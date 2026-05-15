@@ -64,6 +64,7 @@ export function AutomationSettings() {
   const [ccLoading, setCcLoading] = useState(false);
   const [ccSaving, setCcSaving] = useState(false);
   const [ccEnabled, setCcEnabled] = useState(false);
+  const [ccExpanded, setCcExpanded] = useState(false);
   const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
   const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
   const [ccAgentPhone, setCcAgentPhone] = useState('');
@@ -77,6 +78,7 @@ export function AutomationSettings() {
   const [ctLoading, setCtLoading] = useState(false);
   const [ctSaving, setCtSaving] = useState(false);
   const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctExpanded, setCtExpanded] = useState(false);
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
     'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?'
   );
@@ -134,6 +136,7 @@ export function AutomationSettings() {
       const res = await callConnectApi.getSettings(accountId);
       if (res.settings) {
         setCcEnabled(res.settings.enabled);
+        setCcExpanded(res.settings.enabled);
         setCcMode(res.settings.mode);
         setCcAgentStrategy(res.settings.agentStrategy);
         setCcAgentPhone(res.settings.agentPhoneE164 || '');
@@ -144,6 +147,7 @@ export function AutomationSettings() {
         setCcQuietEnd(res.settings.quietHoursEnd || '08:00');
       } else {
         setCcEnabled(false);
+        setCcExpanded(false);
         setCcMode('AGENT_FIRST');
         setCcAgentStrategy('owner');
         setCcAgentPhone('');
@@ -190,6 +194,7 @@ export function AutomationSettings() {
     try {
       const res = await notificationsApi.getCustomerTextingSettings(accountId);
       setCtEnabled(res.enabled);
+      setCtExpanded(res.enabled);
       setCtAutoReplyTemplate(res.autoReplyTemplate);
     } catch {
       // non-fatal — keep defaults
@@ -1075,21 +1080,30 @@ export function AutomationSettings() {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <button
                   className={`toggle-btn ${ctEnabled ? 'on' : 'off'}`}
-                  onClick={() => setCtEnabled(e => !e)}
+                  onClick={() => setCtEnabled(e => { const next = !e; if (next) setCtExpanded(true); return next; })}
                   title={ctEnabled ? 'Disable' : 'Enable'}
                   style={{ marginTop: 2, flexShrink: 0 }}
                 >
                   {ctEnabled ? <Play size={14} /> : <Pause size={14} />}
                 </button>
                 <div style={{ flex: 1 }}>
-                  <div className="rule-header" style={{ marginBottom: 4 }}>
+                  <div className="rule-header" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setCtExpanded(v => !v)}>
                     <h3>Customer Texting</h3>
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={e => { e.stopPropagation(); setCtExpanded(v => !v); }}
+                      title={ctExpanded ? 'Collapse' : 'Expand'}
+                      style={{ transform: ctExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                    >
+                      <ChevronDown size={18} />
+                    </button>
                   </div>
                   <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
                     Automatically text customers when new leads arrive.
                   </p>
 
-                  {ctEnabled && (
+                  {ctExpanded && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       {/* Auto-reply template */}
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1116,19 +1130,18 @@ export function AutomationSettings() {
                         </div>
                       </div>
 
+                      <div className="form-actions" style={{ marginTop: 4 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={saveCtSettings}
+                          disabled={ctSaving}
+                        >
+                          {ctSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                          Save
+                        </button>
+                      </div>
                     </div>
                   )}
-
-                  <div className="form-actions" style={{ marginTop: 16 }}>
-                    <button
-                      className="btn btn-primary"
-                      onClick={saveCtSettings}
-                      disabled={ctSaving}
-                    >
-                      {ctSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
-                      Save
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1153,21 +1166,30 @@ export function AutomationSettings() {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <button
                   className={`toggle-btn ${ccEnabled ? 'on' : 'off'}`}
-                  onClick={() => setCcEnabled(e => !e)}
+                  onClick={() => setCcEnabled(e => { const next = !e; if (next) setCcExpanded(true); return next; })}
                   title={ccEnabled ? 'Disable' : 'Enable'}
                   style={{ marginTop: 2, flexShrink: 0 }}
                 >
                   {ccEnabled ? <Play size={14} /> : <Pause size={14} />}
                 </button>
                 <div style={{ flex: 1 }}>
-                  <div className="rule-header" style={{ marginBottom: 4 }}>
+                  <div className="rule-header" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setCcExpanded(v => !v)}>
                     <h3>Instant Call Connect</h3>
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={e => { e.stopPropagation(); setCcExpanded(v => !v); }}
+                      title={ccExpanded ? 'Collapse' : 'Expand'}
+                      style={{ transform: ccExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                    >
+                      <ChevronDown size={18} />
+                    </button>
                   </div>
                   <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
                     When a new lead arrives, automatically call you and connect them to the lead instantly.
                   </p>
 
-                  {ccEnabled && (
+                  {ccExpanded && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       {/* Connection mode */}
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1269,19 +1291,18 @@ export function AutomationSettings() {
                         )}
                       </div>
 
+                      <div className="form-actions" style={{ marginTop: 4 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={saveCcSettings}
+                          disabled={ccSaving}
+                        >
+                          {ccSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                          Save
+                        </button>
+                      </div>
                     </div>
                   )}
-
-                  <div className="form-actions" style={{ marginTop: 16 }}>
-                    <button
-                      className="btn btn-primary"
-                      onClick={saveCcSettings}
-                      disabled={ccSaving}
-                    >
-                      {ccSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
-                      Save
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
