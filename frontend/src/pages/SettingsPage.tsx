@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle, HelpCircle } from 'lucide-react';
-import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi, notificationsApi } from '../services/api';
+import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi, notificationsApi, followUpApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -122,6 +122,11 @@ export default function SettingsPage() {
   const [importError, setImportError] = useState('');
   const [reimporting, setReimporting] = useState(false);
   const [reimportResult, setReimportResult] = useState<string | null>(null);
+
+  // Follow-up historical-leads opt-in (relocated from Automation → Follow-ups).
+  // Persists into the per-account follow-up settings JSON via followUpApi.
+  const [importFuHistorical, setImportFuHistorical] = useState(false);
+  const [importFuHistoricalSaving, setImportFuHistoricalSaving] = useState(false);
 
   // Tenant phone numbers (bot numbers)
   // tenantPhones is loaded for cache parity but its only renderer (the Phone
@@ -252,6 +257,21 @@ export default function SettingsPage() {
   }, [yelpBudgetEditing, yelpBudgetYear, budgetSnapshots]);
 
   // Load extension pending leads + budget snapshots when import account changes
+  // Hydrate the "Follow up historical leads" checkbox from the selected
+  // account's follow-up settings. The actual field is followUpApplyToExisting.
+  useEffect(() => {
+    if (!importAccountId) {
+      setImportFuHistorical(false);
+      return;
+    }
+    let cancelled = false;
+    followUpApi.getSettings(importAccountId).then((res: any) => {
+      if (cancelled) return;
+      setImportFuHistorical(Boolean(res?.settings?.followUpApplyToExisting));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [importAccountId]);
+
   useEffect(() => {
     if (!importAccountId) {
       setExtensionPendingCount(0);
@@ -1049,6 +1069,41 @@ export default function SettingsPage() {
                         ))}
                       </select>
                     </div>
+
+                    {/* Follow up historical leads — relocated from Automation → Follow-ups.
+                        Toggles the account's followUpApplyToExisting flag, which enrolls
+                        past conversations awaiting reply into the follow-up sequence. */}
+                    {importAccountId && (
+                      <label className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={importFuHistorical}
+                          disabled={importFuHistoricalSaving}
+                          onChange={async (e) => {
+                            const next = e.target.checked;
+                            setImportFuHistorical(next);
+                            setImportFuHistoricalSaving(true);
+                            try {
+                              await followUpApi.saveSettings(importAccountId, {
+                                includeHistorical: next,
+                                applyToExisting: next,
+                              } as any);
+                            } catch {
+                              // Revert on failure so the UI doesn't lie about state.
+                              setImportFuHistorical(!next);
+                            } finally {
+                              setImportFuHistoricalSaving(false);
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <span className="text-xs font-semibold text-slate-700">Follow up historical leads</span>
+                          <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
+                        </div>
+                        {importFuHistoricalSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+                      </label>
+                    )}
 
                     {/* Extension Sync Buttons */}
                     {importAccountId && (

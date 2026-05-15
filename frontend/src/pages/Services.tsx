@@ -485,7 +485,6 @@ export function Services() {
   // (single table price). Stored in followUpSettingsJson.priceQuoteMode.
   const [priceQuoteMode, setPriceQuoteMode] = useState<'range' | 'exact'>('range');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
-  const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
   const [fuReEnrollOnSilence, setFuReEnrollOnSilence] = useState(true);
   const [fuReEnrollDelay, setFuReEnrollDelay] = useState('24h');
   const [fuQuietHoursStart, setFuQuietHoursStart] = useState('22:00');
@@ -498,7 +497,6 @@ export function Services() {
   const [aiStopOnOptOut, setAiStopOnOptOut] = useState(true);
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
   const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(true);
-  const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
   // Human Takeover trigger toggles — per-account flags stored in
   // followUpSettingsJson. Default true so existing accounts keep firing
   // on agreed / wants_live_contact without a UI visit. The three new
@@ -721,7 +719,6 @@ export function Services() {
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
         // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
-        if (s.followUpApplyToExisting !== undefined) setFuIncludeHistorical(s.followUpApplyToExisting);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
         if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceQuoteMode(s.priceQuoteMode);
@@ -738,7 +735,6 @@ export function Services() {
         if (s.aiStopOnOptOut !== undefined) setAiStopOnOptOut(s.aiStopOnOptOut);
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
         if (s.aiStopOnPriceAgreed !== undefined) setAiStopOnPriceAgreed(s.aiStopOnPriceAgreed);
-        if (s.aiMaxReplies !== undefined) setAiMaxReplies(s.aiMaxReplies);
         // Human Takeover trigger toggles (default true if unset).
         if (s.handoffTriggerAgreed !== undefined) setHandoffTriggerAgreed(!!s.handoffTriggerAgreed);
         if (s.handoffTriggerWantsLiveContact !== undefined) setHandoffTriggerWantsLiveContact(!!s.handoffTriggerWantsLiveContact);
@@ -843,8 +839,7 @@ export function Services() {
         followUpStrategy: fuStrategy,
         followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt ? fuStrategyPrompt : null,
         priceQuoteMode,
-        includeHistorical: fuIncludeHistorical,
-        applyToExisting: fuIncludeHistorical,
+        // includeHistorical / applyToExisting are now owned by Settings → Import Negotiations.
         fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
         fuReEnrollOnSilence,
         fuReEnrollDelay,
@@ -856,7 +851,6 @@ export function Services() {
         aiStopOnOptOut,
         aiStopOnBooked,
         aiStopOnPriceAgreed,
-        aiMaxReplies,
         // Human Takeover trigger toggles — per-account, default true.
         handoffTriggerAgreed,
         handoffTriggerWantsLiveContact,
@@ -893,11 +887,11 @@ export function Services() {
     fuAvailability, fuStart, fuEnd, fuTz,
     fuStopOnReply, fuStopOnOptOut, fuStopOnBooked, fuUrgentCapability,
     fuStrategy, fuStrategyPrompt, priceQuoteMode,
-    fuIncludeHistorical, fuExtraWindows,
+    fuExtraWindows,
     fuReEnrollOnSilence, fuReEnrollDelay,
     fuQuietHoursEnabled, fuQuietHoursStart, fuQuietHoursEnd,
     // aiConversationOn intentionally omitted — see note in payload.
-    aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed, aiMaxReplies,
+    aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed,
     handoffTriggerAgreed, handoffTriggerWantsLiveContact, handoffTriggerProvidedPhone,
     handoffTriggerProvidedSquareFootage, handoffTriggerQualificationComplete,
     aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
@@ -2111,53 +2105,6 @@ export function Services() {
         </div>
       )}
 
-      {/* Context bar — systems active */}
-      {(() => {
-        const systems = [
-          autoReplyEnabled || (leadAlertRule?.enabled ?? false),
-          ctEnabled || ccEnabled,
-          fuMode !== 'off',
-        ];
-        const active = systems.filter(Boolean).length;
-        return (
-          <div
-            style={{
-              background: 'var(--lb-surface)',
-              border: '1px solid var(--lb-line)',
-              borderRadius: 'var(--lb-radius-lg)',
-              padding: '14px 18px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 14,
-            }}
-          >
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
-                background: 'var(--lb-accent-tint)',
-                color: 'var(--lb-accent)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <Zap size={16} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                {active}/{systems.length} systems active
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 1 }}>
-                Leadbridge handles new leads end-to-end — alerts, replies, calls, and follow-ups.
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Account Selector */}
       <div
         style={{
@@ -3316,15 +3263,7 @@ export function Services() {
                         The per-account opt-in toggle is rendered at the top of this card via
                         AccountHoursControl feature="applyQuietHours". */}
 
-                    {/* Follow up historical leads */}
-                    <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
-                      <input type="checkbox" checked={fuIncludeHistorical} onChange={(e) => setFuIncludeHistorical(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                      <div>
-                        <span className="text-xs font-semibold text-slate-700">Follow up historical leads</span>
-                        <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
-                      </div>
-                    </label>
+                    {/* "Follow up historical leads" relocated to Settings → Import Negotiations. */}
 
                     {/* Urgent request handling block removed — was not in the
                         spec's "show follow-up controls directly" list. State
@@ -3484,20 +3423,6 @@ export function Services() {
                               <div className="flex items-center gap-2 text-sm text-slate-500">
                                 <span className="text-emerald-500 text-xs">&#10003;</span> Lead is done, scheduled, or archived
                               </div>
-                            </div>
-                          </div>
-
-                          {/* Max replies */}
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
-                            <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
-                            <div className="flex gap-1.5">
-                              {[0, 3, 5, 10].map(n => (
-                                <button key={n} onClick={() => setAiMaxReplies(n)}
-                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
-                                  {n === 0 ? 'Unlimited' : n}
-                                </button>
-                              ))}
                             </div>
                           </div>
 
@@ -3789,18 +3714,6 @@ export function Services() {
                           <Link to="/settings#communication-alerts" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
                             Edit alert template →
                           </Link>
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
-                            <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
-                            <div className="flex gap-1.5">
-                              {[0, 3, 5, 10].map(n => (
-                                <button key={n} onClick={() => setAiMaxReplies(n)}
-                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
-                                  {n === 0 ? 'Unlimited' : n}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
                           <div className="flex items-center gap-2 text-sm text-slate-500 bg-white/70 border border-violet-100 rounded-lg px-3 py-2">
                             <span className="text-emerald-500 text-xs">&#10003;</span>
                             Manager can always take over by sending a message manually
