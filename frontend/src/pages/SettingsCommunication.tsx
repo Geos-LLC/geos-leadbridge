@@ -93,7 +93,7 @@ function CascadeBodyEditor({
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Alert Template (shared body)</label>
+        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">SMS body sent to business owner</label>
         {mixed && (
           <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
             Mixed across accounts
@@ -111,7 +111,7 @@ function CascadeBodyEditor({
         className="w-full font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:opacity-50 disabled:bg-slate-50"
       />
       <p className="text-[10px] text-slate-400 mt-1.5">
-        Blur the field to push this body to every enabled account.
+        Click outside the box to save this body to every enabled account.
         {disabled && ' Enable the toggle above to edit.'}
       </p>
     </div>
@@ -150,8 +150,14 @@ export function SettingsCommunicationSection() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
   // For ALL_ACCOUNTS mode: each account's New-Lead rule (null = not yet
-  // created for that account).
+  // created for that account) and each account's follow-up alert settings
+  // (Reply Alerts + AI Takeover Alerts live there).
   const [allAccountRules, setAllAccountRules] = useState<Record<string, NotificationRule | null>>({});
+  const [allAccountFollowUp, setAllAccountFollowUp] = useState<Record<string, {
+    reEngagementAlertEnabled: boolean;
+    reEngagementTemplate: string;
+    handoffAlertTemplate: string;
+  } | null>>({});
   const isAllMode = selectedAccountId === ALL_ACCOUNTS;
   const [ccSettings, setCcSettings] = useState<CallConnectSettings | null>(null);
   const [ctEnabled, setCtEnabled] = useState(false);
@@ -209,9 +215,8 @@ export function SettingsCommunicationSection() {
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) || null;
 
   // Load all-account state when ALL_ACCOUNTS is picked. Fetches New-Lead
-  // rules in parallel and caches them keyed by accountId. Skips the
-  // per-account sections entirely (templates list still loaded so the
-  // dropdown has options if we choose to show one).
+  // rules AND follow-up settings (Reply Alerts + AI Takeover) per account
+  // in parallel and caches them keyed by accountId.
   useEffect(() => {
     if (!isAllMode) return;
     let cancelled = false;
@@ -224,12 +229,30 @@ export function SettingsCommunicationSection() {
           .then(({ rules }) => ({ accountId: a.id, rule: (rules || []).find(r => r.triggerType === 'new_lead') || null }))
           .catch(() => ({ accountId: a.id, rule: null }))
       )),
+      Promise.all(accounts.map(a =>
+        followUpApi.getSettings(a.id)
+          .then((res: any) => {
+            const s: any = res?.settings || {};
+            return {
+              accountId: a.id,
+              fu: {
+                reEngagementAlertEnabled: !!s.reEngagementAlertEnabled,
+                reEngagementTemplate: s.reEngagementTemplate || 'Lead {{lead.name}} replied: "{{message}}"',
+                handoffAlertTemplate: s.handoffAlertTemplate || 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"',
+              },
+            };
+          })
+          .catch(() => ({ accountId: a.id, fu: null as any }))
+      )),
       templatesApi.getTemplates('message').catch(() => ({ templates: [] as MessageTemplate[] })),
-    ]).then(([allRulesArr, tplRes]: any) => {
+    ]).then(([allRulesArr, allFuArr, tplRes]: any) => {
       if (cancelled) return;
-      const map: Record<string, NotificationRule | null> = {};
-      for (const r of allRulesArr) map[r.accountId] = r.rule;
-      setAllAccountRules(map);
+      const ruleMap: Record<string, NotificationRule | null> = {};
+      for (const r of allRulesArr) ruleMap[r.accountId] = r.rule;
+      const fuMap: Record<string, any> = {};
+      for (const f of allFuArr) fuMap[f.accountId] = f.fu;
+      setAllAccountRules(ruleMap);
+      setAllAccountFollowUp(fuMap);
       setTemplates(tplRes.templates || []);
       setLeadAlertRule(null);
     }).catch((err: any) => {
@@ -538,6 +561,89 @@ export function SettingsCommunicationSection() {
     }
   }
 
+  // Cascade Reply Alerts (followUp.reEngagementAlertEnabled) across all
+  // accounts. Saves through followUpApi which is the canonical store for
+  // these settings; only `reEngagementAlertEnabled` is touched here so the
+  // template body is preserved per-account.
+  async function cascadeReEngagementEnabledAllAccounts(on: boolean) {
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(accounts.map(async acc => {
+        const current = allAccountFollowUp[acc.id];
+        await followUpApi.saveSettings(acc.id, {
+          reEngagementAlertEnabled: on,
+          reEngagementTemplate: current?.reEngagementTemplate,
+          handoffAlertTemplate: current?.handoffAlertTemplate,
+        } as any);
+        return { accountId: acc.id, fu: { ...(current || { reEngagementTemplate: '', handoffAlertTemplate: '' }), reEngagementAlertEnabled: on } };
+      }));
+      const next = { ...allAccountFollowUp };
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') next[r.value.accountId] = r.value.fu as any;
+        else failed++;
+      }
+      setAllAccountFollowUp(next);
+      if (failed > 0) setError(`${failed} account(s) failed to update — try again`);
+      else showSuccess(on ? `Reply Alerts on for ${accounts.length} accounts` : `Reply Alerts off for ${accounts.length} accounts`);
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
+  async function cascadeReEngagementTemplateAllAccounts(body: string) {
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(accounts.map(async acc => {
+        const current = allAccountFollowUp[acc.id];
+        await followUpApi.saveSettings(acc.id, {
+          reEngagementAlertEnabled: current?.reEngagementAlertEnabled,
+          reEngagementTemplate: body,
+          handoffAlertTemplate: current?.handoffAlertTemplate,
+        } as any);
+        return { accountId: acc.id, fu: { ...(current || { reEngagementAlertEnabled: false, handoffAlertTemplate: '' }), reEngagementTemplate: body } };
+      }));
+      const next = { ...allAccountFollowUp };
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') next[r.value.accountId] = r.value.fu as any;
+        else failed++;
+      }
+      setAllAccountFollowUp(next);
+      if (failed > 0) setError(`${failed} account(s) failed to update — try again`);
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
+  async function cascadeHandoffTemplateAllAccounts(body: string) {
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(accounts.map(async acc => {
+        const current = allAccountFollowUp[acc.id];
+        await followUpApi.saveSettings(acc.id, {
+          reEngagementAlertEnabled: current?.reEngagementAlertEnabled,
+          reEngagementTemplate: current?.reEngagementTemplate,
+          handoffAlertTemplate: body,
+        } as any);
+        return { accountId: acc.id, fu: { ...(current || { reEngagementAlertEnabled: false, reEngagementTemplate: '' }), handoffAlertTemplate: body } };
+      }));
+      const next = { ...allAccountFollowUp };
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') next[r.value.accountId] = r.value.fu as any;
+        else failed++;
+      }
+      setAllAccountFollowUp(next);
+      if (failed > 0) setError(`${failed} account(s) failed to update — try again`);
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
   // Aggregate the New-Lead rule state across all accounts. Used by the UI
   // to render All-On / All-Off / Mixed indicators in ALL_ACCOUNTS mode.
   const aggregate = (() => {
@@ -554,6 +660,33 @@ export function SettingsCommunicationSection() {
     const dominantBody = allSameBody ? bodies[0] : '';
     const bodiesMixed = bodies.length > 1 && !allSameBody;
     return { enabledCount, totalCount, allOn, allOff, mixed, dominantBody, bodiesMixed };
+  })();
+
+  // Aggregate Reply Alerts (followUp.reEngagementAlertEnabled + template)
+  // across all accounts.
+  const replyAggregate = (() => {
+    const fuEntries = accounts.map(a => allAccountFollowUp[a.id] || null);
+    const enabledCount = fuEntries.filter(fu => fu?.reEngagementAlertEnabled).length;
+    const totalCount = accounts.length;
+    const allOn = totalCount > 0 && enabledCount === totalCount;
+    const allOff = enabledCount === 0;
+    const mixed = !allOn && !allOff;
+    const bodies = fuEntries.filter(fu => !!fu).map(fu => fu!.reEngagementTemplate || '');
+    const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
+    const dominantBody = allSameBody ? bodies[0] : bodies[0] || '';
+    const bodiesMixed = bodies.length > 1 && !allSameBody;
+    return { enabledCount, totalCount, allOn, allOff, mixed, dominantBody, bodiesMixed };
+  })();
+
+  // Aggregate AI Takeover template across all accounts (no separate toggle —
+  // it shares the Reply Alerts toggle by design).
+  const handoffAggregate = (() => {
+    const fuEntries = accounts.map(a => allAccountFollowUp[a.id] || null);
+    const bodies = fuEntries.filter(fu => !!fu).map(fu => fu!.handoffAlertTemplate || '');
+    const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
+    const dominantBody = allSameBody ? bodies[0] : bodies[0] || '';
+    const bodiesMixed = bodies.length > 1 && !allSameBody;
+    return { dominantBody, bodiesMixed };
   })();
 
   // Self-heal: if a leadAlertRule loads enabled with NO usable template (no
@@ -685,7 +818,7 @@ export function SettingsCommunicationSection() {
               onChange={e => setSelectedAccountId(e.target.value)}
               className="w-full appearance-none rounded-xl px-3 py-2.5 pr-9 text-sm border border-slate-200 bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
             >
-              <option value={ALL_ACCOUNTS}>⭐ All accounts (New Lead Alerts only)</option>
+              <option value={ALL_ACCOUNTS}>⭐ All accounts (cascade alerts)</option>
               {accounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
                   {acc.platform === 'yelp' ? '🔴 ' : '🔵 '}{acc.businessName}
@@ -696,7 +829,7 @@ export function SettingsCommunicationSection() {
           </div>
           {isAllMode && (
             <p className="text-[11px] text-slate-400 mt-1.5">
-              Changes to New Lead Alerts below will apply to all {accounts.length} accounts. Per-account settings (Phone Setup, Reply Alerts, AI Takeover) are hidden — pick a single account to edit those.
+              Toggle and template changes below cascade to all {accounts.length} accounts in parallel. Per-account Phone Setup is hidden — pick a single account to edit phone numbers.
             </p>
           )}
         </div>
@@ -1009,9 +1142,8 @@ export function SettingsCommunicationSection() {
                         )}
                       </div>
                       <p className="text-xs text-slate-400">
-                        {isAllMode
-                          ? `Toggling cascades to all ${aggregate.totalCount} accounts in parallel.`
-                          : 'Get notified when a new lead arrives.'}
+                        SMS sent to business owner when a new lead arrives.
+                        {isAllMode ? ` Cascades to all ${aggregate.totalCount} accounts in parallel.` : ''}
                       </p>
                     </div>
                   </div>
@@ -1092,8 +1224,7 @@ export function SettingsCommunicationSection() {
                 </div>
               </div>
 
-              {/* Reply Alerts (Engage) — per-account; hidden in All Accounts mode. */}
-              {!isAllMode && (
+              {/* Reply Alerts (Engage) — per-account in single mode, cascades in All Accounts mode. */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
@@ -1103,34 +1234,63 @@ export function SettingsCommunicationSection() {
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-bold text-slate-800">Reply Alerts</h4>
                         <TierBadge tier="engage" />
+                        {isAllMode && (
+                          <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                            replyAggregate.allOn ? 'bg-emerald-50 text-emerald-700' :
+                            replyAggregate.allOff ? 'bg-slate-100 text-slate-500' :
+                            'bg-amber-50 text-amber-700'
+                          }`}>
+                            {replyAggregate.allOn ? `All On (${replyAggregate.totalCount})` :
+                             replyAggregate.allOff ? 'All Off' :
+                             `Mixed · ${replyAggregate.enabledCount}/${replyAggregate.totalCount} on`}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400">Get notified when a quiet lead replies.</p>
+                      <p className="text-xs text-slate-400">
+                        {isAllMode
+                          ? `Toggling cascades to all ${replyAggregate.totalCount} accounts in parallel.`
+                          : 'Get notified when a quiet lead replies.'}
+                      </p>
                     </div>
                   </div>
                   <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                    <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                    <input
+                      type="checkbox"
+                      checked={isAllMode ? replyAggregate.allOn : reEngagementAlertOn}
+                      disabled={!canUseEngage || savingAlertRule}
+                      onChange={e => isAllMode ? cascadeReEngagementEnabledAllAccounts(e.target.checked) : setReEngagementAlertOn(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className={`relative w-11 h-6 ${isAllMode && replyAggregate.mixed ? 'bg-amber-300' : 'bg-slate-200'} peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600`} />
                   </label>
                 </div>
-                <div className={`px-5 py-4 space-y-3${!reEngagementAlertOn || !canUseEngage ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                <div className={`px-5 py-4 space-y-3${(!isAllMode && (!reEngagementAlertOn || !canUseEngage)) || (isAllMode && !canUseEngage) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
                   <p className="text-[11px] text-slate-500">Fires when a customer replies after follow-ups were sent.</p>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
-                    <p className="text-[10px] text-slate-400 mb-2">Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.</p>
-                    <textarea
-                      value={reEngagementTemplate}
-                      onChange={e => setReEngagementTemplate(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                      placeholder='Lead {{lead.name}} replied: "{{message}}"'
+                  {isAllMode ? (
+                    <CascadeBodyEditor
+                      key={`reply-cascade-${replyAggregate.enabledCount}`}
+                      initialBody={replyAggregate.dominantBody || 'Lead {{lead.name}} replied: "{{message}}"'}
+                      mixed={replyAggregate.bodiesMixed}
+                      disabled={savingAlertRule || !canUseEngage}
+                      onSave={cascadeReEngagementTemplateAllAccounts}
                     />
-                  </div>
+                  ) : (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.</p>
+                      <textarea
+                        value={reEngagementTemplate}
+                        onChange={e => setReEngagementTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                        placeholder='Lead {{lead.name}} replied: "{{message}}"'
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
-              )}
 
-              {/* AI Human Takeover Alerts (Convert) — per-account; hidden in All Accounts mode. */}
-              {!isAllMode && (
+              {/* AI Human Takeover Alerts (Convert) — per-account in single mode, cascades in All Accounts mode. */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseConvert && <LockedFeatureOverlay ctaLabel="Upgrade to Convert · $139/mo" />}
                 <div className={`px-5 py-4 bg-slate-50/50${!canUseConvert ? ' opacity-60' : ''}`}>
@@ -1140,32 +1300,50 @@ export function SettingsCommunicationSection() {
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-bold text-slate-800">AI Human Takeover Alerts</h4>
                         <TierBadge tier="convert" />
+                        {isAllMode && handoffAggregate.bodiesMixed && (
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                            Mixed across accounts
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400">Get notified when AI detects a manager should take over.</p>
+                      <p className="text-xs text-slate-400">
+                        {isAllMode
+                          ? `Template body cascades to all ${accounts.length} accounts. Uses the Reply Alerts toggle above.`
+                          : 'Get notified when AI detects a manager should take over.'}
+                      </p>
                     </div>
                   </div>
                 </div>
                 <div className={`px-5 py-4 space-y-3${!canUseConvert ? ' opacity-60 pointer-events-none' : ''}`}>
                   <p className="text-[11px] text-slate-500">Fires during AI Conversation when the customer is ready to book, wants a call, or needs a human.</p>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
-                    <p className="text-[10px] text-slate-400 mb-2">
-                      Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
-                    </p>
-                    <textarea
-                      value={handoffAlertTemplate}
-                      onChange={e => setHandoffAlertTemplate(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
-                      placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
+                  {isAllMode ? (
+                    <CascadeBodyEditor
+                      key={`handoff-cascade-${accounts.length}`}
+                      initialBody={handoffAggregate.dominantBody || 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'}
+                      mixed={handoffAggregate.bodiesMixed}
+                      disabled={savingAlertRule || !canUseConvert}
+                      onSave={cascadeHandoffTemplateAllAccounts}
                     />
-                  </div>
+                  ) : (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
+                      </p>
+                      <textarea
+                        value={handoffAlertTemplate}
+                        onChange={e => setHandoffAlertTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
+                        placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
+                      />
+                    </div>
+                  )}
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Auto-fires while AI Conversation is on (configured on the <Link to="/automation" className="text-blue-600 hover:underline">Automation page</Link>). Also requires <span className="font-semibold text-slate-600">Reply Alerts</span> above to be enabled — the same backend toggle gates both paths.
                   </p>
                 </div>
               </div>
-              )}
 
             </div>
           </div>
