@@ -30,7 +30,7 @@ export function Login() {
         localStorage.removeItem('lb_fresh_signup');
         localStorage.setItem('lb_has_logged_in', '1');
       }
-      navigate('/dashboard');
+      navigate('/overview');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to sign in. Please check your credentials.');
     } finally {

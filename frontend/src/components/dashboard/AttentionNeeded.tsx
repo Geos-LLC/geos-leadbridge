@@ -32,7 +32,7 @@ export default function AttentionNeeded({
       label: `Lead${unrepliedLeadCount > 1 ? 's' : ''} Not Replied`,
       description: 'New leads awaiting your response',
       severity: 'urgent',
-      onClick: () => navigate('/messages'),
+      onClick: () => navigate('/lead-activity'),
       icon: <MessageSquare size={20} />,
     });
   }

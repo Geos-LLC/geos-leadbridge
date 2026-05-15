@@ -252,9 +252,9 @@ export function Dashboard() {
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
     } else if (hasSmsIssues) {
-      navigate('/services?expand=lead-alerts');
+      navigate('/automation?expand=lead-alerts');
     } else {
-      navigate(`/messages?account=${account.businessId}`);
+      navigate(`/lead-activity?account=${account.businessId}`);
     }
   };
 
@@ -739,7 +739,7 @@ export function Dashboard() {
               }}
             >
               <Link
-                to="/analytics"
+                to="/insights"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',

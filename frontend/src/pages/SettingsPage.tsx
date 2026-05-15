@@ -1522,7 +1522,7 @@ export default function SettingsPage() {
                   try {
                     const { url } = await platformsApi.getYelpAuthUrl();
                     sessionStorage.setItem('yelp_oauth_url', JSON.stringify({ url, exp: Date.now() + 10 * 60 * 1000 }));
-                    const dashboardUrl = window.location.origin + '/dashboard';
+                    const dashboardUrl = window.location.origin + '/overview';
                     window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
                   } catch (err: any) {
                     alert(err.message || 'Failed to start Yelp connection');
@@ -2070,7 +2070,7 @@ export default function SettingsPage() {
                           <button
                             onClick={() => {
                               setSelectedAccountForInfo(null);
-                              navigate('/services?expand=lead-alerts');
+                              navigate('/automation?expand=lead-alerts');
                             }}
                             className="flex-1 px-6 py-3 bg-orange-600 text-white rounded-xl font-semibold hover:bg-orange-700 shadow-lg shadow-orange-200 transition-all flex items-center justify-center gap-2"
                           >

@@ -1432,7 +1432,7 @@ export function Messages() {
           }}
         >
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/overview')}
             style={{
               width: 28, height: 28,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -3094,7 +3094,7 @@ export function Messages() {
                   </div>
                 ) : templates.length === 0 ? (
                   <p className="no-templates-hint">
-                    No templates yet. <a href="/message-settings">Create one</a>
+                    No templates yet. <a href="/templates">Create one</a>
                   </p>
                 ) : (
                   <select

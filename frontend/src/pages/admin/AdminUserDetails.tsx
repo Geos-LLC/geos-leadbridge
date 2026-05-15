@@ -161,7 +161,7 @@ export default function AdminUserDetailsPage() {
     setAnalyticsCache(null as any);
     setAccountDiagnostics({});
     startImpersonation({ id: user.id, name: user.name, email: user.email });
-    navigate('/dashboard');
+    navigate('/overview');
   };
 
   if (loading || !user) {

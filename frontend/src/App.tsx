@@ -61,19 +61,19 @@ function App() {
           <Route path="/security" element={<Security />} />
           <Route
             path="/login"
-            element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />}
+            element={isAuthenticated ? <Navigate to="/overview" /> : <Login />}
           />
           <Route
             path="/register"
-            element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />}
+            element={isAuthenticated ? <Navigate to="/overview" /> : <Register />}
           />
           <Route
             path="/forgot-password"
-            element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />}
+            element={isAuthenticated ? <Navigate to="/overview" /> : <ForgotPassword />}
           />
           <Route
             path="/reset-password"
-            element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />}
+            element={isAuthenticated ? <Navigate to="/overview" /> : <ResetPassword />}
           />
           <Route path="/demo" element={<DemoLayout />}>
             <Route index element={<Navigate to="/demo/overview" replace />} />
@@ -90,15 +90,28 @@ function App() {
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/messages" element={<Messages />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/message-settings" element={<MessageSettings />} />
-              <Route path="/automation" element={<AutomationSettings />} />
+              {/* Canonical paths — match the nav labels (Overview / Lead Activity /
+                  Automation / Templates / Insights). */}
+              <Route path="/overview" element={<Dashboard />} />
+              <Route path="/lead-activity" element={<Messages />} />
+              <Route path="/automation" element={<Services />} />
+              <Route path="/templates" element={<MessageSettings />} />
+              <Route path="/insights" element={<Analytics />} />
+
+              {/* Legacy URL redirects — keep old bookmarks/links working. */}
+              <Route path="/dashboard" element={<Navigate to="/overview" replace />} />
+              <Route path="/messages" element={<Navigate to="/lead-activity" replace />} />
+              <Route path="/services" element={<Navigate to="/automation" replace />} />
+              <Route path="/message-settings" element={<Navigate to="/templates" replace />} />
+              <Route path="/analytics" element={<Navigate to="/insights" replace />} />
+
+              {/* AutomationSettings page — formerly mounted at /automation but
+                  superseded by the Services page; kept reachable for legacy use. */}
+              <Route path="/automation-legacy" element={<AutomationSettings />} />
+
               <Route path="/notifications" element={<NotificationSettings />} />
               <Route path="/phone-settings" element={<Navigate to="/notifications" />} />
               <Route path="/sms-history" element={<SmsHistory />} />
-              <Route path="/services" element={<Services />} />
               <Route path="/api-test" element={<ApiTest />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/settings" element={<SettingsPage />} />
@@ -113,7 +126,7 @@ function App() {
           </Route>
 
           {/* Default redirect */}
-          <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} />} />
+          <Route path="*" element={<Navigate to={isAuthenticated ? '/overview' : '/'} />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

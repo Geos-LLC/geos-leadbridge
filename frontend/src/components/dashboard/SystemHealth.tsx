@@ -55,7 +55,7 @@ export default function SystemHealth({
         <div
           key={card.label}
           className={`health-status-card clickable ${card.comingSoon ? 'coming-soon' : card.enabled ? 'on' : 'off'}`}
-          onClick={() => navigate('/services')}
+          onClick={() => navigate('/automation')}
           style={{ cursor: 'pointer' }}
         >
           <div className="health-card-icon">{card.icon}</div>

@@ -64,11 +64,11 @@ export function Layout() {
   };
 
   const NAV_ITEMS = [
-    { icon: <LayoutGrid size={15} />,  label: 'Overview',      path: '/dashboard' },
-    { icon: <Inbox size={15} />,       label: 'Lead Activity', path: '/messages' },
-    { icon: <Workflow size={15} />,    label: 'Automation',    path: '/services' },
-    { icon: <FileText size={15} />,    label: 'Templates',     path: '/message-settings' },
-    { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/analytics' },
+    { icon: <LayoutGrid size={15} />,  label: 'Overview',      path: '/overview' },
+    { icon: <Inbox size={15} />,       label: 'Lead Activity', path: '/lead-activity' },
+    { icon: <Workflow size={15} />,    label: 'Automation',    path: '/automation' },
+    { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
+    { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
   ];
 
   const getPageName = () => {
@@ -312,7 +312,7 @@ export function Layout() {
           <ImpersonationBanner />
 
           {/* Top page header — utility-first, minimal decoration */}
-          {location.pathname !== '/messages' && (
+          {location.pathname !== '/lead-activity' && (
             <header
               className="sticky top-0 z-30"
               style={{
@@ -349,7 +349,7 @@ export function Layout() {
           )}
 
           {/* Mobile menu button for Messages page (no top navbar) */}
-          {location.pathname === '/messages' && (
+          {location.pathname === '/lead-activity' && (
             <div
               className="lg:hidden sticky top-0 z-30"
               style={{
@@ -403,7 +403,7 @@ export function Layout() {
                     : `${systemHealth!.issues.length} account issue${systemHealth!.issues.length > 1 ? 's' : ''} detected`}
                 </span>
                 <RouterLink
-                  to="/dashboard"
+                  to="/overview"
                   className="ml-auto hover:underline"
                   style={{
                     fontSize: 13,
@@ -411,7 +411,7 @@ export function Layout() {
                     color: hasCriticalIssues ? 'var(--lb-danger)' : 'var(--lb-warn)',
                   }}
                 >
-                  Review in Dashboard →
+                  Review in Overview →
                 </RouterLink>
               </div>
             </div>

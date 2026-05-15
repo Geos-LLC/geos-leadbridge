@@ -1161,7 +1161,7 @@ export function SettingsCommunicationSection() {
                     />
                   </div>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Auto-fires while AI Conversation is on (configured on the <Link to="/services" className="text-blue-600 hover:underline">Automation page</Link>). Also requires <span className="font-semibold text-slate-600">Reply Alerts</span> above to be enabled — the same backend toggle gates both paths.
+                    Auto-fires while AI Conversation is on (configured on the <Link to="/automation" className="text-blue-600 hover:underline">Automation page</Link>). Also requires <span className="font-semibold text-slate-600">Reply Alerts</span> above to be enabled — the same backend toggle gates both paths.
                   </p>
                 </div>
               </div>
@@ -1184,7 +1184,7 @@ export function SettingsCommunication() {
   const navigate = useNavigate();
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-4">
-      <button onClick={() => navigate('/services')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
+      <button onClick={() => navigate('/automation')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
         <ArrowLeft className="w-4 h-4" /> Back to Automation
       </button>
       <SettingsCommunicationSection />

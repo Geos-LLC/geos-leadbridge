@@ -175,7 +175,7 @@ export default function AccountManagement({
           <div className="account-card-actions">
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => navigate(`/messages?account=${account.businessId}`)}
+              onClick={() => navigate(`/lead-activity?account=${account.businessId}`)}
             >
               <ExternalLink size={14} /> Leads
             </button>

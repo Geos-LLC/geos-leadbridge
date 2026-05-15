@@ -19,10 +19,10 @@ export default function NoAccountsOverlay() {
           You need to connect an account first.
         </p>
         <button
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate('/overview')}
           className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
         >
-          Go to Dashboard
+          Go to Overview
         </button>
       </div>
     </div>

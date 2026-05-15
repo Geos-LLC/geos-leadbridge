@@ -52,7 +52,7 @@ export function Register() {
       trackEvent('signup_success', { method: 'email' });
       trackEvent('first_login');
       localStorage.setItem('lb_has_logged_in', '1');
-      navigate('/dashboard');
+      navigate('/overview');
     } catch (err: any) {
       const errorType = err.response?.status === 409 ? 'email_exists' : err.response?.status >= 500 ? 'server_error' : 'validation';
       setError(err.response?.data?.message || 'Registration failed. Please try again.');
