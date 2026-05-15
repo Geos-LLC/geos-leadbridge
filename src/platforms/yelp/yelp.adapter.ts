@@ -355,6 +355,11 @@ export class YelpAdapter implements IPlatformAdapter {
       const status = error.response?.status;
       const data = error.response?.data;
       this.logger.error(`Error sending Yelp message — status=${status} data=${JSON.stringify(data)} msg=${error.message}`);
+      // Per-lead terminal state: customer archived the project. Not an account-level auth failure.
+      const desc: string = data?.error?.description || '';
+      if (status === 403 && /archived/i.test(desc)) {
+        throw new Error(`Yelp lead archived by customer — ${desc}`);
+      }
       if (status === 401 || status === 403) {
         const reason = data?.error?.code || (status === 401 ? 'token_expired' : 'no_business_access');
         throw new Error(`Yelp ${reason} (${status}) — reconnect your Yelp account to re-authorize`);

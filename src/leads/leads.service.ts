@@ -750,6 +750,10 @@ export class LeadsService {
     try {
       sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
     } catch (err: any) {
+      // Per-lead terminal state (e.g. customer archived) — not an auth failure. Don't try to refresh.
+      if (err.message?.includes('archived')) {
+        throw new BadRequestException(`Cannot send to ${lead.platform} lead: ${err.message}`);
+      }
       const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access') || err.message?.includes('NOT_AUTHORIZED');
       const is401 = err.message?.includes('401') || err.message?.includes('expired') || err.message?.includes('TOKEN_INVALID');
 

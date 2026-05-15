@@ -383,10 +383,16 @@ export class YelpController {
       where: {
         resolved: false,
         accountId: account.id,
-        OR: [
-          { category: 'automation', message: { contains: 'NO_BUSINESS_ACCESS' } },
-          { category: 'automation', message: { contains: '403' } },
-          { category: 'yelp' },
+        AND: [
+          {
+            OR: [
+              { category: 'automation', message: { contains: 'NO_BUSINESS_ACCESS' } },
+              { category: 'automation', message: { contains: '403' } },
+              { category: 'yelp' },
+            ],
+          },
+          // Per-lead state errors (customer archived a project) are NOT account-level auth failures
+          { NOT: { message: { contains: 'archived' } } },
         ],
       },
       orderBy: { createdAt: 'desc' },

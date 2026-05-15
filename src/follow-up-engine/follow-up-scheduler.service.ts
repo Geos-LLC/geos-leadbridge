@@ -954,6 +954,26 @@ export class FollowUpSchedulerService implements OnModuleInit {
           }
         } catch (err: any) {
           this.logger.error(`[FollowUpScheduler] Auto-send failed for enrollment ${enrollment.id}: ${err.message}`);
+          // Customer archived the lead — terminal per-lead state, stop the enrollment instead of retrying every 15 min
+          if (err.message?.includes('archived')) {
+            await this.prisma.followUpStepExecution.create({
+              data: {
+                enrollmentId: enrollment.id,
+                stepIndex: enrollment.currentStepIndex,
+                objective: step.objective,
+                status: 'cancelled',
+                scheduledAt: enrollment.nextStepDueAt || now,
+                executedAt: now,
+                metadataJson: JSON.stringify({ stoppedReason: 'lead_archived', error: err.message }),
+              },
+            });
+            await this.prisma.followUpEnrollment.update({
+              where: { id: enrollment.id },
+              data: { status: 'stopped', stoppedReason: 'lead_archived', completedAt: now },
+            });
+            this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} stopped — lead archived by customer`);
+            return;
+          }
           sendStatus = 'failed';
         }
       }
