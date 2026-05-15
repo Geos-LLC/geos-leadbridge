@@ -22,6 +22,7 @@ import OnboardingTour, { ONBOARDING_STORAGE_KEY } from '../components/Onboarding
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
+import { AccountHoursControl } from '../components/AccountHoursControl';
 
 // Combined variables — same set for all card types (matches Templates page)
 const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
@@ -2677,6 +2678,7 @@ export function Services() {
                       </span>
                     </div>
                   )}
+                  {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="firstMsg" />}
                   {/* Auto-reply template */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
@@ -2762,6 +2764,7 @@ export function Services() {
                       </span>
                     </div>
                   )}
+                  {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="call" />}
                   {/* Connection Mode */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
@@ -2946,6 +2949,7 @@ export function Services() {
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 {fuMode !== 'off' && (
                   <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
+                    {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="followups" />}
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
                       <p className="text-[10px] text-slate-400 mb-2">Choose how follow-ups are delivered.</p>
@@ -3559,6 +3563,7 @@ export function Services() {
               )}
               {(aiConversationOn || !canUseConvert) && (
                 <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
+                  {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="ai" />}
                   {/* AI Strategy editor — moved here from the top of the page.
                       Single source of truth for AI-generated messages across
                       AI Conversation, Follow-up AI mode, and Instant Reply
