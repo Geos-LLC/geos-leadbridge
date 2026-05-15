@@ -1,18 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
-const DEFAULT_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+type Day = typeof ALL_DAYS[number];
+
 const DEFAULT_BH_START = '09:00';
 const DEFAULT_BH_END = '18:00';
 const DEFAULT_QH_START = '22:00';
 const DEFAULT_QH_END = '08:00';
 const DEFAULT_TZ = 'America/New_York';
 
-type ResolvedWindow = {
-  start: string; // "HH:MM"
-  end: string;   // "HH:MM"
-  timezone: string;
-  days: string[]; // ["mon","tue",...]
+/** Per-day window. `null` = closed that day. */
+export type DaySchedule = { start: string; end: string } | null;
+
+/** Full schedule keyed by day-of-week (lowercase 3-letter). */
+export type BusinessSchedule = Partial<Record<Day, DaySchedule>>;
+
+/** Default: Mon-Fri 9-18, weekends closed. */
+export const DEFAULT_BUSINESS_SCHEDULE: BusinessSchedule = {
+  mon: { start: DEFAULT_BH_START, end: DEFAULT_BH_END },
+  tue: { start: DEFAULT_BH_START, end: DEFAULT_BH_END },
+  wed: { start: DEFAULT_BH_START, end: DEFAULT_BH_END },
+  thu: { start: DEFAULT_BH_START, end: DEFAULT_BH_END },
+  fri: { start: DEFAULT_BH_START, end: DEFAULT_BH_END },
+  sat: null,
+  sun: null,
 };
 
 @Injectable()
@@ -22,20 +34,18 @@ export class BusinessHoursService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Returns true if right now falls inside the user's business-hours window,
-   * after applying the per-account override if present. The window is treated
-   * as always-defined — defaults (9:00–18:00 Mon–Fri NY) apply when fields
-   * are null. The user-level `businessHoursEnabled` flag is no longer consulted;
-   * per-feature toggles on SavedAccount are the sole gating mechanism.
+   * Returns true if right now falls inside the user's business-hours window
+   * for the current day. Schedule is per-day (each weekday can have its own
+   * start/end, or be closed). Defaults (Mon-Fri 9-18 NY, weekends closed)
+   * apply when fields are null. Per-feature toggles on SavedAccount are the
+   * sole gating mechanism — the user-level enabled flag is not consulted.
    */
   async isInBusinessHours(userId: string, savedAccountId?: string | null): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        businessHoursStart: true,
-        businessHoursEnd: true,
         businessHoursTimezone: true,
-        businessHoursDays: true,
+        businessHoursDays: true, // now holds the per-day schedule JSON
       },
     });
     if (!user) return true;
@@ -49,28 +59,70 @@ export class BusinessHoursService {
       override = acct?.businessHoursOverride ?? null;
     }
 
-    const window = this.resolveWindow(user, override);
-    return BusinessHoursService.isInWindow(new Date(), window);
+    const schedule = BusinessHoursService.normalizeSchedule(override?.schedule ?? user.businessHoursDays);
+    const tz = override?.timezone ?? user.businessHoursTimezone ?? DEFAULT_TZ;
+
+    const today = BusinessHoursService.currentWeekday(new Date(), tz);
+    const day = schedule[today];
+    if (!day) return false; // closed today
+    return BusinessHoursService.isInTimeRange(new Date(), day.start, day.end, tz);
   }
 
-  private resolveWindow(
-    user: {
-      businessHoursStart: string | null;
-      businessHoursEnd: string | null;
-      businessHoursTimezone: string | null;
-      businessHoursDays: any;
-    },
-    override: any,
-  ): ResolvedWindow {
-    const rawStart = override?.start ?? user.businessHoursStart;
-    const rawEnd = override?.end ?? user.businessHoursEnd;
-    const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_BH_START;
-    const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_BH_END;
-    const timezone = override?.timezone ?? user.businessHoursTimezone ?? DEFAULT_TZ;
-    const rawDays = override?.days ?? user.businessHoursDays;
-    const days = Array.isArray(rawDays) && rawDays.length > 0 ? rawDays : DEFAULT_DAYS;
-    return { start, end, timezone, days: days.map((d: string) => d.toLowerCase()) };
+  /** Coerce stored value into a clean BusinessSchedule. Tolerates legacy shape. */
+  static normalizeSchedule(raw: any): BusinessSchedule {
+    if (!raw) return DEFAULT_BUSINESS_SCHEDULE;
+    // Legacy: ["mon","tue","wed","thu","fri"] — uniform 9-18 across enabled days.
+    if (Array.isArray(raw)) {
+      const out: BusinessSchedule = {};
+      for (const k of ALL_DAYS) {
+        out[k] = raw.includes(k) ? { start: DEFAULT_BH_START, end: DEFAULT_BH_END } : null;
+      }
+      return out;
+    }
+    if (typeof raw === 'object') {
+      const out: BusinessSchedule = {};
+      for (const k of ALL_DAYS) {
+        const v = (raw as any)[k];
+        if (!v) { out[k] = null; continue; }
+        const start = typeof v.start === 'string' && /^\d{1,2}:\d{2}$/.test(v.start) ? v.start : DEFAULT_BH_START;
+        const end = typeof v.end === 'string' && /^\d{1,2}:\d{2}$/.test(v.end) ? v.end : DEFAULT_BH_END;
+        out[k] = { start, end };
+      }
+      return out;
+    }
+    return DEFAULT_BUSINESS_SCHEDULE;
   }
+
+  /** Three-letter lowercase weekday key (`mon`..`sun`) for the given instant in tz. */
+  static currentWeekday(now: Date, timezone: string): Day {
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' });
+      const wd = fmt.format(now).toLowerCase().slice(0, 3);
+      if ((ALL_DAYS as readonly string[]).includes(wd)) return wd as Day;
+    } catch { /* fall through */ }
+    return 'mon';
+  }
+
+  /** Pure HH:MM range check, overnight-wrap aware. */
+  static isInTimeRange(now: Date, start: string, end: string, timezone: string): boolean {
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false });
+      const parts = fmt.formatToParts(now);
+      const hh = Number(parts.find(p => p.type === 'hour')?.value || '0');
+      const mm = Number(parts.find(p => p.type === 'minute')?.value || '0');
+      const cur = hh * 60 + mm;
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+      const s = sh * 60 + sm;
+      const e = eh * 60 + em;
+      return s > e ? (cur >= s || cur < e) : (cur >= s && cur < e);
+    } catch {
+      return true;
+    }
+  }
+
+  // resolveWindow removed — replaced by the per-day path in isInBusinessHours
+  // + normalizeSchedule / currentWeekday / isInTimeRange.
 
   /**
    * Returns true if right now falls inside the user's quiet-hours window.
@@ -93,36 +145,6 @@ export class BusinessHoursService {
     const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_QH_START;
     const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_QH_END;
     const tz = user?.quietHoursTimezone || DEFAULT_TZ;
-    return BusinessHoursService.isInWindow(new Date(), {
-      start, end, timezone: tz,
-      days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
-    });
-  }
-
-  /** Pure window check — exported for tests and direct callers. */
-  static isInWindow(now: Date, window: ResolvedWindow): boolean {
-    try {
-      const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: window.timezone,
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      });
-      const parts = fmt.formatToParts(now);
-      const wd = parts.find(p => p.type === 'weekday')?.value?.toLowerCase().slice(0, 3) || '';
-      const hh = Number(parts.find(p => p.type === 'hour')?.value || '0');
-      const mm = Number(parts.find(p => p.type === 'minute')?.value || '0');
-      if (!window.days.includes(wd)) return false;
-
-      const cur = hh * 60 + mm;
-      const [sh, sm] = window.start.split(':').map(Number);
-      const [eh, em] = window.end.split(':').map(Number);
-      const s = sh * 60 + sm;
-      const e = eh * 60 + em;
-      return s > e ? (cur >= s || cur < e) : (cur >= s && cur < e);
-    } catch {
-      return true; // Defensive: never accidentally block on a TZ/format error.
-    }
+    return BusinessHoursService.isInTimeRange(new Date(), start, end, tz);
   }
 }

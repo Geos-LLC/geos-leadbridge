@@ -91,7 +91,7 @@ export class UsersController {
   @Patch('me/business-hours')
   async updateBusinessHours(
     @Request() req: any,
-    @Body() body: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
+    @Body() body: { timezone?: string; schedule?: Record<string, { start: string; end: string } | null> },
   ) {
     return this.usersService.updateBusinessHours(req.user.id, body);
   }

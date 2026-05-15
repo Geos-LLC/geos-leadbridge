@@ -39,7 +39,7 @@ export function AccountHoursControl({ accountId, feature, compact = false }: Pro
           ]);
           if (!alive) return;
           setApplyQuietOn(acct.followUpsApplyQuietHours);
-          setMasterEnabled(master.enabled);
+          setMasterEnabled(true); // always-on now; toggle controls gating
           setMasterLabel(`${master.start}–${master.end} ${master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone} (daily)`);
         } else {
           const [acct, master] = await Promise.all([
@@ -49,8 +49,14 @@ export function AccountHoursControl({ accountId, feature, compact = false }: Pro
           if (!alive) return;
           setCallOn(acct.callDuringBusinessHours);
           setFirstMsgOn(acct.firstMsgDuringBusinessHours);
-          setMasterEnabled(master.enabled);
-          setMasterLabel(`${master.start}–${master.end} ${master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone}, ${master.days.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(' ')}`);
+          setMasterEnabled(true);
+          // Compact summary: list open days with their windows.
+          const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+          const parts = ALL_DAYS
+            .filter((d) => master.schedule[d])
+            .map((d) => `${d.charAt(0).toUpperCase() + d.slice(1)} ${master.schedule[d]!.start}–${master.schedule[d]!.end}`);
+          const tz = master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone;
+          setMasterLabel(parts.length > 0 ? `${parts.join(', ')} (${tz})` : `closed all days (${tz})`);
         }
       } finally {
         if (alive) setLoading(false);

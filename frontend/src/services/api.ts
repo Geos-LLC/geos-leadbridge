@@ -1144,13 +1144,19 @@ export const usersApi = {
     });
     return data;
   },
-  getBusinessHours: async (): Promise<{ enabled: boolean; start: string; end: string; timezone: string; days: string[] }> => {
+  getBusinessHours: async (): Promise<{
+    timezone: string;
+    schedule: Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { start: string; end: string } | null>;
+  }> => {
     const { data } = await api.get('/v1/users/me/business-hours');
     return data;
   },
   updateBusinessHours: async (
-    body: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
-  ): Promise<{ enabled: boolean; start: string; end: string; timezone: string; days: string[] }> => {
+    body: { timezone?: string; schedule?: Record<string, { start: string; end: string } | null> },
+  ): Promise<{
+    timezone: string;
+    schedule: Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { start: string; end: string } | null>;
+  }> => {
     const { data } = await api.patch('/v1/users/me/business-hours', body);
     return data;
   },

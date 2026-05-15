@@ -185,22 +185,20 @@ export class UsersService {
   // ──────────────────────────────────────────────────────────────────────
 
   async getBusinessHours(userId: string) {
+    const { BusinessHoursService, DEFAULT_BUSINESS_SCHEDULE } = await import('../common/utils/business-hours.service');
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        businessHoursEnabled: true,
-        businessHoursStart: true,
-        businessHoursEnd: true,
         businessHoursTimezone: true,
-        businessHoursDays: true,
+        businessHoursDays: true, // now holds per-day schedule JSON
       },
     });
+    const schedule = user?.businessHoursDays
+      ? BusinessHoursService.normalizeSchedule(user.businessHoursDays)
+      : DEFAULT_BUSINESS_SCHEDULE;
     return {
-      enabled: user?.businessHoursEnabled ?? false,
-      start: user?.businessHoursStart ?? '09:00',
-      end: user?.businessHoursEnd ?? '18:00',
       timezone: user?.businessHoursTimezone ?? 'America/New_York',
-      days: (user?.businessHoursDays as string[] | null) ?? ['mon', 'tue', 'wed', 'thu', 'fri'],
+      schedule,
     };
   }
 
@@ -237,20 +235,17 @@ export class UsersService {
 
   async updateBusinessHours(
     userId: string,
-    dto: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
+    dto: { timezone?: string; schedule?: Record<string, { start: string; end: string } | null> },
   ) {
+    const { BusinessHoursService } = await import('../common/utils/business-hours.service');
     const data: Record<string, any> = {};
-    if (dto.enabled !== undefined) data.businessHoursEnabled = !!dto.enabled;
-    if (dto.start !== undefined) data.businessHoursStart = dto.start || null;
-    if (dto.end !== undefined) data.businessHoursEnd = dto.end || null;
     if (dto.timezone !== undefined) data.businessHoursTimezone = dto.timezone || null;
-    if (dto.days !== undefined) {
-      const valid = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-      const clean = Array.isArray(dto.days)
-        ? dto.days.map((d) => d.toLowerCase().slice(0, 3)).filter((d) => valid.includes(d))
-        : null;
-      data.businessHoursDays = clean && clean.length > 0 ? clean : null;
+    if (dto.schedule !== undefined) {
+      data.businessHoursDays = BusinessHoursService.normalizeSchedule(dto.schedule);
     }
+    // Set enabled=true defensively — the flag is no longer read but stays true
+    // so legacy clients/queries still see the master as on.
+    data.businessHoursEnabled = true;
     await this.prisma.user.update({ where: { id: userId }, data });
     return this.getBusinessHours(userId);
   }
