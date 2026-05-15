@@ -50,6 +50,74 @@ function formatPhoneE164(raw: string): string {
 
 type TestStatus = 'idle' | 'sending' | 'delivered' | 'failed';
 
+// Sentinel value for the "All accounts" picker option. When this is the
+// selected value, the New Lead Alerts toggle and template body cascade to
+// every saved account in parallel; per-account-only sections (Phone Setup,
+// Phone Numbers, Call Connect, Reply Alerts, AI Takeover) are hidden.
+const ALL_ACCOUNTS = '__ALL__';
+
+// Inline body editor used in ALL_ACCOUNTS mode. Keeps its own draft state
+// so typing doesn't trigger a cascade on every keystroke; commits on blur.
+function CascadeBodyEditor({
+  initialBody, mixed, disabled, onSave,
+}: {
+  initialBody: string;
+  mixed: boolean;
+  disabled: boolean;
+  onSave: (body: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(initialBody);
+  const [saving, setSaving] = useState(false);
+  const [savedTick, setSavedTick] = useState(false);
+  const lastSavedRef = useRef(initialBody);
+
+  useEffect(() => {
+    setDraft(initialBody);
+    lastSavedRef.current = initialBody;
+  }, [initialBody]);
+
+  async function commit() {
+    if (saving || disabled) return;
+    if (draft === lastSavedRef.current) return;
+    setSaving(true);
+    try {
+      await onSave(draft);
+      lastSavedRef.current = draft;
+      setSavedTick(true);
+      setTimeout(() => setSavedTick(false), 1500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Alert Template (shared body)</label>
+        {mixed && (
+          <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+            Mixed across accounts
+          </span>
+        )}
+        {saving && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
+        {savedTick && <CheckCircle className="w-3 h-3 text-emerald-500" />}
+      </div>
+      <textarea
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        disabled={disabled}
+        rows={9}
+        className="w-full font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:opacity-50 disabled:bg-slate-50"
+      />
+      <p className="text-[10px] text-slate-400 mt-1.5">
+        Blur the field to push this body to every enabled account.
+        {disabled && ' Enable the toggle above to edit.'}
+      </p>
+    </div>
+  );
+}
+
 /**
  * Communication & Alerts UI.
  *
@@ -81,6 +149,10 @@ export function SettingsCommunicationSection() {
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
+  // For ALL_ACCOUNTS mode: each account's New-Lead rule (null = not yet
+  // created for that account).
+  const [allAccountRules, setAllAccountRules] = useState<Record<string, NotificationRule | null>>({});
+  const isAllMode = selectedAccountId === ALL_ACCOUNTS;
   const [ccSettings, setCcSettings] = useState<CallConnectSettings | null>(null);
   const [ctEnabled, setCtEnabled] = useState(false);
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState('');
@@ -136,9 +208,44 @@ export function SettingsCommunicationSection() {
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) || null;
 
+  // Load all-account state when ALL_ACCOUNTS is picked. Fetches New-Lead
+  // rules in parallel and caches them keyed by accountId. Skips the
+  // per-account sections entirely (templates list still loaded so the
+  // dropdown has options if we choose to show one).
+  useEffect(() => {
+    if (!isAllMode) return;
+    let cancelled = false;
+    setHydrated(false);
+    setHydrating(true);
+    setError(null);
+    Promise.all([
+      Promise.all(accounts.map(a =>
+        notificationsApi.getRules(a.id)
+          .then(({ rules }) => ({ accountId: a.id, rule: (rules || []).find(r => r.triggerType === 'new_lead') || null }))
+          .catch(() => ({ accountId: a.id, rule: null }))
+      )),
+      templatesApi.getTemplates('message').catch(() => ({ templates: [] as MessageTemplate[] })),
+    ]).then(([allRulesArr, tplRes]: any) => {
+      if (cancelled) return;
+      const map: Record<string, NotificationRule | null> = {};
+      for (const r of allRulesArr) map[r.accountId] = r.rule;
+      setAllAccountRules(map);
+      setTemplates(tplRes.templates || []);
+      setLeadAlertRule(null);
+    }).catch((err: any) => {
+      if (!cancelled) setError(err?.message || 'Failed to load alerts across accounts');
+    }).finally(() => {
+      if (cancelled) return;
+      setHydrating(false);
+      setTimeout(() => { if (!cancelled) setHydrated(true); }, 0);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAllMode, accounts.length]);
+
   // Load per-account state when account changes.
   useEffect(() => {
-    if (!selectedAccountId) return;
+    if (!selectedAccountId || isAllMode) return;
     let cancelled = false;
     setHydrated(false);
     setHydrating(true);
@@ -183,8 +290,10 @@ export function SettingsCommunicationSection() {
   }, [selectedAccountId]);
 
   // Debounced auto-save for the alert templates (existing followUpApi field).
+  // Skipped in ALL_ACCOUNTS mode — Reply / Handoff Alerts are per-account
+  // and the UI hides them in that mode.
   useEffect(() => {
-    if (!selectedAccountId || !hydrated) return;
+    if (!selectedAccountId || !hydrated || isAllMode) return;
     const t = setTimeout(() => {
       followUpApi.saveSettings(selectedAccountId, {
         reEngagementAlertEnabled: reEngagementAlertOn,
@@ -195,7 +304,7 @@ export function SettingsCommunicationSection() {
       });
     }, 600);
     return () => clearTimeout(t);
-  }, [selectedAccountId, hydrated, reEngagementAlertOn, reEngagementTemplate, handoffAlertTemplate]);
+  }, [selectedAccountId, hydrated, reEngagementAlertOn, reEngagementTemplate, handoffAlertTemplate, isAllMode]);
 
   const accountPhone = (() => {
     if (!selectedAccountId) return null;
@@ -205,7 +314,7 @@ export function SettingsCommunicationSection() {
       || null;
   })();
   const ccBotNumber = accountPhone?.phoneNumber || '';
-  const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+  const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate && !leadAlertRule.template;
   const ccSamePhone = !!testPhone.trim() && isValidPhoneE164(testPhone) && (
     ccBotNumber === testPhone.trim() || businessPhoneInput === testPhone.trim()
   );
@@ -267,17 +376,31 @@ export function SettingsCommunicationSection() {
     showSuccess('Business phone saved');
   }
 
-  // Find existing platform-named template, or create it. Returns the id.
-  async function ensurePlatformAlertTemplate(): Promise<string | null> {
-    if (!selectedAccount) return null;
-    const platform = selectedAccount.platform || 'thumbtack';
+  // Find existing platform-named template, or create it. Returns the id, or
+  // null if the lookup/creation failed (e.g. P2002 unique-name conflict with
+  // an orphan template). Callers fall back to the inline `template` body on
+  // the rule itself so the alert still fires.
+  async function ensurePlatformAlertTemplate(platformOverride?: string): Promise<string | null> {
+    const platform = platformOverride || selectedAccount?.platform || 'thumbtack';
     const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
     const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
     const existing = templates.find(t => t.name === templateName);
     if (existing) return existing.id;
-    const { template } = await templatesApi.createTemplate(templateName, defaultBody);
-    setTemplates(prev => [template, ...prev]);
-    return template.id;
+    try {
+      const { template } = await templatesApi.createTemplate(templateName, defaultBody);
+      setTemplates(prev => [template, ...prev]);
+      return template.id;
+    } catch {
+      // Most common cause: a previous half-finished setup left a
+      // (userId, name) row in message_templates that isn't visible to the
+      // current `templates` fetch. We swallow here and let the caller fall
+      // back to the inline `rule.template` body — the rule still fires.
+      return null;
+    }
+  }
+
+  function defaultAlertBodyFor(platform?: string | null): string {
+    return platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
   }
 
   // Platform-specific lead alert rule seeding — mirrors the Services
@@ -288,14 +411,16 @@ export function SettingsCommunicationSection() {
     try {
       const platform = selectedAccount.platform || 'thumbtack';
       const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
-      const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
-      const templateId = await ensurePlatformAlertTemplate();
+      const defaultBody = defaultAlertBodyFor(platform);
+      const templateId = await ensurePlatformAlertTemplate(platform);
       const toPhone = businessPhoneInput || user?.businessPhone || '';
       const { rule } = await notificationsApi.createRule(selectedAccountId, {
         name: templateName,
         triggerType: 'new_lead',
         toPhone,
         sendToCustomer: false,
+        // Always include inline body — even if MessageTemplate linking failed,
+        // the rule has a working alert body so the notification still fires.
         template: defaultBody,
         templateId,
         enabled: true,
@@ -314,13 +439,15 @@ export function SettingsCommunicationSection() {
     setError(null);
     try {
       if (leadAlertRule && leadAlertRule.id !== '_pending') {
-        // If we're turning the rule on AND it has no template assigned, seed
-        // the platform default in the same update so the user is never left
-        // looking at an enabled-but-blank alert.
-        const needsTemplate = on && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+        // If we're turning the rule on AND it has no template assigned,
+        // seed the platform default in the same update — both as the inline
+        // body (always works) and the linked MessageTemplate (best effort).
+        const platform = selectedAccount?.platform || 'thumbtack';
+        const hasAnyTemplate = !!(leadAlertRule.templateId || leadAlertRule.messageTemplate || leadAlertRule.template);
         const updates: any = { enabled: on };
-        if (needsTemplate) {
-          const tid = await ensurePlatformAlertTemplate();
+        if (on && !hasAnyTemplate) {
+          updates.template = defaultAlertBodyFor(platform);
+          const tid = await ensurePlatformAlertTemplate(platform);
           if (tid) updates.templateId = tid;
         }
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, updates);
@@ -335,20 +462,117 @@ export function SettingsCommunicationSection() {
     }
   }
 
-  // Self-heal: if a leadAlertRule loads enabled-but-without-a-template, assign
-  // the platform default automatically. Covers rules created by older flows
-  // (or rules whose template was deleted) so the user never sees an enabled
-  // alert with a blank dropdown.
+  // ── ALL_ACCOUNTS cascade ────────────────────────────────────────────────
+  // Toggling or editing the inline template in all-mode fans out to every
+  // account in parallel. Existing rules are PATCHed, missing rules POSTed.
+  async function cascadeToggleAllAccounts(on: boolean) {
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(accounts.map(async acc => {
+        const existing = allAccountRules[acc.id];
+        const platform = (acc as any).platform || 'thumbtack';
+        const defaultBody = defaultAlertBodyFor(platform);
+        if (existing && existing.id !== '_pending') {
+          const hasAnyTemplate = !!(existing.templateId || existing.messageTemplate || existing.template);
+          const updates: any = { enabled: on };
+          if (on && !hasAnyTemplate) updates.template = defaultBody;
+          const { rule } = await notificationsApi.updateRule(acc.id, existing.id, updates);
+          return { accountId: acc.id, rule };
+        }
+        if (on) {
+          const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+          const toPhone = (acc as any).agentPhoneOverride || user?.businessPhone || '';
+          const { rule } = await notificationsApi.createRule(acc.id, {
+            name: templateName,
+            triggerType: 'new_lead',
+            toPhone,
+            sendToCustomer: false,
+            template: defaultBody,
+            enabled: true,
+          } as any);
+          return { accountId: acc.id, rule };
+        }
+        return { accountId: acc.id, rule: existing };
+      }));
+      const nextMap: Record<string, NotificationRule | null> = { ...allAccountRules };
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') nextMap[r.value.accountId] = r.value.rule;
+        else failed++;
+      }
+      setAllAccountRules(nextMap);
+      if (failed > 0) setError(`${failed} account(s) failed to update — try again`);
+      else showSuccess(on ? `Enabled for ${accounts.length} accounts` : `Disabled for ${accounts.length} accounts`);
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
+  async function cascadeTemplateBodyAllAccounts(body: string) {
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(accounts.map(async acc => {
+        const existing = allAccountRules[acc.id];
+        if (!existing || existing.id === '_pending') {
+          return { accountId: acc.id, rule: existing };
+        }
+        // Writing the inline body explicitly clears any linked MessageTemplate
+        // dependency for the alert — `template` is the source of truth used
+        // by the backend when no `templateId` is set, and the rule still
+        // honors `templateId` if it stays linked. We only update `template`.
+        const { rule } = await notificationsApi.updateRule(acc.id, existing.id, { template: body });
+        return { accountId: acc.id, rule };
+      }));
+      const nextMap: Record<string, NotificationRule | null> = { ...allAccountRules };
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') nextMap[r.value.accountId] = r.value.rule;
+        else failed++;
+      }
+      setAllAccountRules(nextMap);
+      if (failed > 0) setError(`${failed} account(s) failed to update — try again`);
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
+  // Aggregate the New-Lead rule state across all accounts. Used by the UI
+  // to render All-On / All-Off / Mixed indicators in ALL_ACCOUNTS mode.
+  const aggregate = (() => {
+    const ruleEntries = accounts.map(a => allAccountRules[a.id] || null);
+    const enabledCount = ruleEntries.filter(r => r?.enabled).length;
+    const totalCount = accounts.length;
+    const allOn = totalCount > 0 && enabledCount === totalCount;
+    const allOff = enabledCount === 0;
+    const mixed = !allOn && !allOff;
+    // Pick the dominant inline template body. If all enabled rules share the
+    // same `template`, surface it; otherwise mark as mixed for the UI.
+    const bodies = ruleEntries.filter(r => r?.enabled).map(r => r!.template || '');
+    const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
+    const dominantBody = allSameBody ? bodies[0] : '';
+    const bodiesMixed = bodies.length > 1 && !allSameBody;
+    return { enabledCount, totalCount, allOn, allOff, mixed, dominantBody, bodiesMixed };
+  })();
+
+  // Self-heal: if a leadAlertRule loads enabled with NO usable template (no
+  // linked MessageTemplate AND no inline body), seed the platform default.
+  // Writes both an inline `template` body (always works) and a `templateId`
+  // (best effort — may be null if the MessageTemplate creation conflicts).
   useEffect(() => {
     if (!selectedAccountId || !leadAlertRule || !leadAlertRule.enabled) return;
-    if (leadAlertRule.templateId || leadAlertRule.messageTemplate) return;
+    if (leadAlertRule.templateId || leadAlertRule.messageTemplate || leadAlertRule.template) return;
     if (savingAlertRule) return;
     let cancelled = false;
     (async () => {
       try {
-        const tid = await ensurePlatformAlertTemplate();
-        if (!tid || cancelled) return;
-        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { templateId: tid });
+        const platform = selectedAccount?.platform || 'thumbtack';
+        const updates: any = { template: defaultAlertBodyFor(platform) };
+        const tid = await ensurePlatformAlertTemplate(platform);
+        if (cancelled) return;
+        if (tid) updates.templateId = tid;
+        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, updates);
         if (!cancelled) setLeadAlertRule(rule);
       } catch {
         // surfaces in normal save-failure paths; no toast spam here
@@ -356,7 +580,7 @@ export function SettingsCommunicationSection() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccountId, leadAlertRule?.id, leadAlertRule?.enabled, leadAlertRule?.templateId, leadAlertRule?.messageTemplate]);
+  }, [selectedAccountId, leadAlertRule?.id, leadAlertRule?.enabled, leadAlertRule?.templateId, leadAlertRule?.messageTemplate, leadAlertRule?.template]);
 
   const changeAlertTemplate = useCallback(async (templateId: string) => {
     if (!selectedAccountId || !leadAlertRule) return;
@@ -461,6 +685,7 @@ export function SettingsCommunicationSection() {
               onChange={e => setSelectedAccountId(e.target.value)}
               className="w-full appearance-none rounded-xl px-3 py-2.5 pr-9 text-sm border border-slate-200 bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
             >
+              <option value={ALL_ACCOUNTS}>⭐ All accounts (New Lead Alerts only)</option>
               {accounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
                   {acc.platform === 'yelp' ? '🔴 ' : '🔵 '}{acc.businessName}
@@ -469,6 +694,11 @@ export function SettingsCommunicationSection() {
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
+          {isAllMode && (
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Changes to New Lead Alerts below will apply to all {accounts.length} accounts. Per-account settings (Phone Setup, Reply Alerts, AI Takeover) are hidden — pick a single account to edit those.
+            </p>
+          )}
         </div>
       )}
 
@@ -492,7 +722,8 @@ export function SettingsCommunicationSection() {
 
       {!hydrating && (
         <>
-          {/* Phone Setup */}
+          {/* Phone Setup — per-account; hidden in All Accounts mode. */}
+          {!isAllMode && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
               <Phone className="w-5 h-5 text-blue-600" />
@@ -660,10 +891,12 @@ export function SettingsCommunicationSection() {
               </div>
             </div>
           </div>
+          )}
 
           {/* Phone Numbers Per Business — moved from /settings General tab.
               Same per-account override edit flow; saves write back to the
-              shared appStore so other pages see the change. */}
+              shared appStore so other pages see the change. Stays visible in
+              All Accounts mode since the table already shows every account. */}
           {accounts.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
@@ -763,29 +996,56 @@ export function SettingsCommunicationSection() {
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-bold text-slate-800">New Lead Alerts</h4>
                         <TierBadge tier="respond" />
+                        {isAllMode && (
+                          <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                            aggregate.allOn ? 'bg-emerald-50 text-emerald-700' :
+                            aggregate.allOff ? 'bg-slate-100 text-slate-500' :
+                            'bg-amber-50 text-amber-700'
+                          }`}>
+                            {aggregate.allOn ? `All On (${aggregate.totalCount})` :
+                             aggregate.allOff ? 'All Off' :
+                             `Mixed · ${aggregate.enabledCount}/${aggregate.totalCount} on`}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400">Get notified when a new lead arrives.</p>
+                      <p className="text-xs text-slate-400">
+                        {isAllMode
+                          ? `Toggling cascades to all ${aggregate.totalCount} accounts in parallel.`
+                          : 'Get notified when a new lead arrives.'}
+                      </p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={leadAlertRule?.enabled ?? false}
-                      onChange={e => toggleLeadAlert(e.target.checked)}
+                      checked={isAllMode ? aggregate.allOn : (leadAlertRule?.enabled ?? false)}
+                      onChange={e => isAllMode ? cascadeToggleAllAccounts(e.target.checked) : toggleLeadAlert(e.target.checked)}
                       disabled={savingAlertRule || creatingAlert}
                       className="sr-only peer"
                     />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                    <div className={`relative w-11 h-6 ${isAllMode && aggregate.mixed ? 'bg-amber-300' : 'bg-slate-200'} peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600`} />
                   </label>
                 </div>
                 <div className="px-5 py-4 space-y-3">
-                  {!leadAlertRule && (() => {
+                  {/* ALL_ACCOUNTS mode — single shared body editor that
+                      cascades to every account on blur. */}
+                  {isAllMode && (
+                    <CascadeBodyEditor
+                      key={`cascade-${aggregate.totalCount}-${aggregate.enabledCount}`}
+                      initialBody={aggregate.dominantBody || defaultAlertBodyFor(accounts[0]?.platform)}
+                      mixed={aggregate.bodiesMixed}
+                      disabled={savingAlertRule || aggregate.enabledCount === 0}
+                      onSave={cascadeTemplateBodyAllAccounts}
+                    />
+                  )}
+                  {/* Per-account mode (existing) */}
+                  {!isAllMode && !leadAlertRule && (() => {
                     // Show the platform default template up-front so the user
                     // sees what the first message alert will look like before
                     // enabling. Toggling on uses the same template via
                     // createLeadAlertRule.
                     const platform = selectedAccount?.platform || 'thumbtack';
-                    const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+                    const defaultBody = defaultAlertBodyFor(platform);
                     const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
                     return (
                       <div>
@@ -801,7 +1061,7 @@ export function SettingsCommunicationSection() {
                       </div>
                     );
                   })()}
-                  {leadAlertRule && (
+                  {!isAllMode && leadAlertRule && (
                     <div className={!(leadAlertRule.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}>
                       <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
                         Template{templateMissing && <span className="ml-1">*</span>}
@@ -814,14 +1074,17 @@ export function SettingsCommunicationSection() {
                           templateMissing ? 'border-2 border-orange-300 bg-orange-50/40' : 'bg-white border border-slate-200'
                         }`}
                       >
-                        <option value="">Select template</option>
+                        <option value="">Select template (uses inline body below)</option>
                         {templates.map(t => (
                           <option key={t.id} value={t.id}>{t.name}</option>
                         ))}
                       </select>
-                      {leadAlertRule.messageTemplate && (
+                      {/* Show the active body: linked MessageTemplate wins,
+                          else the inline `rule.template` so users always see
+                          what will actually be sent. */}
+                      {(leadAlertRule.messageTemplate || leadAlertRule.template) && (
                         <div className="mt-3 bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">
-                          {leadAlertRule.messageTemplate.content}
+                          {leadAlertRule.messageTemplate?.content || leadAlertRule.template}
                         </div>
                       )}
                     </div>
@@ -829,7 +1092,8 @@ export function SettingsCommunicationSection() {
                 </div>
               </div>
 
-              {/* Reply Alerts (Engage) */}
+              {/* Reply Alerts (Engage) — per-account; hidden in All Accounts mode. */}
+              {!isAllMode && (
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
@@ -863,8 +1127,10 @@ export function SettingsCommunicationSection() {
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* AI Human Takeover Alerts (Convert) */}
+              {/* AI Human Takeover Alerts (Convert) — per-account; hidden in All Accounts mode. */}
+              {!isAllMode && (
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseConvert && <LockedFeatureOverlay ctaLabel="Upgrade to Convert · $139/mo" />}
                 <div className={`px-5 py-4 bg-slate-50/50${!canUseConvert ? ' opacity-60' : ''}`}>
@@ -899,6 +1165,7 @@ export function SettingsCommunicationSection() {
                   </p>
                 </div>
               </div>
+              )}
 
             </div>
           </div>
