@@ -47,9 +47,12 @@ interface ServiceCardProps {
   iconTextColor?: string;
   cardRef?: (el: HTMLDivElement | null) => void;
   titleBadge?: React.ReactNode;
+  // When true, the toggle renders in an amber "indeterminate" state to signal
+  // that accounts disagree on this setting (only meaningful in All-Accounts mode).
+  mixed?: boolean;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, cardRef, titleBadge }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, cardRef, titleBadge, mixed }: ServiceCardProps) {
   const borderColor = comingSoon
     ? 'var(--lb-line-soft)'
     : setupRequired
@@ -212,7 +215,10 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
               {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
           )}
-          <label style={{ display: 'inline-flex', alignItems: 'center', cursor: comingSoon ? 'not-allowed' : 'pointer' }}>
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', cursor: comingSoon ? 'not-allowed' : 'pointer' }}
+            title={mixed ? 'Settings differ across accounts — pick a specific account to view or edit' : undefined}
+          >
             <input
               type="checkbox"
               checked={enabled}
@@ -225,7 +231,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
                 position: 'relative',
                 width: 36,
                 height: 20,
-                background: enabled ? 'var(--lb-accent)' : 'var(--lb-ink-8)',
+                background: mixed ? '#f59e0b' : enabled ? 'var(--lb-accent)' : 'var(--lb-ink-8)',
                 borderRadius: 999,
                 transition: 'background 160ms ease',
                 display: 'inline-block',
@@ -236,7 +242,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
                 style={{
                   position: 'absolute',
                   top: 2,
-                  left: enabled ? 18 : 2,
+                  left: mixed ? 10 : enabled ? 18 : 2,
                   width: 16,
                   height: 16,
                   borderRadius: 99,
@@ -332,6 +338,16 @@ export function Services() {
     return selectedAccountId ? [selectedAccountId] : [];
   };
   const fanoutOthers = (): string[] => getApplyTargets().filter(id => id !== selectedAccountId);
+
+  // Cross-account mixed-state detection — when the user picks "All accounts"
+  // and accounts disagree on a toggle (e.g. Yelp on / Thumbtack off), surface
+  // an amber indeterminate state on the relevant ServiceCard switch.
+  const [mixedToggles, setMixedToggles] = useState<{
+    whenLeadArrives: boolean;
+    followUps: boolean;
+    aiConversation: boolean;
+  }>({ whenLeadArrives: false, followUps: false, aiConversation: false });
+
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
   const [loading, setLoading] = useState(!sc);
   const [error, setError] = useState<string | null>(null);
@@ -750,6 +766,46 @@ export function Services() {
       });
     });
   }, [selectedAccountId]);
+
+  // Compute cross-account mixed state for the three big toggles. Runs whenever
+  // the account list changes or All-Accounts mode flips on. Reset to all-false
+  // when in single-account mode so the visual never lies about the selection.
+  useEffect(() => {
+    if (!allAccountsMode || accounts.length < 2) {
+      setMixedToggles({ whenLeadArrives: false, followUps: false, aiConversation: false });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [rulesRes, ...fuResults] = await Promise.all([
+          automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] })),
+          ...accounts.map(a => followUpApi.getSettings(a.id).catch(() => ({ settings: null as any }))),
+        ]);
+        if (cancelled) return;
+
+        const arrivesByAccount = accounts.map(a =>
+          (rulesRes.rules || []).some(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && r.enabled)
+        );
+        const fuByAccount = fuResults.map(res => {
+          const mode = (res?.settings as any)?.followUpMode;
+          return mode != null && mode !== 'off';
+        });
+        const aiByAccount = fuResults.map(res => Boolean((res?.settings as any)?.aiConversationEnabled));
+
+        const isMixed = (vals: boolean[]) => vals.length > 1 && new Set(vals).size > 1;
+
+        setMixedToggles({
+          whenLeadArrives: isMixed(arrivesByAccount),
+          followUps: isMixed(fuByAccount),
+          aiConversation: isMixed(aiByAccount),
+        });
+      } catch {
+        // non-fatal; leave previous state
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [allAccountsMode, accounts]);
 
   // Debounced auto-save: any change to the follow-up / AI Conversation /
   // re-engagement state below persists ~600ms after the user stops typing or
@@ -2282,6 +2338,7 @@ export function Services() {
             title="When a Lead Arrives"
             description="Choose what happens immediately when a new lead comes in."
             enabled={autoReplyEnabled}
+            mixed={allAccountsMode && mixedToggles.whenLeadArrives}
             onToggle={(on) => {
               if (on && noPhone) { setError('Set up a LeadBridge Number in Settings first.'); navigate('/settings'); return; }
               if (on) {
@@ -2928,6 +2985,7 @@ export function Services() {
               titleBadge={<TierBadge tier="engage" />}
               description="Automatically follow up with leads who stop responding."
               enabled={fuMode !== 'off'}
+              mixed={allAccountsMode && mixedToggles.followUps}
               onToggle={(on) => {
                 const next = on ? 'suggest' : 'off';
                 setFuMode(next);
@@ -3470,6 +3528,7 @@ export function Services() {
               titleBadge={<TierBadge tier="convert" />}
               description="Let the system continue the conversation based on previous messages."
               enabled={aiConversationOn && canUseConvert}
+              mixed={allAccountsMode && mixedToggles.aiConversation}
               onToggle={(on) => {
                 // Always allow turning OFF. Only block turning ON for non-Convert tiers.
                 if (on && !canUseConvert) return;
