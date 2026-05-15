@@ -122,6 +122,17 @@ model User {
   // AI settings
   globalAiPrompt String? @map("global_ai_prompt") @db.Text // Global AI system prompt — applied to all AI replies
 
+  // ============================================================
+  // Single source of truth for the user's wall-clock timezone.
+  // Resolved everywhere via resolveTimezone() in account-timezone.ts:
+  //   SavedAccount.timezoneOverride → User.timezone → DEFAULT.
+  // The older businessHoursTimezone / quietHoursTimezone columns
+  // below are kept (with their @map kept stable) as a read fallback
+  // for one deploy cycle so a pre-migration row never crashes the
+  // resolver. New writes target `timezone`. Drop in a follow-up PR
+  // once every read has been verified to honor the new column.
+  timezone String? @default("America/New_York") @map("timezone")
+
   // Business Hours — single master window for the whole user.
   // Per-card behavior (Instant Call, Instant Text first-msg, AI Conversation,
   // Follow-ups) reads this and decides whether to fire based on per-card toggles
@@ -130,6 +141,7 @@ model User {
   businessHoursEnabled  Boolean @default(false) @map("business_hours_enabled")
   businessHoursStart    String? @map("business_hours_start") // "09:00" 24h
   businessHoursEnd      String? @map("business_hours_end") // "18:00" 24h
+  /// DEPRECATED — read via resolveTimezone(); kept for read fallback only.
   businessHoursTimezone String? @default("America/New_York") @map("business_hours_tz")
   businessHoursDays     Json?   @map("business_hours_days") // ["mon","tue",...] — null = Mon-Fri default
 
@@ -140,6 +152,7 @@ model User {
   quietHoursEnabled  Boolean @default(false) @map("quiet_hours_enabled")
   quietHoursStart    String? @map("quiet_hours_start") // "22:00"
   quietHoursEnd      String? @map("quiet_hours_end") // "08:00"
+  /// DEPRECATED — read via resolveTimezone(); kept for read fallback only.
   quietHoursTimezone String? @default("America/New_York") @map("quiet_hours_tz")
 
   // Password reset
@@ -444,7 +457,13 @@ model SavedAccount {
   followUpReplyType        String? // 'template' | 'ai'
   followUpActiveHoursStart String? // e.g. "09:00"
   followUpActiveHoursEnd   String? // e.g. "21:00"
+  /// DEPRECATED — read via resolveTimezone(account, user); writes go to
+  /// `timezoneOverride` below. Kept for one deploy cycle as a read fallback.
   followUpTimezone         String? // e.g. "America/New_York"
+  // Single per-account override of the user's master timezone. Null = inherit
+  // User.timezone. New code MUST resolve via resolveTimezone() (account-timezone.ts)
+  // rather than reading any of the legacy *Timezone columns directly.
+  timezoneOverride         String? @map("timezone_override")
   followUpSettingsJson     String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Business-hours wiring (User.businessHours* is the master)
   businessHoursOverride       Json?   @map("business_hours_override") // null = inherit User. { start, end, timezone, days }

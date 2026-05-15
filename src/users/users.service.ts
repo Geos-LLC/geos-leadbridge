@@ -228,7 +228,15 @@ export class UsersService {
     if (dto.enabled !== undefined) data.quietHoursEnabled = !!dto.enabled;
     if (dto.start !== undefined) data.quietHoursStart = dto.start || null;
     if (dto.end !== undefined) data.quietHoursEnd = dto.end || null;
-    if (dto.timezone !== undefined) data.quietHoursTimezone = dto.timezone || null;
+    // Dual-write: canonical `User.timezone` + legacy `quietHoursTimezone`.
+    // The legacy column is read-fallback-only after the canonical-timezone
+    // migration; keeping the write keeps both columns in sync for one
+    // deploy cycle so a rollback doesn't strand data. Drop the legacy
+    // assignment in the same PR that drops the column.
+    if (dto.timezone !== undefined) {
+      data.quietHoursTimezone = dto.timezone || null;
+      data.timezone = dto.timezone || null;
+    }
     await this.prisma.user.update({ where: { id: userId }, data });
     return this.getQuietHours(userId);
   }
@@ -239,7 +247,12 @@ export class UsersService {
   ) {
     const { BusinessHoursService } = await import('../common/utils/business-hours.service');
     const data: Record<string, any> = {};
-    if (dto.timezone !== undefined) data.businessHoursTimezone = dto.timezone || null;
+    // Dual-write: canonical `User.timezone` + legacy `businessHoursTimezone`.
+    // (See updateQuietHours for the rationale.)
+    if (dto.timezone !== undefined) {
+      data.businessHoursTimezone = dto.timezone || null;
+      data.timezone = dto.timezone || null;
+    }
     if (dto.schedule !== undefined) {
       data.businessHoursDays = BusinessHoursService.normalizeSchedule(dto.schedule);
     }

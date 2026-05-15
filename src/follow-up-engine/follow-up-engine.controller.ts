@@ -652,7 +652,13 @@ export class FollowUpEngineController {
         followUpReplyType: replyType ?? undefined,
         followUpActiveHoursStart: activeHoursStart ?? undefined,
         followUpActiveHoursEnd: activeHoursEnd ?? undefined,
+        // Dual-write: canonical `timezoneOverride` + legacy `followUpTimezone`.
+        // The legacy column is read-fallback-only after the canonical-timezone
+        // migration; keeping the write keeps both columns in sync for one
+        // deploy cycle so a rollback doesn't strand data. Drop the legacy
+        // assignment in the same PR that drops the column.
         followUpTimezone: timezone ?? undefined,
+        timezoneOverride: timezone ?? undefined,
         followUpSettingsJson: Object.keys(extendedSettings).length > 0 ? JSON.stringify(extendedSettings) : undefined,
       },
     });

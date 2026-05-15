@@ -1,19 +1,20 @@
 /**
  * Pins the TZ fallback chain of BusinessHoursService.isInQuietHours.
  *
- * The chain is:
- *   1. User.quietHoursTimezone           — explicit quiet-hours override
- *   2. User.businessHoursTimezone        — user's master TZ (single source)
- *   3. 'America/New_York'                — last-resort literal
+ * Resolution is now delegated to resolveTimezone() in account-timezone.ts.
+ * The order it produces for User-only inputs:
  *
- * Why this matters: the master-quiet-hours scheduler gate (introduced in
- * the business-hours PR) interprets "is now in 22:00-08:00" against
- * whichever TZ this function returns. A user who set ONE master TZ
- * (businessHoursTimezone) but never touched quietHoursTimezone expects
- * both gates to interpret in the SAME wall clock — without the fallback
- * through businessHoursTimezone, quiet hours silently defaulted to NY
- * while the business-hours gate honored the user's setting. Drift would
- * be invisible until the wrong follow-up fires.
+ *   1. User.timezone               — canonical master (new)
+ *   2. User.businessHoursTimezone  — legacy column
+ *   3. User.quietHoursTimezone     — legacy column
+ *   4. 'America/New_York'          — last-resort literal
+ *
+ * Behavior change from the prior Adjustment-A chain: when both
+ * `businessHoursTimezone` and `quietHoursTimezone` are set on legacy rows
+ * (no `timezone` column set yet), `businessHoursTimezone` now wins. This
+ * mirrors what the migration's backfill SQL writes into `User.timezone`,
+ * so once the migration runs every row resolves to the same value the
+ * fallback chain returns. The single-source-of-truth direction.
  *
  * We assert precedence by spying on the static `isInTimeRange` (which
  * receives the resolved TZ as its 4th argument) instead of relying on
@@ -45,58 +46,73 @@ describe('BusinessHoursService.isInQuietHours — TZ fallback precedence', () =>
     rangeSpy.mockRestore();
   });
 
-  it('uses User.quietHoursTimezone when set (highest precedence)', async () => {
+  it('uses the canonical User.timezone when set (wins over every legacy column)', async () => {
     const { svc } = buildService({
       quietHoursStart: '22:00',
       quietHoursEnd: '08:00',
-      quietHoursTimezone: 'America/Los_Angeles',
-      businessHoursTimezone: 'America/New_York',
+      timezone: 'America/Los_Angeles',
+      businessHoursTimezone: 'America/Chicago',
+      quietHoursTimezone: 'America/Denver',
     });
     await svc.isInQuietHours('u-1');
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Los_Angeles');
   });
 
-  it('falls back to User.businessHoursTimezone when quietHoursTimezone is null', async () => {
+  it('falls back to User.businessHoursTimezone when canonical timezone is null', async () => {
     const { svc } = buildService({
       quietHoursStart: '22:00',
       quietHoursEnd: '08:00',
-      quietHoursTimezone: null,
+      timezone: null,
       businessHoursTimezone: 'America/Chicago',
+      quietHoursTimezone: 'America/Denver',
     });
     await svc.isInQuietHours('u-1');
+    // businessHoursTimezone wins over quietHoursTimezone (legacy ordering
+    // chosen to match the migration backfill — see resolveTimezone()).
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Chicago');
   });
 
-  it('falls back to User.businessHoursTimezone when quietHoursTimezone is empty string', async () => {
+  it('falls back to User.quietHoursTimezone when canonical and businessHours legacy are null', async () => {
     const { svc } = buildService({
       quietHoursStart: '22:00',
       quietHoursEnd: '08:00',
-      quietHoursTimezone: '',
-      businessHoursTimezone: 'America/Chicago',
-    });
-    await svc.isInQuietHours('u-1');
-    expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Chicago');
-  });
-
-  it('falls back to User.businessHoursTimezone when quietHoursTimezone is whitespace-only', async () => {
-    // Whitespace would format as a non-IANA zone and produce garbage. The
-    // trim+truthy check pushes through to the next fallback.
-    const { svc } = buildService({
-      quietHoursStart: '22:00',
-      quietHoursEnd: '08:00',
-      quietHoursTimezone: '   ',
-      businessHoursTimezone: 'America/Chicago',
-    });
-    await svc.isInQuietHours('u-1');
-    expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Chicago');
-  });
-
-  it('falls back to America/New_York when both are null', async () => {
-    const { svc } = buildService({
-      quietHoursStart: '22:00',
-      quietHoursEnd: '08:00',
-      quietHoursTimezone: null,
+      timezone: null,
       businessHoursTimezone: null,
+      quietHoursTimezone: 'America/Denver',
+    });
+    await svc.isInQuietHours('u-1');
+    expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Denver');
+  });
+
+  it('falls back to canonical timezone over legacy when both set (whitespace-trim safe)', async () => {
+    const { svc } = buildService({
+      quietHoursStart: '22:00',
+      quietHoursEnd: '08:00',
+      timezone: '  America/Phoenix  ',
+      businessHoursTimezone: 'America/Chicago',
+    });
+    await svc.isInQuietHours('u-1');
+    expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Phoenix');
+  });
+
+  it('skips empty / whitespace canonical and falls back to legacy business-hours TZ', async () => {
+    const { svc } = buildService({
+      quietHoursStart: '22:00',
+      quietHoursEnd: '08:00',
+      timezone: '   ',
+      businessHoursTimezone: 'America/Chicago',
+    });
+    await svc.isInQuietHours('u-1');
+    expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Chicago');
+  });
+
+  it('falls back to America/New_York when every TZ source is null', async () => {
+    const { svc } = buildService({
+      quietHoursStart: '22:00',
+      quietHoursEnd: '08:00',
+      timezone: null,
+      businessHoursTimezone: null,
+      quietHoursTimezone: null,
     });
     await svc.isInQuietHours('u-1');
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/New_York');
@@ -108,34 +124,31 @@ describe('BusinessHoursService.isInQuietHours — TZ fallback precedence', () =>
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/New_York');
   });
 
-  it('uses default start/end (22:00–08:00) when both fields are null', async () => {
+  it('uses default quiet-hours range (22:00–08:00) when both fields are null', async () => {
     const { svc } = buildService({
       quietHoursStart: null,
       quietHoursEnd: null,
-      quietHoursTimezone: null,
-      businessHoursTimezone: null,
+      timezone: null,
     });
     await svc.isInQuietHours('u-1');
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/New_York');
   });
 
-  it('keeps user-set start/end when they match the HH:MM regex', async () => {
+  it('keeps user-set start / end when they match HH:MM regex', async () => {
     const { svc } = buildService({
       quietHoursStart: '21:30',
       quietHoursEnd: '07:15',
-      quietHoursTimezone: 'America/Denver',
-      businessHoursTimezone: null,
+      timezone: 'America/Denver',
     });
     await svc.isInQuietHours('u-1');
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '21:30', '07:15', 'America/Denver');
   });
 
-  it('rejects malformed start time and substitutes the default', async () => {
+  it('rejects malformed start time and substitutes the default 22:00', async () => {
     const { svc } = buildService({
       quietHoursStart: 'not-a-time',
       quietHoursEnd: '08:00',
-      quietHoursTimezone: 'America/Denver',
-      businessHoursTimezone: null,
+      timezone: 'America/Denver',
     });
     await svc.isInQuietHours('u-1');
     expect(rangeSpy).toHaveBeenCalledWith(expect.any(Date), '22:00', '08:00', 'America/Denver');

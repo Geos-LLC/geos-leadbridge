@@ -2,9 +2,12 @@
  * Single source of truth for resolving an account's wall-clock timezone.
  *
  * Resolution order (each is skipped if null / empty / whitespace):
- *   1. SavedAccount.followUpTimezone — set via the Services UI
- *   2. User.businessHoursTimezone    — user-level default
- *   3. 'America/New_York'            — last-resort literal
+ *   1. SavedAccount.timezoneOverride    — canonical per-account override
+ *   2. SavedAccount.followUpTimezone    — DEPRECATED legacy column (read-only fallback)
+ *   3. User.timezone                    — canonical user-level master
+ *   4. User.businessHoursTimezone       — DEPRECATED legacy fallback
+ *   5. User.quietHoursTimezone          — DEPRECATED legacy fallback
+ *   6. 'America/New_York'               — last-resort literal
  *
  * Use this helper EVERY time you need to interpret wall-clock times for an
  * account — active-hours snap, quiet-hours snap, AI prompt clock, notification
@@ -16,21 +19,30 @@
  * which will read a different TZ than the SMS gating, and only one of them
  * will be right.
  *
- * Per-feature TZ columns (NotificationSettings.quietHoursTimezone,
- * AutomationRule.activeHoursTimezone, CallConnectSettings.quietHoursTimezone,
- * FollowUpSequenceTemplate.activeHoursTimezone) are slated for removal — they
- * predate this consolidation and are kept as read-only fallbacks until every
- * call site here is migrated. New code MUST resolve TZ through this helper.
+ * Writes MUST target the canonical columns (`SavedAccount.timezoneOverride` and
+ * `User.timezone`). Steps 2/4/5 above only exist to keep pre-migration rows
+ * working until those legacy columns are dropped in a follow-up PR. Per-feature
+ * TZ columns (NotificationSettings.quietHoursTimezone, AutomationRule.activeHoursTimezone,
+ * CallConnectSettings.quietHoursTimezone, FollowUpSequenceTemplate.activeHoursTimezone)
+ * are also slated for removal.
  */
 
 export const DEFAULT_TIMEZONE = 'America/New_York';
 
 interface AccountTimezoneFields {
+  /** Canonical per-account override. Prefer this on new writes. */
+  timezoneOverride?: string | null;
+  /** Legacy — read fallback only. */
   followUpTimezone?: string | null;
 }
 
 interface UserTimezoneFields {
+  /** Canonical user-level master. Prefer this on new writes. */
+  timezone?: string | null;
+  /** Legacy — read fallback only. */
   businessHoursTimezone?: string | null;
+  /** Legacy — read fallback only. */
+  quietHoursTimezone?: string | null;
 }
 
 /**
@@ -46,9 +58,15 @@ export function resolveTimezone(
   account?: AccountTimezoneFields | null,
   user?: UserTimezoneFields | null,
 ): string {
-  const acctTz = account?.followUpTimezone?.trim();
-  if (acctTz) return acctTz;
-  const userTz = user?.businessHoursTimezone?.trim();
-  if (userTz) return userTz;
+  const acctOverride = account?.timezoneOverride?.trim();
+  if (acctOverride) return acctOverride;
+  const acctLegacy = account?.followUpTimezone?.trim();
+  if (acctLegacy) return acctLegacy;
+  const userMaster = user?.timezone?.trim();
+  if (userMaster) return userMaster;
+  const userBh = user?.businessHoursTimezone?.trim();
+  if (userBh) return userBh;
+  const userQh = user?.quietHoursTimezone?.trim();
+  if (userQh) return userQh;
   return DEFAULT_TIMEZONE;
 }

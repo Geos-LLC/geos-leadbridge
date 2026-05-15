@@ -1,72 +1,138 @@
 /**
  * Pins the resolution order of the canonical account-timezone helper.
  *
- * Guards against silent regression of the fallback chain:
- *   SavedAccount.followUpTimezone → User.businessHoursTimezone → DEFAULT.
+ * Resolution order (precedence, top wins):
+ *   1. SavedAccount.timezoneOverride    — canonical per-account override
+ *   2. SavedAccount.followUpTimezone    — legacy read fallback (deprecated)
+ *   3. User.timezone                    — canonical user-level master
+ *   4. User.businessHoursTimezone       — legacy read fallback (deprecated)
+ *   5. User.quietHoursTimezone          — legacy read fallback (deprecated)
+ *   6. 'America/New_York'               — last-resort literal
  *
- * Why this is its own test file: the helper is the single source of truth
- * the follow-up engine, scheduler, and any future quiet-hours / active-hours
- * consumer reach for. A subtle precedence change here (e.g. flipping the
- * order, or no longer trimming whitespace) would silently land follow-ups
- * on the wrong wall clock for every account that has different values on
- * the two columns.
+ * This file guards both the canonical-column-wins direction (rows that
+ * exist on the new columns must beat any legacy value on the same row)
+ * and the legacy-fallback direction (pre-migration rows that still only
+ * have legacy values must keep resolving to those values until the
+ * follow-up "drop legacy columns" PR lands).
+ *
+ * Why the second direction matters: the migration that introduces the new
+ * columns backfills from legacy values, but a row that was created
+ * BEFORE the migration ran but RE-READ AFTER it ran would have NULL on
+ * the new columns and non-null on the legacy ones. The fallback chain
+ * lets those rows continue to resolve correctly during the transition.
  */
 
 import { DEFAULT_TIMEZONE, resolveTimezone } from './account-timezone';
 
-describe('resolveTimezone — single source of truth', () => {
-  it('returns SavedAccount.followUpTimezone when set', () => {
+describe('resolveTimezone — canonical-column precedence', () => {
+  it('returns SavedAccount.timezoneOverride when set, regardless of legacy', () => {
     expect(
-      resolveTimezone({ followUpTimezone: 'America/Los_Angeles' }, { businessHoursTimezone: 'America/Chicago' }),
+      resolveTimezone(
+        { timezoneOverride: 'America/Los_Angeles', followUpTimezone: 'America/Chicago' },
+        { timezone: 'Europe/London', businessHoursTimezone: 'Europe/Paris', quietHoursTimezone: 'Europe/Berlin' },
+      ),
     ).toBe('America/Los_Angeles');
   });
 
-  it('falls back to User.businessHoursTimezone when account TZ is null', () => {
+  it('returns User.timezone when no account-level value is set', () => {
     expect(
-      resolveTimezone({ followUpTimezone: null }, { businessHoursTimezone: 'America/Chicago' }),
+      resolveTimezone(
+        { timezoneOverride: null, followUpTimezone: null },
+        { timezone: 'Europe/London', businessHoursTimezone: 'Europe/Paris' },
+      ),
+    ).toBe('Europe/London');
+  });
+
+  it('prefers canonical User.timezone over legacy User.businessHoursTimezone when both set', () => {
+    expect(
+      resolveTimezone(
+        null,
+        { timezone: 'America/Phoenix', businessHoursTimezone: 'America/Chicago' },
+      ),
+    ).toBe('America/Phoenix');
+  });
+
+  it('prefers User.timezone over User.quietHoursTimezone when both set', () => {
+    expect(
+      resolveTimezone(
+        null,
+        { timezone: 'America/Phoenix', quietHoursTimezone: 'America/Chicago' },
+      ),
+    ).toBe('America/Phoenix');
+  });
+});
+
+describe('resolveTimezone — legacy column fallback (transition window)', () => {
+  it('falls back to SavedAccount.followUpTimezone when timezoneOverride is null', () => {
+    // Pre-migration row: only the legacy column has a value. Resolver still works.
+    expect(
+      resolveTimezone(
+        { timezoneOverride: null, followUpTimezone: 'America/Los_Angeles' },
+        { timezone: 'Europe/London' },
+      ),
+    ).toBe('America/Los_Angeles');
+  });
+
+  it('falls back to User.businessHoursTimezone when both canonical columns are null', () => {
+    expect(
+      resolveTimezone(
+        { timezoneOverride: null, followUpTimezone: null },
+        { timezone: null, businessHoursTimezone: 'America/Chicago' },
+      ),
     ).toBe('America/Chicago');
   });
 
-  it('falls back to User.businessHoursTimezone when account TZ is empty string', () => {
+  it('falls back to User.quietHoursTimezone when business-hours legacy is also null', () => {
     expect(
-      resolveTimezone({ followUpTimezone: '' }, { businessHoursTimezone: 'Europe/London' }),
-    ).toBe('Europe/London');
+      resolveTimezone(
+        null,
+        { timezone: null, businessHoursTimezone: null, quietHoursTimezone: 'America/Denver' },
+      ),
+    ).toBe('America/Denver');
   });
 
-  it('falls back to User.businessHoursTimezone when account TZ is whitespace-only', () => {
-    // A whitespace string would parse as a valid IANA zone by Intl and produce
-    // garbage at format time. The trim guard catches this before propagation.
+  it('account-level legacy beats user-level master (per-account intent dominates)', () => {
+    // A row written before the migration that explicitly set followUpTimezone
+    // overrode the user master. Preserve that intent until the column is dropped.
     expect(
-      resolveTimezone({ followUpTimezone: '   ' }, { businessHoursTimezone: 'Europe/London' }),
-    ).toBe('Europe/London');
+      resolveTimezone(
+        { followUpTimezone: 'America/Los_Angeles' },
+        { timezone: 'Europe/London' },
+      ),
+    ).toBe('America/Los_Angeles');
   });
+});
 
-  it('falls back to DEFAULT when both account and user are null', () => {
+describe('resolveTimezone — null / empty / whitespace guards', () => {
+  it('returns DEFAULT when every input is null', () => {
     expect(resolveTimezone(null, null)).toBe(DEFAULT_TIMEZONE);
   });
 
-  it('falls back to DEFAULT when both are absent (no args)', () => {
+  it('returns DEFAULT when called with no args', () => {
     expect(resolveTimezone()).toBe(DEFAULT_TIMEZONE);
   });
 
-  it('falls back to DEFAULT when account is null and user has empty TZ', () => {
-    expect(resolveTimezone(null, { businessHoursTimezone: '' })).toBe(DEFAULT_TIMEZONE);
+  it('returns DEFAULT when every input is empty string', () => {
+    expect(
+      resolveTimezone(
+        { timezoneOverride: '', followUpTimezone: '' },
+        { timezone: '', businessHoursTimezone: '', quietHoursTimezone: '' },
+      ),
+    ).toBe(DEFAULT_TIMEZONE);
+  });
+
+  it('skips whitespace-only values (they would crash Intl.DateTimeFormat)', () => {
+    expect(
+      resolveTimezone(
+        { timezoneOverride: '   ', followUpTimezone: '\t' },
+        { timezone: ' ', businessHoursTimezone: 'America/Chicago' },
+      ),
+    ).toBe('America/Chicago');
   });
 
   it('DEFAULT_TIMEZONE is America/New_York (literal anchor, not derived)', () => {
     // Pinned literal — if this value ever changes the migration also needs to
     // backfill every account whose null fallback was relying on it.
     expect(DEFAULT_TIMEZONE).toBe('America/New_York');
-  });
-
-  it('prefers account TZ over user TZ even when both are valid', () => {
-    // Reaffirms the precedence direction. Reversing the order here would
-    // silently override any per-account overrides set via the Services UI.
-    expect(
-      resolveTimezone(
-        { followUpTimezone: 'Pacific/Honolulu' },
-        { businessHoursTimezone: 'America/New_York' },
-      ),
-    ).toBe('Pacific/Honolulu');
   });
 });

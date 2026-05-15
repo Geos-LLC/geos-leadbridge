@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
+import { resolveTimezone } from './account-timezone';
 
 const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 type Day = typeof ALL_DAYS[number];
@@ -44,23 +45,52 @@ export class BusinessHoursService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        businessHoursTimezone: true,
-        businessHoursDays: true, // now holds the per-day schedule JSON
+        timezone: true,                // canonical user-level TZ
+        businessHoursTimezone: true,   // legacy fallback (deprecated)
+        quietHoursTimezone: true,      // legacy fallback (deprecated)
+        businessHoursDays: true,       // per-day schedule JSON
       },
     });
     if (!user) return true;
 
     let override: any = null;
+    let accountForTz: { timezoneOverride?: string | null; followUpTimezone?: string | null } | null = null;
     if (savedAccountId) {
       const acct = await this.prisma.savedAccount.findUnique({
         where: { id: savedAccountId },
-        select: { businessHoursOverride: true },
+        select: {
+          businessHoursOverride: true,
+          timezoneOverride: true,      // canonical per-account override
+          followUpTimezone: true,      // legacy fallback (deprecated)
+        },
       });
       override = acct?.businessHoursOverride ?? null;
+      accountForTz = acct ?? null;
     }
 
     const schedule = BusinessHoursService.normalizeSchedule(override?.schedule ?? user.businessHoursDays);
-    const tz = override?.timezone ?? user.businessHoursTimezone ?? DEFAULT_TZ;
+    // Canonical TZ resolution. Precedence (top wins):
+    //   1. SavedAccount.timezoneOverride                       (new canonical)
+    //   2. SavedAccount.followUpTimezone                       (legacy column)
+    //   3. SavedAccount.businessHoursOverride.timezone (JSON)  (legacy JSON field)
+    //   4. User.timezone                                       (new canonical)
+    //   5. User.businessHoursTimezone / quietHoursTimezone     (legacy columns)
+    //   6. 'America/New_York'                                  (literal default)
+    //
+    // The JSON-nested timezone in businessHoursOverride is folded in as a
+    // legacy fallback (step 3) — it was introduced before `timezoneOverride`
+    // existed as a top-level column, and rows written through the pre-canonical
+    // UI still carry it. New writes target `timezoneOverride` directly.
+    const overrideJsonTz = typeof override?.timezone === 'string' && override.timezone.trim()
+      ? override.timezone
+      : null;
+    const tz = resolveTimezone(
+      {
+        timezoneOverride: accountForTz?.timezoneOverride,
+        followUpTimezone: accountForTz?.followUpTimezone ?? overrideJsonTz,
+      },
+      user,
+    );
 
     const today = BusinessHoursService.currentWeekday(new Date(), tz);
     const day = schedule[today];
@@ -142,18 +172,21 @@ export class BusinessHoursService {
       select: {
         quietHoursStart: true,
         quietHoursEnd: true,
-        quietHoursTimezone: true,
+        // Pull every TZ column the resolver knows about. Resolution priority
+        // is enforced by resolveTimezone() — not by the order of the select.
+        timezone: true,
         businessHoursTimezone: true,
+        quietHoursTimezone: true,
       },
     });
     const rawStart = user?.quietHoursStart;
     const rawEnd = user?.quietHoursEnd;
     const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_QH_START;
     const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_QH_END;
-    const tz =
-      (user?.quietHoursTimezone && user.quietHoursTimezone.trim()) ||
-      (user?.businessHoursTimezone && user.businessHoursTimezone.trim()) ||
-      DEFAULT_TZ;
+    // Canonical TZ resolution chain — same one resolveTimezone() applies for
+    // the follow-up engine and isInBusinessHours. New: User.timezone wins,
+    // legacy quietHoursTimezone / businessHoursTimezone are read fallbacks.
+    const tz = resolveTimezone(null, user);
     return BusinessHoursService.isInTimeRange(new Date(), start, end, tz);
   }
 }
