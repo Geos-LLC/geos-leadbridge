@@ -148,24 +148,33 @@ export const useAppStore = create<AppState>()(
       setAccountDiagnostics: (diag) => set({ accountDiagnostics: diag }),
       loadDiagnostics: async (accounts, force = false) => {
         const existing = get().accountDiagnostics;
-        // Skip if we already have diagnostics for all accounts (unless forced)
         if (!force && accounts.length > 0 && accounts.every(a => existing[a.id])) {
           return;
         }
         set({ diagnosticsLoading: true });
         const diagnosticsMap: Record<string, AccountDiagnostics> = {};
-        for (const account of accounts) {
+        await Promise.allSettled(accounts.map(async (account) => {
           try {
             const diag = account.platform === 'yelp'
               ? await platformsApi.getYelpAccountHealth(account.id)
               : await thumbtackApi.getAccountHealth(account.id);
             diagnosticsMap[account.id] = diag;
-            // Update incrementally so UI updates as each completes
-            set({ accountDiagnostics: { ...diagnosticsMap } });
           } catch (err) {
             console.error(`Failed to load diagnostics for ${account.id}:`, err);
+            // Record an unhealthy stub so the card stops spinning and shows "Needs attention"
+            diagnosticsMap[account.id] = {
+              healthy: false,
+              issues: ['Health check failed — refresh to retry'],
+              notificationIssues: [],
+              platform: { connected: false },
+              account: { hasWebhook: false },
+              notifications: { settingsExist: false, hasSigcoreApiKey: false, newLeadRules: 0, customerReplyRules: 0, rules: [] },
+              automation: { totalRules: 0 },
+              recentLogs: [],
+            } as unknown as AccountDiagnostics;
           }
-        }
+          set({ accountDiagnostics: { ...diagnosticsMap } });
+        }));
         set({ diagnosticsLoading: false });
       },
 
