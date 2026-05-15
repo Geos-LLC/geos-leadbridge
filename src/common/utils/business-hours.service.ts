@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
 const DEFAULT_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const DEFAULT_BH_START = '09:00';
+const DEFAULT_BH_END = '18:00';
+const DEFAULT_QH_START = '22:00';
+const DEFAULT_QH_END = '08:00';
+const DEFAULT_TZ = 'America/New_York';
 
 type ResolvedWindow = {
   start: string; // "HH:MM"
@@ -18,28 +23,22 @@ export class BusinessHoursService {
 
   /**
    * Returns true if right now falls inside the user's business-hours window,
-   * after applying the per-account override if present.
-   *
-   * Returns true when:
-   *  - businessHoursEnabled is false (master switch off → no gating)
-   *  - resolved start/end are missing or malformed (defensive — don't accidentally block)
-   *
-   * Returns false only when the master is on AND we have a valid window AND
-   * the current time/day is outside it.
+   * after applying the per-account override if present. The window is treated
+   * as always-defined — defaults (9:00–18:00 Mon–Fri NY) apply when fields
+   * are null. The user-level `businessHoursEnabled` flag is no longer consulted;
+   * per-feature toggles on SavedAccount are the sole gating mechanism.
    */
   async isInBusinessHours(userId: string, savedAccountId?: string | null): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        businessHoursEnabled: true,
         businessHoursStart: true,
         businessHoursEnd: true,
         businessHoursTimezone: true,
         businessHoursDays: true,
       },
     });
-
-    if (!user || !user.businessHoursEnabled) return true;
+    if (!user) return true;
 
     let override: any = null;
     if (savedAccountId) {
@@ -51,8 +50,6 @@ export class BusinessHoursService {
     }
 
     const window = this.resolveWindow(user, override);
-    if (!window) return true; // Misconfigured — fail open.
-
     return BusinessHoursService.isInWindow(new Date(), window);
   }
 
@@ -64,44 +61,38 @@ export class BusinessHoursService {
       businessHoursDays: any;
     },
     override: any,
-  ): ResolvedWindow | null {
-    const start = override?.start ?? user.businessHoursStart;
-    const end = override?.end ?? user.businessHoursEnd;
-    const timezone = override?.timezone ?? user.businessHoursTimezone ?? 'America/New_York';
+  ): ResolvedWindow {
+    const rawStart = override?.start ?? user.businessHoursStart;
+    const rawEnd = override?.end ?? user.businessHoursEnd;
+    const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_BH_START;
+    const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_BH_END;
+    const timezone = override?.timezone ?? user.businessHoursTimezone ?? DEFAULT_TZ;
     const rawDays = override?.days ?? user.businessHoursDays;
-
-    if (!start || !end || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) {
-      return null;
-    }
     const days = Array.isArray(rawDays) && rawDays.length > 0 ? rawDays : DEFAULT_DAYS;
     return { start, end, timezone, days: days.map((d: string) => d.toLowerCase()) };
   }
 
   /**
    * Returns true if right now falls inside the user's quiet-hours window.
-   * Quiet hours is a daily window (no weekday filter) — broader than business
-   * hours. Used by follow-ups (don't text leads at night).
-   *
-   * Returns false (NOT in quiet hours = OK to send) when:
-   *  - quietHoursEnabled is false (master off)
-   *  - resolved start/end are missing or malformed (defensive — never accidentally block)
+   * Quiet hours is a daily window (no weekday filter) and is treated as
+   * always-defined — defaults (22:00–08:00 NY) apply when fields are null.
+   * The user-level `quietHoursEnabled` flag is no longer consulted;
+   * `SavedAccount.followUpsApplyQuietHours` is the sole gating mechanism.
    */
   async isInQuietHours(userId: string): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        quietHoursEnabled: true,
         quietHoursStart: true,
         quietHoursEnd: true,
         quietHoursTimezone: true,
       },
     });
-    if (!user?.quietHoursEnabled) return false;
-    const start = user.quietHoursStart;
-    const end = user.quietHoursEnd;
-    const tz = user.quietHoursTimezone || 'America/New_York';
-    if (!start || !end || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) return false;
-    // Days = every day (quiet hours is a daily politeness window, not weekday-filtered).
+    const rawStart = user?.quietHoursStart;
+    const rawEnd = user?.quietHoursEnd;
+    const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_QH_START;
+    const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_QH_END;
+    const tz = user?.quietHoursTimezone || DEFAULT_TZ;
     return BusinessHoursService.isInWindow(new Date(), {
       start, end, timezone: tz,
       days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],

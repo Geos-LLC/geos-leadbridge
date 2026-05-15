@@ -12,8 +12,7 @@ import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
 import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
-import { BusinessHoursCard } from '../components/BusinessHoursCard';
-import { QuietHoursCard } from '../components/QuietHoursCard';
+import { HoursCard } from '../components/HoursCard';
 import { SettingsCommunicationSection } from './SettingsCommunication';
 
 const tierNames: Record<string, string> = {
@@ -891,11 +890,9 @@ export default function SettingsPage() {
 
       {activeTab === 'general' && (
       <>
-      {/* Business Hours — master window. Per-card switches live on each account in Services. */}
-      <BusinessHoursCard />
-
-      {/* Quiet Hours — daily "don't text leads at night" window for Follow-ups. */}
-      <QuietHoursCard />
+      {/* Hours — one card, two sections (Business + Quiet). Always-on settings;
+          per-feature switches on Services decide which features respect them. */}
+      <HoursCard />
 
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">
