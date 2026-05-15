@@ -1475,6 +1475,41 @@ export default function SettingsPage() {
                         </select>
                       </div>
 
+                      {/* Follow up historical leads — relocated from Automation → Follow-ups.
+                          Mirrors the same control in the Thumbtack Import section; both
+                          share importAccountId so the displayed value tracks whichever
+                          account selector was last touched. */}
+                      {importAccountId && (
+                        <label className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-red-200 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={importFuHistorical}
+                            disabled={importFuHistoricalSaving}
+                            onChange={async (e) => {
+                              const next = e.target.checked;
+                              setImportFuHistorical(next);
+                              setImportFuHistoricalSaving(true);
+                              try {
+                                await followUpApi.saveSettings(importAccountId, {
+                                  includeHistorical: next,
+                                  applyToExisting: next,
+                                } as any);
+                              } catch {
+                                setImportFuHistorical(!next);
+                              } finally {
+                                setImportFuHistoricalSaving(false);
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-red-600 focus:ring-red-500"
+                          />
+                          <div className="flex-1">
+                            <span className="text-xs font-semibold text-slate-700">Follow up historical leads</span>
+                            <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
+                          </div>
+                          {importFuHistoricalSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+                        </label>
+                      )}
+
                       {importAccountId && (
                         <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                           {yelpExtInstalled ? (
