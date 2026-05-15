@@ -658,7 +658,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
             followUpTimezone: true,
             followUpActiveHoursStart: true,
             followUpActiveHoursEnd: true,
-            followUpsUseBusinessHours: true,
+            followUpsApplyQuietHours: true,
           },
         });
         if (acct) {
@@ -684,7 +684,23 @@ export class FollowUpSchedulerService implements OnModuleInit {
             return s > e ? (current >= s || current < e) : (current >= s && current < e);
           };
 
-          // Quiet hours: skip if currently in quiet window
+          // Quiet hours — two sources, in order:
+          //   1. User-level master quiet hours (Settings → General), when the
+          //      account opts in via `followUpsApplyQuietHours` (default true).
+          //   2. Legacy per-account fuQuietHours* (stored in followUpSettingsJson).
+          //      Used only if the master is off or the account has opted out.
+          if (acct.followUpsApplyQuietHours) {
+            const inQuiet = await this.businessHours.isInQuietHours(leadForQuiet.userId);
+            if (inQuiet) {
+              const nextDue = new Date(now.getTime() + 60 * 60 * 1000);
+              await this.prisma.followUpEnrollment.update({
+                where: { id: enrollment.id },
+                data: { nextStepDueAt: nextDue },
+              });
+              this.logger.log(`[FollowUpScheduler] Inside master quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              return;
+            }
+          }
           if (settings.fuQuietHoursEnabled && settings.fuQuietHoursStart && settings.fuQuietHoursEnd) {
             if (inWindow(settings.fuQuietHoursStart, settings.fuQuietHoursEnd)) {
               const nextDue = this.engineService.computeNextDueAt(now, 0, settings.fuQuietHoursEnd, '23:59', tz);
@@ -692,44 +708,24 @@ export class FollowUpSchedulerService implements OnModuleInit {
                 where: { id: enrollment.id },
                 data: { nextStepDueAt: nextDue },
               });
-              this.logger.log(`[FollowUpScheduler] Quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              this.logger.log(`[FollowUpScheduler] Legacy quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
               return;
             }
           }
 
-          // Business-hours opt-in: when followUpsUseBusinessHours=true, gate
-          // on the User-level master window instead of (or in addition to)
-          // the per-account active hours. Defaults to false because follow-ups
-          // typically need a broader politeness window than business hours
-          // (e.g. 8am-9pm is fine to text, but only 9-6 is staffed).
-          if (acct.followUpsUseBusinessHours) {
-            const inHours = await this.businessHours.isInBusinessHours(leadForQuiet.userId, acct.id);
-            if (!inHours) {
-              // Reschedule to the start of the active window the next time it opens.
-              // Fall back to a 1h retry if we can't resolve a precise window.
-              const nextDue = new Date(now.getTime() + 60 * 60 * 1000);
+          // Per-account active hours (independent of business hours / quiet hours).
+          const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
+          const ahStart = acct.followUpActiveHoursStart;
+          const ahEnd = acct.followUpActiveHoursEnd;
+          if (isActiveHoursMode && ahStart && ahEnd) {
+            if (!inWindow(ahStart, ahEnd)) {
+              const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
               await this.prisma.followUpEnrollment.update({
                 where: { id: enrollment.id },
                 data: { nextStepDueAt: nextDue },
               });
-              this.logger.log(`[FollowUpScheduler] Outside business hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
               return;
-            }
-          } else {
-            // Legacy per-account active hours (still the default).
-            const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
-            const ahStart = acct.followUpActiveHoursStart;
-            const ahEnd = acct.followUpActiveHoursEnd;
-            if (isActiveHoursMode && ahStart && ahEnd) {
-              if (!inWindow(ahStart, ahEnd)) {
-                const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
-                await this.prisma.followUpEnrollment.update({
-                  where: { id: enrollment.id },
-                  data: { nextStepDueAt: nextDue },
-                });
-                this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
-                return;
-              }
             }
           }
         }

@@ -2949,7 +2949,7 @@ export function Services() {
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 {fuMode !== 'off' && (
                   <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
-                    {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="followups" />}
+                    {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="applyQuietHours" />}
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
                       <p className="text-[10px] text-slate-400 mb-2">Choose how follow-ups are delivered.</p>
@@ -3255,44 +3255,9 @@ export function Services() {
                       )}
                     </div>
 
-                    {/* Quiet hours */}
-                    <div className="rounded-xl border border-slate-200 overflow-hidden">
-                      <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
-                        <input type="checkbox" checked={fuQuietHoursEnabled} onChange={(e) => setFuQuietHoursEnabled(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                        <div>
-                          <span className="text-xs font-semibold text-slate-700">Quiet hours</span>
-                          <span className="block text-[10px] text-slate-400">Don't send follow-ups during nighttime or off-hours</span>
-                        </div>
-                      </label>
-                      {fuQuietHoursEnabled && (
-                        <div className="px-3 py-3 border-t border-slate-100">
-                          <div className="grid grid-cols-3 gap-3">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Don't send after</label>
-                              <input type="time" value={fuQuietHoursStart} onChange={e => setFuQuietHoursStart(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Resume at</label>
-                              <input type="time" value={fuQuietHoursEnd} onChange={e => setFuQuietHoursEnd(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                              <select value={fuTz} onChange={e => setFuTz(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
-                                <option value="America/New_York">Eastern</option>
-                                <option value="America/Chicago">Central</option>
-                                <option value="America/Denver">Mountain</option>
-                                <option value="America/Los_Angeles">Pacific</option>
-                              </select>
-                            </div>
-                          </div>
-                          <p className="text-[10px] text-slate-400 mt-2">Messages scheduled during quiet hours will be sent when quiet hours end.</p>
-                        </div>
-                      )}
-                    </div>
+                    {/* Quiet hours config moved to Settings → General → Quiet Hours.
+                        The per-account opt-in toggle is rendered at the top of this card via
+                        AccountHoursControl feature="applyQuietHours". */}
 
                     {/* Follow up historical leads */}
                     <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
@@ -3563,7 +3528,6 @@ export function Services() {
               )}
               {(aiConversationOn || !canUseConvert) && (
                 <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
-                  {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="ai" />}
                   {/* AI Strategy editor — moved here from the top of the page.
                       Single source of truth for AI-generated messages across
                       AI Conversation, Follow-up AI mode, and Instant Reply
@@ -3662,66 +3626,36 @@ export function Services() {
                     );
                   })()}
 
-                  {/* Availability */}
+                  {/* Auto Reply Availability — gates when AI replies.
+                      "Always (24/7)" → aiConversationMode='always'.
+                      "Outside of business hours" → aiConversationMode='when_dispatcher_unavailable'
+                      (AI replies only outside the User's Business Hours window;
+                      configure that window in Settings → General). */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Auto Reply Availability</label>
                     <p className="text-[11px] text-slate-400 mb-2">Choose when AI can reply automatically.</p>
-                    <div className="flex gap-2 mb-3">
-                      <button onClick={() => { setFuAvailability('always'); saveAvailabilityNow('always'); }}
+                    <div className="flex gap-2">
+                      <button onClick={() => {
+                          setFuAvailability('always');
+                          saveAvailabilityNow('always');
+                          if (selectedAccountId) usersApi.updateAccountHours(selectedAccountId, { aiConversationMode: 'always' }).catch(() => {});
+                        }}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         Always (24/7)
                       </button>
-                      <button onClick={() => { setFuAvailability('active_hours'); saveAvailabilityNow('active_hours'); }}
+                      <button onClick={() => {
+                          setFuAvailability('active_hours');
+                          saveAvailabilityNow('active_hours');
+                          if (selectedAccountId) usersApi.updateAccountHours(selectedAccountId, { aiConversationMode: 'when_dispatcher_unavailable' }).catch(() => {});
+                        }}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Set up active time
+                        Outside of business hours
                       </button>
                     </div>
                     {fuAvailability === 'active_hours' && (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                            <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                            <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                            <select value={fuTz} onChange={e => { setFuTz(e.target.value); saveAvailabilityNow('active_hours', { tz: e.target.value }); }} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
-                              <option value="America/New_York">Eastern</option>
-                              <option value="America/Chicago">Central</option>
-                              <option value="America/Denver">Mountain</option>
-                              <option value="America/Los_Angeles">Pacific</option>
-                            </select>
-                          </div>
-                        </div>
-                        {fuExtraWindows.map((w, i) => (
-                          <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                              <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                              <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                            </div>
-                            <div className="flex items-end pb-1">
-                              <button onClick={() => { const u = fuExtraWindows.filter((_, j) => j !== i); setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
-                                className="p-2 text-slate-400 hover:text-red-500 transition-colors">
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        <button onClick={() => { const u = [...fuExtraWindows, { start: '13:00', end: '17:00' }]; setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
-                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1">
-                          + Add time window
-                        </button>
-                      </div>
+                      <p className="text-[11px] text-slate-400 mt-2">
+                        Using the master Business Hours window from <span className="font-semibold">Settings → General</span>. AI replies only outside it.
+                      </p>
                     )}
                   </div>
 

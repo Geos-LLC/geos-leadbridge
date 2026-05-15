@@ -133,6 +133,15 @@ model User {
   businessHoursTimezone String? @default("America/New_York") @map("business_hours_tz")
   businessHoursDays     Json?   @map("business_hours_days") // ["mon","tue",...] — null = Mon-Fri default
 
+  // Quiet Hours — daily "don't message leads at night" window, broader than
+  // business hours. Used by follow-ups when the account opts in via
+  // SavedAccount.followUpsApplyQuietHours. Separate from owner-side
+  // NotificationSettings.quietHours (which silences ALERTS to the dispatcher).
+  quietHoursEnabled  Boolean @default(false) @map("quiet_hours_enabled")
+  quietHoursStart    String? @map("quiet_hours_start") // "22:00"
+  quietHoursEnd      String? @map("quiet_hours_end") // "08:00"
+  quietHoursTimezone String? @default("America/New_York") @map("quiet_hours_tz")
+
   // Password reset
   passwordResetToken   String?
   passwordResetExpires DateTime?
@@ -444,7 +453,11 @@ model SavedAccount {
   // Follow-ups default to their existing quiet-hours model (broader than business
   // hours — politeness, e.g. no texting 9pm-8am). Flip this to true only if you
   // want follow-ups restricted to the master business-hours window too.
+  // (Kept for backward compat; the UI now exposes followUpsApplyQuietHours instead.)
   followUpsUseBusinessHours   Boolean @default(false) @map("follow_ups_use_business_hours")
+  // When true, follow-ups skip during the User's master quiet-hours window.
+  // Default true matches the "don't text at night" politeness convention.
+  followUpsApplyQuietHours    Boolean @default(true) @map("follow_ups_apply_quiet_hours")
   // AI Conversation mode — three states:
   //   "always"                      — AI replies 24/7
   //   "when_dispatcher_unavailable" — AI replies ONLY outside business hours (human takes over during)

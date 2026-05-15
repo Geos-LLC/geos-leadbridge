@@ -97,6 +97,27 @@ export class UsersController {
   }
 
   /**
+   * Get the user's quiet hours (daily "don't text leads at night" window)
+   * GET /v1/users/me/quiet-hours
+   */
+  @Get('me/quiet-hours')
+  async getQuietHours(@Request() req: any) {
+    return this.usersService.getQuietHours(req.user.id);
+  }
+
+  /**
+   * Update quiet hours
+   * PATCH /v1/users/me/quiet-hours
+   */
+  @Patch('me/quiet-hours')
+  async updateQuietHours(
+    @Request() req: any,
+    @Body() body: { enabled?: boolean; start?: string; end?: string; timezone?: string },
+  ) {
+    return this.usersService.updateQuietHours(req.user.id, body);
+  }
+
+  /**
    * Get per-account hours toggles + optional override window
    * GET /v1/users/me/account-hours/:accountId
    */
@@ -117,7 +138,7 @@ export class UsersController {
       override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
-      followUpsUseBusinessHours?: boolean;
+      followUpsApplyQuietHours?: boolean;
       aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
     },
   ) {

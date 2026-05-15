@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 import { usersApi } from '../services/api';
 
-type Feature = 'call' | 'firstMsg' | 'ai' | 'followups';
+type Feature = 'call' | 'firstMsg' | 'applyQuietHours';
 
 interface Props {
   accountId: string;
@@ -11,19 +11,12 @@ interface Props {
   compact?: boolean;
 }
 
-const AI_MODE_LABELS: Record<string, { title: string; hint: string }> = {
-  always: { title: 'Always on', hint: 'AI replies 24/7' },
-  when_dispatcher_unavailable: { title: 'When you\'re unavailable', hint: 'AI replies only outside business hours (you handle them during)' },
-  business_hours_only: { title: 'During business hours only', hint: 'AI replies only inside business hours' },
-};
-
 /**
- * Per-account control bound to a single Business Hours feature. Renders:
- *  - 'call' / 'firstMsg' / 'followups' → a single labeled toggle
- *  - 'ai'                              → a 3-option radio group
+ * Per-account control bound to a single feature toggle:
+ *  - 'call' / 'firstMsg'    → opts in to the User's Business Hours window
+ *  - 'applyQuietHours'      → opts in to the User's Quiet Hours window (follow-ups)
  *
- * Reads the master `businessHoursEnabled` to show a hint when the master
- * is off (the per-account toggle has no effect until master is on).
+ * Each renders a single labeled toggle plus a hint showing the master window state.
  */
 export function AccountHoursControl({ accountId, feature, compact = false }: Props) {
   const [loading, setLoading] = useState(true);
@@ -32,31 +25,39 @@ export function AccountHoursControl({ accountId, feature, compact = false }: Pro
   const [masterLabel, setMasterLabel] = useState('');
   const [callOn, setCallOn] = useState(true);
   const [firstMsgOn, setFirstMsgOn] = useState(true);
-  const [followUpsOn, setFollowUpsOn] = useState(false);
-  const [aiMode, setAiMode] = useState<'always' | 'when_dispatcher_unavailable' | 'business_hours_only'>('when_dispatcher_unavailable');
+  const [applyQuietOn, setApplyQuietOn] = useState(true);
 
   useEffect(() => {
     if (!accountId) return;
     let alive = true;
     (async () => {
       try {
-        const [acct, master] = await Promise.all([
-          usersApi.getAccountHours(accountId),
-          usersApi.getBusinessHours(),
-        ]);
-        if (!alive) return;
-        setCallOn(acct.callDuringBusinessHours);
-        setFirstMsgOn(acct.firstMsgDuringBusinessHours);
-        setFollowUpsOn(acct.followUpsUseBusinessHours);
-        setAiMode(acct.aiConversationMode);
-        setMasterEnabled(master.enabled);
-        setMasterLabel(`${master.start}–${master.end} ${master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone}, ${master.days.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(' ')}`);
+        if (feature === 'applyQuietHours') {
+          const [acct, master] = await Promise.all([
+            usersApi.getAccountHours(accountId),
+            usersApi.getQuietHours(),
+          ]);
+          if (!alive) return;
+          setApplyQuietOn(acct.followUpsApplyQuietHours);
+          setMasterEnabled(master.enabled);
+          setMasterLabel(`${master.start}–${master.end} ${master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone} (daily)`);
+        } else {
+          const [acct, master] = await Promise.all([
+            usersApi.getAccountHours(accountId),
+            usersApi.getBusinessHours(),
+          ]);
+          if (!alive) return;
+          setCallOn(acct.callDuringBusinessHours);
+          setFirstMsgOn(acct.firstMsgDuringBusinessHours);
+          setMasterEnabled(master.enabled);
+          setMasterLabel(`${master.start}–${master.end} ${master.timezone.split('/')[1]?.replace('_', ' ') || master.timezone}, ${master.days.map((d) => d.charAt(0).toUpperCase() + d.slice(1)).join(' ')}`);
+        }
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
-  }, [accountId]);
+  }, [accountId, feature]);
 
   const save = async (patch: Parameters<typeof usersApi.updateAccountHours>[1]) => {
     setSaving(true);
@@ -75,47 +76,20 @@ export function AccountHoursControl({ accountId, feature, compact = false }: Pro
     );
   }
 
+  const masterKind = feature === 'applyQuietHours' ? 'Quiet hours' : 'Business hours';
   const masterHint = !compact && (
     <p className="text-[11px] text-slate-400 mt-1">
       <Clock size={10} className="inline -mt-px mr-1" />
-      {masterEnabled ? `Business hours: ${masterLabel}` : 'Business hours master is OFF — toggles have no effect until enabled in Settings → General.'}
+      {masterEnabled
+        ? `${masterKind}: ${masterLabel}`
+        : `${masterKind} master is OFF — toggle has no effect until enabled in Settings → General.`}
     </p>
   );
-
-  if (feature === 'ai') {
-    return (
-      <div className="space-y-2 bg-slate-50/50 border border-slate-100 rounded-xl p-3">
-        <div className="flex items-center justify-between">
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">When AI replies</p>
-          {saving && <Loader2 size={12} className="animate-spin text-slate-400" />}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {(Object.keys(AI_MODE_LABELS) as Array<keyof typeof AI_MODE_LABELS>).map((k) => {
-            const on = aiMode === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => { setAiMode(k as any); save({ aiConversationMode: k as any }); }}
-                className={`text-left p-2 rounded-lg border transition-colors ${
-                  on ? 'bg-blue-50 border-blue-300 text-blue-900' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <div className="text-xs font-bold">{AI_MODE_LABELS[k].title}</div>
-                <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{AI_MODE_LABELS[k].hint}</div>
-              </button>
-            );
-          })}
-        </div>
-        {masterHint}
-      </div>
-    );
-  }
 
   const toggleConfig = {
     call: { label: 'Only call during business hours', on: callOn, set: (v: boolean) => { setCallOn(v); save({ callDuringBusinessHours: v }); } },
     firstMsg: { label: 'Only send first SMS during business hours', on: firstMsgOn, set: (v: boolean) => { setFirstMsgOn(v); save({ firstMsgDuringBusinessHours: v }); } },
-    followups: { label: 'Use business hours for follow-ups (overrides quiet hours)', on: followUpsOn, set: (v: boolean) => { setFollowUpsOn(v); save({ followUpsUseBusinessHours: v }); } },
+    applyQuietHours: { label: 'Apply quiet hours (don\'t send follow-ups overnight)', on: applyQuietOn, set: (v: boolean) => { setApplyQuietOn(v); save({ followUpsApplyQuietHours: v }); } },
   }[feature];
 
   return (

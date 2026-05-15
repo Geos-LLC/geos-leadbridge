@@ -204,6 +204,37 @@ export class UsersService {
     };
   }
 
+  async getQuietHours(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        quietHoursEnabled: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
+        quietHoursTimezone: true,
+      },
+    });
+    return {
+      enabled: user?.quietHoursEnabled ?? false,
+      start: user?.quietHoursStart ?? '22:00',
+      end: user?.quietHoursEnd ?? '08:00',
+      timezone: user?.quietHoursTimezone ?? 'America/New_York',
+    };
+  }
+
+  async updateQuietHours(
+    userId: string,
+    dto: { enabled?: boolean; start?: string; end?: string; timezone?: string },
+  ) {
+    const data: Record<string, any> = {};
+    if (dto.enabled !== undefined) data.quietHoursEnabled = !!dto.enabled;
+    if (dto.start !== undefined) data.quietHoursStart = dto.start || null;
+    if (dto.end !== undefined) data.quietHoursEnd = dto.end || null;
+    if (dto.timezone !== undefined) data.quietHoursTimezone = dto.timezone || null;
+    await this.prisma.user.update({ where: { id: userId }, data });
+    return this.getQuietHours(userId);
+  }
+
   async updateBusinessHours(
     userId: string,
     dto: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
@@ -236,7 +267,7 @@ export class UsersService {
         businessHoursOverride: true,
         callDuringBusinessHours: true,
         firstMsgDuringBusinessHours: true,
-        followUpsUseBusinessHours: true,
+        followUpsApplyQuietHours: true,
         aiConversationMode: true,
       },
     });
@@ -245,7 +276,7 @@ export class UsersService {
       override: (account.businessHoursOverride as any) ?? null,
       callDuringBusinessHours: account.callDuringBusinessHours,
       firstMsgDuringBusinessHours: account.firstMsgDuringBusinessHours,
-      followUpsUseBusinessHours: account.followUpsUseBusinessHours,
+      followUpsApplyQuietHours: account.followUpsApplyQuietHours,
       aiConversationMode: account.aiConversationMode ?? 'when_dispatcher_unavailable',
     };
   }
@@ -257,7 +288,7 @@ export class UsersService {
       override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
-      followUpsUseBusinessHours?: boolean;
+      followUpsApplyQuietHours?: boolean;
       aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
     },
   ) {
@@ -271,7 +302,7 @@ export class UsersService {
     if (dto.override !== undefined) data.businessHoursOverride = dto.override;
     if (dto.callDuringBusinessHours !== undefined) data.callDuringBusinessHours = !!dto.callDuringBusinessHours;
     if (dto.firstMsgDuringBusinessHours !== undefined) data.firstMsgDuringBusinessHours = !!dto.firstMsgDuringBusinessHours;
-    if (dto.followUpsUseBusinessHours !== undefined) data.followUpsUseBusinessHours = !!dto.followUpsUseBusinessHours;
+    if (dto.followUpsApplyQuietHours !== undefined) data.followUpsApplyQuietHours = !!dto.followUpsApplyQuietHours;
     if (dto.aiConversationMode !== undefined) {
       const valid = ['always', 'when_dispatcher_unavailable', 'business_hours_only'];
       if (!valid.includes(dto.aiConversationMode)) {

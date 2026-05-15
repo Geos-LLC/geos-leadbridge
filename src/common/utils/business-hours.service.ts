@@ -77,6 +77,37 @@ export class BusinessHoursService {
     return { start, end, timezone, days: days.map((d: string) => d.toLowerCase()) };
   }
 
+  /**
+   * Returns true if right now falls inside the user's quiet-hours window.
+   * Quiet hours is a daily window (no weekday filter) — broader than business
+   * hours. Used by follow-ups (don't text leads at night).
+   *
+   * Returns false (NOT in quiet hours = OK to send) when:
+   *  - quietHoursEnabled is false (master off)
+   *  - resolved start/end are missing or malformed (defensive — never accidentally block)
+   */
+  async isInQuietHours(userId: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        quietHoursEnabled: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
+        quietHoursTimezone: true,
+      },
+    });
+    if (!user?.quietHoursEnabled) return false;
+    const start = user.quietHoursStart;
+    const end = user.quietHoursEnd;
+    const tz = user.quietHoursTimezone || 'America/New_York';
+    if (!start || !end || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) return false;
+    // Days = every day (quiet hours is a daily politeness window, not weekday-filtered).
+    return BusinessHoursService.isInWindow(new Date(), {
+      start, end, timezone: tz,
+      days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+    });
+  }
+
   /** Pure window check — exported for tests and direct callers. */
   static isInWindow(now: Date, window: ResolvedWindow): boolean {
     try {

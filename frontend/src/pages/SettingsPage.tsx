@@ -13,6 +13,7 @@ import ServicePricingForm from '../components/ServicePricingForm';
 import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
 import { BusinessHoursCard } from '../components/BusinessHoursCard';
+import { QuietHoursCard } from '../components/QuietHoursCard';
 import { SettingsCommunicationSection } from './SettingsCommunication';
 
 const tierNames: Record<string, string> = {
@@ -892,6 +893,9 @@ export default function SettingsPage() {
       <>
       {/* Business Hours — master window. Per-card switches live on each account in Services. */}
       <BusinessHoursCard />
+
+      {/* Quiet Hours — daily "don't text leads at night" window for Follow-ups. */}
+      <QuietHoursCard />
 
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">

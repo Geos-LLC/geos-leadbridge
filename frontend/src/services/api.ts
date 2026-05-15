@@ -1154,13 +1154,23 @@ export const usersApi = {
     const { data } = await api.patch('/v1/users/me/business-hours', body);
     return data;
   },
+  getQuietHours: async (): Promise<{ enabled: boolean; start: string; end: string; timezone: string }> => {
+    const { data } = await api.get('/v1/users/me/quiet-hours');
+    return data;
+  },
+  updateQuietHours: async (
+    body: { enabled?: boolean; start?: string; end?: string; timezone?: string },
+  ): Promise<{ enabled: boolean; start: string; end: string; timezone: string }> => {
+    const { data } = await api.patch('/v1/users/me/quiet-hours', body);
+    return data;
+  },
   getAccountHours: async (
     accountId: string,
   ): Promise<{
     override: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
     callDuringBusinessHours: boolean;
     firstMsgDuringBusinessHours: boolean;
-    followUpsUseBusinessHours: boolean;
+    followUpsApplyQuietHours: boolean;
     aiConversationMode: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
   }> => {
     const { data } = await api.get(`/v1/users/me/account-hours/${accountId}`);
@@ -1172,14 +1182,14 @@ export const usersApi = {
       override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
-      followUpsUseBusinessHours?: boolean;
+      followUpsApplyQuietHours?: boolean;
       aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
     },
   ): Promise<{
     override: any;
     callDuringBusinessHours: boolean;
     firstMsgDuringBusinessHours: boolean;
-    followUpsUseBusinessHours: boolean;
+    followUpsApplyQuietHours: boolean;
     aiConversationMode: string;
   }> => {
     const { data } = await api.patch(`/v1/users/me/account-hours/${accountId}`, body);
