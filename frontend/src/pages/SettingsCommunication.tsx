@@ -15,27 +15,19 @@ import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
 import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
 import { notify } from '../store/notificationStore';
 
-const THUMBTACK_ALERT_TEMPLATE =
+// Unified default body for "New Lead Alerts" — applied to every account
+// regardless of platform. Backend seeds this as the "Lead Alert - SMS"
+// MessageTemplate; this copy is the fallback when the rule is created
+// before getTemplates has run.
+const LEAD_ALERT_SMS_TEMPLATE =
   'New lead for {account.name}\n' +
-  '{lead.name}, Price {lead.price}\n' +
-  'Location: {lead.location}, {lead.zip}\n' +
-  'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
-  'Frequency: {lead.frequency}\n' +
-  'Description: {lead.serviceDescription}\n' +
-  'Add-ons: {lead.addons}\n' +
-  'Pets: {lead.pets}\n' +
-  'Message: {lead.message}\n' +
-  'Phone: {lead.phone}';
-
-const YELP_ALERT_TEMPLATE =
-  'New Yelp lead for {account.name}\n' +
   '{lead.name}\n' +
   'Service: {lead.service}\n' +
   'Location: {lead.location}, {lead.zip}\n' +
-  'Availability: {lead.availability}\n' +
   'Message: {lead.message}\n' +
-  'Phone: {lead.phone}\n' +
-  'Email: {lead.email}';
+  'Phone: {lead.phone}';
+
+const LEAD_ALERT_TEMPLATE_NAME = 'Lead Alert - SMS';
 
 function isValidPhoneE164(phone: string): boolean {
   return /^\+[1-9]\d{6,14}$/.test(phone.trim());
@@ -462,46 +454,37 @@ export function SettingsCommunicationSection() {
     showSuccess('Business phone saved');
   }
 
-  // Find existing platform-named template, or create it. Returns the id, or
-  // null if the lookup/creation failed (e.g. P2002 unique-name conflict with
-  // an orphan template). Callers fall back to the inline `template` body on
-  // the rule itself so the alert still fires.
-  async function ensurePlatformAlertTemplate(platformOverride?: string): Promise<string | null> {
-    const platform = platformOverride || selectedAccount?.platform || 'thumbtack';
-    const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
-    const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
-    const existing = templates.find(t => t.name === templateName);
+  // Find or create the unified "Lead Alert - SMS" MessageTemplate so newly
+  // created NotificationRules can be linked to it. Returns null on the
+  // P2002 unique-name conflict path; callers fall back to the inline
+  // `template` body on the rule itself so the alert still fires.
+  async function ensureSharedAlertTemplate(): Promise<string | null> {
+    const existing = templates.find(t => t.name === LEAD_ALERT_TEMPLATE_NAME);
     if (existing) return existing.id;
     try {
-      const { template } = await templatesApi.createTemplate(templateName, defaultBody);
+      const { template } = await templatesApi.createTemplate(LEAD_ALERT_TEMPLATE_NAME, LEAD_ALERT_SMS_TEMPLATE);
       setTemplates(prev => [template, ...prev]);
       return template.id;
     } catch {
-      // Most common cause: a previous half-finished setup left a
-      // (userId, name) row in message_templates that isn't visible to the
-      // current `templates` fetch. We swallow here and let the caller fall
-      // back to the inline `rule.template` body — the rule still fires.
       return null;
     }
   }
 
-  function defaultAlertBodyFor(platform?: string | null): string {
-    return platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+  function defaultAlertBody(): string {
+    return LEAD_ALERT_SMS_TEMPLATE;
   }
 
-  // Platform-specific lead alert rule seeding — mirrors the Services
-  // toggleLeadAlerts logic so Yelp and Thumbtack get correct defaults.
+  // Lead alert rule seeding — one unified "Lead Alert - SMS" template applies
+  // to every account regardless of platform.
   async function createLeadAlertRule(): Promise<void> {
     if (!selectedAccountId || !selectedAccount) return;
     setCreatingAlert(true);
     try {
-      const platform = selectedAccount.platform || 'thumbtack';
-      const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
-      const defaultBody = defaultAlertBodyFor(platform);
-      const templateId = await ensurePlatformAlertTemplate(platform);
+      const defaultBody = defaultAlertBody();
+      const templateId = await ensureSharedAlertTemplate();
       const toPhone = businessPhoneInput || user?.businessPhone || '';
       const { rule } = await notificationsApi.createRule(selectedAccountId, {
-        name: templateName,
+        name: LEAD_ALERT_TEMPLATE_NAME,
         triggerType: 'new_lead',
         toPhone,
         sendToCustomer: false,
@@ -526,14 +509,13 @@ export function SettingsCommunicationSection() {
     try {
       if (leadAlertRule && leadAlertRule.id !== '_pending') {
         // If we're turning the rule on AND it has no template assigned,
-        // seed the platform default in the same update — both as the inline
+        // seed the unified default in the same update — both as the inline
         // body (always works) and the linked MessageTemplate (best effort).
-        const platform = selectedAccount?.platform || 'thumbtack';
         const hasAnyTemplate = !!(leadAlertRule.templateId || leadAlertRule.messageTemplate || leadAlertRule.template);
         const updates: any = { enabled: on };
         if (on && !hasAnyTemplate) {
-          updates.template = defaultAlertBodyFor(platform);
-          const tid = await ensurePlatformAlertTemplate(platform);
+          updates.template = defaultAlertBody();
+          const tid = await ensureSharedAlertTemplate();
           if (tid) updates.templateId = tid;
         }
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, updates);
@@ -555,10 +537,9 @@ export function SettingsCommunicationSection() {
     setSavingAlertRule(true);
     setError(null);
     try {
+      const defaultBody = defaultAlertBody();
       const results = await Promise.allSettled(accounts.map(async acc => {
         const existing = allAccountRules[acc.id];
-        const platform = (acc as any).platform || 'thumbtack';
-        const defaultBody = defaultAlertBodyFor(platform);
         if (existing && existing.id !== '_pending') {
           const hasAnyTemplate = !!(existing.templateId || existing.messageTemplate || existing.template);
           const updates: any = { enabled: on };
@@ -567,10 +548,9 @@ export function SettingsCommunicationSection() {
           return { accountId: acc.id, rule };
         }
         if (on) {
-          const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
           const toPhone = (acc as any).agentPhoneOverride || user?.businessPhone || '';
           const { rule } = await notificationsApi.createRule(acc.id, {
-            name: templateName,
+            name: LEAD_ALERT_TEMPLATE_NAME,
             triggerType: 'new_lead',
             toPhone,
             sendToCustomer: false,
@@ -595,18 +575,13 @@ export function SettingsCommunicationSection() {
     }
   }
 
-  // Cascade the inline body for New Lead Alerts. When platformFilter is set,
-  // only rules belonging to accounts of that platform receive the update —
-  // used for the per-platform Thumbtack/Yelp editor blocks in ALL_ACCOUNTS
-  // mode (each platform has a different default body).
-  async function cascadeTemplateBodyAllAccounts(body: string, platformFilter?: string) {
+  // Cascade the inline body for New Lead Alerts to every account. One
+  // shared template applies regardless of platform.
+  async function cascadeTemplateBodyAllAccounts(body: string) {
     setSavingAlertRule(true);
     setError(null);
     try {
-      const targets = platformFilter
-        ? accounts.filter(a => ((a as any).platform || 'thumbtack') === platformFilter)
-        : accounts;
-      const results = await Promise.allSettled(targets.map(async acc => {
+      const results = await Promise.allSettled(accounts.map(async acc => {
         const existing = allAccountRules[acc.id];
         if (!existing || existing.id === '_pending') {
           return { accountId: acc.id, rule: existing };
@@ -714,7 +689,9 @@ export function SettingsCommunicationSection() {
   }
 
   // Aggregate the New-Lead rule state across all accounts. Used by the UI
-  // to render All-On / All-Off / Mixed indicators in ALL_ACCOUNTS mode.
+  // to render All-On / All-Off / Mixed indicators and the shared editor
+  // body in ALL_ACCOUNTS mode. One template applies to every account
+  // regardless of platform.
   const aggregate = (() => {
     const ruleEntries = accounts.map(a => allAccountRules[a.id] || null);
     const enabledCount = ruleEntries.filter(r => r?.enabled).length;
@@ -722,22 +699,12 @@ export function SettingsCommunicationSection() {
     const allOn = totalCount > 0 && enabledCount === totalCount;
     const allOff = enabledCount === 0;
     const mixed = !allOn && !allOff;
-    return { enabledCount, totalCount, allOn, allOff, mixed };
-  })();
-
-  // Per-platform aggregate for New Lead Alerts so each platform group has
-  // its own template + body editor (Thumbtack and Yelp ship with different
-  // default templates).
-  function aggregateForPlatform(platform: string) {
-    const platformAccounts = accounts.filter(a => ((a as any).platform || 'thumbtack') === platform);
-    const rules = platformAccounts.map(a => allAccountRules[a.id] || null).filter(r => !!r) as NotificationRule[];
-    const bodies = rules.map(r => r.template || '');
+    const bodies = ruleEntries.filter(r => !!r).map(r => r!.template || '');
     const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
     const dominantBody = allSameBody ? bodies[0] : (bodies[0] || '');
     const bodiesMixed = bodies.length > 1 && !allSameBody;
-    return { count: platformAccounts.length, dominantBody, bodiesMixed };
-  }
-  const platformsPresent = Array.from(new Set(accounts.map(a => (a as any).platform || 'thumbtack')));
+    return { enabledCount, totalCount, allOn, allOff, mixed, dominantBody, bodiesMixed };
+  })();
 
   // Aggregate Reply Alerts (followUp.reEngagementAlertEnabled + template)
   // across all accounts.
@@ -777,9 +744,8 @@ export function SettingsCommunicationSection() {
     let cancelled = false;
     (async () => {
       try {
-        const platform = selectedAccount?.platform || 'thumbtack';
-        const updates: any = { template: defaultAlertBodyFor(platform) };
-        const tid = await ensurePlatformAlertTemplate(platform);
+        const updates: any = { template: defaultAlertBody() };
+        const tid = await ensureSharedAlertTemplate();
         if (cancelled) return;
         if (tid) updates.templateId = tid;
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, updates);
@@ -1223,64 +1189,43 @@ export function SettingsCommunicationSection() {
                   </label>
                 </div>
                 <div className="px-5 py-4 space-y-4">
-                  {/* ALL_ACCOUNTS mode — one editor per platform present
-                      (Thumbtack and Yelp have different default bodies). */}
-                  {isAllMode && platformsPresent.map(platform => {
-                    const agg = aggregateForPlatform(platform);
-                    if (agg.count === 0) return null;
-                    const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
-                    const preferredTpl = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
-                    return (
-                      <div key={platform} className="border border-slate-100 rounded-xl p-4 bg-slate-50/30 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
-                            platform === 'yelp' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
-                          }`}>{platformLabel} · {agg.count}</span>
-                          <span className="text-[11px] text-slate-400">
-                            {agg.count === 1 ? '1 account' : `${agg.count} accounts`}
-                          </span>
-                        </div>
-                        <TemplateDropdownEditor
-                          key={`new-lead-${platform}-${agg.count}`}
-                          label="SMS body sent to business owner"
-                          templates={templates}
-                          preferredTemplateName={preferredTpl}
-                          currentBody={agg.dominantBody || defaultAlertBodyFor(platform)}
-                          mixed={agg.bodiesMixed}
-                          disabled={savingAlertRule || aggregate.enabledCount === 0}
-                          onSave={(body) => cascadeTemplateBodyAllAccounts(body, platform)}
-                        />
-                      </div>
-                    );
-                  })}
+                  {/* ALL_ACCOUNTS mode — single shared editor (one template
+                      applies to every account regardless of platform). */}
+                  {isAllMode && (
+                    <TemplateDropdownEditor
+                      key={`new-lead-all-${aggregate.totalCount}-${aggregate.enabledCount}`}
+                      label="SMS body sent to business owner"
+                      templates={templates}
+                      preferredTemplateName={LEAD_ALERT_TEMPLATE_NAME}
+                      currentBody={aggregate.dominantBody || defaultAlertBody()}
+                      mixed={aggregate.bodiesMixed}
+                      disabled={savingAlertRule || aggregate.enabledCount === 0}
+                      onSave={(body) => cascadeTemplateBodyAllAccounts(body)}
+                    />
+                  )}
                   {/* Per-account mode: template dropdown + editable body.
-                      Pre-creation (no rule yet), preview the platform default;
-                      after toggle-on, the editor wires into the live rule. */}
-                  {!isAllMode && !leadAlertRule && (() => {
-                    const platform = selectedAccount?.platform || 'thumbtack';
-                    const defaultBody = defaultAlertBodyFor(platform);
-                    const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
-                    return (
-                      <div>
-                        <label className="text-[11px] font-bold uppercase tracking-widest mb-2 block text-slate-400">
-                          Default {platformLabel} Template
-                        </label>
-                        <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap font-mono">
-                          {defaultBody}
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-2">
-                          Toggle on above to create this alert rule. You can pick a different template and edit the body after it's created.
-                        </p>
+                      Pre-creation (no rule yet), preview the default; after
+                      toggle-on, the editor wires into the live rule. */}
+                  {!isAllMode && !leadAlertRule && (
+                    <div>
+                      <label className="text-[11px] font-bold uppercase tracking-widest mb-2 block text-slate-400">
+                        Default Template
+                      </label>
+                      <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap font-mono">
+                        {defaultAlertBody()}
                       </div>
-                    );
-                  })()}
+                      <p className="text-[10px] text-slate-400 mt-2">
+                        Toggle on above to create this alert rule. You can pick a different template and edit the body after it's created.
+                      </p>
+                    </div>
+                  )}
                   {!isAllMode && leadAlertRule && (
                     <div className={!(leadAlertRule.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}>
                       <TemplateDropdownEditor
                         key={`new-lead-${selectedAccountId}-${leadAlertRule.id}`}
                         label="SMS body sent to business owner"
                         templates={templates}
-                        preferredTemplateName={(selectedAccount?.platform || 'thumbtack') === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack'}
+                        preferredTemplateName={LEAD_ALERT_TEMPLATE_NAME}
                         currentBody={leadAlertRule.template || leadAlertRule.messageTemplate?.content || ''}
                         mixed={false}
                         disabled={savingAlertRule}

@@ -68,6 +68,15 @@ export class TemplatesService {
       isDefault: false,
     },
     {
+      // Unified default for "New Lead Alerts" — applied across both
+      // Thumbtack and Yelp accounts when cascading in All Accounts mode.
+      // Uses only fields shared by both platforms.
+      name: 'Lead Alert - SMS',
+      content: 'New lead for {account.name}\n{lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nMessage: {lead.message}\nPhone: {lead.phone}',
+      type: 'message',
+      isDefault: false,
+    },
+    {
       // Owner SMS sent when a quiet lead replies after follow-ups. Surfaced
       // in the "Reply Alerts" picker on Settings → Communication & Alerts.
       name: 'Reply Alert',
