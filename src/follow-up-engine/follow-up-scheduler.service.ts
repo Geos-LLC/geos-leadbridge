@@ -12,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
+import { resolveTimezone } from '../common/utils/account-timezone';
+import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { CronLockTx, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { LeadsService } from '../leads/leads.service';
@@ -46,6 +48,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
     @Inject(forwardRef(() => LeadStatusService))
     private readonly leadStatusService: LeadStatusService,
     private readonly gateService: FollowUpGateService,
+    private readonly businessHours: BusinessHoursService,
   ) {
     // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
     // Defaults to true (enabled). User controls follow-ups via per-account settings.
@@ -650,16 +653,26 @@ export class FollowUpSchedulerService implements OnModuleInit {
         const acct = await this.prisma.savedAccount.findFirst({
           where: { userId: leadForQuiet.userId, businessId: leadForQuiet.businessId },
           select: {
+            id: true,
             followUpSettingsJson: true,
             followUpTimezone: true,
             followUpActiveHoursStart: true,
             followUpActiveHoursEnd: true,
+            followUpsUseBusinessHours: true,
           },
         });
         if (acct) {
           let settings: any = {};
           try { settings = JSON.parse(acct.followUpSettingsJson || '{}'); } catch {}
-          const tz = acct.followUpTimezone || 'America/New_York';
+          // Canonical TZ resolution: SavedAccount.followUpTimezone → User.businessHoursTimezone → 'America/New_York'.
+          // Same helper is used by enrollInSequence + advanceAfterSuggestion + the
+          // post-send step compute below, so all four code paths agree on the wall
+          // clock they're snapping to.
+          const userForTz = await this.prisma.user.findUnique({
+            where: { id: leadForQuiet.userId },
+            select: { businessHoursTimezone: true },
+          }).catch(() => null);
+          const tz = resolveTimezone(acct, userForTz);
           const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
           const [h, m] = fmt.format(now).split(':').map(Number);
           const current = h * 60 + m;
@@ -684,19 +697,39 @@ export class FollowUpSchedulerService implements OnModuleInit {
             }
           }
 
-          // Active hours: skip if availability=active_hours and we're outside the window
-          const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
-          const ahStart = acct.followUpActiveHoursStart;
-          const ahEnd = acct.followUpActiveHoursEnd;
-          if (isActiveHoursMode && ahStart && ahEnd) {
-            if (!inWindow(ahStart, ahEnd)) {
-              const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
+          // Business-hours opt-in: when followUpsUseBusinessHours=true, gate
+          // on the User-level master window instead of (or in addition to)
+          // the per-account active hours. Defaults to false because follow-ups
+          // typically need a broader politeness window than business hours
+          // (e.g. 8am-9pm is fine to text, but only 9-6 is staffed).
+          if (acct.followUpsUseBusinessHours) {
+            const inHours = await this.businessHours.isInBusinessHours(leadForQuiet.userId, acct.id);
+            if (!inHours) {
+              // Reschedule to the start of the active window the next time it opens.
+              // Fall back to a 1h retry if we can't resolve a precise window.
+              const nextDue = new Date(now.getTime() + 60 * 60 * 1000);
               await this.prisma.followUpEnrollment.update({
                 where: { id: enrollment.id },
                 data: { nextStepDueAt: nextDue },
               });
-              this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              this.logger.log(`[FollowUpScheduler] Outside business hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
               return;
+            }
+          } else {
+            // Legacy per-account active hours (still the default).
+            const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
+            const ahStart = acct.followUpActiveHoursStart;
+            const ahEnd = acct.followUpActiveHoursEnd;
+            if (isActiveHoursMode && ahStart && ahEnd) {
+              if (!inWindow(ahStart, ahEnd)) {
+                const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
+                await this.prisma.followUpEnrollment.update({
+                  where: { id: enrollment.id },
+                  data: { nextStepDueAt: nextDue },
+                });
+                this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+                return;
+              }
             }
           }
         }
@@ -765,8 +798,13 @@ export class FollowUpSchedulerService implements OnModuleInit {
       const nextIdx = enrollment.currentStepIndex + 1;
       const nextS = steps[nextIdx];
       if (nextS) {
+        // Re-resolve TZ here — the earlier quiet/active-hours block guards
+        // its `tz` inside `if (leadForQuiet?.businessId)`, so it isn't in
+        // scope on this rare "step already sent, advance" branch. Same
+        // helper, same fallback chain, no drift.
+        const tz = await this.resolveEnrollmentTimezone(enrollment);
         const nextDue = this.engineService.computeNextDueAt(
-          now, nextS.delayMinutes, null, null, 'America/New_York',
+          now, nextS.delayMinutes, null, null, tz,
         );
         await this.prisma.followUpEnrollment.update({
           where: { id: enrollment.id },
@@ -964,12 +1002,13 @@ export class FollowUpSchedulerService implements OnModuleInit {
     // at the top of processEnrollment). Pass null to skip active-hours snap.
     const nextStep = steps[enrollment.currentStepIndex + 1];
     if (nextStep) {
+      const tzForAdvance = await this.resolveEnrollmentTimezone(enrollment);
       const nextDue = this.engineService.computeNextDueAt(
         now,
         nextStep.delayMinutes,
         null,
         null,
-        'America/New_York',
+        tzForAdvance,
       );
 
       await this.prisma.followUpEnrollment.update({
@@ -1044,6 +1083,32 @@ export class FollowUpSchedulerService implements OnModuleInit {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Resolve the wall-clock timezone for an enrollment via the canonical chain
+   * (SavedAccount.followUpTimezone → User.businessHoursTimezone → DEFAULT).
+   *
+   * Used by the rare advance paths that fall outside the quiet/active-hours
+   * block's local `tz` scope. Returns the DEFAULT literal when the lead has
+   * no businessId or the savedAccount is missing — never throws.
+   */
+  private async resolveEnrollmentTimezone(enrollment: any): Promise<string> {
+    if (!enrollment?.leadId) return resolveTimezone();
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: enrollment.leadId },
+      select: { userId: true, businessId: true },
+    }).catch(() => null);
+    if (!lead?.businessId) return resolveTimezone();
+    const acct = await this.prisma.savedAccount.findFirst({
+      where: { userId: lead.userId, businessId: lead.businessId },
+      select: { followUpTimezone: true },
+    }).catch(() => null);
+    const user = await this.prisma.user.findUnique({
+      where: { id: lead.userId },
+      select: { businessHoursTimezone: true },
+    }).catch(() => null);
+    return resolveTimezone(acct, user);
   }
 
   /** Parse human-readable delay string to minutes */

@@ -12,6 +12,7 @@ import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
 import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
+import { BusinessHoursCard } from '../components/BusinessHoursCard';
 import { SettingsCommunicationSection } from './SettingsCommunication';
 
 const tierNames: Record<string, string> = {
@@ -889,6 +890,9 @@ export default function SettingsPage() {
 
       {activeTab === 'general' && (
       <>
+      {/* Business Hours — master window. Per-card switches live on each account in Services. */}
+      <BusinessHoursCard />
+
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">
         <h3 className="text-xl font-bold text-slate-900 px-2">Marketplace Connections</h3>

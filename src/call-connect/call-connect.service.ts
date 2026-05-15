@@ -7,6 +7,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
+import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
 import {
@@ -42,6 +43,7 @@ export class CallConnectService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private httpService: HttpService,
+    private businessHours: BusinessHoursService,
   ) {
     // SIGCORE_CALL_CONNECT_URL lets call-connect point to a different Sigcore instance
     // (e.g. staging) while notifications/SMS continue using SIGCORE_API_URL (production).
@@ -622,6 +624,21 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
     });
     if (!settings?.enabled) return;
+
+    // Business-hours gate. Per-account `callDuringBusinessHours` (default true)
+    // opts the account into the User-level master window. Outside the window:
+    // skip the call entirely. SMS alerts and AI inbox replies still go.
+    const acct = await this.prisma.savedAccount.findUnique({
+      where: { id: params.savedAccountId },
+      select: { callDuringBusinessHours: true },
+    });
+    if (acct?.callDuringBusinessHours !== false) {
+      const inHours = await this.businessHours.isInBusinessHours(params.userId, params.savedAccountId);
+      if (!inHours) {
+        this.logger.log(`[triggerForLead] Skipping — outside business hours for user ${params.userId} (lead ${params.leadId})`);
+        return;
+      }
+    }
 
     // Self-heal shared tenants before anything else — ensures this account has
     // its own dedicated Sigcore workspace so CC settings don't leak across accounts.

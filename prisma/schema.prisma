@@ -122,6 +122,17 @@ model User {
   // AI settings
   globalAiPrompt String? @map("global_ai_prompt") @db.Text // Global AI system prompt — applied to all AI replies
 
+  // Business Hours — single master window for the whole user.
+  // Per-card behavior (Instant Call, Instant Text first-msg, AI Conversation,
+  // Follow-ups) reads this and decides whether to fire based on per-card toggles
+  // on SavedAccount. Owner-alert quietHours (NotificationSettings.quietHours*)
+  // is independent — it's the dispatcher's personal sleep window.
+  businessHoursEnabled  Boolean @default(false) @map("business_hours_enabled")
+  businessHoursStart    String? @map("business_hours_start") // "09:00" 24h
+  businessHoursEnd      String? @map("business_hours_end") // "18:00" 24h
+  businessHoursTimezone String? @default("America/New_York") @map("business_hours_tz")
+  businessHoursDays     Json?   @map("business_hours_days") // ["mon","tue",...] — null = Mon-Fri default
+
   // Password reset
   passwordResetToken   String?
   passwordResetExpires DateTime?
@@ -426,6 +437,19 @@ model SavedAccount {
   followUpActiveHoursEnd   String? // e.g. "21:00"
   followUpTimezone         String? // e.g. "America/New_York"
   followUpSettingsJson     String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
+  // Business-hours wiring (User.businessHours* is the master)
+  businessHoursOverride       Json?   @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
+  callDuringBusinessHours     Boolean @default(true) @map("call_during_business_hours")     // Instant Call gate
+  firstMsgDuringBusinessHours Boolean @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
+  // Follow-ups default to their existing quiet-hours model (broader than business
+  // hours — politeness, e.g. no texting 9pm-8am). Flip this to true only if you
+  // want follow-ups restricted to the master business-hours window too.
+  followUpsUseBusinessHours   Boolean @default(false) @map("follow_ups_use_business_hours")
+  // AI Conversation mode — three states:
+  //   "always"                      — AI replies 24/7
+  //   "when_dispatcher_unavailable" — AI replies ONLY outside business hours (human takes over during)
+  //   "business_hours_only"         — AI replies ONLY during business hours
+  aiConversationMode          String? @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
   // Service pricing configuration (JSON — per-account pricing table)
   servicePricingJson       String?  @db.Text
   // FAQ — per-account answers to common customer questions, injected as REFERENCE in AI prompts

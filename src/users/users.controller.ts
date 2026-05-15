@@ -76,6 +76,55 @@ export class UsersController {
   }
 
   /**
+   * Get the user's business hours (master window in Settings → General)
+   * GET /v1/users/me/business-hours
+   */
+  @Get('me/business-hours')
+  async getBusinessHours(@Request() req: any) {
+    return this.usersService.getBusinessHours(req.user.id);
+  }
+
+  /**
+   * Update business hours
+   * PATCH /v1/users/me/business-hours
+   */
+  @Patch('me/business-hours')
+  async updateBusinessHours(
+    @Request() req: any,
+    @Body() body: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
+  ) {
+    return this.usersService.updateBusinessHours(req.user.id, body);
+  }
+
+  /**
+   * Get per-account hours toggles + optional override window
+   * GET /v1/users/me/account-hours/:accountId
+   */
+  @Get('me/account-hours/:accountId')
+  async getAccountHours(@Request() req: any, @Param('accountId') accountId: string) {
+    return this.usersService.getAccountHoursSettings(req.user.id, accountId);
+  }
+
+  /**
+   * Update per-account hours toggles + optional override window
+   * PATCH /v1/users/me/account-hours/:accountId
+   */
+  @Patch('me/account-hours/:accountId')
+  async updateAccountHours(
+    @Request() req: any,
+    @Param('accountId') accountId: string,
+    @Body() body: {
+      override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
+      callDuringBusinessHours?: boolean;
+      firstMsgDuringBusinessHours?: boolean;
+      followUpsUseBusinessHours?: boolean;
+      aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+    },
+  ) {
+    return this.usersService.updateAccountHoursSettings(req.user.id, accountId, body);
+  }
+
+  /**
    * Get pricing config for an account
    * GET /v1/users/me/pricing/:accountId
    */

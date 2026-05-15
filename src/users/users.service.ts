@@ -179,6 +179,110 @@ export class UsersService {
     return { success: true };
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Business Hours (master, in Settings → General)
+  // Per-card behavior toggles live on SavedAccount (see getAccountHoursSettings).
+  // ──────────────────────────────────────────────────────────────────────
+
+  async getBusinessHours(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        businessHoursEnabled: true,
+        businessHoursStart: true,
+        businessHoursEnd: true,
+        businessHoursTimezone: true,
+        businessHoursDays: true,
+      },
+    });
+    return {
+      enabled: user?.businessHoursEnabled ?? false,
+      start: user?.businessHoursStart ?? '09:00',
+      end: user?.businessHoursEnd ?? '18:00',
+      timezone: user?.businessHoursTimezone ?? 'America/New_York',
+      days: (user?.businessHoursDays as string[] | null) ?? ['mon', 'tue', 'wed', 'thu', 'fri'],
+    };
+  }
+
+  async updateBusinessHours(
+    userId: string,
+    dto: { enabled?: boolean; start?: string; end?: string; timezone?: string; days?: string[] },
+  ) {
+    const data: Record<string, any> = {};
+    if (dto.enabled !== undefined) data.businessHoursEnabled = !!dto.enabled;
+    if (dto.start !== undefined) data.businessHoursStart = dto.start || null;
+    if (dto.end !== undefined) data.businessHoursEnd = dto.end || null;
+    if (dto.timezone !== undefined) data.businessHoursTimezone = dto.timezone || null;
+    if (dto.days !== undefined) {
+      const valid = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+      const clean = Array.isArray(dto.days)
+        ? dto.days.map((d) => d.toLowerCase().slice(0, 3)).filter((d) => valid.includes(d))
+        : null;
+      data.businessHoursDays = clean && clean.length > 0 ? clean : null;
+    }
+    await this.prisma.user.update({ where: { id: userId }, data });
+    return this.getBusinessHours(userId);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Per-account behavior toggles + optional override window
+  // ──────────────────────────────────────────────────────────────────────
+
+  async getAccountHoursSettings(userId: string, savedAccountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: {
+        id: true,
+        businessHoursOverride: true,
+        callDuringBusinessHours: true,
+        firstMsgDuringBusinessHours: true,
+        followUpsUseBusinessHours: true,
+        aiConversationMode: true,
+      },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    return {
+      override: (account.businessHoursOverride as any) ?? null,
+      callDuringBusinessHours: account.callDuringBusinessHours,
+      firstMsgDuringBusinessHours: account.firstMsgDuringBusinessHours,
+      followUpsUseBusinessHours: account.followUpsUseBusinessHours,
+      aiConversationMode: account.aiConversationMode ?? 'when_dispatcher_unavailable',
+    };
+  }
+
+  async updateAccountHoursSettings(
+    userId: string,
+    savedAccountId: string,
+    dto: {
+      override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
+      callDuringBusinessHours?: boolean;
+      firstMsgDuringBusinessHours?: boolean;
+      followUpsUseBusinessHours?: boolean;
+      aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+    },
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+
+    const data: Record<string, any> = {};
+    if (dto.override !== undefined) data.businessHoursOverride = dto.override;
+    if (dto.callDuringBusinessHours !== undefined) data.callDuringBusinessHours = !!dto.callDuringBusinessHours;
+    if (dto.firstMsgDuringBusinessHours !== undefined) data.firstMsgDuringBusinessHours = !!dto.firstMsgDuringBusinessHours;
+    if (dto.followUpsUseBusinessHours !== undefined) data.followUpsUseBusinessHours = !!dto.followUpsUseBusinessHours;
+    if (dto.aiConversationMode !== undefined) {
+      const valid = ['always', 'when_dispatcher_unavailable', 'business_hours_only'];
+      if (!valid.includes(dto.aiConversationMode)) {
+        throw new NotFoundException(`Invalid aiConversationMode: ${dto.aiConversationMode}`);
+      }
+      data.aiConversationMode = dto.aiConversationMode;
+    }
+    await this.prisma.savedAccount.update({ where: { id: savedAccountId }, data });
+    return this.getAccountHoursSettings(userId, savedAccountId);
+  }
+
   /**
    * Resolve pricing for an account, falling back to any sibling account with pricing
    * when the account itself has none. Used by both the UI preview and AI execution

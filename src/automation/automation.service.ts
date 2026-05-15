@@ -6,6 +6,7 @@
 import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
+import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
@@ -208,6 +209,7 @@ export class AutomationService implements OnModuleInit {
     @Inject(forwardRef(() => FollowUpEngineService))
     private followUpEngine: FollowUpEngineService,
     private notifications: NotificationsService,
+    private businessHours: BusinessHoursService,
   ) {}
 
   /**
@@ -872,24 +874,40 @@ export class AutomationService implements OnModuleInit {
         try { aiRules = JSON.parse(savedAccount.followUpSettingsJson); } catch {}
       }
 
-      // Active hours enforcement for AI Conversation. The Services UI
-      // exposes "Always (24/7) / Set up active time" inside the AI
-      // Conversation card. When set to active_hours, the saved
-      // followUpActiveHoursStart / followUpActiveHoursEnd columns gate
-      // when AI replies — outside the window we don't auto-respond.
-      // Previously this only kicked in for isFollowUp rules in
-      // executePendingMessage; the synthetic ai-conversation-* rule
-      // bypassed it because there's no AutomationRule row to look up.
-      const aiAvailability = aiRules.followUpAvailability ?? aiRules.availability;
-      const ahStart = savedAccount.followUpActiveHoursStart;
-      const ahEnd = savedAccount.followUpActiveHoursEnd;
-      const ahTz = savedAccount.followUpTimezone || 'America/New_York';
-      if (aiAvailability === 'active_hours' && ahStart && ahEnd) {
-        if (!this.isInActiveHours(ahStart, ahEnd, ahTz)) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside active hours (${ahStart}-${ahEnd} ${ahTz})`);
+      // AI Conversation availability — tri-state on `savedAccount.aiConversationMode`:
+      //   "always"                      — reply 24/7
+      //   "when_dispatcher_unavailable" — reply ONLY outside business hours
+      //                                   (human handles during business hours)
+      //   "business_hours_only"         — reply ONLY during business hours
+      // Falls back to the legacy `followUpAvailability` / `followUpActiveHours*`
+      // settings if `aiConversationMode` is null (pre-migration accounts).
+      const aiMode = (savedAccount as any).aiConversationMode as string | null | undefined;
+      if (aiMode === 'when_dispatcher_unavailable') {
+        const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
+        if (inHours) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — dispatcher available (inside business hours)`);
           return;
         }
+      } else if (aiMode === 'business_hours_only') {
+        const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
+        if (!inHours) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside business hours`);
+          return;
+        }
+      } else if (aiMode == null) {
+        // Legacy path — preserve until UI migrates everyone to aiConversationMode.
+        const aiAvailability = aiRules.followUpAvailability ?? aiRules.availability;
+        const ahStart = savedAccount.followUpActiveHoursStart;
+        const ahEnd = savedAccount.followUpActiveHoursEnd;
+        const ahTz = savedAccount.followUpTimezone || 'America/New_York';
+        if (aiAvailability === 'active_hours' && ahStart && ahEnd) {
+          if (!this.isInActiveHours(ahStart, ahEnd, ahTz)) {
+            this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside active hours (${ahStart}-${ahEnd} ${ahTz}) [legacy mode]`);
+            return;
+          }
+        }
       }
+      // aiMode === 'always' falls through — no gate.
 
       // Check terminal lead status — don't reply to done/hired/archived leads.
       // Reuses the outer-scope `lead` (already loaded with status + threadId).

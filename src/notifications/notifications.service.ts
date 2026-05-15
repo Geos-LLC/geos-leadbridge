@@ -6,6 +6,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
+import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
@@ -193,6 +194,7 @@ export class NotificationsService {
     private configService: ConfigService,
     private cache: CacheService,
     private trialService: TrialService,
+    private businessHours: BusinessHoursService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -789,6 +791,12 @@ export class NotificationsService {
 
     const settings = existingSettings;
 
+    // Customer-facing rules must never link a `templateId` — the inline
+    // `template` is the user-managed source of truth (Customer Texting form).
+    // A linked MessageTemplate would shadow it at send time. See Liz Jacob
+    // 2026-05-14 (3 Spotless accounts blasted owner-style lead dumps).
+    const safeTemplateId = (data.sendToCustomer ?? false) ? null : (data.templateId || null);
+
     const rule = await this.prisma.notificationRule.create({
       data: {
         notificationSettingsId: settings.id,
@@ -798,7 +806,7 @@ export class NotificationsService {
         toPhone: data.toPhone,
         sendToCustomer: data.sendToCustomer ?? false,
         template: data.template,
-        templateId: data.templateId || null,
+        templateId: safeTemplateId,
         delayMinutes: data.delayMinutes ?? 0,
         stopOnCustomerReply: data.stopOnCustomerReply ?? true,
         stopOnLeadClosed: data.stopOnLeadClosed ?? true,
@@ -873,6 +881,14 @@ export class NotificationsService {
     this.logger.log(`[updateRule] Updating rule ${ruleId} with data: ${JSON.stringify(data)}`);
     this.logger.log(`[updateRule] Previous enabled value: ${existing.enabled}`);
 
+    // Customer-facing rules must never link a `templateId`. Resolve effective
+    // sendToCustomer from incoming change OR existing row, then force null.
+    // Also clears a pre-existing stale link if a rule is flipped TO sendToCustomer.
+    const effectiveSendToCustomer = data.sendToCustomer ?? existing.sendToCustomer;
+    const templateIdUpdate = effectiveSendToCustomer
+      ? { templateId: null }
+      : (data.templateId !== undefined ? { templateId: data.templateId || null } : {});
+
     const rule = await this.prisma.notificationRule.update({
       where: { id: ruleId },
       data: {
@@ -882,7 +898,7 @@ export class NotificationsService {
         ...(data.toPhone !== undefined && { toPhone: data.toPhone }),
         ...(data.sendToCustomer !== undefined && { sendToCustomer: data.sendToCustomer }),
         ...(data.template !== undefined && { template: data.template }),
-        ...(data.templateId !== undefined && { templateId: data.templateId || null }),
+        ...templateIdUpdate,
         ...(data.delayMinutes !== undefined && { delayMinutes: data.delayMinutes }),
         ...(data.stopOnCustomerReply !== undefined && { stopOnCustomerReply: data.stopOnCustomerReply }),
         ...(data.stopOnLeadClosed !== undefined && { stopOnLeadClosed: data.stopOnLeadClosed }),
@@ -1292,6 +1308,25 @@ export class NotificationsService {
     const _ruleStart = Date.now();
     const { userId, savedAccountId, leadId, lead } = context;
 
+    // Business-hours gate for customer-facing first-message SMS only.
+    // Per-account `firstMsgDuringBusinessHours` (default true) opts the account
+    // into the User-level master window. Owner alerts (sendToCustomer=false)
+    // are NOT gated here — they have their own `quietHours` setting for the
+    // dispatcher's personal sleep window.
+    if (rule?.sendToCustomer && savedAccountId) {
+      const acct = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { firstMsgDuringBusinessHours: true },
+      });
+      if (acct?.firstMsgDuringBusinessHours !== false) {
+        const inHours = await this.businessHours.isInBusinessHours(userId, savedAccountId);
+        if (!inHours) {
+          this.logger.log(`[sendNotificationWithRule] SKIPPED customer SMS — outside business hours (rule=${rule?.name}, account=${savedAccountId})`);
+          return;
+        }
+      }
+    }
+
     // Resolve agent phone + bot phone in parallel
     const [agentPhoneRaw, fromPhone] = await Promise.all([
       this.resolveAgentPhone(userId, savedAccountId),
@@ -1305,7 +1340,14 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : agentPhone;
 
-    const template = rule?.messageTemplate?.content || rule?.template || settings.template;
+    // For customer-facing rules, the inline `rule.template` is what the Customer
+    // Texting form writes — that's the user-visible source of truth. A stale
+    // `templateId` linking to an owner-style MessageTemplate (e.g. from an admin
+    // edit via the general Notification Rules UI) previously shadowed it and
+    // blasted internal lead-dump bodies to customers (Liz Jacob 2026-05-14).
+    const template = rule?.sendToCustomer
+      ? (rule?.template || rule?.messageTemplate?.content || settings.template)
+      : (rule?.messageTemplate?.content || rule?.template || settings.template);
     const ruleName = rule?.name || 'Legacy Alert';
     const ruleId = rule?.id || null;
 
@@ -1329,8 +1371,11 @@ export class NotificationsService {
 
     // Render the message using the configured template.
     // Prepend platform label so the recipient knows which channel the lead came from
-    // (unless the template already mentions the platform).
-    const platformLabel = context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '';
+    // (unless the template already mentions the platform). The label is an
+    // internal/owner-side cue — never prepend it on customer-facing messages.
+    const platformLabel = rule?.sendToCustomer
+      ? ''
+      : (context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '');
     let messageBody: string;
     if (template) {
       const rendered = this.renderTemplate(template, lead, context.accountName);
@@ -2669,7 +2714,10 @@ export class NotificationsService {
       return { success: true };
     }
 
-    // Create auto-reply rule (immediate, no follow-ups)
+    // Create auto-reply rule (immediate, no follow-ups). Explicit templateId:
+    // null is belt-and-suspenders — createRule/updateRule already force it on
+    // sendToCustomer rules, but the Customer Texting form goes through this
+    // dedicated path, so make the intent obvious.
     await this.prisma.notificationRule.create({
       data: {
         notificationSettingsId: settings.id,
@@ -2677,6 +2725,7 @@ export class NotificationsService {
         triggerType: 'new_lead',
         sendToCustomer: true,
         template: dto.autoReplyTemplate,
+        templateId: null,
         delayMinutes: 0,
         enabled: true,
       },
