@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useState, useEffect, useRef } from 'react';
 import { billingApi } from '../services/api';
+import { PageSkeleton } from './PageSkeleton';
 
 // Routes that should be accessible even with expired trial
 const TRIAL_EXEMPT_ROUTES = ['/pricing', '/billing', '/settings'];
@@ -51,10 +52,13 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace />;
   }
 
-  // Only show blank on the very first check — subsequent route changes
-  // keep the current page mounted while re-checking in the background
+  // First-render gate: show a loading skeleton (not a blank screen) while the
+  // initial billing check is in flight. Returning null here meant a brand-new
+  // signup landed on white nothingness until the Stripe call resolved — long
+  // enough that customers reloaded thinking the page broke, which delayed
+  // the onboarding quiz from appearing.
   if (!trialChecked && !hasEverChecked.current) {
-    return null;
+    return <PageSkeleton />;
   }
 
   // Redirect to pricing if trial expired and no subscription

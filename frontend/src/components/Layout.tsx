@@ -12,7 +12,9 @@ import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
 import OnboardingStep1Modal from './OnboardingStep1Modal';
-import OnboardingStep2Modal from './OnboardingStep2Modal';
+// OnboardingStep2Modal is intentionally not rendered right now — Modal B
+// will be replaced. Keep the file + backend endpoints so the swap is a
+// one-line re-import.
 
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
@@ -119,18 +121,11 @@ export function Layout() {
 
   const profile = user?.onboardingProfile ?? null;
   const needsStep1 = !impersonatingUser && !!user && !profile?.step1CompletedAt && !profile?.step1SkippedAt;
-  const needsStep2 =
-    !impersonatingUser &&
-    !!user &&
-    !!profile?.step1CompletedAt &&
-    !profile?.step2CompletedAt &&
-    !profile?.step2SkippedAt;
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--lb-bg)' }}>
       <TrialExpiredModal />
       {needsStep1 && <OnboardingStep1Modal onComplete={() => { /* authStore updated inside modal */ }} />}
-      {!needsStep1 && needsStep2 && <OnboardingStep2Modal onComplete={() => { /* authStore updated inside modal */ }} />}
 
       {/* Mobile Navigation Overlay */}
       {mobileMenuOpen && (
