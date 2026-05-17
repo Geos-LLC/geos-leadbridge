@@ -18,7 +18,7 @@ export class UsersService {
     private cache: CacheService,
   ) {}
 
-  async updateProfile(userId: string, updates: { name?: string; businessPhone?: string }) {
+  async updateProfile(userId: string, updates: { name?: string; businessPhone?: string; website?: string | null }) {
     const data: Record<string, any> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.businessPhone !== undefined) {
@@ -28,10 +28,18 @@ export class UsersService {
       else if (digits.length > 10) data.businessPhone = `+${digits}`;
       else data.businessPhone = updates.businessPhone || null;
     }
+    if (updates.website !== undefined) {
+      // Free-text, just trim — onboarding wizard accepts "myco.com",
+      // "https://myco.com", etc. Empty string normalizes to null so the
+      // "I don't have a website" skip path clears the field rather than
+      // storing whitespace.
+      const trimmed = (updates.website ?? '').trim();
+      data.website = trimmed.length === 0 ? null : trimmed;
+    }
 
     const user = await this.prisma.user.update({
       where: { id: userId },
-      select: { id: true, name: true, email: true, businessPhone: true },
+      select: { id: true, name: true, email: true, businessPhone: true, website: true },
       data,
     });
 

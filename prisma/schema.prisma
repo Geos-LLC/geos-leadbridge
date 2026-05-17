@@ -111,6 +111,13 @@ model User {
   // Business phone (agent's personal phone for receiving forwarded calls/SMS)
   businessPhone String?
 
+  // Business website. Captured during the onboarding wizard's Business
+  // step (PR 2) — the AI website-parser stub feeds off this once shipped.
+  // Free-text, nullable; we don't validate format here so the user can
+  // enter "myco.com", "https://myco.com", or "I don't have one yet" via
+  // the explicit skip path.
+  website String?
+
   // Sigcore phone number provisioning
   phoneNumber         String? // User's dedicated Sigcore/Twilio number
   sigcoreAllocationId String? @map("callioAllocationId") // Sigcore's allocation ID for this number

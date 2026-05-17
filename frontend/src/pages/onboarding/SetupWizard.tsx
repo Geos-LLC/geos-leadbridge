@@ -9,6 +9,8 @@ import WizardShell from './WizardShell';
 import WelcomeStep from './steps/WelcomeStep';
 import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
+import ConnectStep from './steps/ConnectStep';
+import BusinessWebsiteStep from './steps/BusinessWebsiteStep';
 import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
@@ -128,9 +130,12 @@ export default function SetupWizard() {
 
   if (loading) return <PageSkeleton />;
 
-  // Body selection. Welcome and Done own their own primary CTA, so we
-  // hide the action bar there. The middle six render the placeholder
-  // in PR 1; real bodies land in PR 2+.
+  // Body selection. Welcome / Done / Business own their own primary
+  // CTA so the wizard footer is hidden on those steps. Connect uses the
+  // shared footer (Skip / Continue), and the remaining four still
+  // render the PR1 placeholder until later PRs land.
+  const stepOwnsActions = isWelcome || isDone || currentStep === 'business';
+
   let body: React.ReactNode;
   if (isWelcome) {
     body = (
@@ -144,6 +149,26 @@ export default function SetupWizard() {
     );
   } else if (isDone) {
     body = <DoneStep checklist={checklist} onFinish={handleFinish} saving={saving} />;
+  } else if (currentStep === 'connect') {
+    body = <ConnectStep />;
+  } else if (currentStep === 'business') {
+    body = (
+      <BusinessWebsiteStep
+        saving={saving}
+        setSaving={setSaving}
+        // BusinessWebsiteStep already persisted the website value; the
+        // wizard just records "done" / "skipped" + advances. nextStep
+        // is guaranteed non-null here because Business is never last.
+        onSaveContinue={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'business', status: 'done', nextStep });
+        }}
+        onNoWebsite={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'business', status: 'skipped', nextStep });
+        }}
+      />
+    );
   } else {
     body = <PlaceholderStep step={currentStep} />;
   }
@@ -153,10 +178,10 @@ export default function SetupWizard() {
       currentStep={currentStep}
       checklist={checklist}
       onBack={prevStep ? handleBack : undefined}
-      onSkip={isWelcome || isDone ? undefined : handleSkip}
-      onContinue={isWelcome || isDone ? undefined : handleContinue}
+      onSkip={stepOwnsActions ? undefined : handleSkip}
+      onContinue={stepOwnsActions ? undefined : handleContinue}
       saving={saving}
-      hideActions={isWelcome || isDone}
+      hideActions={stepOwnsActions}
     >
       {body}
     </WizardShell>

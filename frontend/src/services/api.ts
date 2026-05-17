@@ -1096,7 +1096,12 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
-  updateProfile: async (updates: { name?: string; businessPhone?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string; businessPhone?: string | null } }> => {
+  updateProfile: async (
+    updates: { name?: string; businessPhone?: string; website?: string | null },
+  ): Promise<{
+    success: boolean;
+    user: { id: string; name: string; email: string; businessPhone?: string | null; website?: string | null };
+  }> => {
     const { data } = await api.patch('/v1/users/me', updates);
     return data;
   },
