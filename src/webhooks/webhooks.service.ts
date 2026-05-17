@@ -816,13 +816,24 @@ export class WebhooksService {
         msgSavedAccounts.find((a: any) => a.userId === userId) ||
         msgSavedAccounts[0] || null;
 
-      // Trigger automation rules (Thumbtack auto-reply)
+      // Trigger automation rules (Thumbtack auto-reply).
+      //
+      // `customerMessage` + `messageId` are load-bearing: without them
+      // `handleCustomerReply` skips intent classification, the Lead.status
+      // transition, the handoff alert, and every phrase-list AI Conversation
+      // stop check — all of those are gated on `context.customerMessage`.
+      // The Yelp webhook path (line ~2054) already forwards both; this is
+      // the Thumbtack-side parity fix. FargiPro / Amy Koch 2026-05-16:
+      // customer wrote "I have booked someone else for this task", AI
+      // replied 33s later because the classifier was never invoked here.
       try {
         await this.automationService.handleCustomerReply({
           userId,
           businessId,
           negotiationId,
           leadId: lead.id,
+          messageId,
+          customerMessage: messageContent,
           isFirstCustomerReply: customerMessageCount === 1,
           isSecondCustomerMessage: customerMessageCount === 2, // First actual reply after initial message
           customerName: lead.customerName,
