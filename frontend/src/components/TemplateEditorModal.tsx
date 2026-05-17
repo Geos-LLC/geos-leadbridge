@@ -338,7 +338,7 @@ export function TemplateEditorModal({
               )}
               <button
                 onClick={handleSave}
-                disabled={saving || !content.trim()}
+                disabled={saving || (!hideContentField && !content.trim())}
                 className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {saving && <Loader2 size={16} className="animate-spin" />}
