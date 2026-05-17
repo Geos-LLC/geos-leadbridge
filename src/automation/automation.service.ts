@@ -18,6 +18,7 @@ import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
+import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -1648,6 +1649,11 @@ export class AutomationService implements OnModuleInit {
               }
               priceParts.push('');
               priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
+              // Hard guards (see pricing-guards.ts). Same rules as the
+              // follow-up generator + ai.controller paths — AI must NOT
+              // quote when bed/bath unknown or when the customer asks for
+              // a disabled service type.
+              priceParts.push(buildPricingGuardRules(p));
               pricingBlock = priceParts.join('\n');
             }
           } catch { /* invalid JSON */ }

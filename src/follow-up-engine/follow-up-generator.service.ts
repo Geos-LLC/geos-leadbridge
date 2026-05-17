@@ -24,6 +24,7 @@ import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone, stripLea
 import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
+import { buildPricingGuardRules } from '../ai/pricing-guards';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -267,6 +268,10 @@ export class FollowUpGeneratorService {
             }
             priceParts.push('');
             priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
+            // Hard guards (see pricing-guards.ts). Closes the FargiPro follow-up
+            // "$130 for 1BR/1BA" bug — AI must NOT quote when bed/bath unknown
+            // or when the requested service type is disabled on this account.
+            priceParts.push(buildPricingGuardRules(p));
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }
