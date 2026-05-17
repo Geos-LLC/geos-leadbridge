@@ -33,6 +33,7 @@ const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
 const AdminTenantNumbers = lazy(() => import('./pages/admin/AdminTenantNumbers'));
+const SetupWizard = lazy(() => import('./pages/onboarding/SetupWizard'));
 
 // Demo sub-views share one module so a single dynamic import lands the whole
 // demo experience. Splitting per view would add 9 round-trips for a flow where
@@ -89,6 +90,12 @@ function App() {
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
+            {/* Setup wizard runs OUTSIDE the Layout — it owns the full
+                viewport (left rail with step list, top progress bar,
+                bottom action bar) and intentionally has no app sidebar /
+                trial banner so users can focus on setup. */}
+            <Route path="/onboarding/setup" element={<SetupWizard />} />
+
             <Route element={<Layout />}>
               {/* Canonical paths — match the nav labels (Overview / Lead Activity /
                   Automation / Templates / Insights). */}

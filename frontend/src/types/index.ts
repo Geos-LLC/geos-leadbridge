@@ -1,3 +1,19 @@
+// 8-step guided setup wizard. Step slugs match the backend WIZARD_STEPS
+// enum in src/onboarding/onboarding.service.ts — keep them in sync.
+export const WIZARD_STEPS = [
+  'welcome',
+  'connect',
+  'business',
+  'ai',
+  'pricing',
+  'automation',
+  'ai_rules',
+  'done',
+] as const;
+export type WizardStep = (typeof WIZARD_STEPS)[number];
+export type WizardStatus = 'done' | 'skipped';
+export type WizardChecklist = Partial<Record<WizardStep, WizardStatus>>;
+
 export interface OnboardingProfile {
   id: string;
   userId: string;
@@ -14,6 +30,12 @@ export interface OnboardingProfile {
   userGoal: string | null;
   step2CompletedAt: string | null;
   step2SkippedAt: string | null;
+  // 8-step setup wizard progress
+  wizardStartedAt: string | null;
+  wizardCompletedAt: string | null;
+  wizardCurrentStep: WizardStep | null;
+  wizardSkippedSteps: WizardStep[];
+  wizardChecklistStatus: WizardChecklist | null;
   createdAt: string;
   updatedAt: string;
 }

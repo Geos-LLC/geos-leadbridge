@@ -209,6 +209,16 @@ model OnboardingProfile {
   step2CompletedAt  DateTime?
   step2SkippedAt    DateTime?
 
+  // 8-step guided setup wizard (welcome → connect → business → ai → pricing
+  // → automation → ai_rules → done). Independent of the legacy step1/step2
+  // segmentation quiz above; those fields stay for historical data but no
+  // longer drive UI gating.
+  wizardStartedAt       DateTime?
+  wizardCompletedAt     DateTime?
+  wizardCurrentStep     String?
+  wizardSkippedSteps    String[]  @default([])
+  wizardChecklistStatus Json? // { connect: 'done'|'skipped', business: ..., ai: ..., pricing: ..., automation: ..., ai_rules: ... }
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

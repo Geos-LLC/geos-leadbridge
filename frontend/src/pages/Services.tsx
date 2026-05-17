@@ -18,7 +18,6 @@ import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../com
 import ServicePricingForm, { DEFAULT_CLEANING_PRICING } from '../components/ServicePricingForm';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
-import OnboardingTour, { ONBOARDING_STORAGE_KEY } from '../components/OnboardingTour';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
@@ -577,25 +576,6 @@ export function Services() {
   // Step 2: Match to leads
   const [csMatchingLeads, setCsMatchingLeads] = useState(false);
   const [csMatchResult, setCsMatchResult] = useState<{ synced: number; totalConversations: number; totalLeads: number } | null>(null);
-
-  // Onboarding tour
-  const [tourActive, setTourActive] = useState(false);
-
-  // Listen for tour start event from Layout header button
-  useEffect(() => {
-    const handler = () => setTourActive(true);
-    window.addEventListener('lb:start-tour', handler);
-    return () => window.removeEventListener('lb:start-tour', handler);
-  }, []);
-
-  // Auto-start tour on first visit (once data is loaded and tenant phones exist)
-  useEffect(() => {
-    if (!loading && tenantPhones.length > 0 && !localStorage.getItem(ONBOARDING_STORAGE_KEY)) {
-      // Small delay so DOM is fully rendered
-      const t = setTimeout(() => setTourActive(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, [loading, tenantPhones.length]);
 
   // Lead Alert saved snapshot for dirty tracking
   const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
@@ -4130,9 +4110,6 @@ export function Services() {
           setFuStepEditor(null);
         }}
       />
-
-      {/* Onboarding Tour */}
-      <OnboardingTour active={tourActive} onComplete={() => setTourActive(false)} />
 
       {/* Pricing Table Modal — read-only View or full Edit */}
       {showPricingModal && selectedAccountId && (

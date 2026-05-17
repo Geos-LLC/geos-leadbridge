@@ -11,6 +11,7 @@ import { useAuthStore } from '../store/authStore';
 import { thumbtackApi, analyticsApi, notificationsApi, platformsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import SetupProgressCard from './onboarding/SetupProgressCard';
 import type { SavedAccount } from '../types';
 import { Btn, Card, Kpi, PlatformBadge, StatusPill, EmptyState } from '../components/ui';
 
@@ -417,6 +418,9 @@ export function Dashboard() {
           Leadbridge captured {stats.yelp.leadsToday + stats.thumbtack.leadsToday} new lead{(stats.yelp.leadsToday + stats.thumbtack.leadsToday) !== 1 ? 's' : ''} today.
         </p>
       </div>
+
+      {/* Setup-progress card — only renders while wizard is incomplete */}
+      <SetupProgressCard />
 
       {/* KPI row */}
       <div style={{ position: 'relative' }}>

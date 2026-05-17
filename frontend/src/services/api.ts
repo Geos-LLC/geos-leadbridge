@@ -1902,6 +1902,18 @@ export const onboardingApi = {
     const { data } = await api.post('/v1/onboarding/step1/skip');
     return data;
   },
+  // 8-step guided setup wizard. The /profile endpoint returns the full
+  // OnboardingProfile (wizard fields included); patchWizard is the only
+  // mutation — advance the current step, mark one step done/skipped, and
+  // optionally flag the wizard complete in one round trip.
+  patchWizard: async (input: {
+    currentStep?: import('../types').WizardStep;
+    markStep?: { step: import('../types').WizardStep; status: import('../types').WizardStatus };
+    completed?: boolean;
+  }): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
+    const { data } = await api.patch('/v1/onboarding/wizard', input);
+    return data;
+  },
 };
 
 export default api;

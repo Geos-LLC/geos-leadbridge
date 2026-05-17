@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { OnboardingService, Step1Input, Step2Input } from './onboarding.service';
+import {
+  OnboardingService,
+  Step1Input,
+  Step2Input,
+  WIZARD_STEPS,
+  WizardPatchInput,
+  WizardStatus,
+  WizardStep,
+} from './onboarding.service';
+
+const VALID_WIZARD_STATUSES: WizardStatus[] = ['done', 'skipped'];
 
 const VALID_PRIMARY_SOURCES = ['thumbtack', 'yelp', 'google', 'facebook', 'other'];
 const VALID_VOLUMES = ['0-5', '5-15', '15-50', '50+'];
@@ -73,6 +83,30 @@ export class OnboardingController {
   @Post('step1/skip')
   async skipStep1(@CurrentUser() user: any) {
     const profile = await this.onboardingService.skipStep1(user.id);
+    return { success: true, profile };
+  }
+
+  // --- 8-step guided setup wizard --------------------------------------
+  // GET is intentionally folded into /profile (the existing endpoint already
+  // returns the whole OnboardingProfile, wizard fields included once the
+  // migration runs). PATCH is the only mutation: it accepts a partial
+  // update so the client can advance the current step, mark a step
+  // done/skipped, and mark the wizard complete in one round trip.
+
+  @Patch('wizard')
+  async patchWizard(@CurrentUser() user: any, @Body() body: WizardPatchInput) {
+    if (body.currentStep && !WIZARD_STEPS.includes(body.currentStep as WizardStep)) {
+      throw new BadRequestException(`Invalid currentStep: ${body.currentStep}`);
+    }
+    if (body.markStep) {
+      if (!WIZARD_STEPS.includes(body.markStep.step as WizardStep)) {
+        throw new BadRequestException(`Invalid markStep.step: ${body.markStep.step}`);
+      }
+      if (!VALID_WIZARD_STATUSES.includes(body.markStep.status)) {
+        throw new BadRequestException(`Invalid markStep.status: ${body.markStep.status}`);
+      }
+    }
+    const profile = await this.onboardingService.patchWizard(user.id, body);
     return { success: true, profile };
   }
 }

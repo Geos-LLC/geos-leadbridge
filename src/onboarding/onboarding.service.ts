@@ -16,6 +16,31 @@ export interface Step2Input {
   userGoal?: string;
 }
 
+// 8-step guided setup wizard. The wizard writes most of its data to the
+// real settings tables (SavedAccount, User, etc.); only the progress
+// bookkeeping lives on OnboardingProfile so the user can resume.
+export const WIZARD_STEPS = [
+  'welcome',
+  'connect',
+  'business',
+  'ai',
+  'pricing',
+  'automation',
+  'ai_rules',
+  'done',
+] as const;
+export type WizardStep = (typeof WIZARD_STEPS)[number];
+export type WizardStatus = 'done' | 'skipped';
+
+export interface WizardPatchInput {
+  currentStep?: WizardStep;
+  // Caller passes the slug + status for the step they just finished. The
+  // service merges into the existing checklist map; it does not require
+  // the caller to send the full map.
+  markStep?: { step: WizardStep; status: WizardStatus };
+  completed?: boolean;
+}
+
 @Injectable()
 export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
@@ -93,6 +118,73 @@ export class OnboardingService {
       update: { step1SkippedAt: now },
     });
     this.logger.log(`[Onboarding] Step 1 skipped for user ${userId}`);
+    return profile;
+  }
+
+  // --- 8-step guided setup wizard ----------------------------------------
+
+  async patchWizard(userId: string, input: WizardPatchInput) {
+    const now = new Date();
+
+    // Read existing checklist so we can merge a single step update without
+    // requiring the caller to send the whole map.
+    const existing = await this.prisma.onboardingProfile.findUnique({
+      where: { userId },
+      select: {
+        wizardStartedAt: true,
+        wizardChecklistStatus: true,
+        wizardSkippedSteps: true,
+      },
+    });
+
+    const mergedChecklist: Record<string, WizardStatus> = {
+      ...((existing?.wizardChecklistStatus as Record<string, WizardStatus> | null) ?? {}),
+    };
+    const skippedSet = new Set<string>(existing?.wizardSkippedSteps ?? []);
+
+    if (input.markStep) {
+      if (!WIZARD_STEPS.includes(input.markStep.step)) {
+        throw new Error(`Invalid wizard step: ${input.markStep.step}`);
+      }
+      mergedChecklist[input.markStep.step] = input.markStep.status;
+      if (input.markStep.status === 'skipped') {
+        skippedSet.add(input.markStep.step);
+      } else {
+        skippedSet.delete(input.markStep.step);
+      }
+    }
+    if (input.currentStep && !WIZARD_STEPS.includes(input.currentStep)) {
+      throw new Error(`Invalid wizard step: ${input.currentStep}`);
+    }
+
+    const setStarted = !existing?.wizardStartedAt;
+    const setCompleted = input.completed === true;
+
+    const profile = await this.prisma.onboardingProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        wizardStartedAt: now,
+        wizardCurrentStep: input.currentStep ?? 'welcome',
+        wizardChecklistStatus: mergedChecklist,
+        wizardSkippedSteps: Array.from(skippedSet),
+        wizardCompletedAt: setCompleted ? now : null,
+      },
+      update: {
+        ...(setStarted ? { wizardStartedAt: now } : {}),
+        ...(input.currentStep ? { wizardCurrentStep: input.currentStep } : {}),
+        wizardChecklistStatus: mergedChecklist,
+        wizardSkippedSteps: Array.from(skippedSet),
+        ...(setCompleted ? { wizardCompletedAt: now } : {}),
+      },
+    });
+
+    if (input.markStep) {
+      this.logger.log(`[Wizard] user=${userId} marked ${input.markStep.step}=${input.markStep.status}`);
+    }
+    if (setCompleted) {
+      this.logger.log(`[Wizard] user=${userId} completed setup`);
+    }
     return profile;
   }
 }

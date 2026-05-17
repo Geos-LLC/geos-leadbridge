@@ -11,10 +11,11 @@ import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
-import OnboardingStep1Modal from './OnboardingStep1Modal';
-// OnboardingStep2Modal is intentionally not rendered right now — Modal B
-// will be replaced. Keep the file + backend endpoints so the swap is a
-// one-line re-import.
+// OnboardingStep1Modal and OnboardingStep2Modal (the legacy 2-step
+// segmentation quiz) are intentionally NOT rendered anymore. The 8-step
+// guided setup wizard at /onboarding/setup replaces them. The modal
+// files + their backend endpoints are kept for historical data; do not
+// re-import here without an explicit decision.
 
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
@@ -119,13 +120,9 @@ export function Layout() {
     </NavLink>
   );
 
-  const profile = user?.onboardingProfile ?? null;
-  const needsStep1 = !impersonatingUser && !!user && !profile?.step1CompletedAt && !profile?.step1SkippedAt;
-
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--lb-bg)' }}>
       <TrialExpiredModal />
-      {needsStep1 && <OnboardingStep1Modal onComplete={() => { /* authStore updated inside modal */ }} />}
 
       {/* Mobile Navigation Overlay */}
       {mobileMenuOpen && (
@@ -416,9 +413,10 @@ export function Layout() {
 
           <Outlet />
 
-          {/* Floating tour button — accent-colored, consistent with design */}
+          {/* Floating "resume setup" button — opens the guided setup
+              wizard so users can finish onboarding from any page. */}
           <button
-            onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
+            onClick={() => navigate('/onboarding/setup')}
             className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
             style={{
               width: 44,
@@ -430,7 +428,8 @@ export function Layout() {
               cursor: 'pointer',
               boxShadow: 'var(--lb-shadow-md)',
             }}
-            title="Quick tour"
+            title="Open setup guide"
+            aria-label="Open setup guide"
           >
             <GraduationCap size={18} />
           </button>
