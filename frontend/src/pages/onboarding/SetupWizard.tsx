@@ -6,7 +6,6 @@ import { notify } from '../../store/notificationStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep, WizardStatus } from '../../types';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import WizardShell from './WizardShell';
-import WelcomeStep from './steps/WelcomeStep';
 import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
 import ConnectStep from './steps/ConnectStep';
@@ -15,7 +14,7 @@ import AIKnowledgeStep from './steps/AIKnowledgeStep';
 import PricingSetupStep from './steps/PricingSetupStep';
 import AutomationLevelStep from './steps/AutomationLevelStep';
 import AIRulesStep from './steps/AIRulesStep';
-import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
+import { FIRST_ACTIONABLE_STEP, WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
 // the checklist, and the calls to the backend wizard endpoint; each
@@ -34,9 +33,16 @@ export default function SetupWizard() {
   const [profile, setProfile] = useState<OnboardingProfile | null>(user?.onboardingProfile ?? null);
   const [loading, setLoading] = useState(!profile);
   const [saving, setSaving] = useState(false);
-  const [currentStep, setCurrentStep] = useState<WizardStep>(
-    (profile?.wizardCurrentStep as WizardStep | null) ?? 'welcome',
-  );
+
+  // Pick the right starting step: prefer the user's last-known
+  // currentStep, but skip legacy 'welcome' (it's no longer in the
+  // wizard) and never land on 'done' on initial mount.
+  function resolveInitialStep(p: OnboardingProfile | null): WizardStep {
+    const stored = p?.wizardCurrentStep as WizardStep | null | undefined;
+    if (stored && stored !== 'welcome' && stored !== 'done') return stored;
+    return FIRST_ACTIONABLE_STEP;
+  }
+  const [currentStep, setCurrentStep] = useState<WizardStep>(resolveInitialStep(profile));
 
   // On first mount, fetch the latest profile so we resume at the right
   // step even if authStore was hydrated from a stale persist snapshot.
@@ -46,9 +52,7 @@ export default function SetupWizard() {
       .then(({ profile: fresh }) => {
         if (cancelled) return;
         setProfile(fresh);
-        if (fresh?.wizardCurrentStep) {
-          setCurrentStep(fresh.wizardCurrentStep);
-        }
+        setCurrentStep(resolveInitialStep(fresh));
         // Sync the persisted user object so the Overview progress card
         // reads the same checklist next time it mounts.
         if (user && fresh) {
@@ -101,7 +105,6 @@ export default function SetupWizard() {
   const currentIndex = getStepIndex(currentStep);
   const prevStep = currentIndex > 0 ? WIZARD_STEP_META[currentIndex - 1].slug : null;
   const nextStep = currentIndex < WIZARD_STEP_META.length - 1 ? WIZARD_STEP_META[currentIndex + 1].slug : null;
-  const isWelcome = currentStep === 'welcome';
   const isDone = currentStep === 'done';
 
   function handleBack() {
@@ -139,7 +142,6 @@ export default function SetupWizard() {
   // redundant). Connect uses the shared footer; the remaining steps
   // each manage their own save+advance.
   const stepOwnsActions =
-    isWelcome ||
     isDone ||
     currentStep === 'business' ||
     currentStep === 'ai' ||
@@ -148,17 +150,7 @@ export default function SetupWizard() {
     currentStep === 'ai_rules';
 
   let body: React.ReactNode;
-  if (isWelcome) {
-    body = (
-      <WelcomeStep
-        saving={saving}
-        onGetStarted={() => {
-          if (!nextStep) return;
-          void advance({ finishedStep: 'welcome', status: 'done', nextStep });
-        }}
-      />
-    );
-  } else if (isDone) {
+  if (isDone) {
     body = <DoneStep checklist={checklist} onFinish={handleFinish} saving={saving} />;
   } else if (currentStep === 'connect') {
     body = <ConnectStep />;

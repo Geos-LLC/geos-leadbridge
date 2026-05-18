@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { onboardingApi } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
-import { ACTIONABLE_STEPS, WIZARD_STEP_META } from './wizardConfig';
+import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
 
 // Setup-progress card shown on Overview. Only renders when the user
 // hasn't yet completed the 8-step wizard. The middle six steps
@@ -54,10 +54,11 @@ export default function SetupProgressCard() {
     const complete = !!profile?.wizardCompletedAt;
     // Best step to resume at: the user's last-known current step if it
     // still maps onto something actionable; otherwise the first
-    // actionable step that isn't done/skipped.
+    // actionable step that isn't done/skipped. 'welcome' is legacy and
+    // no longer a real step — treat it as "not started yet".
     const current = profile?.wizardCurrentStep as WizardStep | undefined;
     const fallbackNext = ACTIONABLE_STEPS.find(s => checklist[s] !== 'done' && checklist[s] !== 'skipped');
-    const next = current && current !== 'welcome' && current !== 'done' ? current : (fallbackNext ?? 'welcome');
+    const next = current && current !== 'welcome' && current !== 'done' ? current : (fallbackNext ?? FIRST_ACTIONABLE_STEP);
     return {
       completedCount: completed,
       totalCount: total,
