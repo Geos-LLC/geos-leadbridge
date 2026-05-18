@@ -264,7 +264,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
                 ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined)
                 : (firstReplyMessageTpl?.content || undefined)
             }
-            actionLabel="Edit Template"
+            actionLabel={replyType === 'ai' ? 'Edit Prompt' : 'Edit Template'}
             onAction={() => goTemplate(
               replyType === 'ai' ? firstReplyPromptTpl : firstReplyMessageTpl,
               replyType === 'ai' ? 'prompts' : 'auto-reply',
