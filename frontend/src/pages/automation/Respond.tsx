@@ -4,7 +4,7 @@ import {
   FileText, ArrowRightLeft, Volume2, Mic, Info,
   Clipboard, Sparkles, Brain, User, ArrowRight, PhoneCall, Loader2,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner,
 } from '../../components/automation/ui';
@@ -13,6 +13,8 @@ import type { AutomationRule, CallConnectMode, CallConnectSettings, Notification
 
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromState = { from: location.pathname + location.search, fromLabel: 'When a Lead Arrives' };
 
   // Visual + state
   const [instantReplyOn, setInstantReplyOn] = useState(true);
@@ -101,9 +103,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     }
   };
 
-  const goAiSettings = () => navigate('/automation/convert');
-  const goEditHours = () => navigate('/settings?tab=hours');
-  const goTemplates = () => navigate('/templates');
+  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
+  const goTemplates = () => navigate('/templates', { state: fromState });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

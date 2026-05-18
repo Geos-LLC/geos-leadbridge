@@ -5,6 +5,7 @@ import {
   Check,
   MoreHorizontal,
   ExternalLink,
+  ArrowLeft,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -80,10 +81,34 @@ export function AutoBadge({ tone = 'green', children }: { tone?: BadgeTone; chil
 }
 
 // ===================================================================
+// BackLink — small "← Back to X" link above a page header
+// ===================================================================
+export function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        background: 'transparent', border: 0, cursor: 'pointer',
+        fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+        color: 'var(--lb-ink-5)', padding: 0,
+        marginBottom: 10,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.color = 'var(--lb-accent)'; }}
+      onMouseLeave={e => { e.currentTarget.style.color = 'var(--lb-ink-5)'; }}
+    >
+      <ArrowLeft size={14} />
+      Back to {label}
+    </button>
+  );
+}
+
+// ===================================================================
 // AutoPageHeader — H1 + badge + subtitle + actions
 // ===================================================================
 export function AutoPageHeader({
-  title, badge, subtitle, onSave, saving, headerActions,
+  title, badge, subtitle, onSave, saving, headerActions, backLink,
 }: {
   title: ReactNode;
   badge?: { label: string; tone: BadgeTone };
@@ -91,6 +116,7 @@ export function AutoPageHeader({
   onSave?: () => void;
   saving?: boolean;
   headerActions?: ReactNode;
+  backLink?: { label: string; onClick: () => void };
 }) {
   return (
     <div style={{
@@ -98,6 +124,7 @@ export function AutoPageHeader({
       gap: 16, marginBottom: 22,
     }}>
       <div style={{ minWidth: 0, flex: 1 }}>
+        {backLink && <BackLink label={backLink.label} onClick={backLink.onClick} />}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
           <h1 style={{
             margin: 0, fontSize: 22, fontWeight: 700,

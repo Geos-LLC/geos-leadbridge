@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2,
 } from 'lucide-react';
@@ -18,6 +18,8 @@ function formatPhone(e164: string | null): string {
 
 export function SettingsCommunication() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromState = { from: location.pathname + location.search, fromLabel: 'Settings · Communication' };
   const user = useAuthStore(s => s.user) as any;
   const [leadBridgeNumber, setLeadBridgeNumber] = useState<string | null>(null);
   const [loadingPhone, setLoadingPhone] = useState(true);
@@ -36,7 +38,7 @@ export function SettingsCommunication() {
 
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
   const goEditProfile = () => navigate('/settings?tab=general');
-  const goTemplates = () => navigate('/templates');
+  const goTemplates = () => navigate('/templates', { state: fromState });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

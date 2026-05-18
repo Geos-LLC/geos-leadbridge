@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
   RefreshCw, Clock, UserX, Brain, Info, Loader2,
@@ -29,6 +29,8 @@ const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
 
 export function AutomationFollowups({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromState = { from: location.pathname + location.search, fromLabel: 'Follow-ups' };
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
 
@@ -102,8 +104,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     }
   };
 
-  const goAiSettings = () => navigate('/automation/convert');
-  const goQuietSettings = () => navigate('/settings?tab=hours');
+  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
   const resetPlan = () => setPlan(DEFAULT_FOLLOWUP_PLAN);
   const addStep = () => setPlan(p => [...p, { val: 1, unit: 'month' }]);
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
@@ -27,6 +27,8 @@ const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title:
 
 export function AutomationConversation({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromState = { from: location.pathname + location.search, fromLabel: 'AI Conversation' };
   const isAll = accountId === 'all';
 
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
@@ -110,8 +112,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const toggleStop = (k: keyof typeof stopRules) => setStopRules(r => ({ ...r, [k]: !r[k] }));
   const toggleTakeover = (k: keyof typeof takeover) => setTakeover(r => ({ ...r, [k]: !r[k] }));
 
-  const goFollowups = () => navigate('/automation/engage');
-  const goAlerts = () => navigate('/settings/communication');
+  const goFollowups = () => navigate('/automation/engage', { state: fromState });
+  const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

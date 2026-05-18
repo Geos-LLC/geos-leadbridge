@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { AutoPageHeader, type BadgeTone } from '../../components/automation/ui';
 import { AccountTabs, ScopeBanner, ALL_ACCOUNTS } from '../../components/automation/AccountTabs';
+import { useBackLink } from '../../components/automation/useBackLink';
 import { AutomationRespond } from './Respond';
 import { AutomationFollowups } from './Followups';
 import { AutomationConversation } from './Conversation';
@@ -37,6 +38,7 @@ export function AutomationPage() {
   const location = useLocation();
   const tab = pathToTab(location.pathname);
   const meta = META[tab];
+  const backLink = useBackLink();
 
   const storedAccounts = useAppStore(s => s.savedAccounts);
   // Remember the last picked account so navigating between sub-pages doesn't reset.
@@ -54,7 +56,12 @@ export function AutomationPage() {
 
   return (
     <div style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
-      <AutoPageHeader title={meta.title} badge={meta.badge} subtitle={meta.subtitle} />
+      <AutoPageHeader
+        title={meta.title}
+        badge={meta.badge}
+        subtitle={meta.subtitle}
+        backLink={backLink || undefined}
+      />
       <AccountTabs value={accountId} onChange={onChangeScope} accounts={storedAccounts} />
       <ScopeBanner accountId={accountId} accounts={storedAccounts} />
 
