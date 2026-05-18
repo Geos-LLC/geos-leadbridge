@@ -12,6 +12,7 @@ import { thumbtackApi, analyticsApi, notificationsApi, platformsApi } from '../s
 import ConnectionModal from '../components/ConnectionModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import SetupProgressCard from './onboarding/SetupProgressCard';
+import { onboardingApi } from '../services/api';
 import type { SavedAccount } from '../types';
 import { Btn, Card, Kpi, PlatformBadge, StatusPill, EmptyState } from '../components/ui';
 
@@ -19,6 +20,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, impersonatingUser } = useAuthStore();
+  const setAuth = useAuthStore(state => state.setAuth);
   const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, loadDiagnostics, systemHealth, systemHealthLoading } = useAppStore();
 
   // Per-platform empty stats. The Dashboard splits Yelp and Thumbtack into
@@ -104,6 +106,51 @@ export function Dashboard() {
       loadAccounts(true);
       setSearchParams({}, { replace: true });
     }
+  }, []);
+
+  // Wizard return flow: if the user kicked off OAuth from /onboarding/setup,
+  // ConnectStep stored a flag in sessionStorage before redirecting. After the
+  // OAuth callback drops them here on /overview, we mark connect=done + advance
+  // the wizard's currentStep to 'business' and navigate the user back into
+  // the wizard so they pick up where they left off.
+  //
+  // We only fire on successful connections (`?connected=...`), not on errors —
+  // that way an error landing here still surfaces the OAuth banner instead of
+  // being whisked away to the wizard with a stale state. The flag is cleared
+  // unconditionally so we never trigger this branch from an unrelated future
+  // visit to /overview.
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    if (!connected) return;
+    let wantsWizardReturn: string | null = null;
+    try { wantsWizardReturn = sessionStorage.getItem('lb_wizard_oauth_return'); } catch { /* ignore */ }
+    if (wantsWizardReturn !== '1') return;
+    try { sessionStorage.removeItem('lb_wizard_oauth_return'); } catch { /* ignore */ }
+
+    void onboardingApi
+      .patchWizard({
+        currentStep: 'business',
+        markStep: { step: 'connect', status: 'done' },
+      })
+      .then(({ profile }) => {
+        // Sync the persisted user so SetupWizard's initial-step
+        // resolver sees `business` without waiting for its own
+        // refetch — avoids the brief flash of the Connect step.
+        if (user && profile) {
+          const token = localStorage.getItem('token') || '';
+          setAuth({ ...user, onboardingProfile: profile }, token);
+        }
+        setSearchParams({}, { replace: true });
+        navigate('/onboarding/setup');
+      })
+      .catch(() => {
+        // PATCH failure shouldn't strand the user — leave them on
+        // /overview with the SetupProgressCard still prompting.
+        setSearchParams({}, { replace: true });
+      });
+    // Intentionally not depending on user/setAuth identity — this
+    // effect should only run on initial mount with the query param.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

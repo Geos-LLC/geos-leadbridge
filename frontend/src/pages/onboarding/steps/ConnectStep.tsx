@@ -7,17 +7,38 @@ import { PlatformBadge } from '../../../components/ui';
 import { getStepMeta } from '../wizardConfig';
 import type { SavedAccount } from '../../../types';
 
+// Sentinel checked by Dashboard after an OAuth callback to decide
+// whether the user should be sent back into the wizard. Set before
+// the OAuth redirect fires, consumed (and cleared) on the wizard
+// return.
+const WIZARD_OAUTH_RETURN_FLAG = 'lb_wizard_oauth_return';
+
+interface Props {
+  // True when wizardChecklistStatus.connect === 'done'. Used to
+  // suppress the auto-mark patch when nothing's changed.
+  alreadyDone: boolean;
+  // Called on mount when accounts exist and the step isn't yet marked
+  // done. Marks the step done WITHOUT advancing currentStep — the
+  // user still drives navigation via the wizard footer.
+  onMarkDone: () => Promise<void> | void;
+}
+
 // Connect Sources step. Reuses the existing ConnectionModal — which
 // already owns the Thumbtack/Yelp OAuth flows — so this component is a
 // thin presentational shell that lists connected SavedAccounts and
 // hands off to the modal when the user wants to add another one.
 //
-// "Continue" in the wizard footer is always available (the wizard
-// container handles the action bar). This step does NOT block the
-// user — they can skip even with zero accounts connected — but the
-// wizard's Continue button is the natural "I'm done here" cue, so we
-// highlight it more strongly once at least one account exists.
-export default function ConnectStep() {
+// Two behaviors that make the step feel "live":
+//   1. If the user arrives with at least one SavedAccount (because
+//      they connected before the wizard, OAuthed in a different tab,
+//      or just came back from OAuth), we auto-mark connect=done so
+//      the sidebar checkmark and the Overview progress card both
+//      turn green without needing a manual Continue click.
+//   2. When the user clicks a platform tile we set a sessionStorage
+//      flag. The OAuth callback redirects back to /overview; the
+//      Dashboard sees the flag and routes the user back into the
+//      wizard (with connect=done already, advancing to Business).
+export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
   const [modalOpen, setModalOpen] = useState(false);
@@ -36,6 +57,25 @@ export default function ConnectStep() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-mark connect=done when accounts exist and the wizard hasn't
+  // already recorded the step as done. Runs on every render where the
+  // inputs change; onMarkDone itself no-ops on duplicate writes thanks
+  // to the backend's merge semantics (and the alreadyDone gate stops
+  // the loop after the first successful patch).
+  useEffect(() => {
+    if (savedAccounts.length > 0 && !alreadyDone) {
+      void onMarkDone();
+    }
+  }, [savedAccounts.length, alreadyDone, onMarkDone]);
+
+  function openConnectionModal() {
+    // Tell Dashboard "if you see ?connected=… on your next mount,
+    // assume the user wants to be back in the wizard." Cleared by
+    // Dashboard once consumed.
+    try { sessionStorage.setItem(WIZARD_OAUTH_RETURN_FLAG, '1'); } catch { /* ignore */ }
+    setModalOpen(true);
+  }
 
   const byPlatform = useMemo(() => {
     const groups: Record<string, SavedAccount[]> = {};
@@ -101,13 +141,13 @@ export default function ConnectStep() {
           name="Thumbtack"
           dotColor="rgb(37,99,235)"
           subtitle={byPlatform.thumbtack?.length ? `${byPlatform.thumbtack.length} connected` : 'OAuth login'}
-          onClick={() => setModalOpen(true)}
+          onClick={openConnectionModal}
         />
         <PlatformTile
           name="Yelp"
           dotColor="rgb(220,38,38)"
           subtitle={byPlatform.yelp?.length ? `${byPlatform.yelp.length} connected` : 'OAuth login'}
-          onClick={() => setModalOpen(true)}
+          onClick={openConnectionModal}
         />
         <PlatformTile
           name="Website form"

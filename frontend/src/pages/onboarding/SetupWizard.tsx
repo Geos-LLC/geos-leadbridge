@@ -153,7 +153,18 @@ export default function SetupWizard() {
   if (isDone) {
     body = <DoneStep checklist={checklist} onFinish={handleFinish} saving={saving} />;
   } else if (currentStep === 'connect') {
-    body = <ConnectStep />;
+    body = (
+      <ConnectStep
+        alreadyDone={checklist.connect === 'done'}
+        // Marks connect=done in the checklist WITHOUT advancing
+        // currentStep. The user still has to click Continue in the
+        // wizard footer to move on — auto-marking just turns the
+        // sidebar tick green when an account is already connected.
+        onMarkDone={async () => {
+          await advance({ finishedStep: 'connect', status: 'done', nextStep: null });
+        }}
+      />
+    );
   } else if (currentStep === 'business') {
     body = (
       <BusinessWebsiteStep
