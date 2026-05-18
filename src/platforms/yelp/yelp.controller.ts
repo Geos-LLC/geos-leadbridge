@@ -83,14 +83,14 @@ export class YelpController {
     if (error) {
       this.logger.error(`[Yelp OAuth] Step 3: ERROR from Yelp — error=${error} desc=${errorDescription}`);
       const params = new URLSearchParams({ error, error_description: errorDescription || 'Yelp OAuth failed' });
-      const redirectUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
+      const redirectUrl = `${this.frontendUrl}/overview?${params.toString()}`;
       this.logger.log(`[Yelp OAuth] Step 3: Redirecting to ${redirectUrl}`);
       return res.redirect(redirectUrl);
     }
 
     if (!code) {
       this.logger.error(`[Yelp OAuth] Step 3: Missing authorization code`);
-      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_code&error_description=Authorization code is required`);
+      return res.redirect(`${this.frontendUrl}/overview?error=missing_code&error_description=Authorization code is required`);
     }
 
     try {
@@ -98,7 +98,7 @@ export class YelpController {
       this.logger.log(`[Yelp OAuth] Step 3: State decoded → userId=${userId || 'INVALID'}`);
       if (!userId) {
         this.logger.error(`[Yelp OAuth] Step 3: Invalid/expired state`);
-        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired. Please try again.`);
+        return res.redirect(`${this.frontendUrl}/overview?error=invalid_state&error_description=OAuth state expired. Please try again.`);
       }
 
       // Exchange code for tokens
@@ -114,7 +114,7 @@ export class YelpController {
       if (businesses.length === 0) {
         this.logger.warn(`[Yelp OAuth] Step 5: No businesses found — storing credentials at platform level`);
         await this.platformService.storeCredentials(userId, PlatformName.YELP, credentials);
-        return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&warning=no_businesses`);
+        return res.redirect(`${this.frontendUrl}/overview?connected=yelp&warning=no_businesses`);
       }
 
       // Save each business as a SavedAccount with per-business OAuth credentials
@@ -189,13 +189,13 @@ export class YelpController {
       }
 
       this.logger.log(`[Yelp OAuth] Step 6: Complete — ${businesses.length} businesses connected for user ${userId}`);
-      const successUrl = `${this.frontendUrl}/dashboard?connected=yelp&businesses=${businesses.length}`;
+      const successUrl = `${this.frontendUrl}/overview?connected=yelp&businesses=${businesses.length}`;
       this.logger.log(`[Yelp OAuth] Step 6: Redirecting to ${successUrl}`);
       return res.redirect(successUrl);
     } catch (err: any) {
       this.logger.error(`[Yelp OAuth] FAILED at callback: ${err.message} stack=${err.stack?.split('\n').slice(0, 3).join(' | ')}`);
       const params = new URLSearchParams({ error: 'oauth_failed', error_description: err.message });
-      const failUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
+      const failUrl = `${this.frontendUrl}/overview?${params.toString()}`;
       this.logger.log(`[Yelp OAuth] Redirecting to error URL: ${failUrl}`);
       return res.redirect(failUrl);
     }

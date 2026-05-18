@@ -205,11 +205,11 @@ export class ThumbtackController {
         error,
         error_description: errorDescription || 'OAuth authorization failed',
       });
-      return res.redirect(`${this.frontendUrl}/dashboard?${errorParams.toString()}`);
+      return res.redirect(`${this.frontendUrl}/overview?${errorParams.toString()}`);
     }
 
     if (!code) {
-      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_code&error_description=Authorization code is required`);
+      return res.redirect(`${this.frontendUrl}/overview?error=missing_code&error_description=Authorization code is required`);
     }
 
     try {
@@ -217,7 +217,7 @@ export class ThumbtackController {
       const userId = await this.platformService.getUserIdFromState(state);
 
       if (!userId) {
-        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired or invalid. Please try connecting again.`);
+        return res.redirect(`${this.frontendUrl}/overview?error=invalid_state&error_description=OAuth state expired or invalid. Please try connecting again.`);
       }
 
       // Exchange code for tokens
@@ -242,7 +242,7 @@ export class ThumbtackController {
         params.set('reconnect', '1'); // Auto-open reconnect modal on dashboard
       }
 
-      const redirectUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
+      const redirectUrl = `${this.frontendUrl}/overview?${params.toString()}`;
       console.log('[ThumbtackController] Redirecting to:', redirectUrl);
       return res.redirect(redirectUrl);
     } catch (err) {
@@ -250,7 +250,7 @@ export class ThumbtackController {
         error: 'oauth_failed',
         error_description: err.message || 'Failed to complete OAuth',
       });
-      return res.redirect(`${this.frontendUrl}/dashboard?${errorParams.toString()}`);
+      return res.redirect(`${this.frontendUrl}/overview?${errorParams.toString()}`);
     }
   }
 
