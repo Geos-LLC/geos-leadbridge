@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   Users, PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
-  MessageSquareText,
+  MessageSquareText, Loader2,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -11,6 +12,7 @@ import {
   Radio, IconTile, ActionLink, AutoBadge,
   type IconTone,
 } from '../../components/automation/ui';
+import { followUpApi } from '../../services/api';
 
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
 
@@ -23,7 +25,10 @@ const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title:
   { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Phone',   body: 'Encourage a phone call with your team.' },
 ];
 
-export function AutomationConversation(_props: { accountId: string }) {
+export function AutomationConversation({ accountId }: { accountId: string }) {
+  const navigate = useNavigate();
+  const isAll = accountId === 'all';
+
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
   const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
   const [availability, setAvailability] = useState<'always' | 'hours'>('always');
@@ -34,11 +39,102 @@ export function AutomationConversation(_props: { accountId: string }) {
     ready: true, live: true, phone: true, sqft: true, qualified: true,
   });
 
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isAll) return;
+    let alive = true;
+    setLoading(true); setError(null);
+    followUpApi.getSettings(accountId)
+      .then((res: any) => {
+        if (!alive || !res?.settings) return;
+        const s = res.settings;
+        const strat = (s.followUpStrategy as StrategyKey | undefined);
+        if (strat && STRATEGIES.some(x => x.k === strat)) setStrategy(strat);
+        if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceMode(s.priceQuoteMode);
+        // Loaded UI availability — when active_hours, show "outside hours" toggle.
+        if (s.followUpAvailability === 'active_hours') setAvailability('hours');
+        else if (s.followUpAvailability === 'always') setAvailability('always');
+        // Stop rules
+        setStopRules({
+          not_contacted: s.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
+          booked:        s.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
+          price_agreed:  s.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
+          done:          true, // No backend equivalent — visual only
+        });
+        // Human takeover triggers
+        setTakeover({
+          ready:     s.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
+          live:      s.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
+          phone:     s.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
+          sqft:      s.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
+          qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
+        });
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [accountId, isAll]);
+
+  const handleSave = async () => {
+    if (isAll) {
+      setError('Pick a specific account to save changes. "All accounts" is read-only in this view for now.');
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      await followUpApi.saveWizardSettings(accountId, {
+        followUpStrategy: strategy,
+        priceQuoteMode: priceMode,
+        followUpAvailability: availability === 'hours' ? 'active_hours' : 'always',
+        aiStopOnOptOut: stopRules.not_contacted,
+        aiStopOnBooked: stopRules.booked,
+        aiStopOnPriceAgreed: stopRules.price_agreed,
+        handoffTriggerAgreed: takeover.ready,
+        handoffTriggerWantsLiveContact: takeover.live,
+        handoffTriggerProvidedPhone: takeover.phone,
+        handoffTriggerProvidedSquareFootage: takeover.sqft,
+        handoffTriggerQualificationComplete: takeover.qualified,
+      });
+      setSavedAt(Date.now());
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const toggleStop = (k: keyof typeof stopRules) => setStopRules(r => ({ ...r, [k]: !r[k] }));
   const toggleTakeover = (k: keyof typeof takeover) => setTakeover(r => ({ ...r, [k]: !r[k] }));
 
+  const goFollowups = () => navigate('/automation/engage');
+  const goAlerts = () => navigate('/settings/communication');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
+          <Loader2 size={14} className="animate-spin" /> Loading AI conversation settings…
+        </div>
+      )}
+      {error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 10,
+          background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
+          fontSize: 13, fontWeight: 600,
+        }}>{error}</div>
+      )}
+      {savedAt && !error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 10,
+          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+          fontSize: 13, fontWeight: 600,
+        }}>Saved.</div>
+      )}
+
       {/* AI Strategy */}
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
@@ -141,7 +237,7 @@ export function AutomationConversation(_props: { accountId: string }) {
               When any of these happen, AI stops and the conversation is handed off.
             </div>
             <div style={{ marginTop: 14 }}>
-              <ActionLink external>Learn more</ActionLink>
+              <ActionLink external onClick={() => window.open('https://help.leadbridge360.com', '_blank')}>Learn more</ActionLink>
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -163,7 +259,11 @@ export function AutomationConversation(_props: { accountId: string }) {
         }}>
           <Info size={14} />
           Some stop rules may also trigger follow-up flows. Manage in
-          <a href="#" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Follow-ups settings.</a>
+          <a
+            href="/automation/engage"
+            onClick={(e) => { e.preventDefault(); goFollowups(); }}
+            style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+          >Follow-ups settings.</a>
         </div>
       </SectionCard>
 
@@ -207,7 +307,7 @@ export function AutomationConversation(_props: { accountId: string }) {
           <div style={{ flex: 1 }}>
             Alerts are sent based on templates in <strong>Settings → Communication → AI Human Takeover Alerts</strong>.
           </div>
-          <ActionLink external>Go to Alerts &amp; Notifications</ActionLink>
+          <ActionLink external onClick={goAlerts}>Go to Alerts &amp; Notifications</ActionLink>
         </div>
       </SectionCard>
 
@@ -234,6 +334,25 @@ export function AutomationConversation(_props: { accountId: string }) {
           <FlowStep icon={Hand}               iconTone="rose"   title="If a Stop Rule matches," subtitle="AI stops replying" />
         </div>
       </SectionCard>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || isAll}
+          style={{
+            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
+            background: 'var(--lb-accent)', color: 'white',
+            border: 0, borderRadius: 10,
+            cursor: (saving || isAll) ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            opacity: (saving || isAll) ? 0.6 : 1,
+          }}
+          title={isAll ? 'Pick a specific account to save changes' : undefined}
+        >
+          {saving ? 'Saving...' : 'Save changes'}
+        </button>
+      </div>
     </div>
   );
 }

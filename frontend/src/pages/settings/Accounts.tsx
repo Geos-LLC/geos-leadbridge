@@ -1,7 +1,10 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plug, Plus, AlertTriangle, Info } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { SettingCard, ActionLink, FooterBanner } from '../../components/automation/ui';
 import type { SavedAccount } from '../../types';
+import ConnectionModal from '../../components/ConnectionModal';
 
 const PLATFORM_LABEL: Record<string, string> = {
   thumbtack: 'Thumbtack',
@@ -18,7 +21,17 @@ const PLATFORM_COLOR: Record<string, string> = {
 };
 
 export function SettingsAccounts() {
+  const navigate = useNavigate();
   const accounts = useAppStore(s => s.savedAccounts);
+  const [modal, setModal] = useState<{ open: boolean; reconnect?: SavedAccount | null }>({ open: false });
+
+  // "Configure" jumps to the legacy Services screen which still owns per-account
+  // settings UI today; remembered last-account is read from localStorage there.
+  const goConfigure = (a: SavedAccount) => {
+    localStorage.setItem('lb_last_account_id', a.id);
+    navigate('/automation-classic');
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <SettingCard
@@ -29,6 +42,7 @@ export function SettingsAccounts() {
         headerRight={
           <button
             type="button"
+            onClick={() => setModal({ open: true, reconnect: null })}
             style={{
               padding: '8px 14px', fontSize: 13, fontWeight: 600,
               background: 'var(--lb-accent)', color: 'white',
@@ -61,14 +75,19 @@ export function SettingsAccounts() {
                 </div>
               </div>
               {a.tokenDead ? (
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '4px 10px', borderRadius: 999,
-                  background: '#fef3c7', color: '#92400e',
-                  fontSize: 11, fontWeight: 600,
-                }}>
+                <button
+                  type="button"
+                  onClick={() => setModal({ open: true, reconnect: a })}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '4px 10px', borderRadius: 999,
+                    background: '#fef3c7', color: '#92400e',
+                    fontSize: 11, fontWeight: 600,
+                    border: 0, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
                   <AlertTriangle size={11} /> Reconnect required
-                </span>
+                </button>
               ) : (
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -80,7 +99,7 @@ export function SettingsAccounts() {
                   Connected
                 </span>
               )}
-              <ActionLink>Configure</ActionLink>
+              <ActionLink onClick={() => goConfigure(a)}>Configure</ActionLink>
             </div>
           ))}
         </div>
@@ -89,6 +108,14 @@ export function SettingsAccounts() {
       <FooterBanner
         icon={Info}
         body="Disconnecting a source pauses automation for that account but preserves the historical lead data."
+      />
+
+      <ConnectionModal
+        isOpen={modal.open}
+        onClose={() => setModal({ open: false, reconnect: null })}
+        accountToReconnect={modal.reconnect}
+        savedAccounts={accounts}
+        onSuccess={() => setModal({ open: false, reconnect: null })}
       />
     </div>
   );

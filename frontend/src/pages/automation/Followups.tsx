@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
-  RefreshCw, Clock, UserX, Brain, Info,
+  RefreshCw, Clock, UserX, Brain, Info, Loader2,
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
@@ -10,6 +10,8 @@ import {
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
+import { followUpApi } from '../../services/api';
+import { useAppStore } from '../../store/appStore';
 
 const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
   { val: 2,  unit: 'min' },
@@ -25,14 +27,108 @@ const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
   { val: 1,  unit: 'year' },
 ];
 
-export function AutomationFollowups(_props: { accountId: string }) {
+export function AutomationFollowups({ accountId }: { accountId: string }) {
+  const navigate = useNavigate();
+  const accounts = useAppStore(s => s.savedAccounts);
+  const isAll = accountId === 'all';
+
+  // 'suggest' UI mode → API 'suggest'; 'active' UI mode → API 'auto_send'.
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
   const [messageMode, setMessageMode] = useState<'template' | 'ai'>('ai');
-  const plan = DEFAULT_FOLLOWUP_PLAN;
+  const [plan, setPlan] = useState(DEFAULT_FOLLOWUP_PLAN);
+  const [activeHoursStart, setActiveHoursStart] = useState('09:00');
+  const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
+  const [timezone, setTimezone] = useState('America/New_York');
+  const [platform, setPlatform] = useState<string | undefined>(undefined);
+
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Capture platform when we know the account so saveSettings can fan-out seeding.
+  useEffect(() => {
+    if (isAll) { setPlatform(undefined); return; }
+    const acc = accounts.find(a => a.id === accountId);
+    setPlatform(acc?.platform);
+  }, [accountId, isAll, accounts]);
+
+  useEffect(() => {
+    if (isAll) return;
+    let alive = true;
+    setLoading(true); setError(null);
+    followUpApi.getSettings(accountId)
+      .then(res => {
+        if (!alive || !res?.settings) return;
+        const s = res.settings;
+        if (s.followUpMode === 'off') {
+          // Treat "off" same as "suggest" + quiet on=false UI; backend still has mode field.
+          setDeliveryMode('suggest');
+        } else if (s.followUpMode === 'auto_send') setDeliveryMode('active');
+        else setDeliveryMode('suggest');
+        if (s.followUpReplyType === 'template') setMessageMode('template');
+        else if (s.followUpReplyType === 'ai') setMessageMode('ai');
+        if (s.followUpActiveHoursStart) setActiveHoursStart(s.followUpActiveHoursStart);
+        if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
+        if (s.followUpTimezone) setTimezone(s.followUpTimezone);
+      })
+      .catch(() => { /* non-fatal — defaults remain */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [accountId, isAll]);
+
+  const handleSave = async () => {
+    if (isAll) {
+      setError('Pick a specific account to save changes. "All accounts" is read-only in this view for now.');
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      await followUpApi.saveSettings(accountId, {
+        mode: deliveryMode === 'active' ? 'auto_send' : 'suggest',
+        preset: 'smart',
+        replyType: messageMode,
+        activeHoursStart,
+        activeHoursEnd,
+        timezone,
+        platform,
+      });
+      setSavedAt(Date.now());
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const goAiSettings = () => navigate('/automation/convert');
+  const goQuietSettings = () => navigate('/settings?tab=hours');
+  const resetPlan = () => setPlan(DEFAULT_FOLLOWUP_PLAN);
+  const addStep = () => setPlan(p => [...p, { val: 1, unit: 'month' }]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
+          <Loader2 size={14} className="animate-spin" /> Loading follow-up settings…
+        </div>
+      )}
+      {error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 10,
+          background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
+          fontSize: 13, fontWeight: 600,
+        }}>{error}</div>
+      )}
+      {savedAt && !error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 10,
+          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+          fontSize: 13, fontWeight: 600,
+        }}>Saved.</div>
+      )}
+
       {/* Quiet hours */}
       <SettingCard
         icon={PhoneOff}
@@ -53,10 +149,10 @@ export function AutomationFollowups(_props: { accountId: string }) {
               <span style={{ fontWeight: 700 }}>10:00 PM – 8:00 AM</span>
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>
-              America/New_York (daily)
+              {timezone} (daily)
             </div>
           </div>
-          <ActionLink external>Edit in Settings</ActionLink>
+          <ActionLink external onClick={goQuietSettings}>Edit in Settings</ActionLink>
         </div>
       </SettingCard>
 
@@ -112,6 +208,7 @@ export function AutomationFollowups(_props: { accountId: string }) {
             title="Auto"
             body="AI picks the best strategy based on conversation context."
             actionLabel="Edit AI Settings"
+            onAction={goAiSettings}
           />
         </FieldRow>
       </SectionCard>
@@ -127,6 +224,7 @@ export function AutomationFollowups(_props: { accountId: string }) {
           </div>
           <button
             type="button"
+            onClick={resetPlan}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
               background: 'transparent', border: 0, cursor: 'pointer',
@@ -163,6 +261,7 @@ export function AutomationFollowups(_props: { accountId: string }) {
           </div>
           <button
             type="button"
+            onClick={addStep}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
               padding: '7px 14px',
@@ -214,9 +313,28 @@ export function AutomationFollowups(_props: { accountId: string }) {
         />
       </SectionCard>
 
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || isAll}
+          style={{
+            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
+            background: 'var(--lb-accent)', color: 'white',
+            border: 0, borderRadius: 10,
+            cursor: (saving || isAll) ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            opacity: (saving || isAll) ? 0.6 : 1,
+          }}
+          title={isAll ? 'Pick a specific account to save changes' : undefined}
+        >
+          {saving ? 'Saving...' : 'Save changes'}
+        </button>
+      </div>
+
       <FooterBanner
         icon={Info}
-        body={<>Follow-ups respect quiet hours and business hours. You can edit those in <Link to="/settings" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings</Link>.</>}
+        body={<>Follow-ups respect quiet hours and business hours. You can edit those in <Link to="/settings?tab=hours" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings</Link>.</>}
       />
     </div>
   );
@@ -260,6 +378,7 @@ function RuleCardRow({
   tip: string;
   noBorder?: boolean;
 }) {
+  const [value, setValue] = useState(fieldValue);
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
@@ -277,8 +396,8 @@ function RuleCardRow({
       <div>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6 }}>{fieldLabel}</div>
         <Dropdown
-          value={fieldValue}
-          onChange={() => { /* TODO wire */ }}
+          value={value}
+          onChange={setValue}
           options={fieldOptions}
           width="100%"
         />
