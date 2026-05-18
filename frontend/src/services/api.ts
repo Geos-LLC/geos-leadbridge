@@ -128,12 +128,20 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<any>) => {
-    // Handle 401 - redirect to login
+    // Handle 401 - redirect to login ONLY when the user previously had a
+    // valid token. Anonymous visitors on the public Landing page also hit
+    // authenticated endpoints (e.g. getPhonePricing for the pricing block);
+    // booting them to /login on the first paint is wrong — they were never
+    // logged in, so there's nothing to "log them out" of. Without this guard
+    // the marketing site auto-redirects every visitor to the login form.
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth-storage'); // Clear zustand persisted auth state
-      window.location.href = '/login';
+      const hadToken = !!localStorage.getItem('token');
+      if (hadToken) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth-storage'); // Clear zustand persisted auth state
+        window.location.href = '/login';
+      }
       return Promise.reject(error);
     }
 
