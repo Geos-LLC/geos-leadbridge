@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText, Sparkles } from 'lucide-react';
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
@@ -34,9 +34,15 @@ const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
 let _templatesCache: MessageTemplate[] | null = null;
 
 export function MessageSettings() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const highlightId = searchParams.get('highlight');
-  const filterParam = searchParams.get('filter') as TemplateFilter | null;
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  // Capture highlight target ONCE at mount. We deliberately don't read this
+  // from the live searchParams later so cleaning the URL after the flash
+  // doesn't cause the effect to re-evaluate and clear state mid-animation.
+  const initialHighlightRef = useRef<string | null>(searchParams.get('highlight'));
+  const initialFilterRef = useRef<TemplateFilter | null>(searchParams.get('filter') as TemplateFilter | null);
+  const highlightId = initialHighlightRef.current;
   const [templates, setTemplates] = useState<MessageTemplate[]>(_templatesCache ?? []);
   const [loading, setLoading] = useState(!_templatesCache);
   const [saving, setSaving] = useState(false);
@@ -44,10 +50,11 @@ export function MessageSettings() {
   const [expandedTemplates, setExpandedTemplates] = useState<Set<string>>(new Set());
   // Pre-select the filter tab from URL (?filter=prompts etc.) so deep-links land on the right list.
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>(
-    filterParam && FILTER_TABS.some(f => f.key === filterParam) ? filterParam : 'all',
+    initialFilterRef.current && FILTER_TABS.some(f => f.key === initialFilterRef.current) ? initialFilterRef.current : 'all',
   );
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [flashId, setFlashId] = useState<string | null>(null);
+  const hasFlashedRef = useRef(false);
 
   // Modal state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
@@ -60,42 +67,44 @@ export function MessageSettings() {
     loadTemplates();
   }, []);
 
-  // Scroll the highlighted template into view + flash it briefly. Runs whenever
-  // the templates list or the ?highlight param changes (covers both initial
-  // mount and changing param without unmount).
+  // Scroll the highlighted template into view + flash it briefly. Runs once
+  // templates have loaded; uses hasFlashedRef so it never fires twice (e.g.
+  // when the URL cleanup re-renders the page).
   useEffect(() => {
-    if (!highlightId || templates.length === 0) return;
+    if (!highlightId || templates.length === 0 || hasFlashedRef.current) return;
     const target = templates.find(t => t.id === highlightId);
     if (!target) return;
-    // Make sure the row is in the active filter, otherwise switch to its tab.
+    // Make sure the row is visible — if the active filter excludes this row,
+    // switch the tab to the target's category.
     const targetTab = getTemplateFilter(target);
     if (activeFilter !== 'all' && activeFilter !== targetTab) {
       setActiveFilter(targetTab);
+      // Bail; effect will re-run after activeFilter state update.
+      return;
     }
-    // Defer to next frame so the DOM has rendered the matching row.
+    // Defer to next paint so the row (now rendered) has a ref.
     const t = setTimeout(() => {
       const el = rowRefs.current[highlightId];
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setFlashId(highlightId);
-        // Fade flash after 3s.
-        setTimeout(() => setFlashId(null), 3000);
-      }
+      if (!el) return; // row not in DOM yet — let the effect re-run on next render
+      hasFlashedRef.current = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashId(highlightId);
+      // Fade flash, then clean URL while preserving navigation state so the
+      // top-bar back link survives the cleanup.
+      setTimeout(() => {
+        setFlashId(null);
+        const sp = new URLSearchParams(searchParams);
+        sp.delete('highlight');
+        sp.delete('filter');
+        navigate({ pathname: location.pathname, search: sp.toString() ? '?' + sp.toString() : '' }, {
+          replace: true,
+          state: location.state,
+        });
+      }, 3000);
     }, 80);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightId, templates]);
-
-  // Clean the URL once the flash is done so a refresh doesn't re-trigger it.
-  useEffect(() => {
-    if (flashId !== null) return;
-    if (!highlightId) return;
-    const sp = new URLSearchParams(searchParams);
-    sp.delete('highlight');
-    sp.delete('filter');
-    setSearchParams(sp, { replace: true });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flashId]);
+  }, [highlightId, templates, activeFilter]);
 
   async function loadTemplates() {
     try {

@@ -144,7 +144,7 @@ export function SettingsCommunication() {
             body={readyToBookTpl?.content || 'Lead is ready to book a job. Phone: {customerPhone}…'}
             badge={readyToBookTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
             tooltip={readyToBookTpl?.content || undefined}
-            actionLabel="Edit Template"
+            actionLabel={readyToBookTpl?.type === 'prompt' ? 'Edit Prompt' : 'Edit Template'}
             onAction={() => goTemplate(readyToBookTpl)}
           />
         </FieldRow>
@@ -154,7 +154,7 @@ export function SettingsCommunication() {
             body={liveContactTpl?.content || 'Lead wants to talk to a person. Reach them at {customerPhone}…'}
             badge={liveContactTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
             tooltip={liveContactTpl?.content || undefined}
-            actionLabel="Edit Template"
+            actionLabel={liveContactTpl?.type === 'prompt' ? 'Edit Prompt' : 'Edit Template'}
             onAction={() => goTemplate(liveContactTpl)}
           />
         </FieldRow>
