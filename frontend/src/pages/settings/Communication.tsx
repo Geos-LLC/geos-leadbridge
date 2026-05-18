@@ -60,7 +60,16 @@ export function SettingsCommunication() {
 
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
   const goEditProfile = () => navigate('/settings?tab=general');
-  const goTemplates = () => navigate('/templates', { state: fromState });
+  const goTemplate = (tpl: MessageTemplate | undefined) => {
+    const params = new URLSearchParams();
+    if (tpl) {
+      params.set('highlight', tpl.id);
+      params.set('filter', tpl.type === 'prompt' ? 'prompts' : 'alerts');
+    } else {
+      params.set('filter', 'alerts');
+    }
+    navigate(`/templates?${params.toString()}`, { state: fromState });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -133,16 +142,20 @@ export function SettingsCommunication() {
           <InfoTile
             title={readyToBookTpl?.name || 'Ready to Book Alert'}
             body={readyToBookTpl?.content || 'Lead is ready to book a job. Phone: {customerPhone}…'}
+            badge={readyToBookTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
+            tooltip={readyToBookTpl?.content || undefined}
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(readyToBookTpl)}
           />
         </FieldRow>
         <FieldRow icon={FileText} iconTone="violet" label="Wants live contact" noBorder>
           <InfoTile
             title={liveContactTpl?.name || 'Live Contact Alert'}
             body={liveContactTpl?.content || 'Lead wants to talk to a person. Reach them at {customerPhone}…'}
+            badge={liveContactTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
+            tooltip={liveContactTpl?.content || undefined}
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(liveContactTpl)}
           />
         </FieldRow>
       </SettingCard>

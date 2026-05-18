@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText, Sparkles } from 'lucide-react';
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
@@ -9,10 +10,12 @@ const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
   v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
 )];
 
-type TemplateFilter = 'all' | 'auto-reply' | 'alerts' | 'call-connect';
+type TemplateFilter = 'all' | 'auto-reply' | 'alerts' | 'call-connect' | 'prompts';
 
-function getTemplateFilter(name: string): TemplateFilter {
-  const n = name.toLowerCase();
+function getTemplateFilter(t: MessageTemplate): TemplateFilter {
+  // Prompts (type=prompt) live in their own tab regardless of name pattern.
+  if (t.type === 'prompt') return 'prompts';
+  const n = t.name.toLowerCase();
   if (/auto[\s-]?reply|follow[\s-]?up|welcome/.test(n)) return 'auto-reply';
   if (/alert|notification/.test(n)) return 'alerts';
   if (/^cc[\s-]|call[\s-]?connect|whisper|greeting|voicemail/.test(n)) return 'call-connect';
@@ -24,18 +27,27 @@ const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
   { key: 'auto-reply', label: 'Auto Reply' },
   { key: 'alerts', label: 'Alerts' },
   { key: 'call-connect', label: 'Call Connect' },
+  { key: 'prompts', label: 'AI Prompts' },
 ];
 
 // Module-level cache — survives navigation unmounts
 let _templatesCache: MessageTemplate[] | null = null;
 
 export function MessageSettings() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const filterParam = searchParams.get('filter') as TemplateFilter | null;
   const [templates, setTemplates] = useState<MessageTemplate[]>(_templatesCache ?? []);
   const [loading, setLoading] = useState(!_templatesCache);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTemplates, setExpandedTemplates] = useState<Set<string>>(new Set());
-  const [activeFilter, setActiveFilter] = useState<TemplateFilter>('all');
+  // Pre-select the filter tab from URL (?filter=prompts etc.) so deep-links land on the right list.
+  const [activeFilter, setActiveFilter] = useState<TemplateFilter>(
+    filterParam && FILTER_TABS.some(f => f.key === filterParam) ? filterParam : 'all',
+  );
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [flashId, setFlashId] = useState<string | null>(null);
 
   // Modal state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
@@ -47,6 +59,43 @@ export function MessageSettings() {
   useEffect(() => {
     loadTemplates();
   }, []);
+
+  // Scroll the highlighted template into view + flash it briefly. Runs whenever
+  // the templates list or the ?highlight param changes (covers both initial
+  // mount and changing param without unmount).
+  useEffect(() => {
+    if (!highlightId || templates.length === 0) return;
+    const target = templates.find(t => t.id === highlightId);
+    if (!target) return;
+    // Make sure the row is in the active filter, otherwise switch to its tab.
+    const targetTab = getTemplateFilter(target);
+    if (activeFilter !== 'all' && activeFilter !== targetTab) {
+      setActiveFilter(targetTab);
+    }
+    // Defer to next frame so the DOM has rendered the matching row.
+    const t = setTimeout(() => {
+      const el = rowRefs.current[highlightId];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFlashId(highlightId);
+        // Fade flash after 3s.
+        setTimeout(() => setFlashId(null), 3000);
+      }
+    }, 80);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, templates]);
+
+  // Clean the URL once the flash is done so a refresh doesn't re-trigger it.
+  useEffect(() => {
+    if (flashId !== null) return;
+    if (!highlightId) return;
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('highlight');
+    sp.delete('filter');
+    setSearchParams(sp, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flashId]);
 
   async function loadTemplates() {
     try {
@@ -187,7 +236,7 @@ export function MessageSettings() {
             {FILTER_TABS.map(tab => {
               const count = tab.key === 'all'
                 ? templates.length
-                : templates.filter(t => getTemplateFilter(t.name) === tab.key).length;
+                : templates.filter(t => getTemplateFilter(t) === tab.key).length;
               return (
                 <button
                   key={tab.key}
@@ -210,7 +259,7 @@ export function MessageSettings() {
           </div>
         </div>
 
-        {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t.name) === activeFilter).length === 0 ? (
+        {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).length === 0 ? (
           <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center">
             <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
             <h3 className="text-lg font-bold text-slate-600 mb-2">
@@ -231,18 +280,32 @@ export function MessageSettings() {
           </div>
         ) : (
           <div className="space-y-4">
-            {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t.name) === activeFilter).map(template => {
+            {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).map(template => {
               const isExpanded = expandedTemplates.has(template.id);
+              const isFlashing = flashId === template.id;
+              const isPrompt = template.type === 'prompt';
               return (
                 <div
                   key={template.id}
-                  className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden hover:border-blue-200 transition-all"
+                  ref={(el) => { rowRefs.current[template.id] = el; }}
+                  className={
+                    'bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ' +
+                    (isFlashing
+                      ? 'border-blue-500 ring-2 ring-blue-200'
+                      : 'border-slate-100 hover:border-blue-200')
+                  }
+                  style={isFlashing ? { boxShadow: '0 0 0 4px rgba(37,99,235,0.12), 0 1px 2px rgba(10,21,48,0.04)' } : undefined}
                 >
                   <div className="p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
                           <h3 className="text-lg font-bold text-slate-900">{template.name}</h3>
+                          {isPrompt && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-50 text-violet-700 text-[10px] font-bold rounded uppercase tracking-wider">
+                              <Sparkles className="w-3 h-3" /> AI Prompt
+                            </span>
+                          )}
                           {template.isDefault && (
                             <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase tracking-wider">Default</span>
                           )}
