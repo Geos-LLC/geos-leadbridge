@@ -1,8 +1,9 @@
 import { ArrowRight, CheckCircle2, Circle, Rocket, SkipForward } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { onboardingApi } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
-import type { WizardChecklist, WizardStep } from '../../types';
+import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
 import { ACTIONABLE_STEPS, WIZARD_STEP_META } from './wizardConfig';
 
 // Setup-progress card shown on Overview. Only renders when the user
@@ -13,7 +14,32 @@ import { ACTIONABLE_STEPS, WIZARD_STEP_META } from './wizardConfig';
 export default function SetupProgressCard() {
   const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
-  const profile = user?.onboardingProfile ?? null;
+  const setAuth = useAuthStore(s => s.setAuth);
+  // Fetch a fresh profile on mount so the card reflects whatever the
+  // user did during the wizard, even when the persisted authStore
+  // snapshot is stale (e.g. after a soft refresh). We seed from the
+  // store so the card renders immediately and the fetch just patches
+  // any drift.
+  const [profile, setProfile] = useState<OnboardingProfile | null>(user?.onboardingProfile ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    onboardingApi.getProfile()
+      .then(({ profile: fresh }) => {
+        if (cancelled) return;
+        setProfile(fresh);
+        // Sync persisted auth user so other listeners (TrialBanner,
+        // PR1's getProfile path, etc.) see the same checklist state.
+        if (user && fresh) {
+          const token = localStorage.getItem('token') || '';
+          setAuth({ ...user, onboardingProfile: fresh }, token);
+        }
+      })
+      .catch(() => { /* non-fatal — use the seeded value */ });
+    return () => { cancelled = true; };
+    // Intentionally not depending on user/setAuth — we only want this
+    // to fire on Dashboard mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { completedCount, totalCount, percent, items, hasStarted, isComplete, nextStep } = useMemo(() => {
     const checklist: WizardChecklist = profile?.wizardChecklistStatus ?? {};
