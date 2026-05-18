@@ -11,6 +11,8 @@ import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
 import ConnectStep from './steps/ConnectStep';
 import BusinessWebsiteStep from './steps/BusinessWebsiteStep';
+import AIKnowledgeStep from './steps/AIKnowledgeStep';
+import PricingSetupStep from './steps/PricingSetupStep';
 import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
@@ -130,11 +132,16 @@ export default function SetupWizard() {
 
   if (loading) return <PageSkeleton />;
 
-  // Body selection. Welcome / Done / Business own their own primary
-  // CTA so the wizard footer is hidden on those steps. Connect uses the
-  // shared footer (Skip / Continue), and the remaining four still
-  // render the PR1 placeholder until later PRs land.
-  const stepOwnsActions = isWelcome || isDone || currentStep === 'business';
+  // Body selection. Steps that own their own primary CTA hide the
+  // wizard footer (the wizard's shared Continue/Skip would just be
+  // redundant). Connect uses the shared footer; the remaining steps
+  // each manage their own save+advance.
+  const stepOwnsActions =
+    isWelcome ||
+    isDone ||
+    currentStep === 'business' ||
+    currentStep === 'ai' ||
+    currentStep === 'pricing';
 
   let body: React.ReactNode;
   if (isWelcome) {
@@ -166,6 +173,32 @@ export default function SetupWizard() {
         onNoWebsite={async () => {
           if (!nextStep) return;
           await advance({ finishedStep: 'business', status: 'skipped', nextStep });
+        }}
+      />
+    );
+  } else if (currentStep === 'ai') {
+    body = (
+      <AIKnowledgeStep
+        saving={saving}
+        setSaving={setSaving}
+        onSaveContinue={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'ai', status: 'done', nextStep });
+        }}
+      />
+    );
+  } else if (currentStep === 'pricing') {
+    body = (
+      <PricingSetupStep
+        saving={saving}
+        setSaving={setSaving}
+        onSaveContinue={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'pricing', status: 'done', nextStep });
+        }}
+        onSkipManual={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'pricing', status: 'skipped', nextStep });
         }}
       />
     );
