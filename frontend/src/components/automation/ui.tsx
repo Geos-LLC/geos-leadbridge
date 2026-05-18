@@ -370,7 +370,7 @@ export function OptionCard({
 // InfoTile — read-only-looking tile with action link
 // ===================================================================
 export function InfoTile({
-  icon, iconTone, title, body, actionLabel, onAction, big,
+  icon, iconTone, title, body, actionLabel, onAction, big, tooltip, badge,
 }: {
   icon?: LucideIcon;
   iconTone?: IconTone;
@@ -379,18 +379,45 @@ export function InfoTile({
   actionLabel?: string;
   onAction?: () => void;
   big?: boolean;
+  /** Plain-text tooltip shown on hover — typically the full template/prompt content. */
+  tooltip?: string;
+  /** Small pill rendered to the right of the title (e.g. "PROMPT" / "MESSAGE"). */
+  badge?: { label: string; tone: 'violet' | 'green' | 'blue' | 'gray' };
 }) {
+  const badgeTones = {
+    violet: { bg: '#ede9fe', fg: '#6d28d9' },
+    green:  { bg: '#dcfce7', fg: '#15803d' },
+    blue:   { bg: '#dbeafe', fg: '#1d4ed8' },
+    gray:   { bg: '#f1f5f9', fg: '#475569' },
+  };
+  const badgeStyle = badge ? badgeTones[badge.tone] : null;
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 14,
-      padding: big ? '14px 16px' : '12px 14px',
-      background: '#f8fafc',
-      border: '1px solid var(--lb-line-soft)',
-      borderRadius: 10,
-    }}>
+    <div
+      title={tooltip}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: big ? '14px 16px' : '12px 14px',
+        background: '#f8fafc',
+        border: '1px solid var(--lb-line-soft)',
+        borderRadius: 10,
+        cursor: tooltip ? 'help' : 'default',
+      }}
+    >
       {icon && <IconTile icon={icon} tone={iconTone || 'violet'} size="sm" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</div>
+          {badge && badgeStyle && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center',
+              padding: '2px 7px', borderRadius: 999,
+              background: badgeStyle.bg, color: badgeStyle.fg,
+              fontSize: 9.5, fontWeight: 700,
+              letterSpacing: 0.04, textTransform: 'uppercase',
+              fontFamily: 'var(--lb-font-mono)',
+            }}>{badge.label}</span>
+          )}
+        </div>
         {body && <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{body}</div>}
       </div>
       {actionLabel && (

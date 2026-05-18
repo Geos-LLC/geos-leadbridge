@@ -117,7 +117,22 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
-  const goTemplates = () => navigate('/templates', { state: fromState });
+  // Deep-link to Templates with a specific row highlighted + tab preselected.
+  // Filter values match TemplateFilter on the Templates page; 'prompts' is
+  // the new tab specifically for AI prompts (type='prompt' templates).
+  // Accepts any object with at minimum {id} — rule-embedded templates lack
+  // the full MessageTemplate shape, so the type field is optional here.
+  type TplRef = { id: string; type?: 'message' | 'prompt' | string };
+  const goTemplate = (tpl: TplRef | undefined, fallbackFilter?: string) => {
+    const params = new URLSearchParams();
+    if (tpl) {
+      params.set('highlight', tpl.id);
+      params.set('filter', tpl.type === 'prompt' ? 'prompts' : (fallbackFilter || 'auto-reply'));
+    } else if (fallbackFilter) {
+      params.set('filter', fallbackFilter);
+    }
+    navigate(`/templates${params.toString() ? '?' + params.toString() : ''}`, { state: fromState });
+  };
 
   // Resolve template names for tiles. Per-card lookup order:
   // 1. Linked template on the loaded rule (when a specific account is picked)
@@ -243,8 +258,17 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
                 ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
                 : (firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.')
             }
+            badge={replyType === 'ai' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
+            tooltip={
+              replyType === 'ai'
+                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined)
+                : (firstReplyMessageTpl?.content || undefined)
+            }
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(
+              replyType === 'ai' ? firstReplyPromptTpl : firstReplyMessageTpl,
+              replyType === 'ai' ? 'prompts' : 'auto-reply',
+            )}
           />
         </FieldRow>
       </SettingCard>
@@ -277,8 +301,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <InfoTile
             title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
             body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+            badge={{ label: 'Template', tone: 'green' }}
+            tooltip={ctTpl?.content || customerTextRule?.template || undefined}
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(ctTpl, 'auto-reply')}
           />
         </FieldRow>
       </SettingCard>
@@ -330,8 +356,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <InfoTile
             title={whisperTpl?.name || 'CC - Agent Whisper'}
             body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
+            badge={{ label: 'Template', tone: 'violet' }}
+            tooltip={callSettings?.agentWhisperMessage || whisperTpl?.content || undefined}
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(whisperTpl, 'call-connect')}
           />
         </FieldRow>
 
@@ -339,8 +367,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <InfoTile
             title={voicemailTpl?.name || 'CC - Voicemail TTS'}
             body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
+            badge={{ label: 'Template', tone: 'violet' }}
+            tooltip={callSettings?.leadVoicemailMessage || voicemailTpl?.content || undefined}
             actionLabel="Edit Template"
-            onAction={goTemplates}
+            onAction={() => goTemplate(voicemailTpl, 'call-connect')}
           />
         </FieldRow>
       </SettingCard>
