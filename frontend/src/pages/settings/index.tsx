@@ -5,7 +5,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
-import { useBackLink } from '../../components/automation/useBackLink';
 import { SettingsGeneral } from './General';
 import { SettingsCommunication } from './Communication';
 import { SettingsHours } from './Hours';
@@ -43,7 +42,6 @@ export default function SettingsPage() {
     setSearchParams(sp, { replace: true });
   };
   const meta = TABS.find(t => t.key === tab)!;
-  const backLink = useBackLink();
 
   let body: ReactNode = null;
   switch (tab) {
@@ -61,7 +59,6 @@ export default function SettingsPage() {
         title={meta.label}
         badge={{ label: 'Settings', tone: 'blue' }}
         subtitle={SUBTITLES[tab]}
-        backLink={backLink || undefined}
       />
 
       <SettingsTabs value={tab} onChange={setTab} />

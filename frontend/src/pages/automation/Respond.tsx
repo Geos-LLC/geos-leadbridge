@@ -38,6 +38,17 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
   const isAll = accountId === 'all';
 
+  // Templates load once for the whole user (independent of selected account)
+  // so the new-design tiles can show the actual template name even when scope
+  // is "All accounts".
+  useEffect(() => {
+    let alive = true;
+    templatesApi.getTemplates()
+      .then(res => { if (alive) setTemplates(res.templates || []); })
+      .catch(() => { /* non-fatal — tiles fall back to canonical labels */ });
+    return () => { alive = false; };
+  }, []);
+
   // Load per-account data when scope changes
   useEffect(() => {
     if (isAll) {
@@ -50,15 +61,13 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
       notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
       callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
-      templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
-    ]).then(([autoRes, notifRes, ccRes, tplRes]) => {
+    ]).then(([autoRes, notifRes, ccRes]) => {
       if (!alive) return;
       const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
       const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
       setNewLeadRule(nl);
       setCustomerTextRule(ct);
       setCallSettings(ccRes.settings);
-      setTemplates(tplRes.templates || []);
       if (nl) {
         setInstantReplyOn(!!nl.enabled);
         setReplyType(nl.useAi ? 'ai' : 'template');
@@ -110,16 +119,53 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
   const goTemplates = () => navigate('/templates', { state: fromState });
 
-  // Resolve template names for cards whose content is stored as raw strings on
-  // CallConnectSettings (whisper/voicemail). Match by content first (exact
-  // template currently in use), then fall back to the canonical template name.
+  // Resolve template names for tiles. Per-card lookup order:
+  // 1. Linked template on the loaded rule (when a specific account is picked)
+  // 2. Exact content match against the user's templates list
+  // 3. Canonical template name (matches what TemplateEditorModal seeds)
+  // 4. Loose token match (e.g. "first reply" matches "First Reply (v2)")
   const findTplByContent = (content: string | null | undefined): MessageTemplate | undefined =>
     content ? templates.find(t => t.content === content) : undefined;
-  const findTplByName = (name: string): MessageTemplate | undefined => templates.find(t => t.name === name);
+  const findTplByName = (...names: string[]): MessageTemplate | undefined => {
+    for (const n of names) {
+      const exact = templates.find(t => t.name === n);
+      if (exact) return exact;
+    }
+    return undefined;
+  };
+  const findTplLoose = (...tokens: string[]): MessageTemplate | undefined => {
+    const lc = tokens.map(t => t.toLowerCase());
+    return templates.find(t => {
+      const lower = t.name.toLowerCase();
+      return lc.every(tok => lower.includes(tok));
+    });
+  };
 
-  const whisperTpl = findTplByContent(callSettings?.agentWhisperMessage) || findTplByName('CC - Agent Whisper');
-  const voicemailTpl = findTplByContent(callSettings?.leadVoicemailMessage) || findTplByName('CC - Voicemail TTS');
-  const ctTpl = customerTextRule?.messageTemplate || findTplByContent(customerTextRule?.template || null) || findTplByName('CT - Auto Reply');
+  // Instant Reply — AI prompt template (used in 'ai' reply type) or message template (used in 'template' reply type).
+  const firstReplyPromptTpl =
+    newLeadRule?.promptTemplate
+    || findTplByName('First Reply', 'AI - First Reply', 'First Reply Instructions')
+    || findTplLoose('first', 'reply');
+  const firstReplyMessageTpl =
+    newLeadRule?.template
+    || findTplByName('Auto Reply - New Lead', 'Auto Reply', 'First Reply Template');
+
+  // Customer Text — Instant Text card.
+  const ctTpl =
+    customerTextRule?.messageTemplate
+    || findTplByContent(customerTextRule?.template || null)
+    || findTplByName('Auto Reply - New Lead', 'CT - Auto Reply')
+    || findTplLoose('auto', 'reply');
+
+  // Call Connect — whisper and voicemail.
+  const whisperTpl =
+    findTplByContent(callSettings?.agentWhisperMessage)
+    || findTplByName('CC - Agent Whisper', 'Agent Whisper')
+    || findTplLoose('whisper');
+  const voicemailTpl =
+    findTplByContent(callSettings?.leadVoicemailMessage)
+    || findTplByName('CC - Voicemail TTS', 'Voicemail TTS', 'Voicemail')
+    || findTplLoose('voicemail');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -189,13 +235,13 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             iconTone="violet"
             title={
               replyType === 'ai'
-                ? (newLeadRule?.promptTemplate?.name || 'Default first-reply instructions')
-                : (newLeadRule?.template?.name || 'Default first-reply template')
+                ? (firstReplyPromptTpl?.name || 'Default first-reply instructions')
+                : (firstReplyMessageTpl?.name || 'Default first-reply template')
             }
             body={
               replyType === 'ai'
-                ? (newLeadRule?.promptTemplate?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
-                : (newLeadRule?.template?.content || 'Pre-written reply sent when a new lead arrives.')
+                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
+                : (firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.')
             }
             actionLabel="Edit Template"
             onAction={goTemplates}

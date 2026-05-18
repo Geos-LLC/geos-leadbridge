@@ -3,7 +3,7 @@ import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'r
 import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
-  BarChart3, ChevronsUpDown, ChevronRight, ChevronDown,
+  BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -99,6 +99,28 @@ export function Layout() {
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
     return 'Leadbridge';
+  };
+
+  // Top-bar back link — driven by location.state.from set by cross-surface
+  // navigations (Edit Hours, Edit Template, Go to Alerts, etc). When state
+  // is present, replaces the page title with `← Back to <Label>` so the
+  // user can always get back to where they came from with one click.
+  const navState = (location.state || null) as { from?: string; fromLabel?: string } | null;
+  const backLabelFor = (path: string): string => {
+    if (path.startsWith('/automation/respond')) return 'When a Lead Arrives';
+    if (path.startsWith('/automation/engage')) return 'Follow-ups';
+    if (path.startsWith('/automation/convert')) return 'AI Conversation';
+    if (path.startsWith('/automation')) return 'Automation';
+    if (path.startsWith('/settings/communication')) return 'Communication';
+    if (path.startsWith('/settings')) return 'Settings';
+    if (path.startsWith('/templates')) return 'Templates';
+    return 'previous page';
+  };
+  const showBack = !!navState?.from;
+  const backLabel = navState?.fromLabel || (navState?.from ? backLabelFor(navState.from) : '');
+  const onBack = () => {
+    if (navState?.from) navigate(navState.from, { replace: true });
+    else navigate(-1);
   };
 
   const initials = (user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase();
@@ -424,12 +446,35 @@ export function Layout() {
                       LeadBridge
                     </span>
                   </RouterLink>
-                  <h1
-                    className="hidden lg:block"
-                    style={{ fontSize: 22, fontWeight: 800, color: 'var(--lb-ink-1)', letterSpacing: '-0.025em', margin: 0 }}
-                  >
-                    {getPageName()}
-                  </h1>
+                  {showBack ? (
+                    <button
+                      type="button"
+                      onClick={onBack}
+                      className="hidden lg:inline-flex"
+                      style={{
+                        alignItems: 'center', gap: 8,
+                        background: 'transparent', border: 0, padding: '4px 8px',
+                        borderRadius: 8, cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        fontSize: 14, fontWeight: 600,
+                        color: 'var(--lb-ink-3)',
+                        transition: 'background 120ms, color 120ms',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--lb-ink-10)'; e.currentTarget.style.color = 'var(--lb-accent)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--lb-ink-3)'; }}
+                    >
+                      <ArrowLeft size={16} />
+                      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--lb-ink-5)' }}>Back to</span>
+                      <span>{backLabel}</span>
+                    </button>
+                  ) : (
+                    <h1
+                      className="hidden lg:block"
+                      style={{ fontSize: 22, fontWeight: 800, color: 'var(--lb-ink-1)', letterSpacing: '-0.025em', margin: 0 }}
+                    >
+                      {getPageName()}
+                    </h1>
+                  )}
                 </div>
                 <div className="flex items-center gap-3" />
               </div>
