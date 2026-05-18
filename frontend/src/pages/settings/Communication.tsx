@@ -6,8 +6,9 @@ import {
 import {
   SettingCard, FieldRow, InfoTile, Checkbox, ActionLink,
 } from '../../components/automation/ui';
-import { usersApi } from '../../services/api';
+import { usersApi, templatesApi } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import type { MessageTemplate } from '../../types';
 
 function formatPhone(e164: string | null): string {
   if (!e164) return '—';
@@ -26,15 +27,36 @@ export function SettingsCommunication() {
   const [twoWay, setTwoWay] = useState(true);
   const [routeReplies, setRouteReplies] = useState(true);
   const [honorStop, setHonorStop] = useState(true);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
   useEffect(() => {
     let alive = true;
-    usersApi.getMyPhoneNumber()
-      .then(d => { if (alive) setLeadBridgeNumber(d.phoneNumber); })
-      .catch(() => { /* silent */ })
-      .finally(() => { if (alive) setLoadingPhone(false); });
+    Promise.all([
+      usersApi.getMyPhoneNumber().catch(() => ({ phoneNumber: null as string | null, allocationId: null, hasPhoneNumber: false })),
+      templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
+    ]).then(([phoneRes, tplRes]) => {
+      if (!alive) return;
+      setLeadBridgeNumber(phoneRes.phoneNumber);
+      setTemplates(tplRes.templates || []);
+    }).finally(() => { if (alive) setLoadingPhone(false); });
     return () => { alive = false; };
   }, []);
+
+  // Conventional alert template names — match what TemplateEditorModal seeds.
+  const findTpl = (...candidates: string[]): MessageTemplate | undefined => {
+    for (const name of candidates) {
+      const exact = templates.find(t => t.name === name);
+      if (exact) return exact;
+    }
+    // Loose match — first template whose name contains every candidate token.
+    const tokens = candidates.flatMap(c => c.toLowerCase().split(/[\s\-]+/));
+    return templates.find(t => {
+      const lower = t.name.toLowerCase();
+      return tokens.every(tok => lower.includes(tok));
+    });
+  };
+  const readyToBookTpl = findTpl('Ready to Book Alert', 'TT - Ready to Book Alert', 'AI Ready to Book Alert', 'ready book');
+  const liveContactTpl = findTpl('Live Contact Alert', 'TT - Live Contact Alert', 'AI Live Contact Alert', 'live contact');
 
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
   const goEditProfile = () => navigate('/settings?tab=general');
@@ -109,16 +131,16 @@ export function SettingsCommunication() {
       >
         <FieldRow icon={FileText} iconTone="violet" label="Ready to book">
           <InfoTile
-            title="TT - Ready to Book Alert"
-            body="Lead is ready to book a job. Phone: {customerPhone}…"
+            title={readyToBookTpl?.name || 'Ready to Book Alert'}
+            body={readyToBookTpl?.content || 'Lead is ready to book a job. Phone: {customerPhone}…'}
             actionLabel="Edit Template"
             onAction={goTemplates}
           />
         </FieldRow>
         <FieldRow icon={FileText} iconTone="violet" label="Wants live contact" noBorder>
           <InfoTile
-            title="TT - Live Contact Alert"
-            body="Lead wants to talk to a person. Reach them at {customerPhone}…"
+            title={liveContactTpl?.name || 'Live Contact Alert'}
+            body={liveContactTpl?.content || 'Lead wants to talk to a person. Reach them at {customerPhone}…'}
             actionLabel="Edit Template"
             onAction={goTemplates}
           />

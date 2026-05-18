@@ -3,6 +3,8 @@ import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileTex
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
+import { BackLink } from '../components/automation/ui';
+import { useBackLink } from '../components/automation/useBackLink';
 
 // Combined variables for template page
 const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
@@ -30,6 +32,7 @@ const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
 let _templatesCache: MessageTemplate[] | null = null;
 
 export function MessageSettings() {
+  const backLink = useBackLink();
   const [templates, setTemplates] = useState<MessageTemplate[]>(_templatesCache ?? []);
   const [loading, setLoading] = useState(!_templatesCache);
   const [saving, setSaving] = useState(false);
@@ -135,6 +138,11 @@ export function MessageSettings() {
   if (loading) {
     return (
       <div className="p-6 lg:p-10">
+        {backLink && (
+          <div className="mb-4">
+            <BackLink label={backLink.label} onClick={backLink.onClick} />
+          </div>
+        )}
         <div className="flex items-center gap-3 mb-6">
           <FileText className="w-6 h-6 text-blue-600" />
           <h1 className="text-2xl font-bold text-slate-900">Message Templates</h1>
@@ -149,6 +157,11 @@ export function MessageSettings() {
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+      {backLink && (
+        <div className="-mb-6">
+          <BackLink label={backLink.label} onClick={backLink.onClick} />
+        </div>
+      )}
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
           <X size={16} className="shrink-0" />

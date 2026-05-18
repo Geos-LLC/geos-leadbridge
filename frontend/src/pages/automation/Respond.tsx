@@ -8,8 +8,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner,
 } from '../../components/automation/ui';
-import { automationApi, callConnectApi, notificationsApi } from '../../services/api';
-import type { AutomationRule, CallConnectMode, CallConnectSettings, NotificationRule } from '../../types';
+import { automationApi, callConnectApi, notificationsApi, templatesApi } from '../../services/api';
+import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule } from '../../types';
 
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
@@ -29,6 +29,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [newLeadRule, setNewLeadRule] = useState<AutomationRule | null>(null);
   const [customerTextRule, setCustomerTextRule] = useState<NotificationRule | null>(null);
   const [callSettings, setCallSettings] = useState<CallConnectSettings | null>(null);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,13 +50,15 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
       notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
       callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
-    ]).then(([autoRes, notifRes, ccRes]) => {
+      templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
+    ]).then(([autoRes, notifRes, ccRes, tplRes]) => {
       if (!alive) return;
       const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
       const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
       setNewLeadRule(nl);
       setCustomerTextRule(ct);
       setCallSettings(ccRes.settings);
+      setTemplates(tplRes.templates || []);
       if (nl) {
         setInstantReplyOn(!!nl.enabled);
         setReplyType(nl.useAi ? 'ai' : 'template');
@@ -106,6 +109,17 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
   const goTemplates = () => navigate('/templates', { state: fromState });
+
+  // Resolve template names for cards whose content is stored as raw strings on
+  // CallConnectSettings (whisper/voicemail). Match by content first (exact
+  // template currently in use), then fall back to the canonical template name.
+  const findTplByContent = (content: string | null | undefined): MessageTemplate | undefined =>
+    content ? templates.find(t => t.content === content) : undefined;
+  const findTplByName = (name: string): MessageTemplate | undefined => templates.find(t => t.name === name);
+
+  const whisperTpl = findTplByContent(callSettings?.agentWhisperMessage) || findTplByName('CC - Agent Whisper');
+  const voicemailTpl = findTplByContent(callSettings?.leadVoicemailMessage) || findTplByName('CC - Voicemail TTS');
+  const ctTpl = customerTextRule?.messageTemplate || findTplByContent(customerTextRule?.template || null) || findTplByName('CT - Auto Reply');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -173,8 +187,16 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <InfoTile
             icon={FileText}
             iconTone="violet"
-            title="Default first-reply instructions"
-            body="How AI should write the first reply."
+            title={
+              replyType === 'ai'
+                ? (newLeadRule?.promptTemplate?.name || 'Default first-reply instructions')
+                : (newLeadRule?.template?.name || 'Default first-reply template')
+            }
+            body={
+              replyType === 'ai'
+                ? (newLeadRule?.promptTemplate?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
+                : (newLeadRule?.template?.content || 'Pre-written reply sent when a new lead arrives.')
+            }
             actionLabel="Edit Template"
             onAction={goTemplates}
           />
@@ -207,8 +229,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
         <FieldRow icon={FileText} iconTone="green" label="SMS Template" noBorder>
           <InfoTile
-            title={customerTextRule?.messageTemplate?.name || customerTextRule?.name || 'CT - Auto Reply'}
-            body={customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+            title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
+            body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
             actionLabel="Edit Template"
             onAction={goTemplates}
           />
@@ -260,8 +282,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
         <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
           <InfoTile
-            title="CC - Agent Whisper"
-            body={callSettings?.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}…'}
+            title={whisperTpl?.name || 'CC - Agent Whisper'}
+            body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
             actionLabel="Edit Template"
             onAction={goTemplates}
           />
@@ -269,8 +291,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
         <FieldRow icon={Mic} iconTone="violet" label="Voicemail Message" noBorder>
           <InfoTile
-            title="CC - Voicemail TTS"
-            body={callSettings?.leadVoicemailMessage || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
+            title={voicemailTpl?.name || 'CC - Voicemail TTS'}
+            body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
             actionLabel="Edit Template"
             onAction={goTemplates}
           />
