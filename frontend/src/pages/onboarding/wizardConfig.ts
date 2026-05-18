@@ -16,14 +16,12 @@ export interface WizardStepMeta {
   countsTowardChecklist: boolean;
 }
 
+// Welcome is intentionally absent from this list — the Overview's
+// "Start setup" card is the welcome moment, no need for a separate
+// in-wizard splash. The backend keeps 'welcome' as a valid slug for
+// historical wizardChecklistStatus rows; the frontend just never
+// navigates there now.
 export const WIZARD_STEP_META: WizardStepMeta[] = [
-  {
-    slug: 'welcome',
-    label: 'Welcome',
-    title: 'Welcome to LeadBridge',
-    description: "Reply instantly and never miss a lead. We'll help set up your business in about 2 minutes.",
-    countsTowardChecklist: false,
-  },
   {
     slug: 'connect',
     label: 'Connect',
@@ -74,6 +72,12 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     countsTowardChecklist: false,
   },
 ];
+
+// Welcome was the first step in the original 8-step flow. Removed
+// because the Overview "Start setup" card is the welcome moment.
+// Kept here as a no-op so any older SetupProgressCard fallback that
+// references it still type-checks.
+export const FIRST_ACTIONABLE_STEP = WIZARD_STEP_META[0].slug;
 
 export const ACTIONABLE_STEPS: WizardStep[] = WIZARD_STEP_META.filter(
   m => m.countsTowardChecklist,

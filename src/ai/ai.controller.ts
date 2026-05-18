@@ -7,6 +7,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { buildPriceRangeInstruction } from './price-range';
 import { buildBusinessContextBlock } from './business-context';
 import { buildFaqBlock, parseAccountFaq } from './faq-context';
+import { buildPricingGuardRules } from './pricing-guards';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -292,7 +293,11 @@ export class AiController {
 
       parts.push('--- End Pricing Guide ---');
       parts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
-      parts.push('When you DO quote (per the GLOBAL pricing policy + PRIMARY INSTRUCTION), match bedrooms and bathrooms from the lead details to find the right row above. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant. If you are not quoting, do not mention price.');
+      // Hard guards: no quote without bed+bath, no silent service-type
+      // substitution, no closest-row interpolation. See pricing-guards.ts
+      // for the FargiPro incident this closes.
+      parts.push(buildPricingGuardRules(p));
+      parts.push('Mention applicable discounts (recurring, order amount) when relevant. If you are not quoting, do not mention price.');
 
       return parts.join('\n');
     } catch {

@@ -128,12 +128,20 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<any>) => {
-    // Handle 401 - redirect to login
+    // Handle 401 - redirect to login ONLY when the user previously had a
+    // valid token. Anonymous visitors on the public Landing page also hit
+    // authenticated endpoints (e.g. getPhonePricing for the pricing block);
+    // booting them to /login on the first paint is wrong — they were never
+    // logged in, so there's nothing to "log them out" of. Without this guard
+    // the marketing site auto-redirects every visitor to the login form.
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth-storage'); // Clear zustand persisted auth state
-      window.location.href = '/login';
+      const hadToken = !!localStorage.getItem('token');
+      if (hadToken) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth-storage'); // Clear zustand persisted auth state
+        window.location.href = '/login';
+      }
       return Promise.reject(error);
     }
 
@@ -1096,7 +1104,12 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
-  updateProfile: async (updates: { name?: string; businessPhone?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string; businessPhone?: string | null } }> => {
+  updateProfile: async (
+    updates: { name?: string; businessPhone?: string; website?: string | null },
+  ): Promise<{
+    success: boolean;
+    user: { id: string; name: string; email: string; businessPhone?: string | null; website?: string | null };
+  }> => {
     const { data } = await api.patch('/v1/users/me', updates);
     return data;
   },
@@ -1865,6 +1878,19 @@ export const followUpApi = {
     timezone: string;
     platform?: string;
   }): Promise<{ success: boolean; seeded: number }> => {
+    const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
+    return data;
+  },
+  // Wizard-flavored save that accepts the broader set of keys the
+  // backend already merges into followUpSettingsJson (mode + AI stop
+  // flags + handoff triggers + re-engagement). The narrowly-typed
+  // saveSettings above keeps the existing Services UI honest; this one
+  // is opt-in for the onboarding wizard so we don't have to widen the
+  // existing call sites.
+  saveWizardSettings: async (
+    savedAccountId: string,
+    settings: Record<string, unknown>,
+  ): Promise<{ success: boolean; seeded?: number }> => {
     const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
     return data;
   },

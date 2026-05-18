@@ -51,6 +51,9 @@ export interface User {
   hasOwnNumber?: boolean;
   phoneNumber?: string | null;
   businessPhone?: string | null;
+  // Business website — captured by the onboarding wizard's Business
+  // step (free text, may be a domain like "myco.com" or a full URL).
+  website?: string | null;
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;

@@ -27,8 +27,10 @@ const SmsHistory = lazy(() => import('./pages/SmsHistory').then(m => ({ default:
 const Services = lazy(() => import('./pages/Services').then(m => ({ default: m.Services })));
 const ApiTest = lazy(() => import('./pages/ApiTest').then(m => ({ default: m.ApiTest })));
 const Pricing = lazy(() => import('./pages/Pricing'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SettingsPage = lazy(() => import('./pages/settings'));
+const SettingsPageLegacy = lazy(() => import('./pages/SettingsPage'));
 const SettingsCommunication = lazy(() => import('./pages/SettingsCommunication').then(m => ({ default: m.SettingsCommunication })));
+const AutomationPage = lazy(() => import('./pages/automation').then(m => ({ default: m.AutomationPage })));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
@@ -101,7 +103,14 @@ function App() {
                   Automation / Templates / Insights). */}
               <Route path="/overview" element={<Dashboard />} />
               <Route path="/lead-activity" element={<Messages />} />
-              <Route path="/automation" element={<Services />} />
+              {/* New redesigned Automation surface — 3 sub-routes with shared wrapper.
+                  /automation redirects to /automation/respond. The legacy single-page
+                  Services component is still reachable at /automation-classic. */}
+              <Route path="/automation" element={<Navigate to="/automation/respond" replace />} />
+              <Route path="/automation/respond" element={<AutomationPage />} />
+              <Route path="/automation/engage"  element={<AutomationPage />} />
+              <Route path="/automation/convert" element={<AutomationPage />} />
+              <Route path="/automation-classic" element={<Services />} />
               <Route path="/templates" element={<MessageSettings />} />
               <Route path="/insights" element={<Analytics />} />
 
@@ -122,6 +131,7 @@ function App() {
               <Route path="/api-test" element={<ApiTest />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings-classic" element={<SettingsPageLegacy />} />
               <Route path="/settings/communication" element={<SettingsCommunication />} />
               <Route path="/invite/accept" element={<AcceptInvite />} />
               <Route path="/billing" element={<Navigate to="/settings" />} />

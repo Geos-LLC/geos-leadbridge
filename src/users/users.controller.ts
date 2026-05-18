@@ -53,7 +53,10 @@ export class UsersController {
    * PATCH /v1/users/me
    */
   @Patch('me')
-  async updateProfile(@Request() req: any, @Body() body: { name?: string; businessPhone?: string }) {
+  async updateProfile(
+    @Request() req: any,
+    @Body() body: { name?: string; businessPhone?: string; website?: string | null },
+  ) {
     return this.usersService.updateProfile(req.user.id, body);
   }
 

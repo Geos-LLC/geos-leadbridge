@@ -96,6 +96,7 @@ export class AuthService {
         hasOwnNumber: user.hasOwnNumber,
         phoneNumber: user.phoneNumber,
         businessPhone: user.businessPhone,
+        website: user.website ?? null,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -141,6 +142,7 @@ export class AuthService {
         hasOwnNumber: user.hasOwnNumber,
         phoneNumber: user.phoneNumber,
         businessPhone: user.businessPhone,
+        website: user.website ?? null,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -167,6 +169,7 @@ export class AuthService {
         hasOwnNumber: true,
         phoneNumber: true,
         businessPhone: true,
+        website: true,
         createdAt: true,
         // Trial fields — used to compute `trialActive` so the frontend can
         // unlock Engage/Convert features for trial users without an extra

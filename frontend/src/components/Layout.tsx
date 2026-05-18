@@ -3,7 +3,7 @@ import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'r
 import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
-  BarChart3, ChevronsUpDown,
+  BarChart3, ChevronsUpDown, ChevronRight, ChevronDown,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -66,10 +66,22 @@ export function Layout() {
     navigate('/login');
   };
 
-  const NAV_ITEMS = [
+  type NavChild = { label: string; path: string; hint: string; tone: 'green' | 'purple' | 'blue' };
+  type NavItem = { icon: React.ReactNode; label: string; path: string; children?: NavChild[] };
+
+  const NAV_ITEMS: NavItem[] = [
     { icon: <LayoutGrid size={15} />,  label: 'Overview',      path: '/overview' },
     { icon: <Inbox size={15} />,       label: 'Lead Activity', path: '/lead-activity' },
-    { icon: <Workflow size={15} />,    label: 'Automation',    path: '/automation' },
+    {
+      icon: <Workflow size={15} />,
+      label: 'Automation',
+      path: '/automation',
+      children: [
+        { label: 'When a Lead Arrives', path: '/automation/respond', hint: 'Respond', tone: 'green' },
+        { label: 'Follow-ups',          path: '/automation/engage',  hint: 'Engage',  tone: 'purple' },
+        { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert', tone: 'blue' },
+      ],
+    },
     { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
     { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
   ];
@@ -78,6 +90,7 @@ export function Layout() {
     const path = location.pathname;
     const navItem = NAV_ITEMS.find(item => item.path === path);
     if (navItem) return navItem.label;
+    if (path.startsWith('/automation')) return 'Automation';
     if (path === '/sms-history') return 'SMS History';
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
@@ -119,6 +132,89 @@ export function Layout() {
       )}
     </NavLink>
   );
+
+  const HINT_TONES: Record<'green' | 'purple' | 'blue', { bg: string; fg: string }> = {
+    green:  { bg: '#dcfce7', fg: '#15803d' },
+    purple: { bg: '#ede9fe', fg: '#6d28d9' },
+    blue:   { bg: '#dbeafe', fg: '#1d4ed8' },
+  };
+
+  // Render a primary nav item that may have nested children. Children show only
+  // when the active route is inside the parent's path tree (e.g. /automation/*).
+  const renderNavGroup = (item: NavItem) => {
+    const parentActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+    const hasChildren = !!item.children?.length;
+    const showChildren = hasChildren && parentActive;
+    const firstChildPath = hasChildren ? item.children![0].path : item.path;
+
+    return (
+      <div key={item.path}>
+        <NavLink
+          to={hasChildren ? firstChildPath : item.path}
+          end={!hasChildren}
+          className={({ isActive }) => {
+            const active = hasChildren ? parentActive : isActive;
+            return `group flex items-center gap-2.5 px-3 py-[8px] rounded-full transition-colors mb-[2px] ` +
+              (active
+                ? 'bg-[var(--lb-accent-tint)] text-[var(--lb-accent)] font-bold'
+                : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)] font-medium');
+          }}
+          onClick={() => setMobileMenuOpen(false)}
+          style={{ fontSize: 13 }}
+        >
+          <span
+            className="shrink-0 inline-flex items-center justify-center"
+            style={{ color: parentActive ? 'var(--lb-accent)' : 'var(--lb-ink-5)' }}
+          >
+            {item.icon}
+          </span>
+          <span className="flex-1 truncate">{item.label}</span>
+          {hasChildren && (
+            showChildren
+              ? <ChevronDown size={13} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+              : <ChevronRight size={13} style={{ color: 'var(--lb-ink-6)', flexShrink: 0 }} />
+          )}
+        </NavLink>
+
+        {showChildren && (
+          <div
+            style={{
+              margin: '2px 0 6px 18px',
+              paddingLeft: 10,
+              borderLeft: '1px solid var(--lb-line)',
+              display: 'flex', flexDirection: 'column', gap: 1,
+            }}
+          >
+            {item.children!.map(c => {
+              const tone = HINT_TONES[c.tone];
+              return (
+                <NavLink
+                  key={c.path}
+                  to={c.path}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 rounded-[6px] transition-colors ` +
+                    (isActive
+                      ? 'bg-[var(--lb-ink-10)] text-[var(--lb-ink-1)] font-semibold'
+                      : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)] font-medium')
+                  }
+                  onClick={() => setMobileMenuOpen(false)}
+                  style={{ fontSize: 12.5, padding: '6px 10px' }}
+                >
+                  <span className="flex-1 truncate">{c.label}</span>
+                  <span style={{
+                    padding: '2px 7px', borderRadius: 99,
+                    background: tone.bg, color: tone.fg,
+                    fontSize: 10, fontWeight: 600, letterSpacing: 0.02,
+                    flexShrink: 0,
+                  }}>{c.hint}</span>
+                </NavLink>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--lb-bg)' }}>
@@ -215,7 +311,7 @@ export function Layout() {
 
           {/* Primary nav */}
           <nav className="flex-1 sidebar-scroll overflow-y-auto" style={{ marginTop: 4 }}>
-            {NAV_ITEMS.map(renderNavItem)}
+            {NAV_ITEMS.map(renderNavGroup)}
 
             {user?.role === 'ADMIN' && !impersonatingUser && (
               <>
