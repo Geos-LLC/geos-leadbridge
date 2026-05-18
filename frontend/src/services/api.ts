@@ -1873,6 +1873,19 @@ export const followUpApi = {
     const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
     return data;
   },
+  // Wizard-flavored save that accepts the broader set of keys the
+  // backend already merges into followUpSettingsJson (mode + AI stop
+  // flags + handoff triggers + re-engagement). The narrowly-typed
+  // saveSettings above keeps the existing Services UI honest; this one
+  // is opt-in for the onboarding wizard so we don't have to widen the
+  // existing call sites.
+  saveWizardSettings: async (
+    savedAccountId: string,
+    settings: Record<string, unknown>,
+  ): Promise<{ success: boolean; seeded?: number }> => {
+    const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
+    return data;
+  },
 };
 
 export const onboardingApi = {

@@ -13,6 +13,8 @@ import ConnectStep from './steps/ConnectStep';
 import BusinessWebsiteStep from './steps/BusinessWebsiteStep';
 import AIKnowledgeStep from './steps/AIKnowledgeStep';
 import PricingSetupStep from './steps/PricingSetupStep';
+import AutomationLevelStep from './steps/AutomationLevelStep';
+import AIRulesStep from './steps/AIRulesStep';
 import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
@@ -141,7 +143,9 @@ export default function SetupWizard() {
     isDone ||
     currentStep === 'business' ||
     currentStep === 'ai' ||
-    currentStep === 'pricing';
+    currentStep === 'pricing' ||
+    currentStep === 'automation' ||
+    currentStep === 'ai_rules';
 
   let body: React.ReactNode;
   if (isWelcome) {
@@ -199,6 +203,28 @@ export default function SetupWizard() {
         onSkipManual={async () => {
           if (!nextStep) return;
           await advance({ finishedStep: 'pricing', status: 'skipped', nextStep });
+        }}
+      />
+    );
+  } else if (currentStep === 'automation') {
+    body = (
+      <AutomationLevelStep
+        saving={saving}
+        setSaving={setSaving}
+        onSaveContinue={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'automation', status: 'done', nextStep });
+        }}
+      />
+    );
+  } else if (currentStep === 'ai_rules') {
+    body = (
+      <AIRulesStep
+        saving={saving}
+        setSaving={setSaving}
+        onSaveContinue={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'ai_rules', status: 'done', nextStep });
         }}
       />
     );
