@@ -54,6 +54,13 @@ export interface User {
   // Business website — captured by the onboarding wizard's Business
   // step (free text, may be a domain like "myco.com" or a full URL).
   website?: string | null;
+  // Parsed metadata for the website above. Populated by the
+  // verifyWebsite endpoint when the user submits a reachable URL.
+  websiteMetadataJson?: {
+    title?: string;
+    description?: string;
+    phone?: string;
+  } | null;
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;

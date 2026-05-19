@@ -112,11 +112,15 @@ model User {
   businessPhone String?
 
   // Business website. Captured during the onboarding wizard's Business
-  // step (PR 2) — the AI website-parser stub feeds off this once shipped.
-  // Free-text, nullable; we don't validate format here so the user can
-  // enter "myco.com", "https://myco.com", or "I don't have one yet" via
-  // the explicit skip path.
+  // step (PR 2). Free-text, nullable.
   website String?
+
+  // Parsed website metadata — populated by the verifyWebsite endpoint
+  // when the user submits a reachable URL. Stored as JSON so we can
+  // grow the shape (title/description today, hours/services/phone
+  // tomorrow) without further migrations. Used downstream to pre-fill
+  // AI Knowledge / Settings.
+  websiteMetadataJson Json?
 
   // Sigcore phone number provisioning
   phoneNumber         String? // User's dedicated Sigcore/Twilio number

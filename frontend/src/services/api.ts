@@ -1105,12 +1105,41 @@ export const usersApi = {
     return data;
   },
   updateProfile: async (
-    updates: { name?: string; businessPhone?: string; website?: string | null },
+    updates: {
+      name?: string;
+      businessPhone?: string;
+      website?: string | null;
+      websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+    },
   ): Promise<{
     success: boolean;
-    user: { id: string; name: string; email: string; businessPhone?: string | null; website?: string | null };
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      businessPhone?: string | null;
+      website?: string | null;
+      websiteMetadataJson?: { title?: string; description?: string; phone?: string } | null;
+    };
   }> => {
     const { data } = await api.patch('/v1/users/me', updates);
+    return data;
+  },
+  // Onboarding wizard's Business step calls this before saving the URL.
+  // The backend normalizes ("myco.com" → "https://myco.com"), runs an
+  // SSRF guard, fetches with a timeout, and extracts <title> + meta
+  // description + a likely phone number. If unreachable, returns a
+  // typed errorCode so the UI can show a specific message.
+  verifyWebsite: async (
+    url: string,
+  ): Promise<{
+    reachable: boolean;
+    normalizedUrl: string;
+    metadata?: { title?: string; description?: string; phone?: string };
+    errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
+    errorMessage?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/website/verify', { url });
     return data;
   },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {

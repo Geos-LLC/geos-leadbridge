@@ -170,6 +170,7 @@ export class AuthService {
         phoneNumber: true,
         businessPhone: true,
         website: true,
+        websiteMetadataJson: true,
         createdAt: true,
         // Trial fields — used to compute `trialActive` so the frontend can
         // unlock Engage/Convert features for trial users without an extra

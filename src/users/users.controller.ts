@@ -55,9 +55,25 @@ export class UsersController {
   @Patch('me')
   async updateProfile(
     @Request() req: any,
-    @Body() body: { name?: string; businessPhone?: string; website?: string | null },
+    @Body() body: {
+      name?: string;
+      businessPhone?: string;
+      website?: string | null;
+      websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+    },
   ) {
     return this.usersService.updateProfile(req.user.id, body);
+  }
+
+  /**
+   * Verify a website URL: normalize, SSRF-guard, fetch with timeout,
+   * extract basic metadata. Called by the onboarding wizard's
+   * Business step before persisting the URL.
+   * POST /v1/users/me/website/verify
+   */
+  @Post('me/website/verify')
+  async verifyWebsite(@Request() req: any, @Body() body: { url?: string }) {
+    return this.usersService.verifyWebsite(body?.url ?? '');
   }
 
   /**

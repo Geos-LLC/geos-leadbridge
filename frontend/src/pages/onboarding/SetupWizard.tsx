@@ -113,17 +113,25 @@ export default function SetupWizard() {
   const nextStep = currentIndex < WIZARD_STEP_META.length - 1 ? WIZARD_STEP_META[currentIndex + 1].slug : null;
   const isDone = currentStep === 'done';
 
-  function handleBack() {
-    if (!prevStep) return;
-    setCurrentStep(prevStep);
-    // Persist the move so a refresh resumes at the right place.
-    void onboardingApi.patchWizard({ currentStep: prevStep }).then(({ profile: fresh }) => {
+  // Direct navigation to any step in the rail. Used by both the
+  // footer Back button and the now-clickable sidebar — same persistence
+  // semantics in both cases. Don't change checklist status here: the
+  // user is just moving around, not declaring a step done/skipped.
+  function goToStep(target: WizardStep) {
+    if (target === currentStep) return;
+    setCurrentStep(target);
+    void onboardingApi.patchWizard({ currentStep: target }).then(({ profile: fresh }) => {
       setProfile(fresh);
       if (user) {
         const token = localStorage.getItem('token') || '';
         setAuth({ ...user, onboardingProfile: fresh }, token);
       }
-    }).catch(() => { /* non-fatal */ });
+    }).catch(() => { /* non-fatal — local state already updated */ });
+  }
+
+  function handleBack() {
+    if (!prevStep) return;
+    goToStep(prevStep);
   }
 
   function handleSkip() {
@@ -248,6 +256,7 @@ export default function SetupWizard() {
       onBack={prevStep ? handleBack : undefined}
       onSkip={stepOwnsActions ? undefined : handleSkip}
       onContinue={stepOwnsActions ? undefined : handleContinue}
+      onStepClick={goToStep}
       saving={saving}
       hideActions={stepOwnsActions}
     >
