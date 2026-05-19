@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Moon, Loader2 } from 'lucide-react';
 import {
   SettingCard, FieldRow, BigToggle, Dropdown,
@@ -56,11 +56,19 @@ export function SettingsHours() {
   const [quietTz, setQuietTz] = useState('America/New_York');
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  // Preserved for potential busy-state UI later.
+  const [_saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
-  // Load on mount
+  // Load on mount. Mark hydration done in a setTimeout so the state setters
+  // above don't trip the debounced auto-save below.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -88,7 +96,10 @@ export function SettingsHours() {
       } catch (e: any) {
         if (alive) setError(e?.response?.data?.message || e?.message || 'Failed to load hours');
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+          setTimeout(() => { hydratedRef.current = true; }, 0);
+        }
       }
     })();
     return () => { alive = false; };
@@ -97,33 +108,42 @@ export function SettingsHours() {
   const setDayField = (d: Day, patch: Partial<DayState>) =>
     setHours(h => ({ ...h, [d]: { ...h[d], ...patch } }));
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const schedule: Record<string, { start: string; end: string } | null> = {};
-      (DAYS as readonly Day[]).forEach(d => {
-        const key = DAY_TO_API[d];
-        schedule[key] = hours[d].on
-          ? { start: display24(hours[d].start), end: display24(hours[d].end) }
-          : null;
-      });
-      await Promise.all([
-        usersApi.updateBusinessHours({ timezone: tz, schedule }),
-        usersApi.updateQuietHours({
-          enabled: quietOn,
-          start: display24(quietStart),
-          end: display24(quietEnd),
-          timezone: quietTz,
-        }),
-      ]);
-      setSavedAt(Date.now());
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
+  // Auto-save (debounced ~800ms) — fires on every state change once the
+  // initial load has hydrated. Both business-hours and quiet-hours endpoints
+  // are written in parallel.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const t = setTimeout(() => {
+      (async () => {
+        setSaving(true); setError(null);
+        try {
+          const schedule: Record<string, { start: string; end: string } | null> = {};
+          (DAYS as readonly Day[]).forEach(d => {
+            const key = DAY_TO_API[d];
+            schedule[key] = hours[d].on
+              ? { start: display24(hours[d].start), end: display24(hours[d].end) }
+              : null;
+          });
+          await Promise.all([
+            usersApi.updateBusinessHours({ timezone: tz, schedule }),
+            usersApi.updateQuietHours({
+              enabled: quietOn,
+              start: display24(quietStart),
+              end: display24(quietEnd),
+              timezone: quietTz,
+            }),
+          ]);
+          setSavedAt(Date.now());
+        } catch (e: any) {
+          setError(e?.response?.data?.message || e?.message || 'Failed to save');
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }, 800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hours, tz, quietOn, quietStart, quietEnd, quietTz]);
 
   if (loading) {
     return (
@@ -218,23 +238,6 @@ export function SettingsHours() {
         </FieldRow>
       </SettingCard>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? 'Saving...' : 'Save changes'}
-        </button>
-      </div>
     </div>
   );
 }
