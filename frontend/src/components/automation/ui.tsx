@@ -241,17 +241,18 @@ export function SettingCard({
 }) {
   return (
     <div style={{
-      background: 'white',
-      border: '1px solid ' + (mixed ? '#fcd34d' : 'var(--lb-line)'),
+      background: mixed ? '#fffbeb' : 'white',
+      border: '1.5px solid ' + (mixed ? '#f59e0b' : 'var(--lb-line)'),
       borderRadius: 14,
       boxShadow: mixed
-        ? '0 0 0 3px rgba(245,158,11,0.10), 0 1px 2px rgba(10,21,48,0.03)'
+        ? '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)'
         : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex', alignItems: 'flex-start', gap: 14,
         padding: '20px 24px',
+        background: mixed ? 'rgba(255,255,255,0.6)' : 'transparent',
       }}>
         <IconTile icon={icon} tone={iconTone} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -265,16 +266,37 @@ export function SettingCard({
         {onToggle && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
               {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
             </span>
           </div>
         )}
       </div>
+      {/* Inline amber banner explaining what the mixed state means and what
+          saving will do. Sits between the header and the card body so the
+          user can't miss it. */}
+      {mixed && (
+        <div
+          title={mixedTooltip}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 24px',
+            background: '#fef3c7',
+            borderTop: '1px solid #fde68a',
+            borderBottom: '1px solid #fde68a',
+            fontSize: 12.5, color: '#92400e', fontWeight: 600,
+            cursor: mixedTooltip ? 'help' : 'default',
+          }}
+        >
+          <AlertTriangle size={14} style={{ color: '#d97706', flexShrink: 0 }} />
+          <span>Accounts disagree on this setting. Changing it here will apply the new value to all accounts.</span>
+        </div>
+      )}
       {children && enabled !== false && (
         <div style={{
-          borderTop: '1px solid var(--lb-line-soft)',
+          borderTop: mixed ? 'none' : '1px solid var(--lb-line-soft)',
           padding: contentPad ?? '16px 24px 24px',
+          background: 'white',
         }}>
           {children}
         </div>

@@ -65,7 +65,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   }, [accountId, isAll, accounts]);
 
   useEffect(() => {
-    if (isAll) { hydratedForRef.current = '__all__'; return; }
+    // Defer hydration flag past React's commit phase so the auto-save effect
+    // sees the OLD ref and bails on the tab-switch render. Otherwise we'd
+    // immediately re-save the just-loaded values — and in All-Accounts mode
+    // that fan-outs the seeded values to every account, clobbering per-account
+    // specifics the user previously set.
+    if (isAll) {
+      hydratedForRef.current = null;
+      setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
+      return;
+    }
     hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
@@ -82,9 +91,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
           if (s.followUpTimezone) setTimezone(s.followUpTimezone);
         }
-        hydratedForRef.current = accountId;
+        setTimeout(() => { hydratedForRef.current = accountId; }, 0);
       })
-      .catch(() => { hydratedForRef.current = accountId; })
+      .catch(() => { setTimeout(() => { hydratedForRef.current = accountId; }, 0); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
