@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   ExternalLink,
   ArrowLeft,
+  AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -167,18 +168,32 @@ export function AutoPageHeader({
 
 // ===================================================================
 // BigToggle — 44x24 pill toggle
+//
+// `mixed` mode: when accounts disagree on this setting in All-Accounts scope,
+// the toggle renders in an amber indeterminate state (thumb centered, amber
+// track, warning icon overlay). Clicking still works — flipping it commits a
+// single value to every account.
 // ===================================================================
-export function BigToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function BigToggle({
+  on, onChange, disabled, mixed, mixedTooltip,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  mixed?: boolean;
+  mixedTooltip?: string;
+}) {
   return (
     <button
       type="button"
       role="switch"
-      aria-checked={on}
+      aria-checked={mixed ? 'mixed' : on}
       disabled={disabled}
       onClick={() => onChange(!on)}
+      title={mixed ? mixedTooltip : undefined}
       style={{
         width: 44, height: 24, borderRadius: 999,
-        background: on ? 'var(--lb-accent)' : '#cbd5e1',
+        background: mixed ? '#f59e0b' : on ? 'var(--lb-accent)' : '#cbd5e1',
         border: 0, padding: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
         position: 'relative', flexShrink: 0,
@@ -187,20 +202,30 @@ export function BigToggle({ on, onChange, disabled }: { on: boolean; onChange: (
       }}
     >
       <span style={{
-        position: 'absolute', top: 3, left: on ? 23 : 3,
+        position: 'absolute', top: 3,
+        left: mixed ? 13 : on ? 23 : 3,
         width: 18, height: 18, borderRadius: 99, background: 'white',
         transition: 'left 160ms ease',
         boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-      }} />
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {mixed && <AlertTriangle size={10} style={{ color: '#d97706' }} />}
+      </span>
     </button>
   );
 }
 
 // ===================================================================
 // SettingCard — big section card with header + body
+//
+// `mixed` mode: drawn with an amber-tinted border and a "Differs across
+// accounts" warning pill in the header. Combined with BigToggle's mixed
+// rendering this gives the user a clear signal that flipping the toggle
+// will overwrite per-account values.
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
+  mixed, mixedTooltip,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -211,13 +236,17 @@ export function SettingCard({
   headerRight?: ReactNode;
   children?: ReactNode;
   contentPad?: CSSProperties['padding'];
+  mixed?: boolean;
+  mixedTooltip?: string;
 }) {
   return (
     <div style={{
       background: 'white',
-      border: '1px solid var(--lb-line)',
+      border: '1px solid ' + (mixed ? '#fcd34d' : 'var(--lb-line)'),
       borderRadius: 14,
-      boxShadow: '0 1px 2px rgba(10,21,48,0.03)',
+      boxShadow: mixed
+        ? '0 0 0 3px rgba(245,158,11,0.10), 0 1px 2px rgba(10,21,48,0.03)'
+        : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
@@ -226,15 +255,18 @@ export function SettingCard({
       }}>
         <IconTile icon={icon} tone={iconTone} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
+            {mixed && <MixedBadge tooltip={mixedTooltip} />}
+          </div>
           {subtitle && <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>{subtitle}</div>}
         </div>
         {headerRight}
         {onToggle && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
-            <BigToggle on={!!enabled} onChange={onToggle} />
+            <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
             <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
-              {enabled ? 'On' : 'Off'}
+              {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
             </span>
           </div>
         )}
@@ -248,6 +280,30 @@ export function SettingCard({
         </div>
       )}
     </div>
+  );
+}
+
+// Amber "Differs across accounts" pill rendered next to a card title or row
+// label when accounts disagree on a setting in All-Accounts scope. Hovering
+// shows a per-account breakdown via the native title tooltip.
+export function MixedBadge({ tooltip, label = 'Differs across accounts' }: { tooltip?: string; label?: string }) {
+  return (
+    <span
+      title={tooltip}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '3px 8px', borderRadius: 999,
+        background: '#fef3c7', color: '#92400e',
+        fontSize: 10.5, fontWeight: 700,
+        letterSpacing: 0.04, textTransform: 'uppercase',
+        fontFamily: 'var(--lb-font-mono)',
+        cursor: tooltip ? 'help' : 'default',
+        border: '1px solid #fde68a',
+      }}
+    >
+      <AlertTriangle size={10} />
+      {label}
+    </span>
   );
 }
 

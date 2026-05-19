@@ -6,15 +6,17 @@ import {
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner,
+  SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge,
 } from '../../components/automation/ui';
 import { automationApi, callConnectApi, notificationsApi, templatesApi } from '../../services/api';
-import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule } from '../../types';
+import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
+import { useAppStore } from '../../store/appStore';
 
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = { from: location.pathname + location.search, fromLabel: 'When a Lead Arrives' };
+  const accounts = useAppStore(s => s.savedAccounts);
 
   // Visual + state
   const [instantReplyOn, setInstantReplyOn] = useState(true);
@@ -30,6 +32,19 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [customerTextRule, setCustomerTextRule] = useState<NotificationRule | null>(null);
   const [callSettings, setCallSettings] = useState<CallConnectSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+
+  // Per-account state for All-Accounts mode. When the user is on the
+  // "All accounts" tab we fetch every account's settings so we can
+  // detect cross-account disagreement on each toggle and visually flag it.
+  type PerAccountState = {
+    account: SavedAccount;
+    instantReplyOn: boolean;
+    instantTextOn: boolean;
+    instantCallOn: boolean;
+    replyType: 'ai' | 'template';
+    connMode: 'agent-first' | 'parallel';
+  };
+  const [perAccount, setPerAccount] = useState<PerAccountState[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,12 +64,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     return () => { alive = false; };
   }, []);
 
-  // Load per-account data when scope changes
+  // Single-account load (when the user picks a specific account tab).
   useEffect(() => {
-    if (isAll) {
-      setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
-      return;
-    }
+    if (isAll) return;
     let alive = true;
     setLoading(true); setError(null);
     Promise.all([
@@ -77,36 +89,112 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setInstantCallOn(!!ccRes.settings.enabled);
         setConnMode(ccRes.settings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
       }
+      setPerAccount([]); // not relevant in single-account mode
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
 
-  const handleSave = async () => {
-    if (isAll) {
-      setError('Pick a specific account to save changes. "All accounts" is read-only in this view for now.');
+  // All-accounts load. Fetches automation rules + notification rules + call
+  // connect settings for every connected account in parallel, then summarises
+  // each setting per-account so the UI can detect cross-account disagreement
+  // and surface the "Differs across accounts" warning on the relevant card.
+  useEffect(() => {
+    if (!isAll || accounts.length === 0) {
+      setPerAccount([]);
       return;
     }
+    let alive = true;
+    setLoading(true); setError(null);
+    (async () => {
+      try {
+        const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
+        const perAccountResults = await Promise.all(accounts.map(async (a) => {
+          const [notifRes, ccRes] = await Promise.all([
+            notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] })),
+            callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null })),
+          ]);
+          const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
+          const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+          return {
+            account: a,
+            instantReplyOn: !!nl?.enabled,
+            instantTextOn: !!ct?.enabled,
+            instantCallOn: !!ccRes.settings?.enabled,
+            replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+            connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+          };
+        }));
+        if (!alive) return;
+        setPerAccount(perAccountResults);
+        // Seed visible toggles with the first account's values — purely for display.
+        if (perAccountResults.length > 0) {
+          const first = perAccountResults[0];
+          setInstantReplyOn(first.instantReplyOn);
+          setInstantTextOn(first.instantTextOn);
+          setInstantCallOn(first.instantCallOn);
+          setReplyType(first.replyType);
+          setConnMode(first.connMode);
+        }
+        setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [isAll, accounts]);
+
+  const handleSave = async () => {
     setSaving(true); setError(null);
     try {
-      const ops: Promise<unknown>[] = [];
-      if (newLeadRule) {
-        ops.push(automationApi.updateRule(newLeadRule.id, {
-          enabled: instantReplyOn,
-          useAi: replyType === 'ai',
+      if (isAll) {
+        // Fan-out: re-fetch each account's rules + apply the visible toggles.
+        // For mixed settings this DOES overwrite the diverging value — the
+        // amber warning + tooltip is what tells the user that will happen.
+        const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
+        await Promise.all(accounts.map(async (a) => {
+          const ops: Promise<unknown>[] = [];
+          const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
+          if (nl) {
+            ops.push(automationApi.updateRule(nl.id, {
+              enabled: instantReplyOn,
+              useAi: replyType === 'ai',
+            }));
+          }
+          const notifRes = await notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] }));
+          const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+          if (ct) {
+            ops.push(notificationsApi.updateRule(a.id, ct.id, { enabled: instantTextOn }));
+          }
+          const ccRes = await callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null }));
+          if (ccRes.settings) {
+            ops.push(callConnectApi.saveSettings(a.id, {
+              enabled: instantCallOn,
+              mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
+            }));
+          }
+          await Promise.all(ops);
         }));
+      } else {
+        const ops: Promise<unknown>[] = [];
+        if (newLeadRule) {
+          ops.push(automationApi.updateRule(newLeadRule.id, {
+            enabled: instantReplyOn,
+            useAi: replyType === 'ai',
+          }));
+        }
+        if (customerTextRule) {
+          ops.push(notificationsApi.updateRule(accountId, customerTextRule.id, {
+            enabled: instantTextOn,
+          }));
+        }
+        if (callSettings) {
+          ops.push(callConnectApi.saveSettings(accountId, {
+            enabled: instantCallOn,
+            mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
+          }));
+        }
+        await Promise.all(ops);
       }
-      if (customerTextRule) {
-        ops.push(notificationsApi.updateRule(accountId, customerTextRule.id, {
-          enabled: instantTextOn,
-        }));
-      }
-      if (callSettings) {
-        ops.push(callConnectApi.saveSettings(accountId, {
-          enabled: instantCallOn,
-          mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
-        }));
-      }
-      await Promise.all(ops);
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
@@ -114,6 +202,32 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       setSaving(false);
     }
   };
+
+  // Cross-account disagreement detection for All-Accounts mode. For each
+  // tracked setting we both: (1) flag whether accounts disagree, and (2)
+  // build a human-readable tooltip listing each account's current value so
+  // the user can hover the warning to see exactly what's diverging.
+  const isMixedFor = <K extends keyof PerAccountState>(key: K): boolean => {
+    if (!isAll || perAccount.length < 2) return false;
+    const first = perAccount[0][key];
+    return perAccount.some(p => p[key] !== first);
+  };
+  const tooltipFor = <K extends keyof PerAccountState>(key: K, fmt: (v: PerAccountState[K]) => string): string | undefined => {
+    if (!isAll || perAccount.length < 2) return undefined;
+    return 'Accounts disagree on this setting:\n'
+      + perAccount.map(p => `  • ${p.account.businessName || p.account.platform}: ${fmt(p[key])}`).join('\n');
+  };
+  const onOff = (v: any) => (v ? 'On' : 'Off');
+  const mixedInstantReply = isMixedFor('instantReplyOn');
+  const mixedInstantText  = isMixedFor('instantTextOn');
+  const mixedInstantCall  = isMixedFor('instantCallOn');
+  const mixedReplyType    = isMixedFor('replyType');
+  const mixedConnMode     = isMixedFor('connMode');
+  const tipInstantReply = tooltipFor('instantReplyOn', onOff);
+  const tipInstantText  = tooltipFor('instantTextOn', onOff);
+  const tipInstantCall  = tooltipFor('instantCallOn', onOff);
+  const tipReplyType    = tooltipFor('replyType', v => v === 'ai' ? 'Let AI write it' : 'Use template');
+  const tipConnMode     = tooltipFor('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
 
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
@@ -212,9 +326,20 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Send the first message automatically when a new lead arrives."
         enabled={instantReplyOn}
         onToggle={setInstantReplyOn}
+        mixed={mixedInstantReply}
+        mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="Reply type" align="top">
+        <FieldRow
+          label={
+            mixedReplyType ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                Reply type <MixedBadge tooltip={tipReplyType} />
+              </span>
+            ) : 'Reply type'
+          }
+          align="top"
+        >
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={replyType === 'template'}
@@ -281,6 +406,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Automatically text the lead when a new lead arrives."
         enabled={instantTextOn}
         onToggle={setInstantTextOn}
+        mixed={mixedInstantText}
+        mixedTooltip={tipInstantText}
         contentPad="8px 24px 24px"
       >
         <FieldRow icon={Clock} iconTone="gray" label="Timing" align="top">
@@ -317,6 +444,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Call your team and connect to the lead right away."
         enabled={instantCallOn}
         onToggle={setInstantCallOn}
+        mixed={mixedInstantCall}
+        mixedTooltip={tipInstantCall}
         contentPad="8px 24px 24px"
       >
         <FieldRow icon={Clock} iconTone="gray" label="Timing" align="top">
@@ -333,7 +462,18 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow icon={ArrowRightLeft} iconTone="gray" label="Connection Mode" align="top">
+        <FieldRow
+          icon={ArrowRightLeft}
+          iconTone="gray"
+          label={
+            mixedConnMode ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                Connection Mode <MixedBadge tooltip={tipConnMode} />
+              </span>
+            ) : 'Connection Mode'
+          }
+          align="top"
+        >
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={connMode === 'agent-first'}
@@ -379,18 +519,18 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         <button
           type="button"
           onClick={handleSave}
-          disabled={saving || isAll}
+          disabled={saving}
           style={{
             padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
             background: 'var(--lb-accent)', color: 'white',
             border: 0, borderRadius: 10,
-            cursor: (saving || isAll) ? 'not-allowed' : 'pointer',
+            cursor: saving ? 'not-allowed' : 'pointer',
             fontFamily: 'inherit',
-            opacity: (saving || isAll) ? 0.6 : 1,
+            opacity: saving ? 0.6 : 1,
           }}
-          title={isAll ? 'Pick a specific account to save changes' : undefined}
+          title={isAll ? `Apply these settings to all ${accounts.length} accounts` : undefined}
         >
-          {saving ? 'Saving...' : 'Save changes'}
+          {saving ? 'Saving...' : isAll ? `Save changes to all ${accounts.length} accounts` : 'Save changes'}
         </button>
       </div>
 
