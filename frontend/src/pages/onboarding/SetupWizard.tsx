@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { onboardingApi } from '../../services/api';
+import { authApi, onboardingApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
@@ -46,20 +46,37 @@ export default function SetupWizard() {
   }
   const [currentStep, setCurrentStep] = useState<WizardStep>(resolveInitialStep(profile));
 
-  // On first mount, fetch the latest profile so we resume at the right
-  // step even if authStore was hydrated from a stale persist snapshot.
+  // On first mount, fetch the latest profile AND the latest auth user
+  // so we resume at the right step and any step that reads from
+  // user.* (website, businessPhone, etc.) sees live data instead of a
+  // stale authStore snapshot. The first time a user logs in after a
+  // schema change, the persisted authStore lacks the new fields — a
+  // refresh here is the cheapest way to backfill them.
   useEffect(() => {
     let cancelled = false;
-    onboardingApi.getProfile()
-      .then(({ profile: fresh }) => {
+    Promise.all([onboardingApi.getProfile(), authApi.getProfile().catch(() => null)])
+      .then(([profileRes, freshUser]) => {
         if (cancelled) return;
-        setProfile(fresh);
-        setCurrentStep(resolveInitialStep(fresh));
-        // Sync the persisted user object so the Overview progress card
-        // reads the same checklist next time it mounts.
-        if (user && fresh) {
+        if (profileRes?.profile) {
+          setProfile(profileRes.profile);
+          setCurrentStep(resolveInitialStep(profileRes.profile));
+        }
+        // Sync the persisted user object so subsequent steps + the
+        // Overview progress card both read the same fresh state.
+        if (user) {
           const token = localStorage.getItem('token') || '';
-          setAuth({ ...user, onboardingProfile: fresh }, token);
+          setAuth(
+            {
+              ...user,
+              ...(profileRes?.profile ? { onboardingProfile: profileRes.profile } : {}),
+              ...(freshUser ? {
+                website: freshUser.website ?? null,
+                websiteMetadataJson: freshUser.websiteMetadataJson ?? null,
+                businessPhone: freshUser.businessPhone ?? user.businessPhone ?? null,
+              } : {}),
+            },
+            token,
+          );
         }
       })
       .finally(() => {
@@ -71,13 +88,18 @@ export default function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derive checklist for display: when savedAccounts drop to zero we
-  // suppress a stale connect=done so the sidebar tick + Overview card
-  // both reflect the live connection state, not a stamp from earlier.
+  // Derive checklist for display: when the data behind a step is
+  // gone (no accounts → AI/Pricing/Automation/AI Rules, no website →
+  // Business), drop the stored `done` so the sidebar tick + Overview
+  // card both reflect live state instead of a stamp from earlier.
   const savedAccounts = useAppStore(s => s.savedAccounts);
+  const hasWebsite = !!(user?.website && user.website.trim().length > 0);
   const checklist: WizardChecklist = useMemo(
-    () => deriveDisplayChecklist(profile?.wizardChecklistStatus ?? {}, savedAccounts.length),
-    [profile?.wizardChecklistStatus, savedAccounts.length],
+    () => deriveDisplayChecklist(profile?.wizardChecklistStatus ?? {}, {
+      accountCount: savedAccounts.length,
+      hasWebsite,
+    }),
+    [profile?.wizardChecklistStatus, savedAccounts.length, hasWebsite],
   );
 
   // Advance helper — sends a patch with the step we just finished + the

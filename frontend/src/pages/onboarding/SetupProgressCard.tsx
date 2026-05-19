@@ -1,7 +1,7 @@
 import { ArrowRight, CheckCircle2, Circle, Rocket, SkipForward } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { onboardingApi } from '../../services/api';
+import { authApi, onboardingApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
@@ -11,28 +11,45 @@ import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wiz
 // SavedAccount exists. Each of these writes its data into per-account
 // JSON on SavedAccount (faqJson.quickFacts / servicePricingJson /
 // followUpSettingsJson), so a SavedAccount cascade-delete also wipes
-// the configuration the user spent time on. Business is intentionally
-// absent: it persists on User.website and survives account removal.
+// the configuration the user spent time on. Business is handled
+// separately — it lives on User.website and only goes stale when the
+// website itself is cleared.
 const ACCOUNT_BOUND_STEPS: WizardStep[] = ['connect', 'ai', 'pricing', 'automation', 'ai_rules'];
 
+export interface DisplayChecklistContext {
+  /** Count of SavedAccount rows owned by the current user. */
+  accountCount: number;
+  /** Whether the user has a non-empty website on file. */
+  hasWebsite: boolean;
+}
+
 // Derive the displayed checklist from the persisted wizard state +
-// live SavedAccount count. When the account is removed, the data
-// behind those steps disappears too; the stored checklist should
-// reflect that or the progress bar lies.
+// live "is the underlying data still there?" signals. When the data
+// behind a step disappears (account removed, website cleared), the
+// stored checklist would lie if we trusted it as-is — so we drop the
+// stored 'done' for those steps and the card shows them as pending.
 //
 // We only revert `done` entries — `skipped` was an explicit user
-// choice and disconnecting shouldn't silently un-skip the step. The
+// choice and a data wipe shouldn't silently un-skip the step. The
 // underlying wizardChecklistStatus on the backend stays untouched;
-// if the user reconnects an account the next ConnectStep mount will
-// re-mark `connect=done` and the display picks back up where it was.
+// if the data comes back the next step mount re-marks it.
 export function deriveDisplayChecklist(
   stored: WizardChecklist,
-  accountCount: number,
+  ctx: DisplayChecklistContext | number,
 ): WizardChecklist {
-  if (accountCount > 0) return stored;
+  // Back-compat: older callers passed accountCount as a bare number.
+  const context: DisplayChecklistContext =
+    typeof ctx === 'number'
+      ? { accountCount: ctx, hasWebsite: true /* don't second-guess if caller didn't tell us */ }
+      : ctx;
   const copy: WizardChecklist = { ...stored };
-  for (const step of ACCOUNT_BOUND_STEPS) {
-    if (copy[step] === 'done') delete copy[step];
+  if (context.accountCount === 0) {
+    for (const step of ACCOUNT_BOUND_STEPS) {
+      if (copy[step] === 'done') delete copy[step];
+    }
+  }
+  if (!context.hasWebsite && copy.business === 'done') {
+    delete copy.business;
   }
   return copy;
 }
@@ -46,23 +63,34 @@ export default function SetupProgressCard() {
   const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
-  // Fetch a fresh profile on mount so the card reflects whatever the
-  // user did during the wizard, even when the persisted authStore
-  // snapshot is stale (e.g. after a soft refresh). We seed from the
-  // store so the card renders immediately and the fetch just patches
-  // any drift.
+  // Fetch a fresh profile + auth-user on mount so the card reflects
+  // whatever the user did during the wizard, even when the persisted
+  // authStore snapshot is stale (e.g. after a soft refresh). We seed
+  // from the store so the card renders immediately and the fetch just
+  // patches any drift. /auth/profile also gives us the live
+  // user.website so the business step doesn't lie about being "done"
+  // when the actual URL was cleared.
   const [profile, setProfile] = useState<OnboardingProfile | null>(user?.onboardingProfile ?? null);
+  const [website, setWebsite] = useState<string | null>(user?.website ?? null);
   useEffect(() => {
     let cancelled = false;
-    onboardingApi.getProfile()
-      .then(({ profile: fresh }) => {
+    Promise.all([onboardingApi.getProfile(), authApi.getProfile().catch(() => null)])
+      .then(([profileRes, freshUser]) => {
         if (cancelled) return;
-        setProfile(fresh);
-        // Sync persisted auth user so other listeners (TrialBanner,
-        // PR1's getProfile path, etc.) see the same checklist state.
-        if (user && fresh) {
+        if (profileRes?.profile) setProfile(profileRes.profile);
+        if (freshUser) setWebsite(freshUser.website ?? null);
+        // Sync persisted auth user so other listeners see the same
+        // checklist + website state next render.
+        if (user && (profileRes?.profile || freshUser)) {
           const token = localStorage.getItem('token') || '';
-          setAuth({ ...user, onboardingProfile: fresh }, token);
+          setAuth(
+            {
+              ...user,
+              ...(profileRes?.profile ? { onboardingProfile: profileRes.profile } : {}),
+              ...(freshUser ? { website: freshUser.website ?? null, websiteMetadataJson: freshUser.websiteMetadataJson ?? null } : {}),
+            },
+            token,
+          );
         }
       })
       .catch(() => { /* non-fatal — use the seeded value */ });
@@ -76,7 +104,10 @@ export default function SetupProgressCard() {
 
   const { completedCount, totalCount, percent, items, hasStarted, isComplete, nextStep } = useMemo(() => {
     const stored: WizardChecklist = profile?.wizardChecklistStatus ?? {};
-    const checklist = deriveDisplayChecklist(stored, savedAccounts.length);
+    const checklist = deriveDisplayChecklist(stored, {
+      accountCount: savedAccounts.length,
+      hasWebsite: !!website && website.trim().length > 0,
+    });
     const total = ACTIONABLE_STEPS.length;
     const completed = ACTIONABLE_STEPS.filter(s => checklist[s] === 'done').length;
     const itemList = WIZARD_STEP_META.filter(m => m.countsTowardChecklist).map(m => ({
@@ -102,7 +133,7 @@ export default function SetupProgressCard() {
       isComplete: complete,
       nextStep: next,
     };
-  }, [profile, savedAccounts.length]);
+  }, [profile, savedAccounts.length, website]);
 
   // Don't render once setup is fully complete — the card is meant as a
   // prompt to finish, not a permanent fixture.
