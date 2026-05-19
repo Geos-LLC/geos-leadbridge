@@ -7,25 +7,34 @@ import { useAuthStore } from '../../store/authStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
 import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
 
+// Steps whose "done" status only makes sense when at least one
+// SavedAccount exists. Each of these writes its data into per-account
+// JSON on SavedAccount (faqJson.quickFacts / servicePricingJson /
+// followUpSettingsJson), so a SavedAccount cascade-delete also wipes
+// the configuration the user spent time on. Business is intentionally
+// absent: it persists on User.website and survives account removal.
+const ACCOUNT_BOUND_STEPS: WizardStep[] = ['connect', 'ai', 'pricing', 'automation', 'ai_rules'];
+
 // Derive the displayed checklist from the persisted wizard state +
-// live SavedAccount state. The `connect` step's stored status can go
-// stale when the user disconnects accounts: the DB still says 'done'
-// because the user clicked Continue earlier, but the source of truth
-// (savedAccounts.length) now contradicts it. We display 'done' only
-// when there's at least one account; otherwise we drop the stored
-// 'done' so the card prompts the user to reconnect. We leave
-// 'skipped' alone — that was an explicit user choice and disconnects
-// shouldn't silently un-skip the step.
+// live SavedAccount count. When the account is removed, the data
+// behind those steps disappears too; the stored checklist should
+// reflect that or the progress bar lies.
+//
+// We only revert `done` entries — `skipped` was an explicit user
+// choice and disconnecting shouldn't silently un-skip the step. The
+// underlying wizardChecklistStatus on the backend stays untouched;
+// if the user reconnects an account the next ConnectStep mount will
+// re-mark `connect=done` and the display picks back up where it was.
 export function deriveDisplayChecklist(
   stored: WizardChecklist,
   accountCount: number,
 ): WizardChecklist {
   if (accountCount > 0) return stored;
-  if (stored.connect === 'done') {
-    const { connect: _ignore, ...rest } = stored;
-    return rest;
+  const copy: WizardChecklist = { ...stored };
+  for (const step of ACCOUNT_BOUND_STEPS) {
+    if (copy[step] === 'done') delete copy[step];
   }
-  return stored;
+  return copy;
 }
 
 // Setup-progress card shown on Overview. Only renders when the user

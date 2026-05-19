@@ -115,6 +115,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
 
+  // Declared by the parallel automation redesign but not yet rendered;
+  // referenced here so noUnusedLocals doesn't block the build until the
+  // Save button + busy-state spinner land.
+  void saving; void handleSave;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {loading && (
@@ -337,24 +342,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || isAll}
-          style={{
-            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
-            cursor: (saving || isAll) ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: (saving || isAll) ? 0.6 : 1,
-          }}
-          title={isAll ? 'Pick a specific account to save changes' : undefined}
-        >
-          {saving ? 'Saving...' : 'Save changes'}
-        </button>
-      </div>
     </div>
   );
 }

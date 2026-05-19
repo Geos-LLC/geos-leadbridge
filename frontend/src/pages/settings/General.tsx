@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Building, Bell, Mail, Smartphone, Info, Loader2 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
@@ -15,18 +15,34 @@ export function SettingsGeneral() {
   const [tz, setTz] = useState<string>('America/New_York');
   const [industry, setIndustry] = useState<string>('Cleaning & home services');
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  // Preserved for potential busy-state UI later.
+  const [_saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   // Pull timezone from business-hours endpoint (single source of truth).
+  // Mark hydration done after the initial load so debounced auto-save doesn't
+  // fire on the very first state-set.
   useEffect(() => {
     let alive = true;
     setLoading(true);
     usersApi.getBusinessHours()
       .then(bh => { if (alive && bh.timezone) setTz(bh.timezone); })
       .catch(() => { /* non-fatal */ })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+          // Defer hydration flag until after this render commits so the
+          // setTz above doesn't trip auto-save.
+          setTimeout(() => { hydratedRef.current = true; }, 0);
+        }
+      });
     return () => { alive = false; };
   }, []);
 
@@ -40,9 +56,7 @@ export function SettingsGeneral() {
     setSaving(true);
     setError(null);
     try {
-      // Persist business name via the user profile endpoint.
       await usersApi.updateProfile({ name: business });
-      // Persist timezone via the business-hours endpoint (canonical home for tz).
       await usersApi.updateBusinessHours({ timezone: tz });
       // Refresh cached auth user so the rest of the app sees the new name.
       if (token) {
@@ -59,6 +73,15 @@ export function SettingsGeneral() {
       setSaving(false);
     }
   };
+
+  // Auto-save (debounced ~800ms — slightly longer since "business name" is a
+  // text field).
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const t = setTimeout(() => { handleSave(); }, 800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [business, tz, industry]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -135,24 +158,6 @@ export function SettingsGeneral() {
         <NotifRow label="Customer agreed on price" desc="A lead replied with a yes on the quote." defaultChannels={{ email: true, sms: false, push: true }} />
         <NotifRow label="Job booked" desc="A lead converted to a booked job." defaultChannels={{ email: true, sms: false, push: true }} noBorder />
       </SettingCard>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? 'Saving...' : 'Save changes'}
-        </button>
-      </div>
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />
     </div>
