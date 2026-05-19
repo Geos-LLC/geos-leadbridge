@@ -822,10 +822,14 @@ export class WebhooksService {
       // `handleCustomerReply` skips intent classification, the Lead.status
       // transition, the handoff alert, and every phrase-list AI Conversation
       // stop check — all of those are gated on `context.customerMessage`.
-      // The Yelp webhook path (line ~2054) already forwards both; this is
-      // the Thumbtack-side parity fix. FargiPro / Amy Koch 2026-05-16:
-      // customer wrote "I have booked someone else for this task", AI
-      // replied 33s later because the classifier was never invoked here.
+      // FargiPro / Amy Koch 2026-05-16: customer wrote "I have booked
+      // someone else for this task", AI replied 33s later because the
+      // classifier was never invoked here. The Yelp path has the parallel
+      // fix at ~line 2065 — it forwards `latestCustomerMessage` (NOT
+      // `leadData.message`, which is the initial inquiry's
+      // `project.additional_info`, the cause of the Mariana S. 2026-05-19
+      // regression where AI replied with a price quote after "I no longer
+      // need this service").
       try {
         await this.automationService.handleCustomerReply({
           userId,
@@ -2067,8 +2071,17 @@ export class WebhooksService {
           businessId,
           negotiationId: leadId,
           leadId: lead.id,
+          messageId: customerEventId || undefined,
           customerName: leadData.customerName,
-          customerMessage: leadData.message || undefined,
+          // `leadData.message` is `project.additional_info` from the Yelp lead
+          // payload — the customer's INITIAL inquiry text, not the latest
+          // reply. Feeding it to the classifier here misses opt-out/completion
+          // signals in the most recent message (Mariana S. 2026-05-19:
+          // customer wrote "Sorry, I no longer need this service", classifier
+          // saw the original inquiry instead and AI replied 30s later with a
+          // price quote). Always prefer `latestCustomerMessage` from the
+          // event-classifier.
+          customerMessage: latestCustomerMessage || leadData.message || undefined,
           accountName: savedAccount.businessName,
           isFirstCustomerReply: false,
           isSecondCustomerMessage: customerMessageCount === 2,
