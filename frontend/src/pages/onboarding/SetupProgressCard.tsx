@@ -2,9 +2,31 @@ import { ArrowRight, CheckCircle2, Circle, Rocket, SkipForward } from 'lucide-re
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onboardingApi } from '../../services/api';
+import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
 import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
+
+// Derive the displayed checklist from the persisted wizard state +
+// live SavedAccount state. The `connect` step's stored status can go
+// stale when the user disconnects accounts: the DB still says 'done'
+// because the user clicked Continue earlier, but the source of truth
+// (savedAccounts.length) now contradicts it. We display 'done' only
+// when there's at least one account; otherwise we drop the stored
+// 'done' so the card prompts the user to reconnect. We leave
+// 'skipped' alone — that was an explicit user choice and disconnects
+// shouldn't silently un-skip the step.
+export function deriveDisplayChecklist(
+  stored: WizardChecklist,
+  accountCount: number,
+): WizardChecklist {
+  if (accountCount > 0) return stored;
+  if (stored.connect === 'done') {
+    const { connect: _ignore, ...rest } = stored;
+    return rest;
+  }
+  return stored;
+}
 
 // Setup-progress card shown on Overview. Only renders when the user
 // hasn't yet completed the 8-step wizard. The middle six steps
@@ -41,8 +63,11 @@ export default function SetupProgressCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const savedAccounts = useAppStore(s => s.savedAccounts);
+
   const { completedCount, totalCount, percent, items, hasStarted, isComplete, nextStep } = useMemo(() => {
-    const checklist: WizardChecklist = profile?.wizardChecklistStatus ?? {};
+    const stored: WizardChecklist = profile?.wizardChecklistStatus ?? {};
+    const checklist = deriveDisplayChecklist(stored, savedAccounts.length);
     const total = ACTIONABLE_STEPS.length;
     const completed = ACTIONABLE_STEPS.filter(s => checklist[s] === 'done').length;
     const itemList = WIZARD_STEP_META.filter(m => m.countsTowardChecklist).map(m => ({
@@ -68,7 +93,7 @@ export default function SetupProgressCard() {
       isComplete: complete,
       nextStep: next,
     };
-  }, [profile]);
+  }, [profile, savedAccounts.length]);
 
   // Don't render once setup is fully complete — the card is meant as a
   // prompt to finish, not a permanent fixture.

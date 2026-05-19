@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StripeService } from '../stripe/stripe.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+import { PlatformService } from '../platforms/platform.service';
 
 @Injectable()
 export class UsersService {
@@ -16,6 +17,8 @@ export class UsersService {
     private notificationsService: NotificationsService,
     private stripeService: StripeService,
     private cache: CacheService,
+    @Inject(forwardRef(() => PlatformService))
+    private platformService: PlatformService,
   ) {}
 
   async updateProfile(userId: string, updates: { name?: string; businessPhone?: string; website?: string | null }) {
@@ -495,6 +498,20 @@ export class UsersService {
         await this.stripeService.cancelSubscription(userId, true);
       } catch (err: any) {
         this.logger.warn(`[deleteOwnAccount] Stripe cancel failed: ${err.message}`);
+      }
+    }
+
+    // Deregister platform-side webhooks BEFORE we lose the
+    // SavedAccount rows in the cascade delete. disconnectAccountWebhook
+    // calls adapter.deleteWebhook (Thumbtack DELETE /businesses/.../
+    // webhooks/..., Yelp unsubscribe) so the platform stops sending
+    // events to LeadBridge for these businesses. Best-effort: failures
+    // shouldn't block the user's explicit account-deletion request.
+    for (const account of user.savedAccounts) {
+      try {
+        await this.platformService.disconnectAccountWebhook(userId, account.id);
+      } catch (err: any) {
+        this.logger.warn(`[deleteOwnAccount] Platform webhook cleanup failed for ${account.id}: ${err.message}`);
       }
     }
 
