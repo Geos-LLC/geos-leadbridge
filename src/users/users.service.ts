@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
+import axios from 'axios';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -6,6 +7,25 @@ import { StripeService } from '../stripe/stripe.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { PlatformService } from '../platforms/platform.service';
+
+export interface VerifyWebsiteResult {
+  reachable: boolean;
+  normalizedUrl: string;
+  metadata?: {
+    title?: string;
+    description?: string;
+    phone?: string;
+  };
+  errorCode?:
+    | 'invalid_url'
+    | 'private_host'
+    | 'dns_not_found'
+    | 'connection_refused'
+    | 'timeout'
+    | 'http_error'
+    | 'unreachable';
+  errorMessage?: string;
+}
 
 @Injectable()
 export class UsersService {
@@ -21,7 +41,12 @@ export class UsersService {
     private platformService: PlatformService,
   ) {}
 
-  async updateProfile(userId: string, updates: { name?: string; businessPhone?: string; website?: string | null }) {
+  async updateProfile(userId: string, updates: {
+    name?: string;
+    businessPhone?: string;
+    website?: string | null;
+    websiteMetadata?: VerifyWebsiteResult['metadata'] | null;
+  }) {
     const data: Record<string, any> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.businessPhone !== undefined) {
@@ -38,11 +63,17 @@ export class UsersService {
       // storing whitespace.
       const trimmed = (updates.website ?? '').trim();
       data.website = trimmed.length === 0 ? null : trimmed;
+      // Clearing the URL also clears the cached metadata so we don't
+      // hand back a title that belongs to the previous site.
+      if (trimmed.length === 0) data.websiteMetadataJson = null;
+    }
+    if (updates.websiteMetadata !== undefined) {
+      data.websiteMetadataJson = updates.websiteMetadata ?? null;
     }
 
     const user = await this.prisma.user.update({
       where: { id: userId },
-      select: { id: true, name: true, email: true, businessPhone: true, website: true },
+      select: { id: true, name: true, email: true, businessPhone: true, website: true, websiteMetadataJson: true },
       data,
     });
 
@@ -539,5 +570,169 @@ export class UsersService {
 
     this.logger.log(`[deleteOwnAccount] User ${user.email} deleted their account`);
     return { success: true };
+  }
+
+  // ---------------------------------------------------------------------
+  // verifyWebsite: lightweight check the onboarding wizard runs before
+  // accepting the Business step. Goals:
+  //   1. Reject typos/garbage URLs up front
+  //   2. Confirm the site actually serves something (no DNS / 5xx)
+  //   3. Pull a tiny amount of metadata (title, description, phone) so
+  //      later wizard steps can pre-fill answers without re-parsing
+  // We deliberately keep this self-contained — no external library,
+  // no SSR pipeline — because the parsing only needs to handle the
+  // first few bytes of a marketing site's <head>.
+  // ---------------------------------------------------------------------
+  async verifyWebsite(input: string): Promise<VerifyWebsiteResult> {
+    const normalized = this.normalizeWebsiteUrl(input);
+    if (!normalized) {
+      return {
+        reachable: false,
+        normalizedUrl: (input ?? '').trim(),
+        errorCode: 'invalid_url',
+        errorMessage: "That doesn't look like a valid website URL.",
+      };
+    }
+
+    // SSRF guard — refuse to fetch internal hosts. The normalize step
+    // already strips obvious "localhost"/RFC1918 cases; this is a
+    // belt-and-suspenders check after URL parsing so a future change
+    // can't accidentally let one slip through.
+    try {
+      const u = new URL(normalized);
+      const host = u.hostname.toLowerCase();
+      if (this.isPrivateHost(host)) {
+        return {
+          reachable: false,
+          normalizedUrl: normalized,
+          errorCode: 'private_host',
+          errorMessage: 'Internal addresses are not allowed.',
+        };
+      }
+    } catch {
+      return { reachable: false, normalizedUrl: normalized, errorCode: 'invalid_url' };
+    }
+
+    try {
+      const response = await axios.get(normalized, {
+        timeout: 6000,
+        maxRedirects: 3,
+        // ~500 KB ceiling — enough to capture the <head> of any
+        // reasonable marketing site without pulling a full SPA bundle.
+        maxContentLength: 500 * 1024,
+        responseType: 'text',
+        // Some hosts refuse non-browser User-Agents; identify ourselves
+        // but pretend to be a Mozilla so anti-bot filters don't 403.
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; LeadBridgeWebsiteCheck/1.0; +https://leadbridge360.com)',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        // Accept everything below 400 — we already handle redirects via
+        // maxRedirects.
+        validateStatus: (s) => s < 400,
+      });
+      const html: string = typeof response.data === 'string' ? response.data : '';
+      const metadata = this.extractWebsiteMetadata(html);
+      return { reachable: true, normalizedUrl: normalized, metadata };
+    } catch (err: any) {
+      const code = err.code || '';
+      const status = err.response?.status;
+      let errorCode: VerifyWebsiteResult['errorCode'] = 'unreachable';
+      let errorMessage = 'We couldn\'t load this site.';
+      if (code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
+        errorCode = 'timeout';
+        errorMessage = 'The site took too long to respond.';
+      } else if (code === 'ENOTFOUND' || /enotfound|getaddrinfo/i.test(err.message || '')) {
+        errorCode = 'dns_not_found';
+        errorMessage = 'We couldn\'t find that domain.';
+      } else if (code === 'ECONNREFUSED') {
+        errorCode = 'connection_refused';
+        errorMessage = 'The site refused the connection.';
+      } else if (typeof status === 'number') {
+        errorCode = 'http_error';
+        errorMessage = `The site returned an error (HTTP ${status}).`;
+      }
+      this.logger.warn(`[verifyWebsite] ${normalized} failed: ${errorCode} (${err.message})`);
+      return { reachable: false, normalizedUrl: normalized, errorCode, errorMessage };
+    }
+  }
+
+  private normalizeWebsiteUrl(input: string): string | null {
+    if (!input) return null;
+    let raw = input.trim();
+    if (raw.length === 0) return null;
+    if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
+    try {
+      const u = new URL(raw);
+      // Hostname must have at least one dot — rejects "localhost",
+      // bare TLDs, and accidental words.
+      if (!u.hostname || !u.hostname.includes('.')) return null;
+      // Reject obvious internal addresses early.
+      if (this.isPrivateHost(u.hostname.toLowerCase())) return null;
+      return u.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private isPrivateHost(host: string): boolean {
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return true;
+    // IPv4 private ranges
+    if (/^127\./.test(host)) return true;
+    if (/^10\./.test(host)) return true;
+    if (/^192\.168\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    // IPv6 loopback / link-local
+    if (host === '::1' || host.startsWith('fe80:')) return true;
+    return false;
+  }
+
+  private extractWebsiteMetadata(html: string): VerifyWebsiteResult['metadata'] {
+    if (!html) return {};
+    const title = this.firstMatch(html, /<title[^>]*>([\s\S]{1,500}?)<\/title>/i);
+    const description =
+      this.metaContent(html, 'description') ||
+      this.metaContent(html, 'og:description', 'property') ||
+      undefined;
+    const phone = this.firstMatch(
+      html,
+      // Tolerant US phone regex — captures most "(415) 555-1234" /
+      // "+1 415 555 1234" / "415.555.1234" forms.
+      /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/,
+      0,
+    );
+    return {
+      title: this.trimText(title),
+      description: this.trimText(description),
+      phone: phone ? phone.trim() : undefined,
+    };
+  }
+
+  private firstMatch(html: string, re: RegExp, group = 1): string | undefined {
+    const m = html.match(re);
+    if (!m) return undefined;
+    return (m[group] ?? '').replace(/\s+/g, ' ').trim() || undefined;
+  }
+
+  private metaContent(html: string, name: string, attr: 'name' | 'property' = 'name'): string | undefined {
+    const reAttrFirst = new RegExp(
+      `<meta[^>]+${attr}=["']${this.escapeRegex(name)}["'][^>]*content=["']([^"']{1,500})["']`,
+      'i',
+    );
+    const reContentFirst = new RegExp(
+      `<meta[^>]+content=["']([^"']{1,500})["'][^>]*${attr}=["']${this.escapeRegex(name)}["']`,
+      'i',
+    );
+    return this.firstMatch(html, reAttrFirst) || this.firstMatch(html, reContentFirst);
+  }
+
+  private escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private trimText(s: string | undefined): string | undefined {
+    if (!s) return undefined;
+    const cleaned = s.replace(/\s+/g, ' ').trim();
+    return cleaned.length === 0 ? undefined : cleaned.slice(0, 280);
   }
 }

@@ -17,6 +17,10 @@ interface WizardShellProps {
   // Hide the entire action bar (used by Welcome / Done which roll their
   // own primary CTA).
   hideActions?: boolean;
+  // Sidebar jump. Optional — when provided, the left-rail step rows
+  // become clickable buttons that jump to the chosen step. The
+  // container is responsible for the actual PATCH + state update.
+  onStepClick?: (step: WizardStep) => void;
 }
 
 // Shared chrome for the 8-step setup wizard. Renders the left rail with
@@ -34,6 +38,7 @@ export default function WizardShell({
   continueDisabled,
   saving,
   hideActions,
+  onStepClick,
 }: WizardShellProps) {
   const navigate = useNavigate();
   const currentIndex = getStepIndex(currentStep);
@@ -65,17 +70,21 @@ export default function WizardShell({
             const isPast = i < currentIndex;
             const isDone = status === 'done';
             const isSkipped = status === 'skipped';
-            return (
-              <div
-                key={meta.slug}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                  isCurrent
-                    ? 'bg-blue-50 text-blue-900'
-                    : isPast || isDone || isSkipped
-                      ? 'text-slate-500'
-                      : 'text-slate-400'
-                }`}
-              >
+            // Sidebar row is clickable when the wizard owner provides a
+            // jump callback and the click would actually change the
+            // current step. Saving is gated so a click can't race a
+            // pending PATCH.
+            const clickable = !!onStepClick && !isCurrent && !saving;
+            const rowClasses = `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors w-full text-left ${
+              isCurrent
+                ? 'bg-blue-50 text-blue-900'
+                : isPast || isDone || isSkipped
+                  ? 'text-slate-500'
+                  : 'text-slate-400'
+            } ${clickable ? 'cursor-pointer hover:bg-slate-100' : 'cursor-default'}`;
+
+            const inner = (
+              <>
                 <span
                   className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-[11px] font-bold ${
                     isCurrent
@@ -92,12 +101,31 @@ export default function WizardShell({
                 >
                   {isDone ? <Check className="w-3.5 h-3.5" /> : i + 1}
                 </span>
-                <span className="flex-1">{meta.label}</span>
+                <span className="flex-1 truncate">{meta.label}</span>
                 {isSkipped && (
                   <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     skipped
                   </span>
                 )}
+              </>
+            );
+
+            if (clickable) {
+              return (
+                <button
+                  key={meta.slug}
+                  type="button"
+                  onClick={() => onStepClick!(meta.slug)}
+                  className={rowClasses}
+                  aria-current={isCurrent ? 'step' : undefined}
+                >
+                  {inner}
+                </button>
+              );
+            }
+            return (
+              <div key={meta.slug} className={rowClasses} aria-current={isCurrent ? 'step' : undefined}>
+                {inner}
               </div>
             );
           })}
