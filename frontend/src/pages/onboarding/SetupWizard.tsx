@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { onboardingApi } from '../../services/api';
+import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep, WizardStatus } from '../../types';
 import { PageSkeleton } from '../../components/PageSkeleton';
+import { deriveDisplayChecklist } from './SetupProgressCard';
 import WizardShell from './WizardShell';
 import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
@@ -69,9 +71,13 @@ export default function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Derive checklist for display: when savedAccounts drop to zero we
+  // suppress a stale connect=done so the sidebar tick + Overview card
+  // both reflect the live connection state, not a stamp from earlier.
+  const savedAccounts = useAppStore(s => s.savedAccounts);
   const checklist: WizardChecklist = useMemo(
-    () => profile?.wizardChecklistStatus ?? {},
-    [profile?.wizardChecklistStatus],
+    () => deriveDisplayChecklist(profile?.wizardChecklistStatus ?? {}, savedAccounts.length),
+    [profile?.wizardChecklistStatus, savedAccounts.length],
   );
 
   // Advance helper — sends a patch with the step we just finished + the

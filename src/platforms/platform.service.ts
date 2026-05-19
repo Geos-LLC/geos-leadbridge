@@ -1478,6 +1478,31 @@ export class PlatformService {
       console.log(`[PlatformService] Deleted ${leads.length} leads for account ${account.businessName}`);
     }
 
+    // Deregister the platform-side webhook before we lose the
+    // accountId/businessId/webhookId we need to call the adapter.
+    // Best-effort: if the call fails (token expired, network blip,
+    // already-deleted on the platform side), log + continue. Leaving
+    // a stale webhook is preferable to silently failing the user's
+    // explicit delete request.
+    if (account.webhookId) {
+      try {
+        const adapter = this.platformFactory.getAdapter(account.platform) as any;
+        if (typeof adapter?.deleteWebhook === 'function') {
+          let credentials: { accessToken: string; refreshToken?: string };
+          const accountCreds = await this.getAccountCredentials(userId, accountId);
+          if (accountCreds) {
+            credentials = accountCreds;
+          } else {
+            credentials = await this.getCredentials(userId, account.platform);
+          }
+          await adapter.deleteWebhook(credentials, account.businessId, account.webhookId);
+          this.logger.log(`[removeSavedAccount] Deregistered ${account.platform} webhook ${account.webhookId} for ${account.businessName}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[removeSavedAccount] Webhook deregistration failed (continuing with local delete): ${err.message}`);
+      }
+    }
+
     // Clean up Sigcore tenant before deleting locally (cascades phone numbers, integrations, API keys)
     try {
       await this.notificationsService.deleteSigcoreTenant(accountId);
