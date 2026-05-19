@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
@@ -13,6 +13,7 @@ import {
   type IconTone,
 } from '../../components/automation/ui';
 import { followUpApi } from '../../services/api';
+import { useAppStore } from '../../store/appStore';
 
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
 
@@ -29,6 +30,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = { from: location.pathname + location.search, fromLabel: 'AI Conversation' };
+  const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
 
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
@@ -42,83 +44,92 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   });
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scopeKey = isAll ? '__all__' : accountId;
+  const hydratedForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isAll) return;
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
+
+  useEffect(() => {
+    if (isAll) { hydratedForRef.current = '__all__'; return; }
+    hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
     followUpApi.getSettings(accountId)
       .then((res: any) => {
-        if (!alive || !res?.settings) return;
-        const s = res.settings;
-        const strat = (s.followUpStrategy as StrategyKey | undefined);
-        if (strat && STRATEGIES.some(x => x.k === strat)) setStrategy(strat);
-        if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceMode(s.priceQuoteMode);
-        // Loaded UI availability — when active_hours, show "outside hours" toggle.
-        if (s.followUpAvailability === 'active_hours') setAvailability('hours');
-        else if (s.followUpAvailability === 'always') setAvailability('always');
-        // Stop rules
-        setStopRules({
-          not_contacted: s.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
-          booked:        s.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
-          price_agreed:  s.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
-          done:          true, // No backend equivalent — visual only
-        });
-        // Human takeover triggers
-        setTakeover({
-          ready:     s.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
-          live:      s.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
-          phone:     s.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
-          sqft:      s.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
-          qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
-        });
+        if (!alive) return;
+        const s = res?.settings;
+        if (s) {
+          const strat = (s.followUpStrategy as StrategyKey | undefined);
+          if (strat && STRATEGIES.some(x => x.k === strat)) setStrategy(strat);
+          if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceMode(s.priceQuoteMode);
+          if (s.followUpAvailability === 'active_hours') setAvailability('hours');
+          else if (s.followUpAvailability === 'always') setAvailability('always');
+          setStopRules({
+            not_contacted: s.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
+            booked:        s.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
+            price_agreed:  s.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
+            done:          true,
+          });
+          setTakeover({
+            ready:     s.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
+            live:      s.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
+            phone:     s.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
+            sqft:      s.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
+            qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
+          });
+        }
+        hydratedForRef.current = accountId;
       })
-      .catch(() => { /* non-fatal */ })
+      .catch(() => { hydratedForRef.current = accountId; })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
 
   const handleSave = async () => {
-    if (isAll) {
-      setError('Pick a specific account to save changes. "All accounts" is read-only in this view for now.');
-      return;
-    }
-    setSaving(true); setError(null);
+    const payload = {
+      followUpStrategy: strategy,
+      priceQuoteMode: priceMode,
+      followUpAvailability: availability === 'hours' ? 'active_hours' : 'always',
+      aiStopOnOptOut: stopRules.not_contacted,
+      aiStopOnBooked: stopRules.booked,
+      aiStopOnPriceAgreed: stopRules.price_agreed,
+      handoffTriggerAgreed: takeover.ready,
+      handoffTriggerWantsLiveContact: takeover.live,
+      handoffTriggerProvidedPhone: takeover.phone,
+      handoffTriggerProvidedSquareFootage: takeover.sqft,
+      handoffTriggerQualificationComplete: takeover.qualified,
+    };
+    setError(null);
     try {
-      await followUpApi.saveWizardSettings(accountId, {
-        followUpStrategy: strategy,
-        priceQuoteMode: priceMode,
-        followUpAvailability: availability === 'hours' ? 'active_hours' : 'always',
-        aiStopOnOptOut: stopRules.not_contacted,
-        aiStopOnBooked: stopRules.booked,
-        aiStopOnPriceAgreed: stopRules.price_agreed,
-        handoffTriggerAgreed: takeover.ready,
-        handoffTriggerWantsLiveContact: takeover.live,
-        handoffTriggerProvidedPhone: takeover.phone,
-        handoffTriggerProvidedSquareFootage: takeover.sqft,
-        handoffTriggerQualificationComplete: takeover.qualified,
-      });
+      if (isAll) {
+        await Promise.all(accounts.map(a => followUpApi.saveWizardSettings(a.id, payload).catch(() => undefined)));
+      } else {
+        await followUpApi.saveWizardSettings(accountId, payload);
+      }
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
-    } finally {
-      setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (hydratedForRef.current !== scopeKey) return;
+    const t = setTimeout(() => { handleSave(); }, 700);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, strategy, priceMode, availability, stopRules, takeover]);
 
   const toggleStop = (k: keyof typeof stopRules) => setStopRules(r => ({ ...r, [k]: !r[k] }));
   const toggleTakeover = (k: keyof typeof takeover) => setTakeover(r => ({ ...r, [k]: !r[k] }));
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
-
-  // Declared by the parallel automation redesign but not yet rendered;
-  // referenced here so noUnusedLocals doesn't block the build until the
-  // Save button + busy-state spinner land.
-  void saving; void handleSave;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -142,7 +153,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         }}>Saved.</div>
       )}
 
-      {/* AI Strategy */}
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
           <IconTile icon={Brain} tone="violet" size="lg" />
@@ -204,7 +214,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      {/* Auto Reply Availability */}
       <SettingCard
         icon={Clock}
         iconTone="violet"
@@ -230,7 +239,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         }
       />
 
-      {/* Stop Rules */}
       <SectionCard padding="22px 24px 8px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Hand} tone="rose" size="lg" />
@@ -274,7 +282,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      {/* Human Takeover */}
       <SectionCard padding="22px 24px 8px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Users} tone="orange" size="lg" />
@@ -318,7 +325,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      {/* How it works */}
       <SectionCard padding="20px 24px">
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
           How it works
@@ -341,7 +347,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           <FlowStep icon={Hand}               iconTone="rose"   title="If a Stop Rule matches," subtitle="AI stops replying" />
         </div>
       </SectionCard>
-
     </div>
   );
 }

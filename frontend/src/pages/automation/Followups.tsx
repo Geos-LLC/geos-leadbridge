@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
@@ -45,9 +45,17 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [platform, setPlatform] = useState<string | undefined>(undefined);
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
+  const [_saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scopeKey = isAll ? '__all__' : accountId;
+  const hydratedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   // Capture platform when we know the account so saveSettings can fan-out seeding.
   useEffect(() => {
@@ -57,45 +65,46 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   }, [accountId, isAll, accounts]);
 
   useEffect(() => {
-    if (isAll) return;
+    if (isAll) { hydratedForRef.current = '__all__'; return; }
+    hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
     followUpApi.getSettings(accountId)
       .then(res => {
-        if (!alive || !res?.settings) return;
-        const s = res.settings;
-        if (s.followUpMode === 'off') {
-          // Treat "off" same as "suggest" + quiet on=false UI; backend still has mode field.
-          setDeliveryMode('suggest');
-        } else if (s.followUpMode === 'auto_send') setDeliveryMode('active');
-        else setDeliveryMode('suggest');
-        if (s.followUpReplyType === 'template') setMessageMode('template');
-        else if (s.followUpReplyType === 'ai') setMessageMode('ai');
-        if (s.followUpActiveHoursStart) setActiveHoursStart(s.followUpActiveHoursStart);
-        if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
-        if (s.followUpTimezone) setTimezone(s.followUpTimezone);
+        if (!alive) return;
+        const s = res?.settings;
+        if (s) {
+          if (s.followUpMode === 'auto_send') setDeliveryMode('active');
+          else setDeliveryMode('suggest');
+          if (s.followUpReplyType === 'template') setMessageMode('template');
+          else if (s.followUpReplyType === 'ai') setMessageMode('ai');
+          if (s.followUpActiveHoursStart) setActiveHoursStart(s.followUpActiveHoursStart);
+          if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
+          if (s.followUpTimezone) setTimezone(s.followUpTimezone);
+        }
+        hydratedForRef.current = accountId;
       })
-      .catch(() => { /* non-fatal — defaults remain */ })
+      .catch(() => { hydratedForRef.current = accountId; })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
 
   const handleSave = async () => {
-    if (isAll) {
-      setError('Pick a specific account to save changes. "All accounts" is read-only in this view for now.');
-      return;
-    }
+    const payload = {
+      mode: deliveryMode === 'active' ? 'auto_send' : 'suggest',
+      preset: 'smart',
+      replyType: messageMode,
+      activeHoursStart,
+      activeHoursEnd,
+      timezone,
+    };
     setSaving(true); setError(null);
     try {
-      await followUpApi.saveSettings(accountId, {
-        mode: deliveryMode === 'active' ? 'auto_send' : 'suggest',
-        preset: 'smart',
-        replyType: messageMode,
-        activeHoursStart,
-        activeHoursEnd,
-        timezone,
-        platform,
-      });
+      if (isAll) {
+        await Promise.all(accounts.map(a => followUpApi.saveSettings(a.id, { ...payload, platform: a.platform }).catch(() => undefined)));
+      } else {
+        await followUpApi.saveSettings(accountId, { ...payload, platform });
+      }
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
@@ -103,6 +112,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       setSaving(false);
     }
   };
+
+  // Auto-save (debounced ~700ms) once the current scope has hydrated.
+  useEffect(() => {
+    if (hydratedForRef.current !== scopeKey) return;
+    const t = setTimeout(() => { handleSave(); }, 700);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn]);
 
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
@@ -314,25 +331,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           noBorder
         />
       </SectionCard>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || isAll}
-          style={{
-            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
-            cursor: (saving || isAll) ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: (saving || isAll) ? 0.6 : 1,
-          }}
-          title={isAll ? 'Pick a specific account to save changes' : undefined}
-        >
-          {saving ? 'Saving...' : 'Save changes'}
-        </button>
-      </div>
 
       <FooterBanner
         icon={Info}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
@@ -47,11 +47,19 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [perAccount, setPerAccount] = useState<PerAccountState[]>([]);
 
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
+  const [_saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isAll = accountId === 'all';
+  const scopeKey = isAll ? '__all__' : accountId;
+  const hydratedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   // Templates load once for the whole user (independent of selected account)
   // so the new-design tiles can show the actual template name even when scope
@@ -67,6 +75,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // Single-account load (when the user picks a specific account tab).
   useEffect(() => {
     if (isAll) return;
+    hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
     Promise.all([
@@ -90,6 +99,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setConnMode(ccRes.settings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
       }
       setPerAccount([]); // not relevant in single-account mode
+      hydratedForRef.current = accountId;
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
@@ -103,6 +113,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       setPerAccount([]);
       return;
     }
+    hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
     (async () => {
@@ -136,12 +147,21 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setConnMode(first.connMode);
         }
         setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
+        hydratedForRef.current = '__all__';
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
   }, [isAll, accounts]);
+
+  // Auto-save (debounced ~700ms) once the current scope has hydrated.
+  useEffect(() => {
+    if (hydratedForRef.current !== scopeKey) return;
+    const t = setTimeout(() => { handleSave(); }, 700);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, instantReplyOn, instantTextOn, instantCallOn, replyType, connMode]);
 
   const handleSave = async () => {
     setSaving(true); setError(null);
@@ -514,25 +534,6 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           />
         </FieldRow>
       </SettingCard>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontFamily: 'inherit',
-            opacity: saving ? 0.6 : 1,
-          }}
-          title={isAll ? `Apply these settings to all ${accounts.length} accounts` : undefined}
-        >
-          {saving ? 'Saving...' : isAll ? `Save changes to all ${accounts.length} accounts` : 'Save changes'}
-        </button>
-      </div>
 
       <FooterBanner
         icon={Info}
