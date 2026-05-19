@@ -56,7 +56,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   }, [savedAt]);
 
   useEffect(() => {
-    if (isAll) { hydratedForRef.current = '__all__'; return; }
+    // Defer hydration flag past commit so the auto-save effect bails on the
+    // tab-switch render (otherwise it'd fan out the just-loaded values to
+    // every account on every tab switch).
+    if (isAll) {
+      hydratedForRef.current = null;
+      setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
+      return;
+    }
     hydratedForRef.current = null;
     let alive = true;
     setLoading(true); setError(null);
@@ -84,9 +91,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
           });
         }
-        hydratedForRef.current = accountId;
+        setTimeout(() => { hydratedForRef.current = accountId; }, 0);
       })
-      .catch(() => { hydratedForRef.current = accountId; })
+      .catch(() => { setTimeout(() => { hydratedForRef.current = accountId; }, 0); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);

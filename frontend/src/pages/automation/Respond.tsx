@@ -99,7 +99,12 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setConnMode(ccRes.settings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
       }
       setPerAccount([]); // not relevant in single-account mode
-      hydratedForRef.current = accountId;
+      // Defer hydration flag past React's commit phase so the auto-save
+      // effect (which fires when state deps change after the setters above)
+      // sees the OLD ref and bails. Otherwise we'd save the just-loaded
+      // values right back, and in All-Accounts mode that fan-outs the
+      // first account's values to every connected account.
+      setTimeout(() => { hydratedForRef.current = accountId; }, 0);
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
@@ -147,7 +152,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setConnMode(first.connMode);
         }
         setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
-        hydratedForRef.current = '__all__';
+        // See single-account load comment — defer past commit so auto-save
+        // doesn't immediately fan out the seeded values to every account.
+        setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
       } finally {
         if (alive) setLoading(false);
       }
