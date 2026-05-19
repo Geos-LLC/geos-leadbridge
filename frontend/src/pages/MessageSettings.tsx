@@ -37,9 +37,8 @@ export function MessageSettings() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // Capture highlight target ONCE at mount. We deliberately don't read this
-  // from the live searchParams later so cleaning the URL after the flash
-  // doesn't cause the effect to re-evaluate and clear state mid-animation.
+  // Capture highlight target ONCE at mount so cleaning the URL after the flash
+  // doesn't cause the effect to re-evaluate to "no target" mid-animation.
   const initialHighlightRef = useRef<string | null>(searchParams.get('highlight'));
   const initialFilterRef = useRef<TemplateFilter | null>(searchParams.get('filter') as TemplateFilter | null);
   const highlightId = initialHighlightRef.current;
@@ -55,6 +54,17 @@ export function MessageSettings() {
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [flashId, setFlashId] = useState<string | null>(null);
   const hasFlashedRef = useRef(false);
+  // Track in-flight timeouts so unmount (e.g. user clicks Back) cancels them.
+  // Otherwise the URL-cleanup setTimeout fires after the user has already left
+  // /templates and rewinds them back here.
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current);
+  }, []);
 
   // Modal state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
@@ -67,42 +77,48 @@ export function MessageSettings() {
     loadTemplates();
   }, []);
 
-  // Scroll the highlighted template into view + flash it briefly. Runs once
-  // templates have loaded; uses hasFlashedRef so it never fires twice (e.g.
-  // when the URL cleanup re-renders the page).
+  // Highlight + flash + clean URL. Runs once after templates load. All
+  // setTimeouts are tracked in refs and cancelled on unmount so navigating
+  // away (e.g. via the top-bar Back link) doesn't get rewound by a pending
+  // cleanup that calls navigate('/templates').
   useEffect(() => {
     if (!highlightId || templates.length === 0 || hasFlashedRef.current) return;
     const target = templates.find(t => t.id === highlightId);
     if (!target) return;
-    // Make sure the row is visible — if the active filter excludes this row,
-    // switch the tab to the target's category.
+    // Switch to the target's tab if the active filter would hide the row.
     const targetTab = getTemplateFilter(target);
     if (activeFilter !== 'all' && activeFilter !== targetTab) {
       setActiveFilter(targetTab);
-      // Bail; effect will re-run after activeFilter state update.
-      return;
+      return; // effect re-runs after activeFilter updates
     }
-    // Defer to next paint so the row (now rendered) has a ref.
-    const t = setTimeout(() => {
+    // Defer one paint so the row's ref is attached.
+    scrollTimerRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
       const el = rowRefs.current[highlightId];
-      if (!el) return; // row not in DOM yet — let the effect re-run on next render
+      if (!el) return;
       hasFlashedRef.current = true;
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setFlashId(highlightId);
-      // Fade flash, then clean URL while preserving navigation state so the
-      // top-bar back link survives the cleanup.
-      setTimeout(() => {
+      // After 3s: fade the flash and strip ?highlight/?filter, but preserve
+      // location.state so the top-bar back link survives.
+      cleanupTimerRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
         setFlashId(null);
         const sp = new URLSearchParams(searchParams);
         sp.delete('highlight');
         sp.delete('filter');
-        navigate({ pathname: location.pathname, search: sp.toString() ? '?' + sp.toString() : '' }, {
-          replace: true,
-          state: location.state,
-        });
+        navigate(
+          { pathname: location.pathname, search: sp.toString() ? '?' + sp.toString() : '' },
+          { replace: true, state: location.state },
+        );
       }, 3000);
     }, 80);
-    return () => clearTimeout(t);
+    return () => {
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+      // NOTE: cleanupTimerRef is intentionally NOT cleared here — only the
+      // unmount effect clears it. We want the URL cleanup to still fire even
+      // if the filter changes mid-flash.
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightId, templates, activeFilter]);
 
