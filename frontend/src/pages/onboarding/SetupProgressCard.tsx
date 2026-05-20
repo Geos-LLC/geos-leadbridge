@@ -59,21 +59,31 @@ export function deriveDisplayChecklist(
 
   const copy: WizardChecklist = { ...stored };
 
-  // Connect: data-driven from accountCount.
+  // Connect: data-driven from accountCount. When the user has at
+  // least one SavedAccount, the step IS done — even if they
+  // previously clicked "Skip this step". 'skipped' is a "do it
+  // later" deferral, and doing it later is what just happened. Hard
+  // data wins.
+  //
+  // When accountCount is back to 0 we drop a stale stored 'done'
+  // (the data behind it is gone) but preserve a stored 'skipped'
+  // so the user's earlier "I'll handle this later" intent is still
+  // visible on the rail.
   if (context.accountCount > 0) {
-    if (copy.connect !== 'skipped') copy.connect = 'done';
+    copy.connect = 'done';
   } else {
-    delete copy.connect;
-    // Drop stale 'done' for the per-account JSON steps too — the
-    // data behind them is gone.
+    if (copy.connect === 'done') delete copy.connect;
+    // Per-account JSON steps: their data was cascade-wiped with
+    // the SavedAccount. Drop their stored 'done' too; keep
+    // 'skipped' for the same reason as above.
     for (const step of ACCOUNT_DATA_STEPS) {
       if (copy[step] === 'done') delete copy[step];
     }
   }
 
-  // Business: data-driven from website presence.
+  // Business: same data-wins-over-skip logic, tied to User.website.
   if (context.hasWebsite) {
-    if (copy.business !== 'skipped') copy.business = 'done';
+    copy.business = 'done';
   } else if (copy.business === 'done') {
     delete copy.business;
   }
