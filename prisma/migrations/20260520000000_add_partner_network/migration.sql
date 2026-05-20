@@ -6,9 +6,10 @@
 -- to keep the module portable.
 
 -- CreateEnum
-CREATE TYPE "PartnerLeadIntent" AS ENUM ('this_week', 'this_month', 'not_sure');
+CREATE TYPE "PartnerLeadIntent" AS ENUM ('this_week', 'this_month', 'future_interest', 'not_sure');
 CREATE TYPE "PartnerLeadStatus" AS ENUM ('new', 'contacted', 'interested_not_now', 'qualified', 'rejected', 'booked', 'paid_manually');
 CREATE TYPE "PartnerLeadEventType" AS ENUM ('page_view', 'form_started', 'form_submitted');
+CREATE TYPE "PartnerLeadContactPref" AS ENUM ('call', 'text', 'either');
 
 -- CreateTable: partner_businesses
 CREATE TABLE "partner_businesses" (
@@ -39,6 +40,8 @@ CREATE TABLE "partner_relationships" (
     "notes" TEXT,
     "widgetEnabled" BOOLEAN NOT NULL DEFAULT false,
     "widgetType" TEXT,
+    "popupDelayMs" INTEGER,
+    "autoOpenFromReferral" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -80,10 +83,12 @@ CREATE TABLE "partner_leads" (
     "destinationBusinessId" TEXT NOT NULL,
     "customerName" TEXT NOT NULL,
     "customerPhone" TEXT NOT NULL,
+    "preferredContact" "PartnerLeadContactPref" NOT NULL DEFAULT 'either',
     "notes" TEXT,
     "intentTiming" "PartnerLeadIntent" NOT NULL,
     "estimatedValue" INTEGER NOT NULL,
     "status" "PartnerLeadStatus" NOT NULL DEFAULT 'new',
+    "assignedTo" TEXT,
     "possibleDuplicate" BOOLEAN NOT NULL DEFAULT false,
     "utmSource" TEXT,
     "utmMedium" TEXT,

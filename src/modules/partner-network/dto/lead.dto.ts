@@ -1,5 +1,9 @@
 import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { PartnerLeadIntent, PartnerLeadStatus } from '../../../../generated/prisma';
+import {
+  PartnerLeadContactPref,
+  PartnerLeadIntent,
+  PartnerLeadStatus,
+} from '../../../../generated/prisma';
 
 // Body of POST /api/partner-network/public/r/:code/submit. The referral code
 // resolves source/destination on the server — clients never send IDs.
@@ -16,6 +20,10 @@ export class SubmitPartnerLeadDto {
 
   @IsEnum(PartnerLeadIntent)
   intentTiming!: PartnerLeadIntent;
+
+  @IsOptional()
+  @IsEnum(PartnerLeadContactPref)
+  preferredContact?: PartnerLeadContactPref;
 
   @IsOptional()
   @IsString()
@@ -47,4 +55,9 @@ export class UpdatePartnerLeadDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  assignedTo?: string;
 }

@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
 export class CreatePartnerRelationshipDto {
   @IsUUID()
@@ -30,6 +30,18 @@ export class CreatePartnerRelationshipDto {
   @IsString()
   @MaxLength(60)
   widgetType?: string;
+
+  // Future popup-widget settings. Persisted now so the relationship can be
+  // configured before the runtime exists; widget loader will read these.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120000)
+  popupDelayMs?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoOpenFromReferral?: boolean;
 }
 
 export class UpdatePartnerRelationshipDto {
@@ -60,4 +72,14 @@ export class UpdatePartnerRelationshipDto {
   @IsString()
   @MaxLength(60)
   widgetType?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120000)
+  popupDelayMs?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoOpenFromReferral?: boolean;
 }
