@@ -47,8 +47,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scopeKey = isAll ? '__all__' : accountId;
-  const hydratedForRef = useRef<string | null>(null);
+  // Dirty flag set only by user-facing setters below. Load callbacks DON'T
+  // touch this, so the auto-save effect never fires on tab switch or load.
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     if (!savedAt) return;
@@ -56,23 +57,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     return () => clearTimeout(t);
   }, [savedAt]);
 
+  // Reset dirty on scope change so the next user action starts fresh.
+  useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
+
   useEffect(() => {
-    // Defer hydration flag past commit so the auto-save effect bails on the
-    // tab-switch render (otherwise it'd fan out the just-loaded values to
-    // every account on every tab switch).
-    if (isAll) {
-      hydratedForRef.current = null;
-      setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
-      return;
-    }
-    hydratedForRef.current = null;
+    if (isAll) return;
     let alive = true;
     setLoading(true); setError(null);
     followUpApi.getSettings(accountId)
       .then((res: any) => {
         if (!alive) return;
         const s = res?.settings;
-        if (s) {
+        if (s && !dirtyRef.current) {
           const strat = (s.followUpStrategy as StrategyKey | undefined);
           if (strat && STRATEGIES.some(x => x.k === strat)) setStrategy(strat);
           if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceMode(s.priceQuoteMode);
@@ -92,9 +88,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
           });
         }
-        setTimeout(() => { hydratedForRef.current = accountId; }, 0);
       })
-      .catch(() => { setTimeout(() => { hydratedForRef.current = accountId; }, 0); })
+      .catch(() => { /* non-fatal */ })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
@@ -128,17 +123,24 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     }
   };
 
-  // Auto-save IMMEDIATELY on every change (no debounce). See Respond.tsx
-  // for the rationale — eliminates the tab-switch race that lost changes.
+  // Auto-save on every USER change (gated by dirtyRef).
   useEffect(() => {
-    if (hydratedForRef.current !== scopeKey) return;
-    setSavedAt(Date.now()); // optimistic
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    setSavedAt(Date.now());
     handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey, strategy, priceMode, availability, stopRules, takeover]);
+  }, [strategy, priceMode, availability, stopRules, takeover]);
 
-  const toggleStop = (k: keyof typeof stopRules) => setStopRules(r => ({ ...r, [k]: !r[k] }));
-  const toggleTakeover = (k: keyof typeof takeover) => setTakeover(r => ({ ...r, [k]: !r[k] }));
+  // markDirty-wrapped setters used by JSX.
+  const onStrategy     = (v: StrategyKey) => { dirtyRef.current = true; setStrategy(v); };
+  const onPriceMode    = (v: 'range' | 'exact') => { dirtyRef.current = true; setPriceMode(v); };
+  const onAvailability = (v: 'always' | 'hours') => { dirtyRef.current = true; setAvailability(v); };
+  const onStopRules    = (next: typeof stopRules) => { dirtyRef.current = true; setStopRules(next); };
+  const onTakeover     = (next: typeof takeover) => { dirtyRef.current = true; setTakeover(next); };
+
+  const toggleStop = (k: keyof typeof stopRules) => onStopRules({ ...stopRules, [k]: !stopRules[k] });
+  const toggleTakeover = (k: keyof typeof takeover) => onTakeover({ ...takeover, [k]: !takeover[k] });
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
@@ -172,7 +174,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               <StrategyCard
                 key={s.k}
                 selected={strategy === s.k}
-                onClick={() => setStrategy(s.k)}
+                onClick={() => onStrategy(s.k)}
                 icon={s.icon}
                 iconTone={s.iconTone}
                 title={s.title}
@@ -196,13 +198,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             <div style={{ display: 'flex', gap: 12 }}>
               <OptionCard
                 selected={priceMode === 'range'}
-                onClick={() => setPriceMode('range')}
+                onClick={() => onPriceMode('range')}
                 title="Range"
                 body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
               />
               <OptionCard
                 selected={priceMode === 'exact'}
-                onClick={() => setPriceMode('exact')}
+                onClick={() => onPriceMode('exact')}
                 title="Exact"
                 body="AI gives an exact price when it has enough information."
               />
@@ -221,14 +223,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             <OptionCard
               compact
               selected={availability === 'always'}
-              onClick={() => setAvailability('always')}
+              onClick={() => onAvailability('always')}
               title="Always (24/7)"
               body="AI replies to leads at any time, day or night."
             />
             <OptionCard
               compact
               selected={availability === 'hours'}
-              onClick={() => setAvailability('hours')}
+              onClick={() => onAvailability('hours')}
               title="Outside of business hours"
               body={<>AI replies only outside your business hours window.<br /><span style={{ color: 'var(--lb-ink-3)' }}>Business Hours: Mon–Fri, 9:00 AM – 6:00 PM (New York)</span></>}
             />

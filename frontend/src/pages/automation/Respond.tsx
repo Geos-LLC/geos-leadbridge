@@ -12,6 +12,21 @@ import { automationApi, callConnectApi, notificationsApi, templatesApi } from '.
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAppStore } from '../../store/appStore';
 
+// Module-level cache: persists across mounts and tab switches so flipping
+// between account tabs feels instant (the new tab's last-known values render
+// immediately while a background refresh fires in parallel).
+type CachedAccount = {
+  instantReplyOn: boolean;
+  instantTextOn: boolean;
+  instantCallOn: boolean;
+  replyType: 'ai' | 'template';
+  connMode: 'agent-first' | 'parallel';
+  newLeadRuleId: string | null;
+  customerTextRuleId: string | null;
+  hasCallSettings: boolean;
+};
+const accountCache = new Map<string, CachedAccount>();
+
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,184 +68,246 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const isAll = accountId === 'all';
-  const scopeKey = isAll ? '__all__' : accountId;
-  const hydratedForRef = useRef<string | null>(null);
+
+  // Dirty flag — set to true ONLY when the user explicitly changes a setting
+  // through one of the wrapped setters below. Load callbacks DON'T touch this,
+  // so the auto-save effect never fires on tab switch or initial load.
+  const dirtyRef = useRef(false);
+  // Cancel in-flight save when scope changes so a slow save can't overwrite
+  // a freshly-loaded account.
+  const saveAbortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     if (!savedAt) return;
     const t = setTimeout(() => setSavedAt(null), 2000);
     return () => clearTimeout(t);
   }, [savedAt]);
 
-  // Templates load once for the whole user (independent of selected account)
-  // so the new-design tiles can show the actual template name even when scope
-  // is "All accounts".
+  // Templates load once for the whole user (independent of selected account).
   useEffect(() => {
     let alive = true;
     templatesApi.getTemplates()
       .then(res => { if (alive) setTemplates(res.templates || []); })
-      .catch(() => { /* non-fatal — tiles fall back to canonical labels */ });
+      .catch(() => { /* non-fatal */ });
     return () => { alive = false; };
   }, []);
 
-  // Single-account load (when the user picks a specific account tab).
+  // Hydrate displayed values INSTANTLY from the module-level cache on every
+  // scope change. This is what makes tab switching feel smooth: the previous
+  // visit's last-known values render immediately without waiting for the API.
+  // A background fetch (next effect) refreshes the cache for any drift.
   useEffect(() => {
-    if (isAll) return;
-    hydratedForRef.current = null;
-    let alive = true;
-    setLoading(true); setError(null);
-    Promise.all([
-      automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
-      notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
-      callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
-    ]).then(([autoRes, notifRes, ccRes]) => {
-      if (!alive) return;
-      const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
-      const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
-      setNewLeadRule(nl);
-      setCustomerTextRule(ct);
-      setCallSettings(ccRes.settings);
-      if (nl) {
-        setInstantReplyOn(!!nl.enabled);
-        setReplyType(nl.useAi ? 'ai' : 'template');
+    dirtyRef.current = false;
+    if (isAll) {
+      const cached = accounts.map(a => accountCache.get(a.id)).filter(Boolean) as CachedAccount[];
+      if (cached.length > 0) {
+        const first = cached[0];
+        setInstantReplyOn(first.instantReplyOn);
+        setInstantTextOn(first.instantTextOn);
+        setInstantCallOn(first.instantCallOn);
+        setReplyType(first.replyType);
+        setConnMode(first.connMode);
       }
-      if (ct) setInstantTextOn(!!ct.enabled);
-      if (ccRes.settings) {
-        setInstantCallOn(!!ccRes.settings.enabled);
-        setConnMode(ccRes.settings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
+    } else {
+      const cached = accountCache.get(accountId);
+      if (cached) {
+        setInstantReplyOn(cached.instantReplyOn);
+        setInstantTextOn(cached.instantTextOn);
+        setInstantCallOn(cached.instantCallOn);
+        setReplyType(cached.replyType);
+        setConnMode(cached.connMode);
       }
-      setPerAccount([]); // not relevant in single-account mode
-      // Defer hydration flag past React's commit phase so the auto-save
-      // effect (which fires when state deps change after the setters above)
-      // sees the OLD ref and bails. Otherwise we'd save the just-loaded
-      // values right back, and in All-Accounts mode that fan-outs the
-      // first account's values to every connected account.
-      setTimeout(() => { hydratedForRef.current = accountId; }, 0);
-    }).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll]);
 
-  // All-accounts load. Fetches automation rules + notification rules + call
-  // connect settings for every connected account in parallel, then summarises
-  // each setting per-account so the UI can detect cross-account disagreement
-  // and surface the "Differs across accounts" warning on the relevant card.
+  // Background fetch: refreshes the cache for the current scope. Doesn't touch
+  // dirtyRef — load-time setters don't trigger the auto-save effect.
   useEffect(() => {
-    if (!isAll || accounts.length === 0) {
-      setPerAccount([]);
-      return;
-    }
-    hydratedForRef.current = null;
     let alive = true;
-    setLoading(true); setError(null);
-    (async () => {
-      try {
-        const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
-        const perAccountResults = await Promise.all(accounts.map(async (a) => {
-          const [notifRes, ccRes] = await Promise.all([
-            notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] })),
-            callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null })),
-          ]);
-          const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
-          const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
-          return {
-            account: a,
-            instantReplyOn: !!nl?.enabled,
-            instantTextOn: !!ct?.enabled,
-            instantCallOn: !!ccRes.settings?.enabled,
-            replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
-            connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
-          };
-        }));
-        if (!alive) return;
-        setPerAccount(perAccountResults);
-        // Seed visible toggles with the first account's values — purely for display.
-        if (perAccountResults.length > 0) {
-          const first = perAccountResults[0];
-          setInstantReplyOn(first.instantReplyOn);
-          setInstantTextOn(first.instantTextOn);
-          setInstantCallOn(first.instantCallOn);
-          setReplyType(first.replyType);
-          setConnMode(first.connMode);
+    if (isAll) {
+      if (accounts.length === 0) { setPerAccount([]); return; }
+      setLoading(true);
+      (async () => {
+        try {
+          const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
+          const results = await Promise.all(accounts.map(async (a) => {
+            const [notifRes, ccRes] = await Promise.all([
+              notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] })),
+              callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null })),
+            ]);
+            const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
+            const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+            const cached: CachedAccount = {
+              instantReplyOn: !!nl?.enabled,
+              instantTextOn: !!ct?.enabled,
+              instantCallOn: !!ccRes.settings?.enabled,
+              replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+              connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+              newLeadRuleId: nl?.id || null,
+              customerTextRuleId: ct?.id || null,
+              hasCallSettings: !!ccRes.settings,
+            };
+            accountCache.set(a.id, cached);
+            return { account: a, ...cached };
+          }));
+          if (!alive) return;
+          setPerAccount(results.map(r => ({
+            account: r.account,
+            instantReplyOn: r.instantReplyOn,
+            instantTextOn: r.instantTextOn,
+            instantCallOn: r.instantCallOn,
+            replyType: r.replyType,
+            connMode: r.connMode,
+          })));
+          // If user hasn't touched anything yet, refresh displayed values from
+          // the first account in the freshly-loaded data. Dirty edits stay.
+          if (!dirtyRef.current && results.length > 0) {
+            const first = results[0];
+            setInstantReplyOn(first.instantReplyOn);
+            setInstantTextOn(first.instantTextOn);
+            setInstantCallOn(first.instantCallOn);
+            setReplyType(first.replyType);
+            setConnMode(first.connMode);
+          }
+          setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
+        } finally {
+          if (alive) setLoading(false);
         }
-        setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
-        // See single-account load comment — defer past commit so auto-save
-        // doesn't immediately fan out the seeded values to every account.
-        setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
+      })();
+    } else {
+      setLoading(true);
+      Promise.all([
+        automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
+        notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
+        callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
+      ]).then(([autoRes, notifRes, ccRes]) => {
+        if (!alive) return;
+        const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
+        const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
+        const cached: CachedAccount = {
+          instantReplyOn: !!nl?.enabled,
+          instantTextOn: !!ct?.enabled,
+          instantCallOn: !!ccRes.settings?.enabled,
+          replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+          connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+          newLeadRuleId: nl?.id || null,
+          customerTextRuleId: ct?.id || null,
+          hasCallSettings: !!ccRes.settings,
+        };
+        accountCache.set(accountId, cached);
+        setNewLeadRule(nl);
+        setCustomerTextRule(ct);
+        setCallSettings(ccRes.settings);
+        // Only push fresh values to display if the user hasn't started editing.
+        if (!dirtyRef.current) {
+          setInstantReplyOn(cached.instantReplyOn);
+          setInstantTextOn(cached.instantTextOn);
+          setInstantCallOn(cached.instantCallOn);
+          setReplyType(cached.replyType);
+          setConnMode(cached.connMode);
+        }
+        setPerAccount([]);
+      }).finally(() => { if (alive) setLoading(false); });
+    }
     return () => { alive = false; };
-  }, [isAll, accounts]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, isAll, accounts]);
 
-  // Auto-save IMMEDIATELY on every state change (no debounce). Toggles and
-  // option cards are infrequent click events, so saving each one is cheap
-  // — and importantly, it eliminates the window where switching account
-  // tabs would cancel a pending debounced save and lose the user's change.
-  // The "Saved" toast is shown optimistically so the user gets instant
-  // feedback rather than waiting for the round-trip.
+  // Auto-save IMMEDIATELY on every USER change. Gate on dirtyRef so load
+  // setters can't trigger this (they don't touch dirtyRef).
   useEffect(() => {
-    if (hydratedForRef.current !== scopeKey) return;
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
     setSavedAt(Date.now()); // optimistic
     handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey, instantReplyOn, instantTextOn, instantCallOn, replyType, connMode]);
+  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode]);
+
+  // markDirty-wrapped setters — these are what the JSX uses. The plain setX
+  // setters are reserved for load callbacks (which DON'T mark dirty).
+  const onInstantReplyOn = (v: boolean) => { dirtyRef.current = true; setInstantReplyOn(v); };
+  const onInstantTextOn  = (v: boolean) => { dirtyRef.current = true; setInstantTextOn(v); };
+  const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; setInstantCallOn(v); };
+  const onReplyType      = (v: 'ai' | 'template') => { dirtyRef.current = true; setReplyType(v); };
+  const onConnMode       = (v: 'agent-first' | 'parallel') => { dirtyRef.current = true; setConnMode(v); };
+
+  // Save the current display state to one or more accounts. For each account
+  // we look up the rule fresh (don't trust component state — it can be stale
+  // after a tab switch or a load races our user-edit) and create the rule on
+  // the fly if the account doesn't have one yet. Cache is updated after each
+  // successful write so the next render reads the new values.
+  const saveOneAccount = async (id: string) => {
+    const ops: Promise<unknown>[] = [];
+    // 1. Instant Reply — automation rule (new_lead, delay=0)
+    ops.push((async () => {
+      const autoRes = await automationApi.getRulesForAccount(id).catch(() => ({ rules: [] as AutomationRule[] }));
+      const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
+      if (nl) {
+        await automationApi.updateRule(nl.id, {
+          enabled: instantReplyOn,
+          useAi: replyType === 'ai',
+        });
+      } else {
+        // No new-lead rule on this account — seed one so the toggle actually
+        // does something. Without this branch the user's click would be a
+        // silent no-op and the setting wouldn't persist.
+        await automationApi.createRule({
+          savedAccountId: id,
+          name: 'Instant Reply',
+          triggerType: 'new_lead',
+          enabled: instantReplyOn,
+          useAi: replyType === 'ai',
+          delayMinutes: 0,
+        }).catch(() => undefined);
+      }
+    })());
+    // 2. Instant Text — notification rule (customer-texting; new_lead + sendToCustomer)
+    ops.push((async () => {
+      const notifRes = await notificationsApi.getRules(id).catch(() => ({ rules: [] as NotificationRule[] }));
+      const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+      if (ct) {
+        await notificationsApi.updateRule(id, ct.id, { enabled: instantTextOn });
+      }
+      // If no customer-texting rule, do nothing — creating one requires extra
+      // info (template, fromPhone, etc.) that we don't have in this UI.
+    })());
+    // 3. Instant Call — call-connect settings (always upsert; the API treats
+    //    the endpoint as upsert when settings don't yet exist).
+    ops.push(callConnectApi.saveSettings(id, {
+      enabled: instantCallOn,
+      mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
+    }).catch(() => undefined));
+    await Promise.all(ops);
+    // Mirror the just-saved values back into the cache so a subsequent tab
+    // switch shows them without a flash.
+    const prev = accountCache.get(id);
+    accountCache.set(id, {
+      instantReplyOn,
+      instantTextOn,
+      instantCallOn,
+      replyType,
+      connMode,
+      newLeadRuleId: prev?.newLeadRuleId ?? null,
+      customerTextRuleId: prev?.customerTextRuleId ?? null,
+      hasCallSettings: true,
+    });
+  };
 
   const handleSave = async () => {
+    // Cancel any in-flight save from a prior toggle so the latest values win.
+    if (saveAbortRef.current) saveAbortRef.current.abort();
+    const controller = new AbortController();
+    saveAbortRef.current = controller;
     setSaving(true); setError(null);
     try {
-      if (isAll) {
-        // Fan-out: re-fetch each account's rules + apply the visible toggles.
-        // For mixed settings this DOES overwrite the diverging value — the
-        // amber warning + tooltip is what tells the user that will happen.
-        const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
-        await Promise.all(accounts.map(async (a) => {
-          const ops: Promise<unknown>[] = [];
-          const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
-          if (nl) {
-            ops.push(automationApi.updateRule(nl.id, {
-              enabled: instantReplyOn,
-              useAi: replyType === 'ai',
-            }));
-          }
-          const notifRes = await notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] }));
-          const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
-          if (ct) {
-            ops.push(notificationsApi.updateRule(a.id, ct.id, { enabled: instantTextOn }));
-          }
-          const ccRes = await callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null }));
-          if (ccRes.settings) {
-            ops.push(callConnectApi.saveSettings(a.id, {
-              enabled: instantCallOn,
-              mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
-            }));
-          }
-          await Promise.all(ops);
-        }));
-      } else {
-        const ops: Promise<unknown>[] = [];
-        if (newLeadRule) {
-          ops.push(automationApi.updateRule(newLeadRule.id, {
-            enabled: instantReplyOn,
-            useAi: replyType === 'ai',
-          }));
-        }
-        if (customerTextRule) {
-          ops.push(notificationsApi.updateRule(accountId, customerTextRule.id, {
-            enabled: instantTextOn,
-          }));
-        }
-        if (callSettings) {
-          ops.push(callConnectApi.saveSettings(accountId, {
-            enabled: instantCallOn,
-            mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
-          }));
-        }
-        await Promise.all(ops);
-      }
-      setSavedAt(Date.now());
+      const targets = isAll ? accounts.map(a => a.id) : [accountId];
+      await Promise.all(targets.map(saveOneAccount));
+      if (!controller.signal.aborted) setSavedAt(Date.now());
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to save');
+      if (!controller.signal.aborted) setError(e?.response?.data?.message || e?.message || 'Failed to save');
     } finally {
+      if (saveAbortRef.current === controller) saveAbortRef.current = null;
       setSaving(false);
     }
   };
@@ -343,7 +420,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         title="Instant Reply"
         subtitle="Send the first message automatically when a new lead arrives."
         enabled={instantReplyOn}
-        onToggle={setInstantReplyOn}
+        onToggle={onInstantReplyOn}
         mixed={mixedInstantReply}
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
@@ -361,14 +438,14 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={replyType === 'template'}
-              onClick={() => setReplyType('template')}
+              onClick={() => onReplyType('template')}
               title="Use template"
               body="Send a pre-written reply."
               icon={Clipboard}
             />
             <OptionCard
               selected={replyType === 'ai'}
-              onClick={() => setReplyType('ai')}
+              onClick={() => onReplyType('ai')}
               title="Let AI write it"
               body="AI will write a personalized first reply."
               icon={Sparkles}
@@ -423,7 +500,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         title="Instant Text"
         subtitle="Automatically text the lead when a new lead arrives."
         enabled={instantTextOn}
-        onToggle={setInstantTextOn}
+        onToggle={onInstantTextOn}
         mixed={mixedInstantText}
         mixedTooltip={tipInstantText}
         contentPad="8px 24px 24px"
@@ -461,7 +538,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         title="Instant Call"
         subtitle="Call your team and connect to the lead right away."
         enabled={instantCallOn}
-        onToggle={setInstantCallOn}
+        onToggle={onInstantCallOn}
         mixed={mixedInstantCall}
         mixedTooltip={tipInstantCall}
         contentPad="8px 24px 24px"
@@ -495,14 +572,14 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={connMode === 'agent-first'}
-              onClick={() => setConnMode('agent-first')}
+              onClick={() => onConnMode('agent-first')}
               title="Agent First"
               body="We call you first, then bridge the lead."
               illustration={<ConnDiagram kind="serial" />}
             />
             <OptionCard
               selected={connMode === 'parallel'}
-              onClick={() => setConnMode('parallel')}
+              onClick={() => onConnMode('parallel')}
               title="Parallel"
               body="We call you and the lead at the same time."
               illustration={<ConnDiagram kind="parallel" />}

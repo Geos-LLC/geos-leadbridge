@@ -49,8 +49,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Dirty flag — set ONLY by user-facing setter wrappers (onX below). Load
+  // callbacks don't touch this, so the auto-save effect never fires after a
+  // tab switch unless the user actually changed something.
+  const dirtyRef = useRef(false);
+  // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
+  // for compatibility with effect deps below.
   const scopeKey = isAll ? '__all__' : accountId;
-  const hydratedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!savedAt) return;
     const t = setTimeout(() => setSavedAt(null), 2000);
@@ -64,25 +69,21 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     setPlatform(acc?.platform);
   }, [accountId, isAll, accounts]);
 
+  // Reset dirty on scope change so the next user action triggers save fresh.
+  useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
+
+  // Background fetch for the current scope. Doesn't touch dirtyRef → never
+  // triggers auto-save. In All-Accounts mode the page is a synthesised view
+  // (no per-account fetch needed — saves fan out at save time anyway).
   useEffect(() => {
-    // Defer hydration flag past React's commit phase so the auto-save effect
-    // sees the OLD ref and bails on the tab-switch render. Otherwise we'd
-    // immediately re-save the just-loaded values — and in All-Accounts mode
-    // that fan-outs the seeded values to every account, clobbering per-account
-    // specifics the user previously set.
-    if (isAll) {
-      hydratedForRef.current = null;
-      setTimeout(() => { hydratedForRef.current = '__all__'; }, 0);
-      return;
-    }
-    hydratedForRef.current = null;
+    if (isAll) return;
     let alive = true;
     setLoading(true); setError(null);
     followUpApi.getSettings(accountId)
       .then(res => {
         if (!alive) return;
         const s = res?.settings;
-        if (s) {
+        if (s && !dirtyRef.current) {
           if (s.followUpMode === 'auto_send') setDeliveryMode('active');
           else setDeliveryMode('suggest');
           if (s.followUpReplyType === 'template') setMessageMode('template');
@@ -91,9 +92,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
           if (s.followUpTimezone) setTimezone(s.followUpTimezone);
         }
-        setTimeout(() => { hydratedForRef.current = accountId; }, 0);
       })
-      .catch(() => { setTimeout(() => { hydratedForRef.current = accountId; }, 0); })
+      .catch(() => { /* non-fatal */ })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [accountId, isAll]);
@@ -122,16 +122,23 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     }
   };
 
-  // Auto-save IMMEDIATELY on every change (no debounce) — clicks/dropdowns
-  // are infrequent so the cost is fine, and removing the debounce closes
-  // the race where switching tabs within the debounce window canceled the
-  // pending save and lost the user's change.
+  // Auto-save IMMEDIATELY on every USER change. Gated by dirtyRef so load
+  // callbacks (which DON'T touch dirtyRef) can never trigger this.
   useEffect(() => {
-    if (hydratedForRef.current !== scopeKey) return;
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
     setSavedAt(Date.now()); // optimistic
     handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn]);
+  }, [deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn]);
+
+  // markDirty-wrapped setters used by JSX. Plain setX setters are reserved
+  // for the load callbacks above.
+  const onDeliveryMode = (v: 'suggest' | 'active') => { dirtyRef.current = true; setDeliveryMode(v); };
+  const onMessageMode  = (v: 'template' | 'ai') => { dirtyRef.current = true; setMessageMode(v); };
+  const onQuietOn      = (v: boolean) => { dirtyRef.current = true; setQuietOn(v); };
+  // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
+  void scopeKey;
 
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
@@ -152,7 +159,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         title="Quiet hours"
         subtitle="Don't send follow-ups overnight."
         enabled={quietOn}
-        onToggle={setQuietOn}
+        onToggle={onQuietOn}
       >
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -187,13 +194,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={deliveryMode === 'suggest'}
-              onClick={() => setDeliveryMode('suggest')}
+              onClick={() => onDeliveryMode('suggest')}
               title="Suggest"
               body="Draft follow-ups for you to review and approve."
             />
             <OptionCard
               selected={deliveryMode === 'active'}
-              onClick={() => setDeliveryMode('active')}
+              onClick={() => onDeliveryMode('active')}
               title="Active"
               body="Send follow-ups automatically without approval."
             />
@@ -204,13 +211,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={messageMode === 'template'}
-              onClick={() => setMessageMode('template')}
+              onClick={() => onMessageMode('template')}
               title="Use custom template"
               body="Use your saved template for all follow-up messages."
             />
             <OptionCard
               selected={messageMode === 'ai'}
-              onClick={() => setMessageMode('ai')}
+              onClick={() => onMessageMode('ai')}
               title="AI (auto)"
               body="AI writes each message based on the conversation using your strategy."
             />
