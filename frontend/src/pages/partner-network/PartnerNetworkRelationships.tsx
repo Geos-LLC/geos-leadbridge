@@ -13,6 +13,8 @@ interface FormState {
   name: string;
   defaultOfferText: string;
   notes: string;
+  widgetEnabled: boolean;
+  widgetType: string;
 }
 const EMPTY_FORM: FormState = {
   sourceBusinessId: '',
@@ -20,6 +22,8 @@ const EMPTY_FORM: FormState = {
   name: '',
   defaultOfferText: '',
   notes: '',
+  widgetEnabled: false,
+  widgetType: '',
 };
 
 export default function PartnerNetworkRelationships() {
@@ -66,6 +70,8 @@ export default function PartnerNetworkRelationships() {
           name: form.name.trim() || undefined,
           defaultOfferText: form.defaultOfferText.trim() || undefined,
           notes: form.notes.trim() || undefined,
+          widgetEnabled: form.widgetEnabled,
+          widgetType: form.widgetType.trim() || undefined,
         });
       } else {
         await partnerNetworkApi.createRelationship({
@@ -74,6 +80,8 @@ export default function PartnerNetworkRelationships() {
           name: form.name.trim() || undefined,
           defaultOfferText: form.defaultOfferText.trim() || undefined,
           notes: form.notes.trim() || undefined,
+          widgetEnabled: form.widgetEnabled,
+          widgetType: form.widgetType.trim() || undefined,
         });
       }
       setShowForm(false);
@@ -104,6 +112,8 @@ export default function PartnerNetworkRelationships() {
       name: r.name ?? '',
       defaultOfferText: r.defaultOfferText ?? '',
       notes: r.notes ?? '',
+      widgetEnabled: r.widgetEnabled ?? false,
+      widgetType: r.widgetType ?? '',
     });
     setShowForm(true);
   };
@@ -165,6 +175,27 @@ export default function PartnerNetworkRelationships() {
             </Field>
             <Field label="Notes" wide>
               <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} style={{ ...inputStyle, minHeight: 60 }} />
+            </Field>
+            <Field label="Widget (future)" wide>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                <input
+                  type="checkbox"
+                  checked={form.widgetEnabled}
+                  onChange={e => setForm({ ...form, widgetEnabled: e.target.checked })}
+                />
+                Enable embeddable widget for this relationship
+              </label>
+              <input
+                style={{ ...inputStyle, marginTop: 8 }}
+                placeholder="widgetType (optional, e.g. inline / popup)"
+                value={form.widgetType}
+                onChange={e => setForm({ ...form, widgetType: e.target.value })}
+                disabled={!form.widgetEnabled}
+              />
+              <p style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 6 }}>
+                Placeholder — no widget runtime is shipped yet. Future loader will read these
+                flags to decide whether to expose <code>/r/:code</code> via <code>partner-widget.js</code>.
+              </p>
             </Field>
           </div>
           <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
