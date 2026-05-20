@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
-  Clipboard, Sparkles, Brain, User, ArrowRight, PhoneCall, Loader2,
+  Clipboard, Sparkles, Brain, User, ArrowRight, PhoneCall,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge,
+  SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
 } from '../../components/automation/ui';
 import { automationApi, callConnectApi, notificationsApi, templatesApi } from '../../services/api';
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
@@ -48,7 +48,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
-  const [_saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -162,11 +162,16 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     return () => { alive = false; };
   }, [isAll, accounts]);
 
-  // Auto-save (debounced ~700ms) once the current scope has hydrated.
+  // Auto-save IMMEDIATELY on every state change (no debounce). Toggles and
+  // option cards are infrequent click events, so saving each one is cheap
+  // — and importantly, it eliminates the window where switching account
+  // tabs would cancel a pending debounced save and lose the user's change.
+  // The "Saved" toast is shown optimistically so the user gets instant
+  // feedback rather than waiting for the round-trip.
   useEffect(() => {
     if (hydratedForRef.current !== scopeKey) return;
-    const t = setTimeout(() => { handleSave(); }, 700);
-    return () => clearTimeout(t);
+    setSavedAt(Date.now()); // optimistic
+    handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey, instantReplyOn, instantTextOn, instantCallOn, replyType, connMode]);
 
@@ -325,25 +330,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {loading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
-          <Loader2 size={14} className="animate-spin" /> Loading account settings…
-        </div>
-      )}
-      {error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
-          fontSize: 13, fontWeight: 600,
-        }}>{error}</div>
-      )}
-      {savedAt && !error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-          fontSize: 13, fontWeight: 600,
-        }}>Saved.</div>
-      )}
+      {/* Floating top-right status indicator — doesn't shift layout. */}
+      {error && <StatusPill status="error" message={error} />}
+      {!error && saving && <StatusPill status="saving" />}
+      {!error && !saving && savedAt && <StatusPill status="saved" />}
+      {!error && !savedAt && loading && <StatusPill status="loading" />}
 
       {/* Instant Reply */}
       <SettingCard

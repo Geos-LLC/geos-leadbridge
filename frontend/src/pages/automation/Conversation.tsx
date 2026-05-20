@@ -4,12 +4,12 @@ import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   Users, PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
-  MessageSquareText, Loader2,
+  MessageSquareText,
   type LucideIcon,
 } from 'lucide-react';
 import {
   SectionCard, SettingCard, FieldRow, OptionCard, ToggleRow,
-  Radio, IconTile, ActionLink, AutoBadge,
+  Radio, IconTile, ActionLink, AutoBadge, StatusPill,
   type IconTone,
 } from '../../components/automation/ui';
 import { followUpApi } from '../../services/api';
@@ -44,6 +44,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   });
 
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scopeKey = isAll ? '__all__' : accountId;
@@ -112,7 +113,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       handoffTriggerProvidedSquareFootage: takeover.sqft,
       handoffTriggerQualificationComplete: takeover.qualified,
     };
-    setError(null);
+    setSaving(true); setError(null);
     try {
       if (isAll) {
         await Promise.all(accounts.map(a => followUpApi.saveWizardSettings(a.id, payload).catch(() => undefined)));
@@ -122,13 +123,17 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
     }
   };
 
+  // Auto-save IMMEDIATELY on every change (no debounce). See Respond.tsx
+  // for the rationale — eliminates the tab-switch race that lost changes.
   useEffect(() => {
     if (hydratedForRef.current !== scopeKey) return;
-    const t = setTimeout(() => { handleSave(); }, 700);
-    return () => clearTimeout(t);
+    setSavedAt(Date.now()); // optimistic
+    handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey, strategy, priceMode, availability, stopRules, takeover]);
 
@@ -140,25 +145,10 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {loading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
-          <Loader2 size={14} className="animate-spin" /> Loading AI conversation settings…
-        </div>
-      )}
-      {error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
-          fontSize: 13, fontWeight: 600,
-        }}>{error}</div>
-      )}
-      {savedAt && !error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-          fontSize: 13, fontWeight: 600,
-        }}>Saved.</div>
-      )}
+      {error && <StatusPill status="error" message={error} />}
+      {!error && saving && <StatusPill status="saving" />}
+      {!error && !saving && savedAt && <StatusPill status="saved" />}
+      {!error && !savedAt && loading && <StatusPill status="loading" />}
 
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>

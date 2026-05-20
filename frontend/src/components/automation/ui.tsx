@@ -305,6 +305,38 @@ export function SettingCard({
   );
 }
 
+// Floating top-right status pill — used for the inline "Saving" / "Saved" /
+// "Loading" indicators on auto-saving pages. Positioned `position: fixed`
+// so it doesn't shift page layout when it appears or disappears.
+export function StatusPill({
+  status, message,
+}: {
+  status: 'saving' | 'saved' | 'error' | 'loading';
+  message?: string;
+}) {
+  const palette = {
+    saving:  { bg: '#eff6ff', fg: '#1d4ed8', border: '#c3d4ff', label: 'Saving…' },
+    saved:   { bg: '#dcfce7', fg: '#15803d', border: '#a7f3d0', label: 'Saved' },
+    error:   { bg: 'var(--lb-danger-tint)', fg: 'var(--lb-danger)', border: '#fecaca', label: 'Error' },
+    loading: { bg: '#f1f5f9', fg: '#475569', border: 'var(--lb-line)', label: 'Loading…' },
+  }[status];
+  return (
+    <div style={{
+      position: 'fixed', top: 78, right: 24, zIndex: 40,
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '6px 12px',
+      background: palette.bg, color: palette.fg,
+      border: '1px solid ' + palette.border,
+      borderRadius: 999,
+      fontSize: 12, fontWeight: 600,
+      boxShadow: '0 2px 8px rgba(10,21,48,0.08)',
+      pointerEvents: 'none',
+    }}>
+      {message || palette.label}
+    </div>
+  );
+}
+
 // Amber "Differs across accounts" pill rendered next to a card title or row
 // label when accounts disagree on a setting in All-Accounts scope. Hovering
 // shows a per-account breakdown via the native title tooltip.

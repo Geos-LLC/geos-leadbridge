@@ -118,12 +118,18 @@ export function ScopeBanner({
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
-      padding: '10px 14px',
-      background: isAll ? '#eff6ff' : '#f8fafc',
-      border: '1px solid ' + (isAll ? '#c3d4ff' : 'var(--lb-line-soft)'),
+      padding: '12px 16px',
+      // Single-account scope deserves a strong visual cue — when the user is
+      // editing per-account values, the banner is amber-tinted with a left
+      // accent stripe so it stands out from the All-accounts blue banner.
+      background: isAll ? '#eff6ff' : '#fffbeb',
+      border: '1.5px solid ' + (isAll ? '#c3d4ff' : '#fcd34d'),
+      borderLeft: '5px solid ' + (isAll ? 'var(--lb-accent)' : '#f59e0b'),
       borderRadius: 10,
-      fontSize: 13, color: isAll ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
+      fontSize: 13.5, fontWeight: 500,
+      color: isAll ? 'var(--lb-accent)' : '#92400e',
       marginBottom: 18,
+      boxShadow: isAll ? 'none' : '0 1px 2px rgba(245,158,11,0.15)',
     }}>
       {isAll ? <Layers size={14} /> : <MapPin size={14} />}
       <div style={{ flex: 1 }}>
