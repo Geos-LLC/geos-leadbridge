@@ -108,24 +108,29 @@ export function Dashboard() {
     }
   }, []);
 
-  // Wizard return flow: if the user kicked off OAuth from /onboarding/setup,
-  // ConnectStep stored a flag in sessionStorage before redirecting. After the
-  // OAuth callback drops them here on /overview, we mark connect=done + advance
-  // the wizard's currentStep to 'business' and navigate the user back into
-  // the wizard so they pick up where they left off.
+  // Wizard return flow. Triggered when OAuth completes (`?connected=...`)
+  // AND the user is still mid-onboarding. Two routes into this branch:
+  //   (a) The user clicked Connect from inside the wizard, which set
+  //       a sessionStorage flag — preferred path, most explicit.
+  //   (b) The user clicked Connect from Dashboard / Overview while
+  //       their wizard is still incomplete. No flag is set, but the
+  //       wizardCompletedAt being null tells us they're in setup
+  //       mode and almost certainly want to be sent back to finish.
+  // We never auto-route post-completion: a returning user adding a
+  // new account from Dashboard should stay on Dashboard.
   //
-  // We only fire on successful connections (`?connected=...`), not on errors —
-  // that way an error landing here still surfaces the OAuth banner instead of
-  // being whisked away to the wizard with a stale state. The flag is cleared
-  // unconditionally so we never trigger this branch from an unrelated future
-  // visit to /overview.
+  // Errors (`?error=...`) stay on /overview so the OAuth error banner
+  // renders — the wizard-return only fires on success.
   useEffect(() => {
     const connected = searchParams.get('connected');
     if (!connected) return;
-    let wantsWizardReturn: string | null = null;
-    try { wantsWizardReturn = sessionStorage.getItem('lb_wizard_oauth_return'); } catch { /* ignore */ }
-    if (wantsWizardReturn !== '1') return;
-    try { sessionStorage.removeItem('lb_wizard_oauth_return'); } catch { /* ignore */ }
+    let hadWizardFlag = false;
+    try { hadWizardFlag = sessionStorage.getItem('lb_wizard_oauth_return') === '1'; } catch { /* ignore */ }
+    if (hadWizardFlag) {
+      try { sessionStorage.removeItem('lb_wizard_oauth_return'); } catch { /* ignore */ }
+    }
+    const wizardIncomplete = !user?.onboardingProfile?.wizardCompletedAt;
+    if (!hadWizardFlag && !wizardIncomplete) return;
 
     void onboardingApi
       .patchWizard({
