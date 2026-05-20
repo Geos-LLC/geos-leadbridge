@@ -8,7 +8,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
 } from '../../components/automation/ui';
-import { automationApi, callConnectApi, notificationsApi, templatesApi } from '../../services/api';
+import { automationApi, callConnectApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAppStore } from '../../store/appStore';
 
@@ -21,6 +21,8 @@ type CachedAccount = {
   instantCallOn: boolean;
   replyType: 'ai' | 'template';
   connMode: 'agent-first' | 'parallel';
+  textBizHours: boolean;
+  callBizHours: boolean;
   newLeadRuleId: string | null;
   customerTextRuleId: string | null;
   hasCallSettings: boolean;
@@ -107,6 +109,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setInstantCallOn(first.instantCallOn);
         setReplyType(first.replyType);
         setConnMode(first.connMode);
+        setTextBizHours(first.textBizHours);
+        setCallBizHours(first.callBizHours);
       }
     } else {
       const cached = accountCache.get(accountId);
@@ -116,6 +120,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setInstantCallOn(cached.instantCallOn);
         setReplyType(cached.replyType);
         setConnMode(cached.connMode);
+        setTextBizHours(cached.textBizHours);
+        setCallBizHours(cached.callBizHours);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,9 +138,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         try {
           const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
           const results = await Promise.all(accounts.map(async (a) => {
-            const [notifRes, ccRes] = await Promise.all([
+            const [notifRes, ccRes, hoursRes] = await Promise.all([
               notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] })),
               callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null })),
+              usersApi.getAccountHours(a.id).catch(() => null),
             ]);
             const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
             const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
@@ -144,6 +151,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               instantCallOn: !!ccRes.settings?.enabled,
               replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+              textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
+              callBizHours: hoursRes?.callDuringBusinessHours ?? true,
               newLeadRuleId: nl?.id || null,
               customerTextRuleId: ct?.id || null,
               hasCallSettings: !!ccRes.settings,
@@ -169,6 +178,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             setInstantCallOn(first.instantCallOn);
             setReplyType(first.replyType);
             setConnMode(first.connMode);
+            setTextBizHours(first.textBizHours);
+            setCallBizHours(first.callBizHours);
           }
           setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
         } finally {
@@ -181,7 +192,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
-      ]).then(([autoRes, notifRes, ccRes]) => {
+        usersApi.getAccountHours(accountId).catch(() => null),
+      ]).then(([autoRes, notifRes, ccRes, hoursRes]) => {
         if (!alive) return;
         const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
@@ -191,6 +203,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           instantCallOn: !!ccRes.settings?.enabled,
           replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+          textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
+          callBizHours: hoursRes?.callDuringBusinessHours ?? true,
           newLeadRuleId: nl?.id || null,
           customerTextRuleId: ct?.id || null,
           hasCallSettings: !!ccRes.settings,
@@ -206,6 +220,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setInstantCallOn(cached.instantCallOn);
           setReplyType(cached.replyType);
           setConnMode(cached.connMode);
+          setTextBizHours(cached.textBizHours);
+          setCallBizHours(cached.callBizHours);
         }
         setPerAccount([]);
       }).finally(() => { if (alive) setLoading(false); });
@@ -222,7 +238,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode]);
+  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode, textBizHours, callBizHours]);
 
   // markDirty-wrapped setters — these are what the JSX uses. The plain setX
   // setters are reserved for load callbacks (which DON'T mark dirty).
@@ -231,6 +247,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; setInstantCallOn(v); };
   const onReplyType      = (v: 'ai' | 'template') => { dirtyRef.current = true; setReplyType(v); };
   const onConnMode       = (v: 'agent-first' | 'parallel') => { dirtyRef.current = true; setConnMode(v); };
+  const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; setTextBizHours(v); };
+  const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; setCallBizHours(v); };
 
   // Save the current display state to one or more accounts. For each account
   // we look up the rule fresh (don't trust component state — it can be stale
@@ -249,11 +267,20 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       instantCallOn,
       replyType,
       connMode,
+      textBizHours,
+      callBizHours,
       newLeadRuleId: prev?.newLeadRuleId ?? null,
       customerTextRuleId: prev?.customerTextRuleId ?? null,
       hasCallSettings: true,
     });
     const ops: Promise<unknown>[] = [];
+    // 0. Per-account business-hours gating (firstMsg + call). Persisted via
+    //    usersApi.updateAccountHours; these are the "Only send during
+    //    business hours" checkboxes on the Instant Text + Instant Call cards.
+    ops.push(usersApi.updateAccountHours(id, {
+      firstMsgDuringBusinessHours: textBizHours,
+      callDuringBusinessHours: callBizHours,
+    }).catch(() => undefined));
     // 1. Instant Reply — automation rule (new_lead, delay=0)
     ops.push((async () => {
       const autoRes = await automationApi.getRulesForAccount(id).catch(() => ({ rules: [] as AutomationRule[] }));
@@ -545,7 +572,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <div>
             <Checkbox
               checked={textBizHours}
-              onChange={setTextBizHours}
+              onChange={onTextBizHours}
               label="Only send during business hours"
               sublabel="Mon–Fri, 9:00 AM – 6:00 PM (America/New_York)"
             />
@@ -583,7 +610,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           <div>
             <Checkbox
               checked={callBizHours}
-              onChange={setCallBizHours}
+              onChange={onCallBizHours}
               label="Only call during business hours"
               sublabel="Mon–Fri, 9:00 AM – 6:00 PM (America/New_York)"
             />

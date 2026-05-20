@@ -10,7 +10,7 @@ import {
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
-import { followUpApi } from '../../services/api';
+import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 
 // Module-level cache for instant tab switching + delay-free mixed detection.
@@ -21,6 +21,9 @@ type CachedFollowups = {
   activeHoursStart: string;
   activeHoursEnd: string;
   timezone: string;
+  resumeDelay: string;
+  deferralDelay: string;
+  hiredDelay: string;
 };
 const followupsCache = new Map<string, CachedFollowups>();
 
@@ -53,7 +56,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
   const [timezone, setTimezone] = useState('America/New_York');
-  const [platform, setPlatform] = useState<string | undefined>(undefined);
+  const [_platform, setPlatform] = useState<string | undefined>(undefined);
+  // Three follow-up rule dropdowns persist to followUpSettingsJson via
+  // fuReEnrollDelay / aiDeferralDelay / aiHiredCompetitorDelay.
+  const [resumeDelay, setResumeDelay] = useState('12 hours');
+  const [deferralDelay, setDeferralDelay] = useState('3 days');
+  const [hiredDelay, setHiredDelay] = useState('3 weeks');
 
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
@@ -83,13 +91,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // Reset dirty on scope change so the next user action triggers save fresh.
   useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
 
-  const parseSettings = (s: any): CachedFollowups => ({
-    quietOn: true, // Stored on user, not per-account — keep default
+  const parseSettings = (s: any, accountHoursQuiet?: boolean): CachedFollowups => ({
+    quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
     deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
     messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
     activeHoursStart: s?.followUpActiveHoursStart || '09:00',
     activeHoursEnd: s?.followUpActiveHoursEnd || '18:00',
     timezone: s?.followUpTimezone || 'America/New_York',
+    resumeDelay: s?.fuReEnrollDelay || '12 hours',
+    deferralDelay: s?.aiDeferralDelay || '3 days',
+    hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
   });
 
   // Hydrate displayed values from cache on scope change (instant).
@@ -98,97 +109,123 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       const cached = accounts.map(a => followupsCache.get(a.id)).filter(Boolean) as CachedFollowups[];
       if (cached.length > 0 && !dirtyRef.current) {
         const first = cached[0];
+        setQuietOn(first.quietOn);
         setDeliveryMode(first.deliveryMode);
         setMessageMode(first.messageMode);
         setActiveHoursStart(first.activeHoursStart);
         setActiveHoursEnd(first.activeHoursEnd);
         setTimezone(first.timezone);
+        setResumeDelay(first.resumeDelay);
+        setDeferralDelay(first.deferralDelay);
+        setHiredDelay(first.hiredDelay);
       }
     } else {
       const cached = followupsCache.get(accountId);
       if (cached && !dirtyRef.current) {
+        setQuietOn(cached.quietOn);
         setDeliveryMode(cached.deliveryMode);
         setMessageMode(cached.messageMode);
         setActiveHoursStart(cached.activeHoursStart);
         setActiveHoursEnd(cached.activeHoursEnd);
         setTimezone(cached.timezone);
+        setResumeDelay(cached.resumeDelay);
+        setDeferralDelay(cached.deferralDelay);
+        setHiredDelay(cached.hiredDelay);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll]);
 
-  // Background fetch — populates cache for all accounts in All-Accounts scope,
-  // or just the active one in single-account mode.
+  // Background fetch — fetches both follow-up settings AND account hours
+  // (the latter carries the quiet-hours toggle which is stored per-account).
   useEffect(() => {
     let alive = true;
     if (isAll) {
       if (accounts.length === 0) return;
       setLoading(true);
-      Promise.all(accounts.map(a =>
+      Promise.all(accounts.map(a => Promise.all([
         followUpApi.getSettings(a.id).catch(() => ({ settings: null })),
-      )).then(results => {
+        usersApi.getAccountHours(a.id).catch(() => null),
+      ]))).then(results => {
         if (!alive) return;
-        results.forEach((res: any, i) => {
-          if (res?.settings) followupsCache.set(accounts[i].id, parseSettings(res.settings));
+        results.forEach(([res, hours]: any[], i) => {
+          const parsed = parseSettings(res?.settings, hours?.followUpsApplyQuietHours);
+          followupsCache.set(accounts[i].id, parsed);
         });
-        if (!dirtyRef.current) {
-          const first = results.find((r: any) => r?.settings);
+        if (!dirtyRef.current && accounts.length > 0) {
+          const first = followupsCache.get(accounts[0].id);
           if (first) {
-            const parsed = parseSettings((first as any).settings);
-            setDeliveryMode(parsed.deliveryMode);
-            setMessageMode(parsed.messageMode);
-            setActiveHoursStart(parsed.activeHoursStart);
-            setActiveHoursEnd(parsed.activeHoursEnd);
-            setTimezone(parsed.timezone);
+            setQuietOn(first.quietOn);
+            setDeliveryMode(first.deliveryMode);
+            setMessageMode(first.messageMode);
+            setActiveHoursStart(first.activeHoursStart);
+            setActiveHoursEnd(first.activeHoursEnd);
+            setTimezone(first.timezone);
+            setResumeDelay(first.resumeDelay);
+            setDeferralDelay(first.deferralDelay);
+            setHiredDelay(first.hiredDelay);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
     } else {
       setLoading(true); setError(null);
-      followUpApi.getSettings(accountId)
-        .then((res: any) => {
-          if (!alive) return;
-          const s = res?.settings;
-          if (s) {
-            const parsed = parseSettings(s);
-            followupsCache.set(accountId, parsed);
-            if (!dirtyRef.current) {
-              setDeliveryMode(parsed.deliveryMode);
-              setMessageMode(parsed.messageMode);
-              setActiveHoursStart(parsed.activeHoursStart);
-              setActiveHoursEnd(parsed.activeHoursEnd);
-              setTimezone(parsed.timezone);
-            }
-          }
-        })
-        .catch(() => { /* non-fatal */ })
-        .finally(() => { if (alive) setLoading(false); });
+      Promise.all([
+        followUpApi.getSettings(accountId).catch(() => ({ settings: null })),
+        usersApi.getAccountHours(accountId).catch(() => null),
+      ]).then(([res, hours]: any[]) => {
+        if (!alive) return;
+        const parsed = parseSettings(res?.settings, hours?.followUpsApplyQuietHours);
+        followupsCache.set(accountId, parsed);
+        if (!dirtyRef.current) {
+          setQuietOn(parsed.quietOn);
+          setDeliveryMode(parsed.deliveryMode);
+          setMessageMode(parsed.messageMode);
+          setActiveHoursStart(parsed.activeHoursStart);
+          setActiveHoursEnd(parsed.activeHoursEnd);
+          setTimezone(parsed.timezone);
+          setResumeDelay(parsed.resumeDelay);
+          setDeferralDelay(parsed.deferralDelay);
+          setHiredDelay(parsed.hiredDelay);
+        }
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { if (alive) setLoading(false); });
     }
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll, accounts]);
 
   const handleSave = async () => {
-    const payload = {
+    // Pass extended fields via saveWizardSettings (broader Record type) so we
+    // can include the 3 rule-card delays + the platform hint.
+    const payload: Record<string, unknown> = {
       mode: deliveryMode === 'active' ? 'auto_send' : 'suggest',
       preset: 'smart',
       replyType: messageMode,
       activeHoursStart,
       activeHoursEnd,
       timezone,
+      fuReEnrollDelay: resumeDelay,
+      aiDeferralDelay: deferralDelay,
+      aiHiredCompetitorDelay: hiredDelay,
     };
     // Optimistic cache write — keep the mixed-state badge accurate before the
     // API round-trip lands.
-    const cached: CachedFollowups = { quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone };
+    const cached: CachedFollowups = {
+      quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
+      resumeDelay, deferralDelay, hiredDelay,
+    };
     const targets = isAll ? accounts : (accounts.find(a => a.id === accountId) ? [accounts.find(a => a.id === accountId)!] : []);
     targets.forEach(a => followupsCache.set(a.id, cached));
     setSaving(true); setError(null);
     try {
-      if (isAll) {
-        await Promise.all(accounts.map(a => followUpApi.saveSettings(a.id, { ...payload, platform: a.platform }).catch(() => undefined)));
-      } else {
-        await followUpApi.saveSettings(accountId, { ...payload, platform });
+      // Save follow-up settings + per-account quiet-hours flag in parallel.
+      const writes: Promise<unknown>[] = [];
+      for (const a of targets) {
+        writes.push(followUpApi.saveWizardSettings(a.id, { ...payload, platform: a.platform }).catch(() => undefined));
+        writes.push(usersApi.updateAccountHours(a.id, { followUpsApplyQuietHours: quietOn }).catch(() => undefined));
       }
+      await Promise.all(writes);
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
@@ -232,13 +269,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn]);
+  }, [deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay]);
 
   // markDirty-wrapped setters used by JSX. Plain setX setters are reserved
   // for the load callbacks above.
-  const onDeliveryMode = (v: 'suggest' | 'active') => { dirtyRef.current = true; setDeliveryMode(v); };
-  const onMessageMode  = (v: 'template' | 'ai') => { dirtyRef.current = true; setMessageMode(v); };
-  const onQuietOn      = (v: boolean) => { dirtyRef.current = true; setQuietOn(v); };
+  const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; setDeliveryMode(v); };
+  const onMessageMode   = (v: 'template' | 'ai') => { dirtyRef.current = true; setMessageMode(v); };
+  const onQuietOn       = (v: boolean) => { dirtyRef.current = true; setQuietOn(v); };
+  const onResumeDelay   = (v: string) => { dirtyRef.current = true; setResumeDelay(v); };
+  const onDeferralDelay = (v: string) => { dirtyRef.current = true; setDeferralDelay(v); };
+  const onHiredDelay    = (v: string) => { dirtyRef.current = true; setHiredDelay(v); };
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 
@@ -414,7 +454,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           title="Resume follow-ups after conversation"
           body="When a customer replies and then goes silent again, start a new follow-up sequence."
           fieldLabel="Wait before resuming"
-          fieldValue="12 hours"
+          fieldValue={resumeDelay}
+          onFieldChange={onResumeDelay}
           fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
           tipIcon={Sparkles}
           tip="How long to wait after your last message before starting follow-ups again."
@@ -425,7 +466,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           title="Check in after customer deferral"
           body={"When customer says \"I'll get back to you\" / \"let me think\", silence the AI and schedule one nudge later. Cancels if they reply first."}
           fieldLabel="Send check-in after"
-          fieldValue="3 days"
+          fieldValue={deferralDelay}
+          onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           tipIcon={Sparkles}
           tip="AI generates this check-in from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
@@ -436,7 +478,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           title="Re-engage after customer hired competitor"
           body="When customer says they hired someone else, send one polite check-in later. Captures the dissatisfied ones."
           fieldLabel="Send re-engage after"
-          fieldValue="3 weeks"
+          fieldValue={hiredDelay}
+          onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           tipIcon={Sparkles}
           tip="AI generates this re-engage from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
@@ -477,7 +520,7 @@ function PlanStep({ n, val, unit }: { n: number; val: number; unit: string }) {
 }
 
 function RuleCardRow({
-  icon, iconTone, title, body, fieldLabel, fieldValue, fieldOptions, tipIcon: TipIcon, tip, noBorder,
+  icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tipIcon: TipIcon, tip, noBorder,
 }: {
   icon: LucideIcon;
   iconTone: IconTone;
@@ -485,12 +528,12 @@ function RuleCardRow({
   body: string;
   fieldLabel: string;
   fieldValue: string;
+  onFieldChange: (v: string) => void;
   fieldOptions: string[];
   tipIcon: LucideIcon;
   tip: string;
   noBorder?: boolean;
 }) {
-  const [value, setValue] = useState(fieldValue);
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
@@ -508,8 +551,8 @@ function RuleCardRow({
       <div>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6 }}>{fieldLabel}</div>
         <Dropdown
-          value={value}
-          onChange={setValue}
+          value={fieldValue}
+          onChange={onFieldChange}
           options={fieldOptions}
           width="100%"
         />
