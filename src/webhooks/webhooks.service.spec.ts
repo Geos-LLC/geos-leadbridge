@@ -74,7 +74,9 @@ describe('WebhooksService — Yelp echo classification (Phase A)', () => {
 
       expect(result.outcome).toBe('unknown');
       expect(result.reason).toContain('fetch_threw');
-      // Caller treats 'unknown' as customer reply AND schedules reconciliation.
+      // Caller now bails on 'unknown' (only schedules reconciliation) — see
+      // handleYelpNewEventInner. Persisting a placeholder corrupted threads on
+      // dead-token businesses (Lavanda Cleaning 2026-05).
     });
 
     it('returns outcome=unknown when adapter returns empty array', async () => {
