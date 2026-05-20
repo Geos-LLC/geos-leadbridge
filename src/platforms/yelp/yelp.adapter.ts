@@ -454,6 +454,24 @@ export class YelpAdapter implements IPlatformAdapter {
     // they do NOT come from lead.message.
     lead.message = data.project?.additional_info || '';
 
+    // Fallback: Yelp's Partner API only returns a structured phone after the
+    // consumer hits the opt-in flow. When the customer just types digits into
+    // additional_info (common for Yelp leads), nothing above fires — so we
+    // mirror the frontend regex in Messages.tsx and extract from the message
+    // body. Runs before the lead row is upserted so the new-lead SMS, Instant
+    // Call trigger, and AI context all see the number.
+    if (!lead.customerPhone && lead.message) {
+      const match = lead.message.match(/(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/);
+      if (match) {
+        const digits = match[1].replace(/\D/g, '');
+        if (digits.length === 11 && digits.startsWith('1')) {
+          lead.customerPhone = `+${digits}`;
+        } else if (digits.length === 10) {
+          lead.customerPhone = `+1${digits}`;
+        }
+      }
+    }
+
     // Location — Yelp uses project.location.postal_code
     lead.postcode = data.project?.location?.postal_code || data.location?.zip_code;
     lead.city = data.project?.location?.city || data.location?.city;
