@@ -7,14 +7,14 @@ import { useAuthStore } from '../../store/authStore';
 import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
 import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
 
-// Steps whose "done" status only makes sense when at least one
-// SavedAccount exists. Each of these writes its data into per-account
-// JSON on SavedAccount (faqJson.quickFacts / servicePricingJson /
+// Steps that go stale when their underlying data disappears. These
+// each write their configuration into per-account JSON on
+// SavedAccount (faqJson.quickFacts / servicePricingJson /
 // followUpSettingsJson), so a SavedAccount cascade-delete also wipes
-// the configuration the user spent time on. Business is handled
-// separately — it lives on User.website and only goes stale when the
-// website itself is cleared.
-const ACCOUNT_BOUND_STEPS: WizardStep[] = ['connect', 'ai', 'pricing', 'automation', 'ai_rules'];
+// what the step represented. Connect + Business are handled
+// separately because their completion signal IS the data itself
+// (SavedAccount existence / User.website).
+const ACCOUNT_DATA_STEPS: WizardStep[] = ['ai', 'pricing', 'automation', 'ai_rules'];
 
 export interface DisplayChecklistContext {
   /** Count of SavedAccount rows owned by the current user. */
@@ -24,15 +24,29 @@ export interface DisplayChecklistContext {
 }
 
 // Derive the displayed checklist from the persisted wizard state +
-// live "is the underlying data still there?" signals. When the data
-// behind a step disappears (account removed, website cleared), the
-// stored checklist would lie if we trusted it as-is — so we drop the
-// stored 'done' for those steps and the card shows them as pending.
+// live "what data does the user actually have?" signals. We treat
+// Connect and Business as data-driven rather than checklist-driven:
 //
-// We only revert `done` entries — `skipped` was an explicit user
-// choice and a data wipe shouldn't silently un-skip the step. The
-// underlying wizardChecklistStatus on the backend stays untouched;
-// if the data comes back the next step mount re-marks it.
+//   - accountCount > 0  →  connect is done (regardless of stored)
+//   - hasWebsite        →  business is done (regardless of stored)
+//
+// Why: those two steps have a single hard completion signal (a row
+// exists / a string is set). If we trusted only the stored checklist
+// we'd get false negatives when ConnectStep's auto-mark or the
+// Dashboard's wizard-return effect didn't fire (cache, race, deep
+// link, user-took-a-different-path), AND false positives when the
+// data was deleted but the stamp survived.
+//
+// For ai / pricing / automation / ai_rules we DO trust the stored
+// status because their data lives in a JSON blob whose "configured-
+// enough" judgement isn't trivially derivable. But when the user
+// drops their last SavedAccount, the data behind those steps was
+// cascade-wiped, so we drop the stored 'done' there too.
+//
+// 'skipped' is always preserved when it would otherwise be 'done' —
+// an explicit user choice shouldn't be silently un-skipped by data
+// appearing. (Reconnecting an account doesn't un-skip AI if you
+// explicitly skipped it; you still see "skipped" on the rail.)
 export function deriveDisplayChecklist(
   stored: WizardChecklist,
   ctx: DisplayChecklistContext | number,
@@ -40,17 +54,30 @@ export function deriveDisplayChecklist(
   // Back-compat: older callers passed accountCount as a bare number.
   const context: DisplayChecklistContext =
     typeof ctx === 'number'
-      ? { accountCount: ctx, hasWebsite: true /* don't second-guess if caller didn't tell us */ }
+      ? { accountCount: ctx, hasWebsite: true /* legacy callers — don't second-guess */ }
       : ctx;
+
   const copy: WizardChecklist = { ...stored };
-  if (context.accountCount === 0) {
-    for (const step of ACCOUNT_BOUND_STEPS) {
+
+  // Connect: data-driven from accountCount.
+  if (context.accountCount > 0) {
+    if (copy.connect !== 'skipped') copy.connect = 'done';
+  } else {
+    delete copy.connect;
+    // Drop stale 'done' for the per-account JSON steps too — the
+    // data behind them is gone.
+    for (const step of ACCOUNT_DATA_STEPS) {
       if (copy[step] === 'done') delete copy[step];
     }
   }
-  if (!context.hasWebsite && copy.business === 'done') {
+
+  // Business: data-driven from website presence.
+  if (context.hasWebsite) {
+    if (copy.business !== 'skipped') copy.business = 'done';
+  } else if (copy.business === 'done') {
     delete copy.business;
   }
+
   return copy;
 }
 
