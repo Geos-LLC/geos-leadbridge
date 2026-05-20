@@ -36,18 +36,57 @@ const DEFAULT_HANDOFF_TRIGGERS = {
 const DEFAULT_HANDOFF_TEMPLATE = 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"';
 
 const STOP_RULES_META = [
-  { key: 'aiStopOnOptOut', label: 'Customer asks not to be contacted' },
-  { key: 'aiStopOnBooked', label: 'Job is booked or confirmed' },
-  { key: 'aiStopOnPriceAgreed', label: 'Customer agrees on price — hand off to manager' },
+  {
+    key: 'aiStopOnOptOut',
+    label: 'Customer asks not to be contacted',
+    description: 'AI detects opt-out language like "stop", "don\'t text me", or "unsubscribe" and immediately stops sending.',
+  },
+  {
+    key: 'aiStopOnBooked',
+    label: 'Job is booked or confirmed',
+    description: 'When the customer says they\'ve hired you (or someone else), AI stops sending follow-ups.',
+  },
+  {
+    key: 'aiStopOnPriceAgreed',
+    label: 'Customer agrees on price — hand off to manager',
+    description: 'Once the customer accepts your quote, AI stops replying so your team can take the call and close the booking.',
+  },
 ] as const;
 
 const HANDOFF_TRIGGERS_META = [
-  { key: 'handoffTriggerAgreed', label: 'Ready to book' },
-  { key: 'handoffTriggerWantsLiveContact', label: 'Wants live contact' },
-  { key: 'handoffTriggerProvidedPhone', label: 'Provided phone number' },
-  { key: 'handoffTriggerProvidedSquareFootage', label: 'Provided square footage' },
-  { key: 'handoffTriggerQualificationComplete', label: 'Qualification complete' },
+  {
+    key: 'handoffTriggerAgreed',
+    label: 'Ready to book',
+    description: 'Customer accepts your proposal or asks to schedule — clear buying intent.',
+  },
+  {
+    key: 'handoffTriggerWantsLiveContact',
+    label: 'Wants live contact',
+    description: 'Customer asks for a call, meeting, or your phone number ("call me", "Zoom at 3", etc.).',
+  },
+  {
+    key: 'handoffTriggerProvidedPhone',
+    label: 'Provided phone number',
+    description: 'Customer shared their phone — a strong signal they want to be called.',
+  },
+  {
+    key: 'handoffTriggerProvidedSquareFootage',
+    label: 'Provided square footage',
+    description: 'Customer answered the sqft question, so AI has enough info to price the job.',
+  },
+  {
+    key: 'handoffTriggerQualificationComplete',
+    label: 'Qualification complete',
+    description: 'Customer has answered every required intake question — the lead is ready for your team.',
+  },
 ] as const;
+
+// The always-on terminal-status guard. Surfaced as a locked row so
+// users understand WHY AI never sends on done/scheduled/archived
+// leads — the rule is hard-coded in follow-up-engine for safety and
+// isn't a per-account toggle.
+const TERMINAL_STATUS_DESCRIPTION =
+  'Once the lead status is set to done, scheduled, hired, or archived in your CRM, AI never sends again. Hard-coded for safety and can\'t be turned off.';
 
 // Step 7 — AI Rules. Summary view of the AI stop conditions and
 // human-takeover triggers, all of which already exist as keys on
@@ -118,19 +157,25 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
           AI stops replying when
         </h2>
         <ul className="space-y-2">
-          {STOP_RULES_META.map(({ key, label }) => {
+          {STOP_RULES_META.map(({ key, label, description }) => {
             const checked = stopRules[key];
             return (
               <RuleRow
                 key={key}
                 label={label}
+                description={description}
                 checked={checked}
                 onChange={v => setStopRules(prev => ({ ...prev, [key]: v }))}
                 disabled={saving}
               />
             );
           })}
-          <RuleRow label="Lead is done, scheduled, or archived" checked locked />
+          <RuleRow
+            label="Lead is done, scheduled, or archived"
+            description={TERMINAL_STATUS_DESCRIPTION}
+            checked
+            locked
+          />
         </ul>
       </section>
 
@@ -141,12 +186,13 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
           Notify your team when AI detects
         </h2>
         <ul className="space-y-2">
-          {HANDOFF_TRIGGERS_META.map(({ key, label }) => {
+          {HANDOFF_TRIGGERS_META.map(({ key, label, description }) => {
             const checked = handoffTriggers[key];
             return (
               <RuleRow
                 key={key}
                 label={label}
+                description={description}
                 checked={checked}
                 onChange={v => setHandoffTriggers(prev => ({ ...prev, [key]: v }))}
                 disabled={saving}
@@ -253,16 +299,17 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
 
 interface RuleRowProps {
   label: string;
+  description: string;
   checked: boolean;
   onChange?: (v: boolean) => void;
   disabled?: boolean;
   locked?: boolean;
 }
 
-function RuleRow({ label, checked, onChange, disabled, locked }: RuleRowProps) {
+function RuleRow({ label, description, checked, onChange, disabled, locked }: RuleRowProps) {
   return (
     <li
-      className={`flex items-center gap-3 px-4 py-3 rounded-2xl border ${
+      className={`flex items-start gap-3 px-4 py-3 rounded-2xl border ${
         locked ? 'border-slate-100 bg-slate-50/60' : 'border-slate-200 bg-white'
       }`}
     >
@@ -271,16 +318,23 @@ function RuleRow({ label, checked, onChange, disabled, locked }: RuleRowProps) {
         checked={checked}
         disabled={disabled || locked}
         onChange={locked || !onChange ? undefined : e => onChange(e.target.checked)}
-        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500/20 disabled:opacity-60"
+        className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500/20 disabled:opacity-60 shrink-0"
       />
-      <span className={`flex-1 text-sm font-semibold ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
-        {label}
-      </span>
-      {locked && (
-        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-          Always on
-        </span>
-      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-sm font-semibold ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
+            {label}
+          </span>
+          {locked && (
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Always on
+            </span>
+          )}
+        </div>
+        <p className={`text-xs leading-snug mt-1 ${locked ? 'text-slate-400' : 'text-slate-500'}`}>
+          {description}
+        </p>
+      </div>
     </li>
   );
 }

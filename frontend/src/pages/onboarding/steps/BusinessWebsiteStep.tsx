@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Globe, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone } from 'lucide-react';
 import { usersApi } from '../../../services/api';
 import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
@@ -38,6 +38,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const meta = getStepMeta('business');
 
   const [value, setValue] = useState<string>(user?.website ?? '');
+  // Business phone — same field we capture at registration. Kept on
+  // User.businessPhone (single source of truth) and surfaced here so
+  // the user can confirm / edit it during onboarding rather than
+  // hunting through Settings.
+  const [phone, setPhone] = useState<string>(user?.businessPhone ?? '');
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
     | { kind: 'checking' }
@@ -57,10 +62,14 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         setVerifyState({ kind: 'invalid', outcome });
         return;
       }
-      // Persist normalized URL + parsed metadata for downstream steps.
+      // Persist normalized URL + parsed metadata + (optionally) the
+      // phone the user typed. The backend's updateProfile normalizes
+      // the phone to E.164 itself; we just hand it the trimmed value.
+      const trimmedPhone = phone.trim();
       const { user: updated } = await usersApi.updateProfile({
         website: outcome.normalizedUrl,
         websiteMetadata: outcome.metadata ?? null,
+        ...(trimmedPhone.length > 0 ? { businessPhone: trimmedPhone } : {}),
       });
       if (user) {
         const token = localStorage.getItem('token') || '';
@@ -69,6 +78,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             ...user,
             website: updated.website ?? null,
             websiteMetadataJson: updated.websiteMetadataJson ?? null,
+            businessPhone: updated.businessPhone ?? user.businessPhone ?? null,
           },
           token,
         );
@@ -124,39 +134,65 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         {meta.description}
       </p>
 
-      <label className="block">
-        <span className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-          Website URL
-        </span>
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-            <Globe className="w-5 h-5" />
+      <div className="space-y-4">
+        <label className="block">
+          <span className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+            Website URL
           </span>
-          <input
-            type="text"
-            inputMode="url"
-            autoComplete="url"
-            placeholder="myco.com or https://myco.com"
-            value={value}
-            onChange={e => {
-              setValue(e.target.value);
-              // Any edit clears the previous result so the user sees a
-              // fresh state on the next submit attempt.
-              if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
-                setVerifyState({ kind: 'idle' });
-              }
-            }}
-            disabled={isChecking}
-            className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60"
-            onKeyDown={e => {
-              if (e.key === 'Enter' && canSave) {
-                e.preventDefault();
-                void verifyAndContinue();
-              }
-            }}
-          />
-        </div>
-      </label>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Globe className="w-5 h-5" />
+            </span>
+            <input
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="myco.com or https://myco.com"
+              value={value}
+              onChange={e => {
+                setValue(e.target.value);
+                // Any edit clears the previous result so the user sees a
+                // fresh state on the next submit attempt.
+                if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
+                  setVerifyState({ kind: 'idle' });
+                }
+              }}
+              disabled={isChecking}
+              className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60"
+              onKeyDown={e => {
+                if (e.key === 'Enter' && canSave) {
+                  e.preventDefault();
+                  void verifyAndContinue();
+                }
+              }}
+            />
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+            Business phone <span className="text-slate-300 font-medium">(optional)</span>
+          </span>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Phone className="w-5 h-5" />
+            </span>
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="(555) 123-4567"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              disabled={isChecking}
+              className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60"
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-slate-400">
+            Notifications and customer replies will be forwarded here.
+          </p>
+        </label>
+      </div>
 
       {/* Verify result panel — replaces the inline help text once the
           user has submitted at least once. */}
