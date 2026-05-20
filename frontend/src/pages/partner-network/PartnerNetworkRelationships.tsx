@@ -15,6 +15,8 @@ interface FormState {
   notes: string;
   widgetEnabled: boolean;
   widgetType: string;
+  popupDelayMs: string;
+  autoOpenFromReferral: boolean;
 }
 const EMPTY_FORM: FormState = {
   sourceBusinessId: '',
@@ -24,6 +26,8 @@ const EMPTY_FORM: FormState = {
   notes: '',
   widgetEnabled: false,
   widgetType: '',
+  popupDelayMs: '',
+  autoOpenFromReferral: false,
 };
 
 export default function PartnerNetworkRelationships() {
@@ -64,6 +68,14 @@ export default function PartnerNetworkRelationships() {
     }
     setSubmitting(true);
     setError(null);
+    const popupDelayMs = form.popupDelayMs.trim()
+      ? Number.parseInt(form.popupDelayMs.trim(), 10)
+      : undefined;
+    if (popupDelayMs !== undefined && (Number.isNaN(popupDelayMs) || popupDelayMs < 0)) {
+      setError('Popup delay must be a non-negative number of milliseconds');
+      setSubmitting(false);
+      return;
+    }
     try {
       if (editingId) {
         await partnerNetworkApi.updateRelationship(editingId, {
@@ -72,6 +84,8 @@ export default function PartnerNetworkRelationships() {
           notes: form.notes.trim() || undefined,
           widgetEnabled: form.widgetEnabled,
           widgetType: form.widgetType.trim() || undefined,
+          popupDelayMs: popupDelayMs ?? null,
+          autoOpenFromReferral: form.autoOpenFromReferral,
         });
       } else {
         await partnerNetworkApi.createRelationship({
@@ -82,6 +96,8 @@ export default function PartnerNetworkRelationships() {
           notes: form.notes.trim() || undefined,
           widgetEnabled: form.widgetEnabled,
           widgetType: form.widgetType.trim() || undefined,
+          popupDelayMs,
+          autoOpenFromReferral: form.autoOpenFromReferral,
         });
       }
       setShowForm(false);
@@ -114,6 +130,8 @@ export default function PartnerNetworkRelationships() {
       notes: r.notes ?? '',
       widgetEnabled: r.widgetEnabled ?? false,
       widgetType: r.widgetType ?? '',
+      popupDelayMs: r.popupDelayMs == null ? '' : String(r.popupDelayMs),
+      autoOpenFromReferral: r.autoOpenFromReferral ?? false,
     });
     setShowForm(true);
   };
@@ -192,6 +210,27 @@ export default function PartnerNetworkRelationships() {
                 onChange={e => setForm({ ...form, widgetType: e.target.value })}
                 disabled={!form.widgetEnabled}
               />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min={0}
+                  max={120000}
+                  placeholder="popupDelayMs (e.g. 4000)"
+                  value={form.popupDelayMs}
+                  onChange={e => setForm({ ...form, popupDelayMs: e.target.value })}
+                  disabled={!form.widgetEnabled}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.autoOpenFromReferral}
+                    onChange={e => setForm({ ...form, autoOpenFromReferral: e.target.checked })}
+                    disabled={!form.widgetEnabled}
+                  />
+                  Auto-open when arriving with <code>?ref=</code>
+                </label>
+              </div>
               <p style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 6 }}>
                 Placeholder — no widget runtime is shipped yet. Future loader will read these
                 flags to decide whether to expose <code>/r/:code</code> via <code>partner-widget.js</code>.

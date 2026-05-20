@@ -22,6 +22,7 @@ import { PrismaService } from '../../common/utils/prisma.service';
 import {
   PartnerBusiness,
   PartnerLead,
+  PartnerLeadContactPref,
   PartnerLeadEventType,
   PartnerLeadIntent,
   PartnerLeadStatus,
@@ -46,6 +47,7 @@ import { SubmitPartnerLeadDto, UpdatePartnerLeadDto } from './dto/lead.dto';
 const INTENT_VALUE: Record<PartnerLeadIntent, number> = {
   this_week: 30,
   this_month: 20,
+  future_interest: 10,
   not_sure: 10,
 };
 
@@ -177,6 +179,8 @@ export class PartnerNetworkService {
         notes: dto.notes?.trim() || null,
         widgetEnabled: dto.widgetEnabled ?? false,
         widgetType: dto.widgetType?.trim() || null,
+        popupDelayMs: dto.popupDelayMs ?? null,
+        autoOpenFromReferral: dto.autoOpenFromReferral ?? false,
       },
     });
   }
@@ -201,6 +205,12 @@ export class PartnerNetworkService {
         ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
         ...(dto.widgetEnabled !== undefined && { widgetEnabled: dto.widgetEnabled }),
         ...(dto.widgetType !== undefined && { widgetType: dto.widgetType?.trim() || null }),
+        ...(dto.popupDelayMs !== undefined && {
+          popupDelayMs: dto.popupDelayMs == null ? null : dto.popupDelayMs,
+        }),
+        ...(dto.autoOpenFromReferral !== undefined && {
+          autoOpenFromReferral: dto.autoOpenFromReferral,
+        }),
       },
     });
   }
@@ -347,6 +357,7 @@ export class PartnerNetworkService {
         destinationBusinessId: referral.destinationBusinessId,
         customerName: name,
         customerPhone: phone,
+        preferredContact: dto.preferredContact ?? PartnerLeadContactPref.either,
         notes: dto.notes?.trim() || null,
         intentTiming: dto.intentTiming,
         estimatedValue,
@@ -466,6 +477,7 @@ export class PartnerNetworkService {
       data: {
         ...(dto.status !== undefined && { status: dto.status }),
         ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
+        ...(dto.assignedTo !== undefined && { assignedTo: dto.assignedTo?.trim() || null }),
       },
     });
   }
@@ -485,7 +497,7 @@ export class PartnerNetworkService {
    * lead row is later deleted manually for any reason.
    */
   async getDashboard(workspaceId: string) {
-    const [leads, eventGroups] = await Promise.all([
+    const [leads, eventGroups, employeeEventGroups] = await Promise.all([
       this.prisma.partnerLead.findMany({
         where: { workspaceId },
         include: { referralCode: true, sourceBusiness: true, destinationBusiness: true },
@@ -495,19 +507,45 @@ export class PartnerNetworkService {
         where: { workspaceId },
         _count: { _all: true },
       }),
+      // Per-code event counts → mapped to per-employee below via referral code
+      // joins. Group at the DB level so this stays cheap as event volume grows.
+      this.prisma.partnerLeadEvent.groupBy({
+        by: ['referralCodeId', 'eventType'],
+        where: { workspaceId },
+        _count: { _all: true },
+      }),
     ]);
 
     const total = leads.length;
     const hot = leads.filter(l => l.intentTiming === 'this_week').length;
     const warm = leads.filter(l => l.intentTiming === 'this_month').length;
-    const cold = leads.filter(l => l.intentTiming === 'not_sure').length;
+    // Both `not_sure` and `future_interest` sit at the bottom of the funnel
+    // (same $10 estimated value); group them as "cold" so the dashboard
+    // categorization stays a clean hot/warm/cold tier set.
+    const cold = leads.filter(
+      l => l.intentTiming === 'not_sure' || l.intentTiming === 'future_interest',
+    ).length;
     const estimatedTotalValue = leads.reduce((acc, l) => acc + (l.estimatedValue ?? 0), 0);
 
     const bySource = new Map<string, { businessId: string; businessName: string; count: number; value: number }>();
     const byDest = new Map<string, { businessId: string; businessName: string; count: number; value: number }>();
     const byCode = new Map<string, { codeId: string; code: string; employeeName: string | null; count: number; value: number }>();
-    const byEmployee = new Map<string, { employeeName: string; count: number; value: number }>();
+    const byEmployee = new Map<string, {
+      employeeName: string;
+      pageViews: number;
+      formStarts: number;
+      submissions: number;
+      value: number;
+    }>();
     const byStatus = new Map<PartnerLeadStatus, number>();
+    // Map referralCodeId → employeeName so we can stitch per-code event counts
+    // onto per-employee aggregates. Codes without an employeeName are dropped
+    // from the per-employee view but still counted in the global funnel.
+    const codeToEmployee = new Map<string, string>();
+    for (const lead of leads) {
+      const employee = (lead.referralCode.employeeName ?? '').trim();
+      if (employee) codeToEmployee.set(lead.referralCodeId, employee);
+    }
 
     for (const lead of leads) {
       const srcKey = lead.sourceBusinessId;
@@ -546,8 +584,14 @@ export class PartnerNetworkService {
 
       const employee = (lead.referralCode.employeeName ?? '').trim();
       if (employee) {
-        const e = byEmployee.get(employee) ?? { employeeName: employee, count: 0, value: 0 };
-        e.count += 1;
+        const e = byEmployee.get(employee) ?? {
+          employeeName: employee,
+          pageViews: 0,
+          formStarts: 0,
+          submissions: 0,
+          value: 0,
+        };
+        e.submissions += 1;
         e.value += lead.estimatedValue;
         byEmployee.set(employee, e);
       }
@@ -555,12 +599,38 @@ export class PartnerNetworkService {
       byStatus.set(lead.status, (byStatus.get(lead.status) ?? 0) + 1);
     }
 
+    // Stitch event counts onto the per-employee aggregate. Codes without an
+    // employee assignment still inflate the global funnel — they just don't
+    // appear in the per-employee table.
+    for (const group of employeeEventGroups) {
+      const employee = codeToEmployee.get(group.referralCodeId);
+      if (!employee) continue;
+      const e = byEmployee.get(employee) ?? {
+        employeeName: employee,
+        pageViews: 0,
+        formStarts: 0,
+        submissions: 0,
+        value: 0,
+      };
+      const n = group._count._all;
+      if (group.eventType === PartnerLeadEventType.page_view) e.pageViews += n;
+      else if (group.eventType === PartnerLeadEventType.form_started) e.formStarts += n;
+      // submissions are sourced from PartnerLead rows above so a deleted lead
+      // doesn't inflate per-employee numbers via a leftover event row.
+      byEmployee.set(employee, e);
+    }
+
     const eventCount = (t: PartnerLeadEventType): number =>
       eventGroups.find(g => g.eventType === t)?._count._all ?? 0;
+    // Funnel: views → starts → submits come from the events table; qualified
+    // and booked come from lead status (per spec, the funnel keeps going past
+    // submission into the partner-side workflow).
     const funnel = {
       views: eventCount(PartnerLeadEventType.page_view),
       started: eventCount(PartnerLeadEventType.form_started),
       submitted: eventCount(PartnerLeadEventType.form_submitted),
+      qualified: byStatus.get(PartnerLeadStatus.qualified) ?? 0,
+      booked: byStatus.get(PartnerLeadStatus.booked) ?? 0,
     };
 
     return {
@@ -568,7 +638,7 @@ export class PartnerNetworkService {
       bySourceBusiness: Array.from(bySource.values()).sort((a, b) => b.count - a.count),
       byDestinationBusiness: Array.from(byDest.values()).sort((a, b) => b.count - a.count),
       byReferralCode: Array.from(byCode.values()).sort((a, b) => b.count - a.count),
-      byEmployee: Array.from(byEmployee.values()).sort((a, b) => b.count - a.count),
+      byEmployee: Array.from(byEmployee.values()).sort((a, b) => b.submissions - a.submissions),
       byStatus: Object.fromEntries(byStatus),
       funnel,
     };
@@ -593,9 +663,11 @@ export class PartnerNetworkService {
       'employeeName',
       'customerName',
       'customerPhone',
+      'preferredContact',
       'intentTiming',
       'estimatedValue',
       'status',
+      'assignedTo',
       'possibleDuplicate',
       'pageViewedAt',
       'formStartedAt',
@@ -611,9 +683,11 @@ export class PartnerNetworkService {
       l.referralCode.employeeName ?? '',
       l.customerName,
       l.customerPhone,
+      l.preferredContact,
       l.intentTiming,
       String(l.estimatedValue),
       l.status,
+      l.assignedTo ?? '',
       l.possibleDuplicate ? 'yes' : 'no',
       l.pageViewedAt?.toISOString() ?? '',
       l.formStartedAt?.toISOString() ?? '',
