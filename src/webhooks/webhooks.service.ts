@@ -1892,19 +1892,6 @@ export class WebhooksService {
       userId, platform: 'yelp', businessId, leadId: lead.id,
     }).catch(() => {});
 
-    // Auto-detect phone number in customer message and save to lead if missing
-    if (!lead.customerPhone && leadData.message) {
-      const phoneMatch = leadData.message.match(/(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/);
-      if (phoneMatch) {
-        const digits = phoneMatch[1].replace(/\D/g, '');
-        const normalized = digits.length === 11 && digits.startsWith('1') ? `+${digits}` : digits.length === 10 ? `+1${digits}` : null;
-        if (normalized) {
-          await this.prisma.lead.update({ where: { id: lead.id }, data: { customerPhone: normalized } }).catch(() => {});
-          this.logger.log(`[Yelp] Auto-detected phone ${normalized} from message for lead ${leadId}`);
-        }
-      }
-    }
-
     // Cross-instance dedup: if the lead existed before our upsert OR was created
     // more than 10s ago (another instance just created it), skip new-lead notifications.
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
