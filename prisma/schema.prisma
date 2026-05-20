@@ -1556,3 +1556,144 @@ model SupportGrant {
   @@index([tenantId, expiresAt])
   @@map("support_grants")
 }
+
+// ==========================================
+// Partner Network Beta
+// ==========================================
+// Self-contained module for partner businesses to exchange/sell qualified
+// local leads via referral QR links + public intent form. Designed as an
+// isolated bounded context so the entire feature (tables, routes, services,
+// UI) can be lifted into a standalone product later. Do NOT couple to
+// marketplace Lead model — keep this module's data in these tables only.
+
+enum PartnerLeadIntent {
+  this_week
+  this_month
+  not_sure
+}
+
+enum PartnerLeadStatus {
+  new
+  contacted
+  qualified
+  rejected
+  booked
+  paid_manually
+}
+
+model PartnerBusiness {
+  id          String   @id @default(uuid())
+  // Owning workspace/tenant — currently the LeadBridge user id. Kept as a
+  // plain string (not FK) so this module can be extracted later without
+  // depending on the LB User table.
+  workspaceId String
+  name        String
+  category    String?
+  phone       String?
+  website     String?
+  serviceArea String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sourceRelationships      PartnerRelationship[] @relation("PartnerRelSource")
+  destinationRelationships PartnerRelationship[] @relation("PartnerRelDestination")
+  sourceReferralCodes      PartnerReferralCode[] @relation("PartnerRefCodeSource")
+  destinationReferralCodes PartnerReferralCode[] @relation("PartnerRefCodeDestination")
+  sourceLeads              PartnerLead[]         @relation("PartnerLeadSource")
+  destinationLeads         PartnerLead[]         @relation("PartnerLeadDestination")
+
+  @@index([workspaceId])
+  @@map("partner_businesses")
+}
+
+model PartnerRelationship {
+  id                    String   @id @default(uuid())
+  workspaceId           String
+  sourceBusinessId      String
+  destinationBusinessId String
+  name                  String?
+  active                Boolean  @default(true)
+  defaultOfferText      String?  @db.Text
+  notes                 String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  sourceBusiness      PartnerBusiness       @relation("PartnerRelSource", fields: [sourceBusinessId], references: [id], onDelete: Cascade)
+  destinationBusiness PartnerBusiness       @relation("PartnerRelDestination", fields: [destinationBusinessId], references: [id], onDelete: Cascade)
+  referralCodes       PartnerReferralCode[]
+
+  @@index([workspaceId])
+  @@index([sourceBusinessId])
+  @@index([destinationBusinessId])
+  @@map("partner_relationships")
+}
+
+model PartnerReferralCode {
+  id                    String   @id @default(uuid())
+  workspaceId           String
+  // Public referral code, e.g. "SPOTLESS-MARIA". Unique across all tenants
+  // since the public URL /r/:code is global.
+  code                  String   @unique
+  sourceBusinessId      String
+  destinationBusinessId String
+  partnerRelationshipId String?
+  employeeName          String?
+  active                Boolean  @default(true)
+  // Stored URL path (e.g. "/r/SPOTLESS-MARIA"). Frontend prefixes with the
+  // current origin to build a copy-able full URL.
+  publicUrl             String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  sourceBusiness      PartnerBusiness      @relation("PartnerRefCodeSource", fields: [sourceBusinessId], references: [id], onDelete: Cascade)
+  destinationBusiness PartnerBusiness      @relation("PartnerRefCodeDestination", fields: [destinationBusinessId], references: [id], onDelete: Cascade)
+  partnerRelationship PartnerRelationship? @relation(fields: [partnerRelationshipId], references: [id], onDelete: SetNull)
+  leads               PartnerLead[]
+
+  @@index([workspaceId])
+  @@index([code])
+  @@index([sourceBusinessId])
+  @@index([destinationBusinessId])
+  @@map("partner_referral_codes")
+}
+
+model PartnerLead {
+  id                    String            @id @default(uuid())
+  workspaceId           String
+  referralCodeId        String
+  sourceBusinessId      String
+  destinationBusinessId String
+  customerName          String
+  customerPhone         String
+  // Free-text notes from the customer-facing form.
+  notes                 String?           @db.Text
+  intentTiming          PartnerLeadIntent
+  // Hardcoded for MVP: this_week=30, this_month=20, not_sure=10. Later this
+  // becomes per-relationship configurable; keep computed at write-time so
+  // historic leads stay valued at the rate at submission.
+  estimatedValue        Int
+  status                PartnerLeadStatus @default(new)
+  // Flagged true when another lead exists with the same phone for the same
+  // destinationBusinessId within the previous 30 days. Submission is never
+  // blocked — admin reviews flagged duplicates manually.
+  possibleDuplicate     Boolean           @default(false)
+  // Optional UTM capture from the public form's query string.
+  utmSource             String?
+  utmMedium             String?
+  utmCampaign           String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  referralCode        PartnerReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  sourceBusiness      PartnerBusiness     @relation("PartnerLeadSource", fields: [sourceBusinessId], references: [id], onDelete: Cascade)
+  destinationBusiness PartnerBusiness     @relation("PartnerLeadDestination", fields: [destinationBusinessId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([referralCodeId])
+  @@index([sourceBusinessId])
+  @@index([destinationBusinessId])
+  @@index([status])
+  @@index([destinationBusinessId, customerPhone, createdAt])
+  @@map("partner_leads")
+}
