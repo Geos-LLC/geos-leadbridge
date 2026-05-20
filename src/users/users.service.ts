@@ -613,13 +613,35 @@ export class UsersService {
       return { reachable: false, normalizedUrl: normalized, errorCode: 'invalid_url' };
     }
 
+    // Try the URL as given. If it fails with a DNS / connection error
+    // AND the hostname doesn't already start with "www.", retry with
+    // the www-prefixed hostname. Several common hosting setups
+    // (Wix / Squarespace / Webflow) only respond on the www subdomain
+    // and the apex isn't even DNS-resolvable.
+    let result = await this.tryFetchWebsite(normalized);
+    if (!result.reachable && this.shouldRetryWithWww(result, normalized)) {
+      try {
+        const u = new URL(normalized);
+        const wwwHost = `www.${u.hostname}`;
+        const wwwUrl = `${u.protocol}//${wwwHost}${u.pathname}${u.search}`;
+        const wwwResult = await this.tryFetchWebsite(wwwUrl);
+        if (wwwResult.reachable) return wwwResult;
+      } catch { /* fall through to original failure */ }
+    }
+    return result;
+  }
+
+  // Inner fetch — kept separate so verifyWebsite can transparently
+  // retry with a www. prefix on DNS / connection failure.
+  private async tryFetchWebsite(url: string): Promise<VerifyWebsiteResult> {
     try {
-      const response = await axios.get(normalized, {
+      const response = await axios.get(url, {
         timeout: 6000,
         maxRedirects: 3,
-        // ~500 KB ceiling — enough to capture the <head> of any
-        // reasonable marketing site without pulling a full SPA bundle.
-        maxContentLength: 500 * 1024,
+        // 5 MB ceiling — most marketing sites are well under 1 MB but
+        // Wix / Squarespace / Webflow pages routinely ship 2-3 MB of
+        // initial HTML. Earlier 500 KB cap rejected those as failures.
+        maxContentLength: 5 * 1024 * 1024,
         responseType: 'text',
         // Some hosts refuse non-browser User-Agents; identify ourselves
         // but pretend to be a Mozilla so anti-bot filters don't 403.
@@ -633,16 +655,28 @@ export class UsersService {
       });
       const html: string = typeof response.data === 'string' ? response.data : '';
       const metadata = this.extractWebsiteMetadata(html);
-      return { reachable: true, normalizedUrl: normalized, metadata };
+      // Capture the final URL after redirect-following so we save the
+      // canonical form ("https://spotless.homes" → save
+      // "https://www.spotless.homes/").
+      const finalUrl: string = (response.request?.res?.responseUrl as string) || url;
+      return { reachable: true, normalizedUrl: finalUrl, metadata };
     } catch (err: any) {
       const code = err.code || '';
       const status = err.response?.status;
+      const msg = err.message || '';
+      // maxContentLength exceeded — the site IS reachable, we just
+      // can't ingest its HTML for parsing. Treat as success without
+      // metadata; the user shouldn't be blocked by a heavy SPA bundle.
+      if (/maxContentLength/i.test(msg)) {
+        this.logger.log(`[verifyWebsite] ${url} oversize body — treating as reachable without metadata`);
+        return { reachable: true, normalizedUrl: url, metadata: {} };
+      }
       let errorCode: VerifyWebsiteResult['errorCode'] = 'unreachable';
       let errorMessage = 'We couldn\'t load this site.';
-      if (code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
+      if (code === 'ECONNABORTED' || /timeout/i.test(msg)) {
         errorCode = 'timeout';
         errorMessage = 'The site took too long to respond.';
-      } else if (code === 'ENOTFOUND' || /enotfound|getaddrinfo/i.test(err.message || '')) {
+      } else if (code === 'ENOTFOUND' || /enotfound|getaddrinfo/i.test(msg)) {
         errorCode = 'dns_not_found';
         errorMessage = 'We couldn\'t find that domain.';
       } else if (code === 'ECONNREFUSED') {
@@ -652,8 +686,24 @@ export class UsersService {
         errorCode = 'http_error';
         errorMessage = `The site returned an error (HTTP ${status}).`;
       }
-      this.logger.warn(`[verifyWebsite] ${normalized} failed: ${errorCode} (${err.message})`);
-      return { reachable: false, normalizedUrl: normalized, errorCode, errorMessage };
+      this.logger.warn(`[verifyWebsite] ${url} failed: ${errorCode} (${msg})`);
+      return { reachable: false, normalizedUrl: url, errorCode, errorMessage };
+    }
+  }
+
+  // Retry with www. only on transport-level failures where the apex
+  // genuinely couldn't be reached. If we got an HTTP status back the
+  // domain answered — don't second-guess that.
+  private shouldRetryWithWww(result: VerifyWebsiteResult, originalUrl: string): boolean {
+    if (!result.errorCode) return false;
+    if (result.errorCode !== 'dns_not_found' && result.errorCode !== 'connection_refused' && result.errorCode !== 'unreachable' && result.errorCode !== 'timeout') {
+      return false;
+    }
+    try {
+      const u = new URL(originalUrl);
+      return !u.hostname.startsWith('www.');
+    } catch {
+      return false;
     }
   }
 
