@@ -7,7 +7,8 @@
 
 -- CreateEnum
 CREATE TYPE "PartnerLeadIntent" AS ENUM ('this_week', 'this_month', 'not_sure');
-CREATE TYPE "PartnerLeadStatus" AS ENUM ('new', 'contacted', 'qualified', 'rejected', 'booked', 'paid_manually');
+CREATE TYPE "PartnerLeadStatus" AS ENUM ('new', 'contacted', 'interested_not_now', 'qualified', 'rejected', 'booked', 'paid_manually');
+CREATE TYPE "PartnerLeadEventType" AS ENUM ('page_view', 'form_started', 'form_submitted');
 
 -- CreateTable: partner_businesses
 CREATE TABLE "partner_businesses" (
@@ -36,6 +37,8 @@ CREATE TABLE "partner_relationships" (
     "active" BOOLEAN NOT NULL DEFAULT true,
     "defaultOfferText" TEXT,
     "notes" TEXT,
+    "widgetEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "widgetType" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -56,6 +59,7 @@ CREATE TABLE "partner_referral_codes" (
     "employeeName" TEXT,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "publicUrl" TEXT NOT NULL,
+    "qrUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -84,6 +88,9 @@ CREATE TABLE "partner_leads" (
     "utmSource" TEXT,
     "utmMedium" TEXT,
     "utmCampaign" TEXT,
+    "pageViewedAt" TIMESTAMP(3),
+    "formStartedAt" TIMESTAMP(3),
+    "submittedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -95,6 +102,22 @@ CREATE INDEX "partner_leads_sourceBusinessId_idx" ON "partner_leads"("sourceBusi
 CREATE INDEX "partner_leads_destinationBusinessId_idx" ON "partner_leads"("destinationBusinessId");
 CREATE INDEX "partner_leads_status_idx" ON "partner_leads"("status");
 CREATE INDEX "partner_leads_destinationBusinessId_customerPhone_createdAt_idx" ON "partner_leads"("destinationBusinessId", "customerPhone", "createdAt");
+
+-- CreateTable: partner_lead_events
+CREATE TABLE "partner_lead_events" (
+    "id" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "referralCodeId" TEXT NOT NULL,
+    "leadId" TEXT,
+    "eventType" "PartnerLeadEventType" NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "partner_lead_events_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX "partner_lead_events_workspaceId_idx" ON "partner_lead_events"("workspaceId");
+CREATE INDEX "partner_lead_events_referralCodeId_idx" ON "partner_lead_events"("referralCodeId");
+CREATE INDEX "partner_lead_events_leadId_idx" ON "partner_lead_events"("leadId");
+CREATE INDEX "partner_lead_events_eventType_idx" ON "partner_lead_events"("eventType");
 
 -- AddForeignKey: partner_relationships
 ALTER TABLE "partner_relationships" ADD CONSTRAINT "partner_relationships_sourceBusinessId_fkey" FOREIGN KEY ("sourceBusinessId") REFERENCES "partner_businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -109,3 +132,7 @@ ALTER TABLE "partner_referral_codes" ADD CONSTRAINT "partner_referral_codes_part
 ALTER TABLE "partner_leads" ADD CONSTRAINT "partner_leads_referralCodeId_fkey" FOREIGN KEY ("referralCodeId") REFERENCES "partner_referral_codes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "partner_leads" ADD CONSTRAINT "partner_leads_sourceBusinessId_fkey" FOREIGN KEY ("sourceBusinessId") REFERENCES "partner_businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "partner_leads" ADD CONSTRAINT "partner_leads_destinationBusinessId_fkey" FOREIGN KEY ("destinationBusinessId") REFERENCES "partner_businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey: partner_lead_events
+ALTER TABLE "partner_lead_events" ADD CONSTRAINT "partner_lead_events_referralCodeId_fkey" FOREIGN KEY ("referralCodeId") REFERENCES "partner_referral_codes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "partner_lead_events" ADD CONSTRAINT "partner_lead_events_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "partner_leads"("id") ON DELETE SET NULL ON UPDATE CASCADE;

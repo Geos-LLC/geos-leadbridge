@@ -12,10 +12,12 @@ export type PartnerLeadIntent = 'this_week' | 'this_month' | 'not_sure';
 export type PartnerLeadStatus =
   | 'new'
   | 'contacted'
+  | 'interested_not_now'
   | 'qualified'
   | 'rejected'
   | 'booked'
   | 'paid_manually';
+export type PartnerLeadEventType = 'page_view' | 'form_started' | 'form_submitted';
 
 export interface PartnerBusiness {
   id: string;
@@ -39,6 +41,8 @@ export interface PartnerRelationship {
   active: boolean;
   defaultOfferText: string | null;
   notes: string | null;
+  widgetEnabled: boolean;
+  widgetType: string | null;
   createdAt: string;
   updatedAt: string;
   sourceBusiness: PartnerBusiness;
@@ -55,6 +59,7 @@ export interface PartnerReferralCode {
   employeeName: string | null;
   active: boolean;
   publicUrl: string;
+  qrUrl: string | null;
   createdAt: string;
   updatedAt: string;
   sourceBusiness: PartnerBusiness;
@@ -77,6 +82,9 @@ export interface PartnerLead {
   utmSource: string | null;
   utmMedium: string | null;
   utmCampaign: string | null;
+  pageViewedAt: string | null;
+  formStartedAt: string | null;
+  submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
   referralCode: PartnerReferralCode;
@@ -93,8 +101,11 @@ export interface DashboardSummary {
     estimatedTotalValue: number;
   };
   bySourceBusiness: Array<{ businessId: string; businessName: string; count: number; value: number }>;
+  byDestinationBusiness: Array<{ businessId: string; businessName: string; count: number; value: number }>;
   byReferralCode: Array<{ codeId: string; code: string; employeeName: string | null; count: number; value: number }>;
+  byEmployee: Array<{ employeeName: string; count: number; value: number }>;
   byStatus: Record<string, number>;
+  funnel: { views: number; started: number; submitted: number };
 }
 
 export interface PublicReferralView {
@@ -130,13 +141,20 @@ export const partnerNetworkApi = {
     name?: string;
     defaultOfferText?: string;
     notes?: string;
+    widgetEnabled?: boolean;
+    widgetType?: string;
   }): Promise<PartnerRelationship> => {
     const { data } = await api.post('/partner-network/relationships', body);
     return data.relationship;
   },
   updateRelationship: async (
     id: string,
-    body: Partial<Pick<PartnerRelationship, 'name' | 'active' | 'defaultOfferText' | 'notes'>>,
+    body: Partial<
+      Pick<
+        PartnerRelationship,
+        'name' | 'active' | 'defaultOfferText' | 'notes' | 'widgetEnabled' | 'widgetType'
+      >
+    >,
   ): Promise<PartnerRelationship> => {
     const { data } = await api.patch(`/partner-network/relationships/${id}`, body);
     return data.relationship;
@@ -200,6 +218,18 @@ export const partnerNetworkApi = {
   getPublicReferral: async (code: string): Promise<PublicReferralView> => {
     const { data } = await api.get(`/partner-network/public/r/${encodeURIComponent(code)}`);
     return data.referral;
+  },
+  logPublicEvent: async (
+    code: string,
+    eventType: 'page_view' | 'form_started',
+  ): Promise<{ recorded: boolean }> => {
+    // Best-effort fire-and-forget; if the request fails we swallow the error
+    // in callers so the customer page never breaks on analytics.
+    const { data } = await api.post(
+      `/partner-network/public/r/${encodeURIComponent(code)}/events`,
+      { eventType },
+    );
+    return data;
   },
   submitPublicLead: async (
     code: string,
