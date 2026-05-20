@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ExternalLink, Eye, Loader2, Sparkles, Wrench } from 'lucide-react';
+import { ExternalLink, Eye, Loader2, Pencil, Sparkles, Wrench } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
 import { usersApi } from '../../../services/api';
@@ -72,10 +72,12 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
     navigate('/settings');
   }
 
-  // Build a tiny preview summary from DEFAULT_CLEANING_PRICING — first
-  // four bed/bath rows + the extras list, so the modal stays small.
-  const previewRows = (DEFAULT_CLEANING_PRICING as any)?.priceTable?.slice(0, 4) ?? [];
-  const previewExtras = ((DEFAULT_CLEANING_PRICING as any)?.extras ?? []).slice(0, 6);
+  // Show the full recommended table — users want to verify the
+  // numbers before committing, and the modal scrolls if it overflows.
+  const previewRows = (DEFAULT_CLEANING_PRICING as any)?.priceTable ?? [];
+  const previewExtras = (DEFAULT_CLEANING_PRICING as any)?.extras ?? [];
+  const previewFrequencies = (DEFAULT_CLEANING_PRICING as any)?.frequencyDiscounts ?? [];
+  const petSurcharge = (DEFAULT_CLEANING_PRICING as any)?.petSurcharge;
 
   return (
     <div className="pt-2">
@@ -130,66 +132,129 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
           onClick={() => setPreviewOpen(false)}
         >
           <div
-            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-7"
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-base font-extrabold text-slate-900 tracking-tight">
-                Recommended pricing — preview
+            {/* Header — sticky inside the modal so it stays on screen
+                while the body scrolls. */}
+            <div className="px-7 pt-7 pb-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <div className="text-base font-extrabold text-slate-900 tracking-tight">
+                  Recommended pricing — full preview
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Default cleaning rates. You can change any row from Settings later.
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewOpen(false)}
-                className="text-sm font-semibold text-slate-400 hover:text-slate-700"
+                className="text-sm font-semibold text-slate-400 hover:text-slate-700 shrink-0"
               >
                 Close
               </button>
             </div>
-            <p className="text-sm text-slate-500 mb-4">
-              First four rows of the recommended cleaning-rate table. The full table includes
-              house sizes up to 6 bed / 5 bath plus extras, condition surcharges, and frequency
-              discounts. You can edit any of it later from Settings.
-            </p>
-            <div className="rounded-2xl border border-slate-100 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-widest">
-                  <tr>
-                    <th className="text-left py-2 px-3 font-bold">Bed / Bath</th>
-                    <th className="text-right py-2 px-3 font-bold">Regular</th>
-                    <th className="text-right py-2 px-3 font-bold">Deep</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row: any, i: number) => (
-                    <tr key={i} className="border-t border-slate-100">
-                      <td className="py-2 px-3 text-slate-700 font-semibold">
-                        {row.bed}b / {row.bath}b
-                      </td>
-                      <td className="py-2 px-3 text-right text-slate-900">${row.regular ?? row.standard ?? '—'}</td>
-                      <td className="py-2 px-3 text-right text-slate-900">${row.deep ?? '—'}</td>
+
+            {/* Scrollable body */}
+            <div className="px-7 py-5 overflow-y-auto flex-1">
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-widest sticky top-0">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-bold">Bed / Bath</th>
+                      <th className="text-right py-2 px-3 font-bold">Regular</th>
+                      <th className="text-right py-2 px-3 font-bold">Deep</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {previewExtras.length > 0 && (
-              <div className="mt-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                  Common extras
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {previewExtras.map((e: any, i: number) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold"
-                    >
-                      {e.name || e.label || 'Extra'}
-                      {typeof e.price === 'number' ? ` · $${e.price}` : ''}
-                    </span>
-                  ))}
-                </div>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((row: any, i: number) => (
+                      <tr key={i} className="border-t border-slate-100">
+                        <td className="py-2 px-3 text-slate-700 font-semibold">
+                          {row.bed}b / {row.bath}b
+                        </td>
+                        <td className="py-2 px-3 text-right text-slate-900">${row.regular ?? row.standard ?? '—'}</td>
+                        <td className="py-2 px-3 text-right text-slate-900">${row.deep ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
+
+              {previewFrequencies.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                    Frequency discounts
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {previewFrequencies.map((f: any, i: number) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold"
+                      >
+                        {f.label || f.name || 'Frequency'}
+                        {typeof f.discount === 'number' ? ` · −${f.discount}%` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {previewExtras.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                    Extras
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {previewExtras.map((e: any, i: number) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold"
+                      >
+                        {e.name || e.label || 'Extra'}
+                        {typeof e.price === 'number' ? ` · $${e.price}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {typeof petSurcharge === 'number' && (
+                <div className="mt-5 text-xs text-slate-500">
+                  <strong className="text-slate-700">Pet surcharge:</strong> ${petSurcharge} per visit.
+                </div>
+              )}
+            </div>
+
+            {/* Footer with primary actions. "Apply & continue" runs
+                the same path as the main "Use recommended" button so
+                a user who only opened the preview can commit without
+                closing it. */}
+            <div className="px-7 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewOpen(false);
+                  navigate('/settings');
+                }}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                <Pencil className="w-4 h-4" />
+                Edit pricing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewOpen(false);
+                  void applyRecommended();
+                }}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {saving ? 'Saving…' : 'Apply & continue'}
+              </button>
+            </div>
           </div>
         </div>
       )}

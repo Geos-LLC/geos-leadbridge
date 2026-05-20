@@ -1,6 +1,11 @@
 import { ArrowRight, Check, Loader2, Settings as SettingsIcon } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { authApi, thumbtackApi } from '../../../services/api';
+import { useAppStore } from '../../../store/appStore';
+import { useAuthStore } from '../../../store/authStore';
 import type { WizardChecklist, WizardStep } from '../../../types';
+import { deriveDisplayChecklist } from '../SetupProgressCard';
 import { WIZARD_STEP_META } from '../wizardConfig';
 
 interface Props {
@@ -22,9 +27,70 @@ const COMPLETION_ITEMS: { step: WizardStep; label: string }[] = [
 
 export default function DoneStep({ checklist, onFinish, saving }: Props) {
   const navigate = useNavigate();
+  const user = useAuthStore(s => s.user);
+  const setAuth = useAuthStore(s => s.setAuth);
+  const storeAccounts = useAppStore(s => s.savedAccounts);
+  const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
 
   // Pull the human title from the shared config to avoid drift.
   const meta = WIZARD_STEP_META.find(m => m.slug === 'done')!;
+
+  // The checklist passed in by SetupWizard is already derived against
+  // its view of user state. But Done is the last step the user sees,
+  // and we want to GUARANTEE the summary reflects DB truth rather
+  // than whatever the persisted authStore is showing. A user who
+  // walked the wizard with a stale authStore (eg. logged in before
+  // the `website` field existed in auth responses) would see Business
+  // unchecked here even though they entered a website.
+  //
+  // Re-fetch live state on mount and re-derive locally with hasWebsite +
+  // accountCount from fresh sources. The fetch also re-syncs authStore
+  // so a return visit to /overview reads the same state.
+  const [liveWebsite, setLiveWebsite] = useState<string | null>(user?.website ?? null);
+  const [liveAccountCount, setLiveAccountCount] = useState<number>(storeAccounts.length);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      authApi.getProfile().catch(() => null),
+      thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as any[] })),
+    ]).then(([freshUser, accountsRes]) => {
+      if (cancelled) return;
+      if (freshUser) {
+        setLiveWebsite(freshUser.website ?? null);
+        if (user) {
+          const token = localStorage.getItem('token') || '';
+          setAuth(
+            {
+              ...user,
+              website: freshUser.website ?? null,
+              websiteMetadataJson: freshUser.websiteMetadataJson ?? null,
+              businessPhone: freshUser.businessPhone ?? user.businessPhone ?? null,
+            },
+            token,
+          );
+        }
+      }
+      const accounts = (accountsRes as any)?.accounts ?? [];
+      setLiveAccountCount(accounts.length);
+      if (accounts.length > 0) setSavedAccounts(accounts);
+    });
+    return () => { cancelled = true; };
+    // Intentionally fire-once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live-derived view of the checklist. Same data-driven rules as the
+  // Overview SetupProgressCard, just sourced from this step's own
+  // freshly-fetched signals so a wizard walk with a stale authStore
+  // can't mislead the user about what got configured.
+  const displayChecklist = useMemo(
+    () => deriveDisplayChecklist(checklist, {
+      accountCount: liveAccountCount,
+      hasWebsite: !!liveWebsite && liveWebsite.trim().length > 0,
+    }),
+    [checklist, liveAccountCount, liveWebsite],
+  );
 
   return (
     <div className="text-center pt-6">
@@ -40,7 +106,7 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
 
       <ul className="mt-10 mx-auto max-w-sm text-left space-y-2">
         {COMPLETION_ITEMS.map(({ step, label }) => {
-          const status = checklist[step];
+          const status = displayChecklist[step];
           const done = status === 'done';
           const skipped = status === 'skipped';
           return (
