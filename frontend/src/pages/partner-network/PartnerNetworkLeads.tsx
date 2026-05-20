@@ -10,7 +10,7 @@ import {
 } from '../../services/partnerNetwork';
 import { Card, Btn } from '../../components/ui';
 
-const STATUSES: PartnerLeadStatus[] = ['new', 'contacted', 'qualified', 'rejected', 'booked', 'paid_manually'];
+const STATUSES: PartnerLeadStatus[] = ['new', 'contacted', 'interested_not_now', 'qualified', 'rejected', 'booked', 'paid_manually'];
 const INTENTS: PartnerLeadIntent[] = ['this_week', 'this_month', 'not_sure'];
 
 export default function PartnerNetworkLeads() {
@@ -24,6 +24,7 @@ export default function PartnerNetworkLeads() {
     sourceBusinessId: '',
     destinationBusinessId: '',
     referralCodeId: '',
+    employeeName: '',
     status: '' as PartnerLeadStatus | '',
     intentTiming: '' as PartnerLeadIntent | '',
   });
@@ -53,6 +54,13 @@ export default function PartnerNetworkLeads() {
   };
 
   useEffect(() => { load(); }, [filters]);
+
+  // Employee filter is purely client-side — the lead carries the code on the
+  // join, so we narrow after fetch rather than translating to one-or-many
+  // referralCodeId values on the server side.
+  const visibleLeads = filters.employeeName
+    ? leads.filter(l => l.referralCode.employeeName === filters.employeeName)
+    : leads;
 
   const updateStatus = async (lead: PartnerLead, status: PartnerLeadStatus) => {
     try {
@@ -84,7 +92,7 @@ export default function PartnerNetworkLeads() {
       )}
 
       <Card>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
           <select value={filters.sourceBusinessId} onChange={e => setFilters({ ...filters, sourceBusinessId: e.target.value })} style={inputStyle}>
             <option value="">All sources</option>
             {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -96,6 +104,12 @@ export default function PartnerNetworkLeads() {
           <select value={filters.referralCodeId} onChange={e => setFilters({ ...filters, referralCodeId: e.target.value })} style={inputStyle}>
             <option value="">All codes</option>
             {codes.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}
+          </select>
+          <select value={filters.employeeName} onChange={e => setFilters({ ...filters, employeeName: e.target.value })} style={inputStyle}>
+            <option value="">All employees</option>
+            {Array.from(new Set(codes.map(c => c.employeeName).filter(Boolean) as string[])).map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
           </select>
           <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value as any })} style={inputStyle}>
             <option value="">All statuses</option>
@@ -113,7 +127,7 @@ export default function PartnerNetworkLeads() {
           <div style={{ padding: 16, color: 'var(--lb-ink-5)', display: 'flex', gap: 8 }}>
             <Loader2 className="animate-spin" size={16} /> Loading…
           </div>
-        ) : leads.length === 0 ? (
+        ) : visibleLeads.length === 0 ? (
           <div style={{ padding: 24, color: 'var(--lb-ink-5)', textAlign: 'center', fontSize: 13 }}>
             No leads match the current filters.
           </div>
@@ -134,7 +148,7 @@ export default function PartnerNetworkLeads() {
                 </tr>
               </thead>
               <tbody>
-                {leads.map(l => (
+                {visibleLeads.map(l => (
                   <tr key={l.id} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
                     <td style={{ ...td, color: 'var(--lb-ink-5)' }}>{new Date(l.createdAt).toLocaleString()}</td>
                     <td style={td}>
