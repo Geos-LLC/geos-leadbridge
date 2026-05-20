@@ -37,6 +37,16 @@ const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
 const AdminTenantNumbers = lazy(() => import('./pages/admin/AdminTenantNumbers'));
 const SetupWizard = lazy(() => import('./pages/onboarding/SetupWizard'));
 
+// Partner Network Beta — isolated module, lazy-loaded as its own chunk so
+// the rest of LeadBridge isn't burdened by it. The /r/:code public page is
+// the only entrypoint that does NOT require auth.
+const PartnerNetworkDashboard = lazy(() => import('./pages/partner-network/PartnerNetworkDashboard'));
+const PartnerNetworkBusinesses = lazy(() => import('./pages/partner-network/PartnerNetworkBusinesses'));
+const PartnerNetworkRelationships = lazy(() => import('./pages/partner-network/PartnerNetworkRelationships'));
+const PartnerNetworkReferralCodes = lazy(() => import('./pages/partner-network/PartnerNetworkReferralCodes'));
+const PartnerNetworkLeads = lazy(() => import('./pages/partner-network/PartnerNetworkLeads'));
+const PublicReferral = lazy(() => import('./pages/partner-network/PublicReferral'));
+
 // Demo sub-views share one module so a single dynamic import lands the whole
 // demo experience. Splitting per view would add 9 round-trips for a flow where
 // users almost always navigate laterally between sections.
@@ -61,6 +71,9 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+
+          {/* Partner Network public referral page — no auth, no app layout. */}
+          <Route path="/r/:code" element={<PublicReferral />} />
           <Route path="/security" element={<Security />} />
           <Route
             path="/login"
@@ -139,6 +152,14 @@ function App() {
               <Route path="/admin/users/:userId" element={<AdminUserDetails />} />
               <Route path="/admin/phone-pool" element={<Navigate to="/admin/tenant-numbers" />} />
               <Route path="/admin/tenant-numbers" element={<AdminTenantNumbers />} />
+
+              {/* Partner Network Beta — admin pages live under /partner-network. */}
+              <Route path="/partner-network" element={<Navigate to="/partner-network/dashboard" replace />} />
+              <Route path="/partner-network/dashboard" element={<PartnerNetworkDashboard />} />
+              <Route path="/partner-network/businesses" element={<PartnerNetworkBusinesses />} />
+              <Route path="/partner-network/relationships" element={<PartnerNetworkRelationships />} />
+              <Route path="/partner-network/referral-codes" element={<PartnerNetworkReferralCodes />} />
+              <Route path="/partner-network/leads" element={<PartnerNetworkLeads />} />
             </Route>
           </Route>
 
