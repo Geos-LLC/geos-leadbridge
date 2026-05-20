@@ -194,7 +194,10 @@ export default function PartnerNetworkReferralCodes() {
             <tbody>
               {codes.map(c => {
                 const fullUrl = `${origin}${c.publicUrl}`;
-                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(fullUrl)}`;
+                // Prefer the QR URL the server persisted at create-time so
+                // changing the QR provider is a single-place swap.
+                const qrUrl = c.qrUrl
+                  ?? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(fullUrl)}`;
                 return (
                   <tr key={c.id} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
                     <td style={{ ...td, fontFamily: 'var(--lb-font-mono)', fontWeight: 600 }}>{c.code}</td>

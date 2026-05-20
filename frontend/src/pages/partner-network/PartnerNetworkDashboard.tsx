@@ -115,6 +115,69 @@ export default function PartnerNetworkDashboard() {
         </Card>
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <Card title="Top referral employees">
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: 'var(--lb-ink-5)', textAlign: 'left' }}>
+                <th style={{ paddingBottom: 6 }}>Employee</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Leads</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.byEmployee?.length ?? 0) === 0 && (
+                <tr><td colSpan={3} style={{ color: 'var(--lb-ink-5)', padding: '8px 0' }}>No employee leads yet.</td></tr>
+              )}
+              {data?.byEmployee.slice(0, 10).map(row => (
+                <tr key={row.employeeName} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                  <td style={{ padding: '6px 0' }}>{row.employeeName}</td>
+                  <td style={{ textAlign: 'right' }}>{row.count}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>${row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+
+        <Card title="Top destination businesses">
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: 'var(--lb-ink-5)', textAlign: 'left' }}>
+                <th style={{ paddingBottom: 6 }}>Destination</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Leads</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.byDestinationBusiness?.length ?? 0) === 0 && (
+                <tr><td colSpan={3} style={{ color: 'var(--lb-ink-5)', padding: '8px 0' }}>No leads yet.</td></tr>
+              )}
+              {data?.byDestinationBusiness.slice(0, 10).map(row => (
+                <tr key={row.businessId} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                  <td style={{ padding: '6px 0' }}>{row.businessName}</td>
+                  <td style={{ textAlign: 'right' }}>{row.count}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>${row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+
+      <Card title="Funnel">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
+          <FunnelStep label="Views" value={data?.funnel.views ?? 0} />
+          <Arrow />
+          <FunnelStep label="Started" value={data?.funnel.started ?? 0} />
+          <Arrow />
+          <FunnelStep label="Submitted" value={data?.funnel.submitted ?? 0} />
+          <div style={{ marginLeft: 'auto', color: 'var(--lb-ink-5)', fontSize: 12 }}>
+            Page views and form starts are not counted as leads.
+          </div>
+        </div>
+      </Card>
+
       <Card title="Leads by status">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {Object.entries(data?.byStatus ?? {}).length === 0 && (
@@ -136,4 +199,23 @@ export default function PartnerNetworkDashboard() {
       </Card>
     </div>
   );
+}
+
+function FunnelStep({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{
+      padding: '10px 16px',
+      borderRadius: 8,
+      background: 'var(--lb-ink-10)',
+      minWidth: 120,
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--lb-font-mono)' }}>{value}</div>
+    </div>
+  );
+}
+
+function Arrow() {
+  return <span style={{ color: 'var(--lb-ink-5)', fontSize: 18 }}>→</span>;
 }
