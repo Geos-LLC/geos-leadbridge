@@ -337,6 +337,37 @@ export function StatusPill({
   );
 }
 
+// Full-width amber "differs across accounts" banner shown ABOVE or INSIDE a
+// card body. Use this when the warning should sit clearly on the card itself
+// rather than be a small pill on the side of the title.
+export function MixedCardBanner({
+  tooltip,
+  message = 'Accounts disagree on this setting. Changing it here will apply the new value to all accounts.',
+}: {
+  tooltip?: string;
+  message?: string;
+}) {
+  return (
+    <div
+      title={tooltip}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 14px',
+        background: '#fef3c7',
+        border: '1.5px solid #f59e0b',
+        borderRadius: 10,
+        fontSize: 12.5, color: '#92400e', fontWeight: 600,
+        cursor: tooltip ? 'help' : 'default',
+        marginBottom: 12,
+        boxShadow: '0 0 0 3px rgba(245,158,11,0.10)',
+      }}
+    >
+      <AlertTriangle size={14} style={{ color: '#d97706', flexShrink: 0 }} />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 // Amber "Differs across accounts" pill rendered next to a card title or row
 // label when accounts disagree on a setting in All-Accounts scope. Hovering
 // shows a per-account breakdown via the native title tooltip.

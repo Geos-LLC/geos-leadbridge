@@ -6,12 +6,23 @@ import {
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
-  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill,
+  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedCardBanner,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
 import { followUpApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+
+// Module-level cache for instant tab switching + delay-free mixed detection.
+type CachedFollowups = {
+  quietOn: boolean;
+  deliveryMode: 'suggest' | 'active';
+  messageMode: 'template' | 'ai';
+  activeHoursStart: string;
+  activeHoursEnd: string;
+  timezone: string;
+};
+const followupsCache = new Map<string, CachedFollowups>();
 
 const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
   { val: 2,  unit: 'min' },
@@ -72,31 +83,90 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // Reset dirty on scope change so the next user action triggers save fresh.
   useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
 
-  // Background fetch for the current scope. Doesn't touch dirtyRef → never
-  // triggers auto-save. In All-Accounts mode the page is a synthesised view
-  // (no per-account fetch needed — saves fan out at save time anyway).
+  const parseSettings = (s: any): CachedFollowups => ({
+    quietOn: true, // Stored on user, not per-account — keep default
+    deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
+    messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
+    activeHoursStart: s?.followUpActiveHoursStart || '09:00',
+    activeHoursEnd: s?.followUpActiveHoursEnd || '18:00',
+    timezone: s?.followUpTimezone || 'America/New_York',
+  });
+
+  // Hydrate displayed values from cache on scope change (instant).
   useEffect(() => {
-    if (isAll) return;
-    let alive = true;
-    setLoading(true); setError(null);
-    followUpApi.getSettings(accountId)
-      .then(res => {
-        if (!alive) return;
-        const s = res?.settings;
-        if (s && !dirtyRef.current) {
-          if (s.followUpMode === 'auto_send') setDeliveryMode('active');
-          else setDeliveryMode('suggest');
-          if (s.followUpReplyType === 'template') setMessageMode('template');
-          else if (s.followUpReplyType === 'ai') setMessageMode('ai');
-          if (s.followUpActiveHoursStart) setActiveHoursStart(s.followUpActiveHoursStart);
-          if (s.followUpActiveHoursEnd) setActiveHoursEnd(s.followUpActiveHoursEnd);
-          if (s.followUpTimezone) setTimezone(s.followUpTimezone);
-        }
-      })
-      .catch(() => { /* non-fatal */ })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    if (isAll) {
+      const cached = accounts.map(a => followupsCache.get(a.id)).filter(Boolean) as CachedFollowups[];
+      if (cached.length > 0 && !dirtyRef.current) {
+        const first = cached[0];
+        setDeliveryMode(first.deliveryMode);
+        setMessageMode(first.messageMode);
+        setActiveHoursStart(first.activeHoursStart);
+        setActiveHoursEnd(first.activeHoursEnd);
+        setTimezone(first.timezone);
+      }
+    } else {
+      const cached = followupsCache.get(accountId);
+      if (cached && !dirtyRef.current) {
+        setDeliveryMode(cached.deliveryMode);
+        setMessageMode(cached.messageMode);
+        setActiveHoursStart(cached.activeHoursStart);
+        setActiveHoursEnd(cached.activeHoursEnd);
+        setTimezone(cached.timezone);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll]);
+
+  // Background fetch — populates cache for all accounts in All-Accounts scope,
+  // or just the active one in single-account mode.
+  useEffect(() => {
+    let alive = true;
+    if (isAll) {
+      if (accounts.length === 0) return;
+      setLoading(true);
+      Promise.all(accounts.map(a =>
+        followUpApi.getSettings(a.id).catch(() => ({ settings: null })),
+      )).then(results => {
+        if (!alive) return;
+        results.forEach((res: any, i) => {
+          if (res?.settings) followupsCache.set(accounts[i].id, parseSettings(res.settings));
+        });
+        if (!dirtyRef.current) {
+          const first = results.find((r: any) => r?.settings);
+          if (first) {
+            const parsed = parseSettings((first as any).settings);
+            setDeliveryMode(parsed.deliveryMode);
+            setMessageMode(parsed.messageMode);
+            setActiveHoursStart(parsed.activeHoursStart);
+            setActiveHoursEnd(parsed.activeHoursEnd);
+            setTimezone(parsed.timezone);
+          }
+        }
+      }).finally(() => { if (alive) setLoading(false); });
+    } else {
+      setLoading(true); setError(null);
+      followUpApi.getSettings(accountId)
+        .then((res: any) => {
+          if (!alive) return;
+          const s = res?.settings;
+          if (s) {
+            const parsed = parseSettings(s);
+            followupsCache.set(accountId, parsed);
+            if (!dirtyRef.current) {
+              setDeliveryMode(parsed.deliveryMode);
+              setMessageMode(parsed.messageMode);
+              setActiveHoursStart(parsed.activeHoursStart);
+              setActiveHoursEnd(parsed.activeHoursEnd);
+              setTimezone(parsed.timezone);
+            }
+          }
+        })
+        .catch(() => { /* non-fatal */ })
+        .finally(() => { if (alive) setLoading(false); });
+    }
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, isAll, accounts]);
 
   const handleSave = async () => {
     const payload = {
@@ -107,6 +177,11 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       activeHoursEnd,
       timezone,
     };
+    // Optimistic cache write — keep the mixed-state badge accurate before the
+    // API round-trip lands.
+    const cached: CachedFollowups = { quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone };
+    const targets = isAll ? accounts : (accounts.find(a => a.id === accountId) ? [accounts.find(a => a.id === accountId)!] : []);
+    targets.forEach(a => followupsCache.set(a.id, cached));
     setSaving(true); setError(null);
     try {
       if (isAll) {
@@ -121,6 +196,33 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       setSaving(false);
     }
   };
+
+  // Mixed-state detection from cache.
+  function getMixedF<K extends keyof CachedFollowups>(
+    key: K,
+    fmt: (v: CachedFollowups[K]) => string,
+  ): { mixed: boolean; tooltip?: string } {
+    if (!isAll) return { mixed: false };
+    const entries = accounts
+      .map(a => ({ account: a, cached: followupsCache.get(a.id) }))
+      .filter(x => x.cached !== undefined) as { account: typeof accounts[0]; cached: CachedFollowups }[];
+    if (entries.length < 2) return { mixed: false };
+    const counts = new Map<string, number>();
+    for (const e of entries) counts.set(String(e.cached[key]), (counts.get(String(e.cached[key])) || 0) + 1);
+    let majorityKey = String(entries[0].cached[key]);
+    let maxCount = 0;
+    counts.forEach((c, k) => { if (c > maxCount) { maxCount = c; majorityKey = k; } });
+    const majorityEntry = entries.find(e => String(e.cached[key]) === majorityKey)!;
+    const deviants = entries.filter(e => String(e.cached[key]) !== majorityKey);
+    if (deviants.length === 0) return { mixed: false };
+    const tooltip =
+      `Most accounts: ${fmt(majorityEntry.cached[key])}\n` +
+      `Differs in:\n` +
+      deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached[key])}`).join('\n');
+    return { mixed: true, tooltip };
+  }
+  const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
+  const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
 
   // Auto-save IMMEDIATELY on every USER change. Gated by dirtyRef so load
   // callbacks (which DON'T touch dirtyRef) can never trigger this.
@@ -180,7 +282,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       </SettingCard>
 
       {/* Follow-up mode */}
-      <SectionCard padding="20px 24px 8px">
+      <SectionCard padding="20px 24px 8px" style={(mixedDelivery.mixed || mixedMessage.mixed) ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
+        {(mixedDelivery.mixed || mixedMessage.mixed) && (
+          <MixedCardBanner
+            tooltip={mixedDelivery.tooltip || mixedMessage.tooltip}
+            message="Accounts disagree on Follow-up mode. Changing it here will apply the new value to all accounts."
+          />
+        )}
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             Follow-up mode
