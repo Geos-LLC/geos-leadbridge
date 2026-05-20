@@ -171,6 +171,26 @@ export default function SetupWizard() {
       .then(() => navigate('/overview'));
   }
 
+  // Wipe wizard progress and snap back to the first actionable step.
+  // The user's actual data (SavedAccounts, website, faq, pricing, etc.)
+  // is intentionally untouched — only the bookkeeping resets so they
+  // can re-walk the flow if they want to retest or reconfigure.
+  function handleRestart() {
+    if (!window.confirm('Restart setup from the first step? Your connected accounts and saved settings stay; only the wizard progress is cleared.')) return;
+    setSaving(true);
+    onboardingApi.patchWizard({ reset: true })
+      .then(({ profile: fresh }) => {
+        setProfile(fresh);
+        setCurrentStep(FIRST_ACTIONABLE_STEP);
+        if (user) {
+          const token = localStorage.getItem('token') || '';
+          setAuth({ ...user, onboardingProfile: fresh }, token);
+        }
+      })
+      .catch((err: any) => notify.error('Could not restart setup', err.response?.data?.message || 'Please try again.'))
+      .finally(() => setSaving(false));
+  }
+
   if (loading) return <PageSkeleton />;
 
   // Body selection. Steps that own their own primary CTA hide the
@@ -279,6 +299,7 @@ export default function SetupWizard() {
       onSkip={stepOwnsActions ? undefined : handleSkip}
       onContinue={stepOwnsActions ? undefined : handleContinue}
       onStepClick={goToStep}
+      onRestart={handleRestart}
       saving={saving}
       hideActions={stepOwnsActions}
     >
