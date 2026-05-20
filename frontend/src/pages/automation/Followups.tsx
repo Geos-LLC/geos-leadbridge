@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
-  RefreshCw, Clock, UserX, Brain, Info, Loader2,
+  RefreshCw, Clock, UserX, Brain, Info,
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
-  Dropdown, ActionLink, IconTile, FooterBanner,
+  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
@@ -46,7 +46,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
 
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
-  const [_saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scopeKey = isAll ? '__all__' : accountId;
@@ -122,11 +122,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     }
   };
 
-  // Auto-save (debounced ~700ms) once the current scope has hydrated.
+  // Auto-save IMMEDIATELY on every change (no debounce) — clicks/dropdowns
+  // are infrequent so the cost is fine, and removing the debounce closes
+  // the race where switching tabs within the debounce window canceled the
+  // pending save and lost the user's change.
   useEffect(() => {
     if (hydratedForRef.current !== scopeKey) return;
-    const t = setTimeout(() => { handleSave(); }, 700);
-    return () => clearTimeout(t);
+    setSavedAt(Date.now()); // optimistic
+    handleSave();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn]);
 
@@ -137,25 +140,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {loading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
-          <Loader2 size={14} className="animate-spin" /> Loading follow-up settings…
-        </div>
-      )}
-      {error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
-          fontSize: 13, fontWeight: 600,
-        }}>{error}</div>
-      )}
-      {savedAt && !error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-          fontSize: 13, fontWeight: 600,
-        }}>Saved.</div>
-      )}
+      {error && <StatusPill status="error" message={error} />}
+      {!error && saving && <StatusPill status="saving" />}
+      {!error && !saving && savedAt && <StatusPill status="saved" />}
+      {!error && !savedAt && loading && <StatusPill status="loading" />}
 
       {/* Quiet hours */}
       <SettingCard
