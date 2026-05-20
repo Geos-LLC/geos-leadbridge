@@ -235,9 +235,24 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // Save the current display state to one or more accounts. For each account
   // we look up the rule fresh (don't trust component state — it can be stale
   // after a tab switch or a load races our user-edit) and create the rule on
-  // the fly if the account doesn't have one yet. Cache is updated after each
-  // successful write so the next render reads the new values.
+  // the fly if the account doesn't have one yet. Cache is updated BEFORE
+  // each write (optimistic) so any subsequent render reads the new values,
+  // and the mixed-state warning recomputes against the just-changed values
+  // rather than the pre-edit ones.
   const saveOneAccount = async (id: string) => {
+    // Optimistic cache write — happens BEFORE the API call so the mixed-state
+    // badge on the All-Accounts tab reflects the user's intent immediately.
+    const prev = accountCache.get(id);
+    accountCache.set(id, {
+      instantReplyOn,
+      instantTextOn,
+      instantCallOn,
+      replyType,
+      connMode,
+      newLeadRuleId: prev?.newLeadRuleId ?? null,
+      customerTextRuleId: prev?.customerTextRuleId ?? null,
+      hasCallSettings: true,
+    });
     const ops: Promise<unknown>[] = [];
     // 1. Instant Reply — automation rule (new_lead, delay=0)
     ops.push((async () => {
@@ -279,19 +294,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
     }).catch(() => undefined));
     await Promise.all(ops);
-    // Mirror the just-saved values back into the cache so a subsequent tab
-    // switch shows them without a flash.
-    const prev = accountCache.get(id);
-    accountCache.set(id, {
-      instantReplyOn,
-      instantTextOn,
-      instantCallOn,
-      replyType,
-      connMode,
-      newLeadRuleId: prev?.newLeadRuleId ?? null,
-      customerTextRuleId: prev?.customerTextRuleId ?? null,
-      hasCallSettings: true,
-    });
+    // Cache was written optimistically at the top of this function — no need
+    // to write again here, the values are already there.
   };
 
   const handleSave = async () => {
@@ -312,31 +316,63 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     }
   };
 
-  // Cross-account disagreement detection for All-Accounts mode. For each
-  // tracked setting we both: (1) flag whether accounts disagree, and (2)
-  // build a human-readable tooltip listing each account's current value so
-  // the user can hover the warning to see exactly what's diverging.
-  const isMixedFor = <K extends keyof PerAccountState>(key: K): boolean => {
-    if (!isAll || perAccount.length < 2) return false;
-    const first = perAccount[0][key];
-    return perAccount.some(p => p[key] !== first);
-  };
-  const tooltipFor = <K extends keyof PerAccountState>(key: K, fmt: (v: PerAccountState[K]) => string): string | undefined => {
-    if (!isAll || perAccount.length < 2) return undefined;
-    return 'Accounts disagree on this setting:\n'
-      + perAccount.map(p => `  • ${p.account.businessName || p.account.platform}: ${fmt(p[key])}`).join('\n');
-  };
+  // Cross-account disagreement detection. Read straight from accountCache so
+  // there's NO delay between landing on the All-Accounts tab and seeing the
+  // warning — cache is populated by the load effect AND by every save, so
+  // the data is always fresh.
+  //
+  // The comparison is majority-vs-deviants (not first-vs-rest): we find the
+  // mode of each setting across accounts, then list ONLY the accounts that
+  // deviate from the majority. The displayed All-Accounts value matches the
+  // majority too, so the tooltip says "Most accounts: X. Differs in: …".
+  const cachedPerAccount = isAll
+    ? accounts.map(a => ({ account: a, cached: accountCache.get(a.id) || null }))
+    : [];
+  const hasEnoughCachedData = cachedPerAccount.filter(x => x.cached).length >= 2;
+
+  function getMixed<K extends keyof CachedAccount>(
+    key: K,
+    fmt: (v: CachedAccount[K]) => string,
+  ): { mixed: boolean; tooltip?: string } {
+    if (!isAll || !hasEnoughCachedData) return { mixed: false };
+    const entries = cachedPerAccount
+      .filter(x => x.cached !== null)
+      .map(x => ({ account: x.account, value: x.cached![key] }));
+    // Find the mode (majority value).
+    const counts = new Map<CachedAccount[K], number>();
+    for (const e of entries) counts.set(e.value, (counts.get(e.value) || 0) + 1);
+    let majority: CachedAccount[K] = entries[0].value;
+    let maxCount = 0;
+    counts.forEach((c, v) => { if (c > maxCount) { maxCount = c; majority = v; } });
+    const deviants = entries.filter(e => e.value !== majority);
+    if (deviants.length === 0) return { mixed: false };
+    const tooltip =
+      `Most accounts: ${fmt(majority)}\n` +
+      `Differs in:\n` +
+      deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.value)}`).join('\n');
+    return { mixed: true, tooltip };
+  }
+
   const onOff = (v: any) => (v ? 'On' : 'Off');
-  const mixedInstantReply = isMixedFor('instantReplyOn');
-  const mixedInstantText  = isMixedFor('instantTextOn');
-  const mixedInstantCall  = isMixedFor('instantCallOn');
-  const mixedReplyType    = isMixedFor('replyType');
-  const mixedConnMode     = isMixedFor('connMode');
-  const tipInstantReply = tooltipFor('instantReplyOn', onOff);
-  const tipInstantText  = tooltipFor('instantTextOn', onOff);
-  const tipInstantCall  = tooltipFor('instantCallOn', onOff);
-  const tipReplyType    = tooltipFor('replyType', v => v === 'ai' ? 'Let AI write it' : 'Use template');
-  const tipConnMode     = tooltipFor('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
+  const _instantReply = getMixed('instantReplyOn', onOff);
+  const _instantText  = getMixed('instantTextOn', onOff);
+  const _instantCall  = getMixed('instantCallOn', onOff);
+  const _replyTypeMix = getMixed('replyType', v => v === 'ai' ? 'Let AI write it' : 'Use template');
+  const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
+  const mixedInstantReply = _instantReply.mixed;
+  const mixedInstantText  = _instantText.mixed;
+  const mixedInstantCall  = _instantCall.mixed;
+  const mixedReplyType    = _replyTypeMix.mixed;
+  const mixedConnMode     = _connModeMix.mixed;
+  const tipInstantReply = _instantReply.tooltip;
+  const tipInstantText  = _instantText.tooltip;
+  const tipInstantCall  = _instantCall.tooltip;
+  const tipReplyType    = _replyTypeMix.tooltip;
+  const tipConnMode     = _connModeMix.tooltip;
+  // perAccount state is no longer referenced for mixed detection; satisfy
+  // noUnusedLocals on the var until we either rip out the load population
+  // step or expose it for a future feature.
+  void perAccount;
 
   const goAiSettings = () => navigate('/automation/convert', { state: fromState });
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
