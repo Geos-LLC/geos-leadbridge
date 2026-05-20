@@ -4,6 +4,7 @@ import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
+  Share2,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -84,6 +85,20 @@ export function Layout() {
     },
     { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
     { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
+    {
+      // Partner Network Beta — isolated module nav. Children mirror the
+      // routes inside frontend/src/pages/partner-network/.
+      icon: <Share2 size={15} />,
+      label: 'Partner Network Beta',
+      path: '/partner-network',
+      children: [
+        { label: 'Dashboard',      path: '/partner-network/dashboard',       hint: 'Beta', tone: 'purple' },
+        { label: 'Businesses',     path: '/partner-network/businesses',      hint: 'Beta', tone: 'purple' },
+        { label: 'Relationships',  path: '/partner-network/relationships',   hint: 'Beta', tone: 'purple' },
+        { label: 'Referral codes', path: '/partner-network/referral-codes',  hint: 'Beta', tone: 'purple' },
+        { label: 'Leads',          path: '/partner-network/leads',           hint: 'Beta', tone: 'purple' },
+      ],
+    },
   ];
 
   const getPageName = () => {
@@ -98,6 +113,7 @@ export function Layout() {
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
+    if (path.startsWith('/partner-network')) return 'Partner Network Beta';
     return 'Leadbridge';
   };
 
