@@ -9,11 +9,23 @@ import {
 } from 'lucide-react';
 import {
   SectionCard, SettingCard, FieldRow, OptionCard, ToggleRow,
-  Radio, IconTile, ActionLink, AutoBadge, StatusPill,
+  Radio, IconTile, ActionLink, AutoBadge, StatusPill, MixedBadge, MixedCardBanner,
   type IconTone,
 } from '../../components/automation/ui';
 import { followUpApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+
+// Module-level cache that survives mount/unmount AND tab switches, so toggling
+// account tabs feels instant and so the mixed-state detection has data to read
+// without waiting for the network.
+type CachedConvSettings = {
+  strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+  priceMode: 'range' | 'exact';
+  availability: 'always' | 'hours';
+  stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
+  takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
+};
+const convCache = new Map<string, CachedConvSettings>();
 
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
 
@@ -60,39 +72,102 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // Reset dirty on scope change so the next user action starts fresh.
   useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
 
+  // Helper: parse a settings payload into our local shape.
+  const parseSettings = (s: any): CachedConvSettings => ({
+    strategy: (s?.followUpStrategy && STRATEGIES.some(x => x.k === s.followUpStrategy))
+      ? s.followUpStrategy
+      : 'auto',
+    priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
+    availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
+    stopRules: {
+      not_contacted: s?.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
+      booked:        s?.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
+      price_agreed:  s?.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
+      done:          true,
+    },
+    takeover: {
+      ready:     s?.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
+      live:      s?.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
+      phone:     s?.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
+      sqft:      s?.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
+      qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
+    },
+  });
+
+  // Hydrate from cache on scope change for instant display.
   useEffect(() => {
-    if (isAll) return;
-    let alive = true;
-    setLoading(true); setError(null);
-    followUpApi.getSettings(accountId)
-      .then((res: any) => {
-        if (!alive) return;
-        const s = res?.settings;
-        if (s && !dirtyRef.current) {
-          const strat = (s.followUpStrategy as StrategyKey | undefined);
-          if (strat && STRATEGIES.some(x => x.k === strat)) setStrategy(strat);
-          if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceMode(s.priceQuoteMode);
-          if (s.followUpAvailability === 'active_hours') setAvailability('hours');
-          else if (s.followUpAvailability === 'always') setAvailability('always');
-          setStopRules({
-            not_contacted: s.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
-            booked:        s.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
-            price_agreed:  s.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
-            done:          true,
-          });
-          setTakeover({
-            ready:     s.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
-            live:      s.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
-            phone:     s.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
-            sqft:      s.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
-            qualified: s.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
-          });
-        }
-      })
-      .catch(() => { /* non-fatal */ })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    if (isAll) {
+      const cached = accounts.map(a => convCache.get(a.id)).filter(Boolean) as CachedConvSettings[];
+      if (cached.length > 0 && !dirtyRef.current) {
+        const first = cached[0];
+        setStrategy(first.strategy);
+        setPriceMode(first.priceMode);
+        setAvailability(first.availability);
+        setStopRules(first.stopRules);
+        setTakeover(first.takeover);
+      }
+    } else {
+      const cached = convCache.get(accountId);
+      if (cached && !dirtyRef.current) {
+        setStrategy(cached.strategy);
+        setPriceMode(cached.priceMode);
+        setAvailability(cached.availability);
+        setStopRules(cached.stopRules);
+        setTakeover(cached.takeover);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll]);
+
+  // Background fetch — single account or all accounts.
+  useEffect(() => {
+    let alive = true;
+    if (isAll) {
+      if (accounts.length === 0) return;
+      setLoading(true); setError(null);
+      Promise.all(accounts.map(a =>
+        followUpApi.getSettings(a.id).catch(() => ({ settings: null })),
+      )).then(results => {
+        if (!alive) return;
+        results.forEach((res: any, i) => {
+          if (res?.settings) convCache.set(accounts[i].id, parseSettings(res.settings));
+        });
+        if (!dirtyRef.current && results.length > 0) {
+          const first = results.find((r: any) => r?.settings);
+          if (first) {
+            const parsed = parseSettings((first as any).settings);
+            setStrategy(parsed.strategy);
+            setPriceMode(parsed.priceMode);
+            setAvailability(parsed.availability);
+            setStopRules(parsed.stopRules);
+            setTakeover(parsed.takeover);
+          }
+        }
+      }).finally(() => { if (alive) setLoading(false); });
+    } else {
+      setLoading(true); setError(null);
+      followUpApi.getSettings(accountId)
+        .then((res: any) => {
+          if (!alive) return;
+          const s = res?.settings;
+          if (s) {
+            const parsed = parseSettings(s);
+            convCache.set(accountId, parsed);
+            if (!dirtyRef.current) {
+              setStrategy(parsed.strategy);
+              setPriceMode(parsed.priceMode);
+              setAvailability(parsed.availability);
+              setStopRules(parsed.stopRules);
+              setTakeover(parsed.takeover);
+            }
+          }
+        })
+        .catch(() => { /* non-fatal */ })
+        .finally(() => { if (alive) setLoading(false); });
+    }
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, isAll, accounts]);
 
   const handleSave = async () => {
     const payload = {
@@ -108,13 +183,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       handoffTriggerProvidedSquareFootage: takeover.sqft,
       handoffTriggerQualificationComplete: takeover.qualified,
     };
+    // Optimistically update cache BEFORE the API call so the mixed-state
+    // badge reflects the new values immediately.
+    const cached: CachedConvSettings = { strategy, priceMode, availability, stopRules, takeover };
+    const targets = isAll ? accounts.map(a => a.id) : [accountId];
+    targets.forEach(id => convCache.set(id, cached));
     setSaving(true); setError(null);
     try {
-      if (isAll) {
-        await Promise.all(accounts.map(a => followUpApi.saveWizardSettings(a.id, payload).catch(() => undefined)));
-      } else {
-        await followUpApi.saveWizardSettings(accountId, payload);
-      }
+      await Promise.all(targets.map(id => followUpApi.saveWizardSettings(id, payload).catch(() => undefined)));
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to save');
@@ -122,6 +198,38 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       setSaving(false);
     }
   };
+
+  // Mixed-state detection from cache — majority vs deviants, no delay.
+  function getMixed<K extends keyof CachedConvSettings>(
+    key: K,
+    fmt: (v: CachedConvSettings[K]) => string,
+  ): { mixed: boolean; tooltip?: string } {
+    if (!isAll) return { mixed: false };
+    const entries = accounts
+      .map(a => ({ account: a, cached: convCache.get(a.id) }))
+      .filter(x => x.cached !== undefined) as { account: typeof accounts[0]; cached: CachedConvSettings }[];
+    if (entries.length < 2) return { mixed: false };
+    // Use JSON.stringify for objects to handle stopRules/takeover deeply.
+    const keyValue = (v: CachedConvSettings[K]) =>
+      typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+    const counts = new Map<string, number>();
+    for (const e of entries) counts.set(keyValue(e.cached[key]), (counts.get(keyValue(e.cached[key])) || 0) + 1);
+    let majorityKey = keyValue(entries[0].cached[key]);
+    let maxCount = 0;
+    counts.forEach((c, k) => { if (c > maxCount) { maxCount = c; majorityKey = k; } });
+    const majorityEntry = entries.find(e => keyValue(e.cached[key]) === majorityKey)!;
+    const deviants = entries.filter(e => keyValue(e.cached[key]) !== majorityKey);
+    if (deviants.length === 0) return { mixed: false };
+    const tooltip =
+      `Most accounts: ${fmt(majorityEntry.cached[key])}\n` +
+      `Differs in:\n` +
+      deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached[key])}`).join('\n');
+    return { mixed: true, tooltip };
+  }
+  const mixedStrategy   = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
+  const mixedPriceMode  = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
+  const mixedStopRules  = getMixed('stopRules', () => '(see hover)');
+  const mixedTakeover   = getMixed('takeover', () => '(see hover)');
 
   // Auto-save on every USER change (gated by dirtyRef).
   useEffect(() => {
@@ -152,13 +260,20 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      <SectionCard padding="22px 24px 24px">
+      <SectionCard padding="22px 24px 24px" style={mixedStrategy.mixed || mixedPriceMode.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
+        {(mixedStrategy.mixed || mixedPriceMode.mixed) && (
+          <MixedCardBanner
+            tooltip={mixedStrategy.tooltip || mixedPriceMode.tooltip}
+            message="Accounts disagree on AI Strategy or pricing. Changing it here will apply the new value to all accounts."
+          />
+        )}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
           <IconTile icon={Brain} tone="violet" size="lg" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>AI Strategy</div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
+              {mixedStrategy.mixed && <MixedBadge tooltip={mixedStrategy.tooltip} />}
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
               Single source of truth for how AI-generated messages are written.<br />
@@ -238,7 +353,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         }
       />
 
-      <SectionCard padding="22px 24px 8px">
+      <SectionCard padding="22px 24px 8px" style={mixedStopRules.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
+        {mixedStopRules.mixed && (
+          <MixedCardBanner
+            tooltip={mixedStopRules.tooltip}
+            message="Accounts disagree on these Stop Rules. Changing them here will apply to all accounts."
+          />
+        )}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Hand} tone="rose" size="lg" />
           <div style={{ flex: '0 0 280px', minWidth: 0 }}>
@@ -281,7 +402,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      <SectionCard padding="22px 24px 8px">
+      <SectionCard padding="22px 24px 8px" style={mixedTakeover.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
+        {mixedTakeover.mixed && (
+          <MixedCardBanner
+            tooltip={mixedTakeover.tooltip}
+            message="Accounts disagree on these Human Takeover triggers. Changing them here will apply to all accounts."
+          />
+        )}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Users} tone="orange" size="lg" />
           <div style={{ flex: '0 0 280px', minWidth: 0 }}>
