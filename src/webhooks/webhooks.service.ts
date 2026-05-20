@@ -1997,6 +1997,19 @@ export class WebhooksService {
             .catch(err => this.logger.warn(`Failed to mark Yelp event for reconciliation: ${err.message}`));
           this.logger.log(`[yelp_event_reconciliation_scheduled] lead=${leadId} eventId=${eventId}`);
         }
+        // Bail BEFORE firing customer-reply side effects. The classifier
+        // couldn't fetch events (typically a 401/403 from a dead Yelp token),
+        // so we don't actually know whether this webhook was a customer reply
+        // or our own outbound echo. The old fail-open code persisted a
+        // placeholder Message row with `sender='customer'`, empty content,
+        // null rawJson — and then stopped follow-ups, sent the re-engagement
+        // alert, emitted the CRM webhook, and called automation as if a real
+        // customer had replied. None of that is recoverable: the reconcile
+        // cron only re-classifies the WebhookEvent row, it never backfills
+        // the corrupted Message row. (Lavanda Cleaning 2026-05-14 / 2026-05-19
+        // bursts: 17 stale empty 'customer' rows across 11 threads on the
+        // same dead-token business; phantom follow-up stops on each.)
+        return;
       }
 
       this.logger.log(`[customer_reply_detected] yelp lead=${leadId} outcome=${classification.outcome} msgLen=${latestCustomerMessage.length}`);
