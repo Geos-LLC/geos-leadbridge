@@ -1522,6 +1522,38 @@ export class PlatformService {
       where: { id: accountId },
     });
 
+    // If this was the user's last account, drop the account-bound
+    // entries from their wizard checklist. The data behind those
+    // steps lived inside the deleted SavedAccount (faqJson.quickFacts,
+    // servicePricingJson, followUpSettingsJson) and is gone — leaving
+    // the checklist saying `done` means the next reconnection lights
+    // the progress bar at 50% even though the new account has none of
+    // that configuration.
+    try {
+      const remaining = await this.prisma.savedAccount.count({ where: { userId } });
+      if (remaining === 0) {
+        const op = await this.prisma.onboardingProfile.findUnique({
+          where: { userId },
+          select: { wizardChecklistStatus: true },
+        });
+        const stored = (op?.wizardChecklistStatus as Record<string, string> | null) ?? {};
+        const next: Record<string, string> = { ...stored };
+        let changed = false;
+        for (const step of ['connect', 'ai', 'pricing', 'automation', 'ai_rules']) {
+          if (next[step] === 'done') { delete next[step]; changed = true; }
+        }
+        if (changed) {
+          await this.prisma.onboardingProfile.update({
+            where: { userId },
+            data: { wizardChecklistStatus: next },
+          });
+          this.logger.log(`[removeSavedAccount] Cleared stale wizard checklist for user ${userId} (last account removed)`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`[removeSavedAccount] Wizard checklist reset failed (non-fatal): ${err.message}`);
+    }
+
     await this.invalidateSavedAccountsCache(userId);
     // BusinessId filter disappears from leads list — invalidate.
     await this.leadCache.invalidateLeadList(userId);
