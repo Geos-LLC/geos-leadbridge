@@ -218,10 +218,11 @@ export function BigToggle({
 // ===================================================================
 // SettingCard — big section card with header + body
 //
-// `mixed` mode: drawn with an amber-tinted border and a "Differs across
-// accounts" warning pill in the header. Combined with BigToggle's mixed
-// rendering this gives the user a clear signal that flipping the toggle
-// will overwrite per-account values.
+// `mixed` mode: signals that the master enabled toggle disagrees across
+// accounts. The whole card is NOT amber-tinted (that was too noisy); only
+// the BigToggle goes amber-indeterminate and a small MixedBadge sits next
+// to the title. Children with their own mismatches handle their own
+// per-control highlighting (OptionCard / ToggleRow / StrategyCard).
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
@@ -241,18 +242,15 @@ export function SettingCard({
 }) {
   return (
     <div style={{
-      background: mixed ? '#fffbeb' : 'white',
-      border: '1.5px solid ' + (mixed ? '#f59e0b' : 'var(--lb-line)'),
+      background: 'white',
+      border: '1.5px solid var(--lb-line)',
       borderRadius: 14,
-      boxShadow: mixed
-        ? '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)'
-        : '0 1px 2px rgba(10,21,48,0.03)',
+      boxShadow: '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex', alignItems: 'flex-start', gap: 14,
         padding: '20px 24px',
-        background: mixed ? 'rgba(255,255,255,0.6)' : 'transparent',
       }}>
         <IconTile icon={icon} tone={iconTone} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -272,29 +270,9 @@ export function SettingCard({
           </div>
         )}
       </div>
-      {/* Inline amber banner explaining what the mixed state means and what
-          saving will do. Sits between the header and the card body so the
-          user can't miss it. */}
-      {mixed && (
-        <div
-          title={mixedTooltip}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 24px',
-            background: '#fef3c7',
-            borderTop: '1px solid #fde68a',
-            borderBottom: '1px solid #fde68a',
-            fontSize: 12.5, color: '#92400e', fontWeight: 600,
-            cursor: mixedTooltip ? 'help' : 'default',
-          }}
-        >
-          <AlertTriangle size={14} style={{ color: '#d97706', flexShrink: 0 }} />
-          <span>Accounts disagree on this setting. Changing it here will apply the new value to all accounts.</span>
-        </div>
-      )}
       {children && enabled !== false && (
         <div style={{
-          borderTop: mixed ? 'none' : '1px solid var(--lb-line-soft)',
+          borderTop: '1px solid var(--lb-line-soft)',
           padding: contentPad ?? '16px 24px 24px',
           background: 'white',
         }}>
@@ -465,9 +443,15 @@ export function Radio({ selected }: { selected: boolean }) {
 
 // ===================================================================
 // OptionCard — radio-style picker card
+//
+// `mixed` highlights this card with an amber border, amber-tinted background,
+// and a "Differs across accounts" pill in the title row. Used on the
+// *currently selected* card when accounts disagree on which option is picked,
+// so the warning sits exactly on the control the user is about to commit.
 // ===================================================================
 export function OptionCard({
   selected, onClick, title, body, icon: TrailingIcon, illustration, compact,
+  mixed, mixedTooltip,
 }: {
   selected: boolean;
   onClick: () => void;
@@ -476,28 +460,36 @@ export function OptionCard({
   icon?: LucideIcon;
   illustration?: ReactNode;
   compact?: boolean;
+  mixed?: boolean;
+  mixedTooltip?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={mixed ? mixedTooltip : undefined}
       style={{
+        position: 'relative',
         flex: 1, textAlign: 'left',
         padding: compact ? '14px 16px' : '16px 18px',
-        background: selected ? '#eff6ff' : 'white',
-        border: '1.5px solid ' + (selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        background: mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
+        border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
         borderRadius: 12,
         cursor: 'pointer',
         fontFamily: 'inherit',
         display: 'flex', alignItems: 'flex-start', gap: 12,
         transition: 'border-color 120ms, background 120ms',
         minWidth: 0,
+        boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
       }}
     >
       <Radio selected={selected} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</div>
+            {mixed && <MixedBadge tooltip={mixedTooltip} />}
+          </div>
           {TrailingIcon && <TrailingIcon size={15} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />}
         </div>
         {body && <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.45 }}>{body}</div>}
@@ -581,25 +573,42 @@ export function InfoTile({
 
 // ===================================================================
 // ToggleRow — icon + label + toggle (Stop Rules / Takeover)
+//
+// `mixed` mode: amber-tinted row background + left amber stripe + a
+// "Differs across accounts" pill next to the label. Used when accounts
+// disagree on this specific toggle (e.g. one stop-rule out of four), so the
+// warning sits on the row itself instead of the surrounding section card.
 // ===================================================================
 export function ToggleRow({
-  icon, iconTone, label, on, onChange,
+  icon, iconTone, label, on, onChange, mixed, mixedTooltip,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
   label: ReactNode;
   on: boolean;
   onChange: (v: boolean) => void;
+  mixed?: boolean;
+  mixedTooltip?: string;
 }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 14px',
-      borderRadius: 8,
-    }}>
+    <div
+      title={mixed ? mixedTooltip : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '12px 14px',
+        borderRadius: 8,
+        background: mixed ? '#fffbeb' : undefined,
+        borderLeft: mixed ? '4px solid #f59e0b' : '4px solid transparent',
+        boxShadow: mixed ? '0 0 0 1px #fde68a inset' : undefined,
+        cursor: mixed && mixedTooltip ? 'help' : 'default',
+      }}
+    >
       <IconTile icon={icon} tone={iconTone} size="sm" />
-      <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500, color: 'var(--lb-ink-1)' }}>{label}</div>
-      <BigToggle on={on} onChange={onChange} />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--lb-ink-1)' }}>{label}</span>
+        {mixed && <MixedBadge tooltip={mixedTooltip} />}
+      </div>
+      <BigToggle on={on} onChange={onChange} mixed={mixed} mixedTooltip={mixedTooltip} />
     </div>
   );
 }
