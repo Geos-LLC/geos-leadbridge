@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
-  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedCardBanner, MixedBadge,
+  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedBadge,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
@@ -328,13 +328,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       </SettingCard>
 
       {/* Follow-up mode */}
-      <SectionCard padding="20px 24px 8px" style={(mixedDelivery.mixed || mixedMessage.mixed) ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
-        {(mixedDelivery.mixed || mixedMessage.mixed) && (
-          <MixedCardBanner
-            tooltip={mixedDelivery.tooltip || mixedMessage.tooltip}
-            message="Accounts disagree on Follow-up mode. Changing it here will apply the new value to all accounts."
-          />
-        )}
+      <SectionCard padding="20px 24px 8px">
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             Follow-up mode
@@ -351,12 +345,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
               onClick={() => onDeliveryMode('suggest')}
               title="Suggest"
               body="Draft follow-ups for you to review and approve."
+              mixed={mixedDelivery.mixed && deliveryMode === 'suggest'}
+              mixedTooltip={mixedDelivery.tooltip}
             />
             <OptionCard
               selected={deliveryMode === 'active'}
               onClick={() => onDeliveryMode('active')}
               title="Active"
               body="Send follow-ups automatically without approval."
+              mixed={mixedDelivery.mixed && deliveryMode === 'active'}
+              mixedTooltip={mixedDelivery.tooltip}
             />
           </div>
         </FieldRow>
@@ -368,12 +366,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
               onClick={() => onMessageMode('template')}
               title="Use custom template"
               body="Use your saved template for all follow-up messages."
+              mixed={mixedMessage.mixed && messageMode === 'template'}
+              mixedTooltip={mixedMessage.tooltip}
             />
             <OptionCard
               selected={messageMode === 'ai'}
               onClick={() => onMessageMode('ai')}
               title="AI (auto)"
               body="AI writes each message based on the conversation using your strategy."
+              mixed={mixedMessage.mixed && messageMode === 'ai'}
+              mixedTooltip={mixedMessage.tooltip}
             />
           </div>
         </FieldRow>

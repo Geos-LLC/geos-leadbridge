@@ -4,12 +4,12 @@ import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   Users, PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
-  MessageSquareText,
+  MessageSquareText, AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 import {
   SectionCard, SettingCard, FieldRow, OptionCard, ToggleRow,
-  Radio, IconTile, ActionLink, AutoBadge, StatusPill, MixedBadge, MixedCardBanner,
+  Radio, IconTile, ActionLink, AutoBadge, StatusPill,
   type IconTone,
 } from '../../components/automation/ui';
 import { followUpApi } from '../../services/api';
@@ -229,8 +229,45 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
   const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
-  const mixedStopRules    = getMixed('stopRules', () => '(see hover)');
-  const mixedTakeover     = getMixed('takeover', () => '(see hover)');
+
+  // Per-sub-key mixed detection for object settings (stopRules, takeover).
+  // Each individual toggle gets its own warning, so the user sees exactly
+  // which toggle accounts disagree on instead of a blanket section warning.
+  function getMixedSubKey<
+    K extends 'stopRules' | 'takeover',
+    S extends keyof CachedConvSettings[K],
+  >(outerKey: K, subKey: S): { mixed: boolean; tooltip?: string } {
+    if (!isAll) return { mixed: false };
+    const entries = accounts
+      .map(a => ({ account: a, cached: convCache.get(a.id) }))
+      .filter(x => x.cached !== undefined) as { account: typeof accounts[0]; cached: CachedConvSettings }[];
+    if (entries.length < 2) return { mixed: false };
+    const counts = new Map<boolean, number>();
+    for (const e of entries) {
+      const v = (e.cached[outerKey] as any)[subKey] as boolean;
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    let majority: boolean = (entries[0].cached[outerKey] as any)[subKey];
+    let maxCount = 0;
+    counts.forEach((c, v) => { if (c > maxCount) { maxCount = c; majority = v; } });
+    const deviants = entries.filter(e => (e.cached[outerKey] as any)[subKey] !== majority);
+    if (deviants.length === 0) return { mixed: false };
+    const fmt = (b: boolean) => (b ? 'On' : 'Off');
+    const tooltip =
+      `Most accounts: ${fmt(majority)}\n` +
+      `Differs in:\n` +
+      deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt((d.cached[outerKey] as any)[subKey])}`).join('\n');
+    return { mixed: true, tooltip };
+  }
+  const mxStopNotContacted = getMixedSubKey('stopRules', 'not_contacted');
+  const mxStopBooked       = getMixedSubKey('stopRules', 'booked');
+  const mxStopPriceAgreed  = getMixedSubKey('stopRules', 'price_agreed');
+  const mxStopDone         = getMixedSubKey('stopRules', 'done');
+  const mxTakeReady        = getMixedSubKey('takeover', 'ready');
+  const mxTakeLive         = getMixedSubKey('takeover', 'live');
+  const mxTakePhone        = getMixedSubKey('takeover', 'phone');
+  const mxTakeSqft         = getMixedSubKey('takeover', 'sqft');
+  const mxTakeQualified    = getMixedSubKey('takeover', 'qualified');
 
   // Auto-save on every USER change (gated by dirtyRef).
   useEffect(() => {
@@ -261,20 +298,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      <SectionCard padding="22px 24px 24px" style={mixedStrategy.mixed || mixedPriceMode.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
-        {(mixedStrategy.mixed || mixedPriceMode.mixed) && (
-          <MixedCardBanner
-            tooltip={mixedStrategy.tooltip || mixedPriceMode.tooltip}
-            message="Accounts disagree on AI Strategy or pricing. Changing it here will apply the new value to all accounts."
-          />
-        )}
+      <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
           <IconTile icon={Brain} tone="violet" size="lg" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>AI Strategy</div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
-              {mixedStrategy.mixed && <MixedBadge tooltip={mixedStrategy.tooltip} />}
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
               Single source of truth for how AI-generated messages are written.<br />
@@ -295,6 +325,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
                 iconTone={s.iconTone}
                 title={s.title}
                 body={s.body}
+                mixed={mixedStrategy.mixed && strategy === s.k}
+                mixedTooltip={mixedStrategy.tooltip}
               />
             ))}
           </div>
@@ -317,12 +349,16 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
                 onClick={() => onPriceMode('range')}
                 title="Range"
                 body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
+                mixed={mixedPriceMode.mixed && priceMode === 'range'}
+                mixedTooltip={mixedPriceMode.tooltip}
               />
               <OptionCard
                 selected={priceMode === 'exact'}
                 onClick={() => onPriceMode('exact')}
                 title="Exact"
                 body="AI gives an exact price when it has enough information."
+                mixed={mixedPriceMode.mixed && priceMode === 'exact'}
+                mixedTooltip={mixedPriceMode.tooltip}
               />
             </div>
           </FieldRow>
@@ -334,8 +370,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         iconTone="violet"
         title="Auto Reply Availability"
         subtitle="Choose when AI can reply automatically."
-        mixed={mixedAvailability.mixed}
-        mixedTooltip={mixedAvailability.tooltip}
         headerRight={
           <div style={{ display: 'flex', gap: 12, flex: 1, marginLeft: 24, marginTop: -4 }}>
             <OptionCard
@@ -344,6 +378,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               onClick={() => onAvailability('always')}
               title="Always (24/7)"
               body="AI replies to leads at any time, day or night."
+              mixed={mixedAvailability.mixed && availability === 'always'}
+              mixedTooltip={mixedAvailability.tooltip}
             />
             <OptionCard
               compact
@@ -351,18 +387,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               onClick={() => onAvailability('hours')}
               title="Outside of business hours"
               body={<>AI replies only outside your business hours window.<br /><span style={{ color: 'var(--lb-ink-3)' }}>Business Hours: Mon–Fri, 9:00 AM – 6:00 PM (New York)</span></>}
+              mixed={mixedAvailability.mixed && availability === 'hours'}
+              mixedTooltip={mixedAvailability.tooltip}
             />
           </div>
         }
       />
 
-      <SectionCard padding="22px 24px 8px" style={mixedStopRules.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
-        {mixedStopRules.mixed && (
-          <MixedCardBanner
-            tooltip={mixedStopRules.tooltip}
-            message="Accounts disagree on these Stop Rules. Changing them here will apply to all accounts."
-          />
-        )}
+      <SectionCard padding="22px 24px 8px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Hand} tone="rose" size="lg" />
           <div style={{ flex: '0 0 280px', minWidth: 0 }}>
@@ -379,10 +411,10 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <ToggleRow icon={UserX}         iconTone="gray"   label="Customer asks not to be contacted"           on={stopRules.not_contacted} onChange={() => toggleStop('not_contacted')} />
-            <ToggleRow icon={CalendarCheck} iconTone="green"  label="Job is booked or confirmed"                  on={stopRules.booked}        onChange={() => toggleStop('booked')} />
-            <ToggleRow icon={HeartHandshake}iconTone="purple" label="Customer agrees on price — hand off to manager" on={stopRules.price_agreed} onChange={() => toggleStop('price_agreed')} />
-            <ToggleRow icon={CheckSquare}   iconTone="cyan"   label="Lead is done, scheduled, or archived"         on={stopRules.done}          onChange={() => toggleStop('done')} />
+            <ToggleRow icon={UserX}         iconTone="gray"   label="Customer asks not to be contacted"           on={stopRules.not_contacted} onChange={() => toggleStop('not_contacted')} mixed={mxStopNotContacted.mixed} mixedTooltip={mxStopNotContacted.tooltip} />
+            <ToggleRow icon={CalendarCheck} iconTone="green"  label="Job is booked or confirmed"                  on={stopRules.booked}        onChange={() => toggleStop('booked')}        mixed={mxStopBooked.mixed}       mixedTooltip={mxStopBooked.tooltip} />
+            <ToggleRow icon={HeartHandshake}iconTone="purple" label="Customer agrees on price — hand off to manager" on={stopRules.price_agreed} onChange={() => toggleStop('price_agreed')} mixed={mxStopPriceAgreed.mixed} mixedTooltip={mxStopPriceAgreed.tooltip} />
+            <ToggleRow icon={CheckSquare}   iconTone="cyan"   label="Lead is done, scheduled, or archived"         on={stopRules.done}          onChange={() => toggleStop('done')}          mixed={mxStopDone.mixed}         mixedTooltip={mxStopDone.tooltip} />
           </div>
         </div>
 
@@ -405,13 +437,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      <SectionCard padding="22px 24px 8px" style={mixedTakeover.mixed ? { border: '1.5px solid #f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.14), 0 1px 2px rgba(10,21,48,0.03)' } : undefined}>
-        {mixedTakeover.mixed && (
-          <MixedCardBanner
-            tooltip={mixedTakeover.tooltip}
-            message="Accounts disagree on these Human Takeover triggers. Changing them here will apply to all accounts."
-          />
-        )}
+      <SectionCard padding="22px 24px 8px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <IconTile icon={Users} tone="orange" size="lg" />
           <div style={{ flex: '0 0 280px', minWidth: 0 }}>
@@ -429,11 +455,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <ToggleRow icon={CalendarCheck} iconTone="green"  label="Ready to book"            on={takeover.ready}     onChange={() => toggleTakeover('ready')} />
-            <ToggleRow icon={PhoneCall}     iconTone="purple" label="Wants live contact"       on={takeover.live}      onChange={() => toggleTakeover('live')} />
-            <ToggleRow icon={Smartphone}    iconTone="blue"   label="Provided phone number"    on={takeover.phone}     onChange={() => toggleTakeover('phone')} />
-            <ToggleRow icon={Ruler}         iconTone="orange" label="Provided square footage"  on={takeover.sqft}      onChange={() => toggleTakeover('sqft')} />
-            <ToggleRow icon={BadgeCheck}    iconTone="cyan"   label="Qualification complete"   on={takeover.qualified} onChange={() => toggleTakeover('qualified')} />
+            <ToggleRow icon={CalendarCheck} iconTone="green"  label="Ready to book"            on={takeover.ready}     onChange={() => toggleTakeover('ready')}     mixed={mxTakeReady.mixed}     mixedTooltip={mxTakeReady.tooltip} />
+            <ToggleRow icon={PhoneCall}     iconTone="purple" label="Wants live contact"       on={takeover.live}      onChange={() => toggleTakeover('live')}      mixed={mxTakeLive.mixed}      mixedTooltip={mxTakeLive.tooltip} />
+            <ToggleRow icon={Smartphone}    iconTone="blue"   label="Provided phone number"    on={takeover.phone}     onChange={() => toggleTakeover('phone')}     mixed={mxTakePhone.mixed}     mixedTooltip={mxTakePhone.tooltip} />
+            <ToggleRow icon={Ruler}         iconTone="orange" label="Provided square footage"  on={takeover.sqft}      onChange={() => toggleTakeover('sqft')}      mixed={mxTakeSqft.mixed}      mixedTooltip={mxTakeSqft.tooltip} />
+            <ToggleRow icon={BadgeCheck}    iconTone="cyan"   label="Qualification complete"   on={takeover.qualified} onChange={() => toggleTakeover('qualified')} mixed={mxTakeQualified.mixed} mixedTooltip={mxTakeQualified.tooltip} />
           </div>
         </div>
 
@@ -481,7 +507,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 }
 
 function StrategyCard({
-  selected, onClick, icon, iconTone, title, body,
+  selected, onClick, icon, iconTone, title, body, mixed, mixedTooltip,
 }: {
   selected: boolean;
   onClick: () => void;
@@ -489,25 +515,34 @@ function StrategyCard({
   iconTone: IconTone;
   title: string;
   body: string;
+  mixed?: boolean;
+  mixedTooltip?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={mixed ? mixedTooltip : undefined}
       style={{
         position: 'relative',
         textAlign: 'left', padding: '14px 12px 14px',
-        background: selected ? '#eff6ff' : 'white',
-        border: '1.5px solid ' + (selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        background: mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
+        border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
         borderRadius: 10,
         cursor: 'pointer', fontFamily: 'inherit',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
         transition: 'border-color 120ms, background 120ms',
+        boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
       }}
     >
       <div style={{ position: 'absolute', top: 8, left: 8 }}>
         <Radio selected={selected} />
       </div>
+      {mixed && (
+        <div style={{ position: 'absolute', top: 6, right: 6, color: '#d97706' }}>
+          <AlertTriangle size={12} />
+        </div>
+      )}
       <div style={{ height: 6 }} />
       <IconTile icon={icon} tone={iconTone} size="md" />
       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</div>

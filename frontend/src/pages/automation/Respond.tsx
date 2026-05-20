@@ -8,6 +8,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
 } from '../../components/automation/ui';
+// MixedBadge is still used inline next to the Timing labels for the
+// per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
 import { automationApi, callConnectApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAppStore } from '../../store/appStore';
@@ -494,16 +496,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        <FieldRow
-          label={
-            mixedReplyType ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Reply type <MixedBadge tooltip={tipReplyType} />
-              </span>
-            ) : 'Reply type'
-          }
-          align="top"
-        >
+        <FieldRow label="Reply type" align="top">
           <div style={{ display: 'flex', gap: 12 }}>
             <OptionCard
               selected={replyType === 'template'}
@@ -511,6 +504,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               title="Use template"
               body="Send a pre-written reply."
               icon={Clipboard}
+              mixed={mixedReplyType && replyType === 'template'}
+              mixedTooltip={tipReplyType}
             />
             <OptionCard
               selected={replyType === 'ai'}
@@ -518,6 +513,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               title="Let AI write it"
               body="AI will write a personalized first reply."
               icon={Sparkles}
+              mixed={mixedReplyType && replyType === 'ai'}
+              mixedTooltip={tipReplyType}
             />
           </div>
         </FieldRow>
@@ -570,8 +567,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Automatically text the lead when a new lead arrives."
         enabled={instantTextOn}
         onToggle={onInstantTextOn}
-        mixed={mixedInstantText || mixedTextBizHours}
-        mixedTooltip={mixedInstantText ? tipInstantText : tipTextBizHours}
+        mixed={mixedInstantText}
+        mixedTooltip={tipInstantText}
         contentPad="8px 24px 24px"
       >
         <FieldRow
@@ -619,8 +616,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Call your team and connect to the lead right away."
         enabled={instantCallOn}
         onToggle={onInstantCallOn}
-        mixed={mixedInstantCall || mixedCallBizHours || mixedConnMode}
-        mixedTooltip={mixedInstantCall ? tipInstantCall : (mixedCallBizHours ? tipCallBizHours : tipConnMode)}
+        mixed={mixedInstantCall}
+        mixedTooltip={tipInstantCall}
         contentPad="8px 24px 24px"
       >
         <FieldRow
@@ -651,13 +648,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         <FieldRow
           icon={ArrowRightLeft}
           iconTone="gray"
-          label={
-            mixedConnMode ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Connection Mode <MixedBadge tooltip={tipConnMode} />
-              </span>
-            ) : 'Connection Mode'
-          }
+          label="Connection Mode"
           align="top"
         >
           <div style={{ display: 'flex', gap: 12 }}>
@@ -667,6 +658,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               title="Agent First"
               body="We call you first, then bridge the lead."
               illustration={<ConnDiagram kind="serial" />}
+              mixed={mixedConnMode && connMode === 'agent-first'}
+              mixedTooltip={tipConnMode}
             />
             <OptionCard
               selected={connMode === 'parallel'}
@@ -674,6 +667,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               title="Parallel"
               body="We call you and the lead at the same time."
               illustration={<ConnDiagram kind="parallel" />}
+              mixed={mixedConnMode && connMode === 'parallel'}
+              mixedTooltip={tipConnMode}
             />
           </div>
         </FieldRow>
