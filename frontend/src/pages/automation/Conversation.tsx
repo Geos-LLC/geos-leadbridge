@@ -226,10 +226,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached[key])}`).join('\n');
     return { mixed: true, tooltip };
   }
-  const mixedStrategy   = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
-  const mixedPriceMode  = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
-  const mixedStopRules  = getMixed('stopRules', () => '(see hover)');
-  const mixedTakeover   = getMixed('takeover', () => '(see hover)');
+  const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
+  const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
+  const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
+  const mixedStopRules    = getMixed('stopRules', () => '(see hover)');
+  const mixedTakeover     = getMixed('takeover', () => '(see hover)');
 
   // Auto-save on every USER change (gated by dirtyRef).
   useEffect(() => {
@@ -333,6 +334,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         iconTone="violet"
         title="Auto Reply Availability"
         subtitle="Choose when AI can reply automatically."
+        mixed={mixedAvailability.mixed}
+        mixedTooltip={mixedAvailability.tooltip}
         headerRight={
           <div style={{ display: 'flex', gap: 12, flex: 1, marginLeft: 24, marginTop: -4 }}>
             <OptionCard

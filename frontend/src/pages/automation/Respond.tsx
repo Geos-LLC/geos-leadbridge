@@ -386,6 +386,12 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const _instantCall  = getMixed('instantCallOn', onOff);
   const _replyTypeMix = getMixed('replyType', v => v === 'ai' ? 'Let AI write it' : 'Use template');
   const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
+  const _textBizMix   = getMixed('textBizHours', v => v ? 'Only during business hours' : 'Anytime');
+  const _callBizMix   = getMixed('callBizHours', v => v ? 'Only during business hours' : 'Anytime');
+  const mixedTextBizHours = _textBizMix.mixed;
+  const mixedCallBizHours = _callBizMix.mixed;
+  const tipTextBizHours   = _textBizMix.tooltip;
+  const tipCallBizHours   = _callBizMix.tooltip;
   const mixedInstantReply = _instantReply.mixed;
   const mixedInstantText  = _instantText.mixed;
   const mixedInstantCall  = _instantCall.mixed;
@@ -564,11 +570,22 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Automatically text the lead when a new lead arrives."
         enabled={instantTextOn}
         onToggle={onInstantTextOn}
-        mixed={mixedInstantText}
-        mixedTooltip={tipInstantText}
+        mixed={mixedInstantText || mixedTextBizHours}
+        mixedTooltip={mixedInstantText ? tipInstantText : tipTextBizHours}
         contentPad="8px 24px 24px"
       >
-        <FieldRow icon={Clock} iconTone="gray" label="Timing" align="top">
+        <FieldRow
+          icon={Clock}
+          iconTone="gray"
+          label={
+            mixedTextBizHours ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                Timing <MixedBadge tooltip={tipTextBizHours} />
+              </span>
+            ) : 'Timing'
+          }
+          align="top"
+        >
           <div>
             <Checkbox
               checked={textBizHours}
@@ -602,11 +619,22 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         subtitle="Call your team and connect to the lead right away."
         enabled={instantCallOn}
         onToggle={onInstantCallOn}
-        mixed={mixedInstantCall}
-        mixedTooltip={tipInstantCall}
+        mixed={mixedInstantCall || mixedCallBizHours || mixedConnMode}
+        mixedTooltip={mixedInstantCall ? tipInstantCall : (mixedCallBizHours ? tipCallBizHours : tipConnMode)}
         contentPad="8px 24px 24px"
       >
-        <FieldRow icon={Clock} iconTone="gray" label="Timing" align="top">
+        <FieldRow
+          icon={Clock}
+          iconTone="gray"
+          label={
+            mixedCallBizHours ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                Timing <MixedBadge tooltip={tipCallBizHours} />
+              </span>
+            ) : 'Timing'
+          }
+          align="top"
+        >
           <div>
             <Checkbox
               checked={callBizHours}
