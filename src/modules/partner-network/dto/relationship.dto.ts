@@ -21,6 +21,15 @@ export class CreatePartnerRelationshipDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  widgetEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  widgetType?: string;
 }
 
 export class UpdatePartnerRelationshipDto {
@@ -42,4 +51,13 @@ export class UpdatePartnerRelationshipDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  widgetEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  widgetType?: string;
 }
