@@ -1569,7 +1569,14 @@ model SupportGrant {
 enum PartnerLeadIntent {
   this_week
   this_month
+  future_interest
   not_sure
+}
+
+enum PartnerLeadContactPref {
+  call
+  text
+  either
 }
 
 enum PartnerLeadStatus {
@@ -1627,8 +1634,13 @@ model PartnerRelationship {
   // be embedded as <script src=".../partner-widget.js"></script>. No widget
   // runtime exists yet; these just record intent so the future loader can
   // decide whether to expose the relationship via the widget bundle.
+  // popupDelayMs / autoOpenFromReferral target the popup widgetType: the
+  // future runtime reads these to decide when to auto-open the form, e.g.
+  // when the partner site receives ?ref=SPOTLESS-MARIA.
   widgetEnabled         Boolean  @default(false)
   widgetType            String?
+  popupDelayMs          Int?
+  autoOpenFromReferral  Boolean  @default(false)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -1684,14 +1696,24 @@ model PartnerLead {
   destinationBusinessId String
   customerName          String
   customerPhone         String
+  // Customer preferred contact method captured from the public form.
+  // Defaults to `either` so leads pre-dating the field still answer the
+  // question generically; future Sigcore integration reads this to choose
+  // call vs SMS as the first follow-up step.
+  preferredContact      PartnerLeadContactPref @default(either)
   // Free-text notes from the customer-facing form.
   notes                 String?           @db.Text
   intentTiming          PartnerLeadIntent
-  // Hardcoded for MVP: this_week=30, this_month=20, not_sure=10. Later this
-  // becomes per-relationship configurable; keep computed at write-time so
-  // historic leads stay valued at the rate at submission.
+  // Hardcoded for MVP: this_week=30, this_month=20, future_interest=10,
+  // not_sure=10. Later this becomes per-relationship configurable; keep
+  // computed at write-time so historic leads stay valued at the rate at
+  // submission.
   estimatedValue        Int
   status                PartnerLeadStatus @default(new)
+  // Manual owner field (e.g. "Mike" on the partner side). No assignment
+  // automation — admin sets this by hand. Plain string so the module stays
+  // portable; later this can move to a partner-side user FK.
+  assignedTo            String?
   // Flagged true when another lead exists with the same phone for the same
   // destinationBusinessId within the previous 30 days. Submission is never
   // blocked — admin reviews flagged duplicates manually.

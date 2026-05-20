@@ -8,7 +8,7 @@
 
 import api from './api';
 
-export type PartnerLeadIntent = 'this_week' | 'this_month' | 'not_sure';
+export type PartnerLeadIntent = 'this_week' | 'this_month' | 'future_interest' | 'not_sure';
 export type PartnerLeadStatus =
   | 'new'
   | 'contacted'
@@ -18,6 +18,7 @@ export type PartnerLeadStatus =
   | 'booked'
   | 'paid_manually';
 export type PartnerLeadEventType = 'page_view' | 'form_started' | 'form_submitted';
+export type PartnerLeadContactPref = 'call' | 'text' | 'either';
 
 export interface PartnerBusiness {
   id: string;
@@ -43,6 +44,8 @@ export interface PartnerRelationship {
   notes: string | null;
   widgetEnabled: boolean;
   widgetType: string | null;
+  popupDelayMs: number | null;
+  autoOpenFromReferral: boolean;
   createdAt: string;
   updatedAt: string;
   sourceBusiness: PartnerBusiness;
@@ -74,10 +77,12 @@ export interface PartnerLead {
   destinationBusinessId: string;
   customerName: string;
   customerPhone: string;
+  preferredContact: PartnerLeadContactPref;
   notes: string | null;
   intentTiming: PartnerLeadIntent;
   estimatedValue: number;
   status: PartnerLeadStatus;
+  assignedTo: string | null;
   possibleDuplicate: boolean;
   utmSource: string | null;
   utmMedium: string | null;
@@ -103,9 +108,21 @@ export interface DashboardSummary {
   bySourceBusiness: Array<{ businessId: string; businessName: string; count: number; value: number }>;
   byDestinationBusiness: Array<{ businessId: string; businessName: string; count: number; value: number }>;
   byReferralCode: Array<{ codeId: string; code: string; employeeName: string | null; count: number; value: number }>;
-  byEmployee: Array<{ employeeName: string; count: number; value: number }>;
+  byEmployee: Array<{
+    employeeName: string;
+    pageViews: number;
+    formStarts: number;
+    submissions: number;
+    value: number;
+  }>;
   byStatus: Record<string, number>;
-  funnel: { views: number; started: number; submitted: number };
+  funnel: {
+    views: number;
+    started: number;
+    submitted: number;
+    qualified: number;
+    booked: number;
+  };
 }
 
 export interface PublicReferralView {
@@ -143,6 +160,8 @@ export const partnerNetworkApi = {
     notes?: string;
     widgetEnabled?: boolean;
     widgetType?: string;
+    popupDelayMs?: number;
+    autoOpenFromReferral?: boolean;
   }): Promise<PartnerRelationship> => {
     const { data } = await api.post('/partner-network/relationships', body);
     return data.relationship;
@@ -152,7 +171,14 @@ export const partnerNetworkApi = {
     body: Partial<
       Pick<
         PartnerRelationship,
-        'name' | 'active' | 'defaultOfferText' | 'notes' | 'widgetEnabled' | 'widgetType'
+        | 'name'
+        | 'active'
+        | 'defaultOfferText'
+        | 'notes'
+        | 'widgetEnabled'
+        | 'widgetType'
+        | 'popupDelayMs'
+        | 'autoOpenFromReferral'
       >
     >,
   ): Promise<PartnerRelationship> => {
@@ -198,7 +224,10 @@ export const partnerNetworkApi = {
     const { data } = await api.get(`/partner-network/leads${params.toString() ? `?${params.toString()}` : ''}`);
     return data.leads;
   },
-  updateLead: async (id: string, body: { status?: PartnerLeadStatus; notes?: string }): Promise<PartnerLead> => {
+  updateLead: async (
+    id: string,
+    body: { status?: PartnerLeadStatus; notes?: string; assignedTo?: string | null },
+  ): Promise<PartnerLead> => {
     const { data } = await api.patch(`/partner-network/leads/${id}`, body);
     return data.lead;
   },
@@ -237,6 +266,7 @@ export const partnerNetworkApi = {
       customerName: string;
       customerPhone: string;
       intentTiming: PartnerLeadIntent;
+      preferredContact?: PartnerLeadContactPref;
       notes?: string;
       utmSource?: string;
       utmMedium?: string;
@@ -247,3 +277,38 @@ export const partnerNetworkApi = {
     return data;
   },
 };
+
+/**
+ * Capture a `?ref=CODE` from the current URL into localStorage so a future
+ * widget runtime can attribute a conversion across sessions even when the
+ * customer lands on the partner's own site first.
+ *
+ * Placeholder per spec — no attribution logic is wired up yet. Returns the
+ * code that was just captured (or the previously stored code if no param is
+ * present). Safe to call from non-React contexts; no-ops in SSR / non-browser.
+ */
+export function captureReferralSource(
+  search: string | URLSearchParams = typeof window === 'undefined' ? '' : window.location.search,
+): string | null {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  const params = typeof search === 'string' ? new URLSearchParams(search) : search;
+  const ref = params.get('ref');
+  const KEY = 'partner-network:ref';
+  if (ref && ref.trim()) {
+    try {
+      const value = ref.trim().toUpperCase();
+      localStorage.setItem(KEY, value);
+      localStorage.setItem(`${KEY}:capturedAt`, new Date().toISOString());
+      return value;
+    } catch {
+      // localStorage can throw in private mode / cookie-blocked frames —
+      // attribution is best-effort, so swallow.
+      return ref.trim().toUpperCase();
+    }
+  }
+  try {
+    return localStorage.getItem(KEY);
+  } catch {
+    return null;
+  }
+}
