@@ -22,6 +22,7 @@ import { PrismaService } from '../../common/utils/prisma.service';
 import {
   PartnerBusiness,
   PartnerLead,
+  PartnerLeadEventType,
   PartnerLeadIntent,
   PartnerLeadStatus,
   PartnerReferralCode,
@@ -47,6 +48,23 @@ const INTENT_VALUE: Record<PartnerLeadIntent, number> = {
   this_month: 20,
   not_sure: 10,
 };
+
+/**
+ * Public helper exported so other modules / tests can mirror the MVP value
+ * table without poking at the constant directly. When intent value becomes
+ * per-relationship, swap the body for a DB lookup — callers stay unchanged.
+ */
+export function calculateEstimatedLeadValue(intent: PartnerLeadIntent): number {
+  return INTENT_VALUE[intent];
+}
+
+// External QR image service used for MVP — no qrcode dependency. Swap to a
+// self-hosted PNG path when we want to stop depending on an external service.
+const QR_IMAGE_BASE = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=';
+
+function buildQrUrl(code: string): string {
+  return `${QR_IMAGE_BASE}${encodeURIComponent(`/r/${code}`)}`;
+}
 
 // Duplicate detection window: a lead with the same phone for the same
 // destination within this many days flags possibleDuplicate=true.
@@ -157,6 +175,8 @@ export class PartnerNetworkService {
         name: dto.name?.trim() || null,
         defaultOfferText: dto.defaultOfferText?.trim() || null,
         notes: dto.notes?.trim() || null,
+        widgetEnabled: dto.widgetEnabled ?? false,
+        widgetType: dto.widgetType?.trim() || null,
       },
     });
   }
@@ -179,6 +199,8 @@ export class PartnerNetworkService {
           defaultOfferText: dto.defaultOfferText?.trim() || null,
         }),
         ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
+        ...(dto.widgetEnabled !== undefined && { widgetEnabled: dto.widgetEnabled }),
+        ...(dto.widgetType !== undefined && { widgetType: dto.widgetType?.trim() || null }),
       },
     });
   }
@@ -228,6 +250,7 @@ export class PartnerNetworkService {
         partnerRelationshipId: dto.partnerRelationshipId ?? null,
         employeeName: dto.employeeName?.trim() || null,
         publicUrl: `/r/${code}`,
+        qrUrl: buildQrUrl(code),
       },
     });
   }
@@ -313,7 +336,8 @@ export class PartnerNetworkService {
       },
     });
 
-    const estimatedValue = INTENT_VALUE[dto.intentTiming];
+    const estimatedValue = calculateEstimatedLeadValue(dto.intentTiming);
+    const now = new Date();
 
     const lead = await this.prisma.partnerLead.create({
       data: {
@@ -331,7 +355,28 @@ export class PartnerNetworkService {
         utmSource: dto.utmSource?.trim() || null,
         utmMedium: dto.utmMedium?.trim() || null,
         utmCampaign: dto.utmCampaign?.trim() || null,
+        submittedAt: now,
       },
+    });
+    // Funnel: record the submit event and backfill any prior page_view /
+    // form_started events for the same code in the last 30 minutes onto the
+    // new lead. Cheap join — events table is small and indexed on referralCode.
+    await this.prisma.partnerLeadEvent.create({
+      data: {
+        workspaceId: referral.workspaceId,
+        referralCodeId: referral.id,
+        leadId: lead.id,
+        eventType: PartnerLeadEventType.form_submitted,
+      },
+    });
+    await this.prisma.partnerLeadEvent.updateMany({
+      where: {
+        referralCodeId: referral.id,
+        leadId: null,
+        eventType: { in: [PartnerLeadEventType.page_view, PartnerLeadEventType.form_started] },
+        createdAt: { gte: new Date(now.getTime() - 30 * 60 * 1000) },
+      },
+      data: { leadId: lead.id },
     });
     this.logger.log(
       `[partner-network] lead submitted code=${referral.code} ` +
@@ -339,6 +384,39 @@ export class PartnerNetworkService {
         `dup=${lead.possibleDuplicate}`,
     );
     return lead;
+  }
+
+  /**
+   * Public, no-auth funnel event capture. Per spec: page views and form
+   * starts DO NOT create leads — they are tracked here only for analytics.
+   *
+   * `form_submitted` is reserved for the /submit endpoint to keep the funnel
+   * trustworthy — a client cannot fake submissions via this method.
+   */
+  async recordPublicEvent(
+    code: string,
+    eventType: PartnerLeadEventType,
+  ): Promise<{ recorded: boolean }> {
+    if (eventType === PartnerLeadEventType.form_submitted) {
+      throw new BadRequestException('form_submitted is recorded by /submit only');
+    }
+    const normalized = code.trim().toUpperCase();
+    const referral = await this.prisma.partnerReferralCode.findUnique({
+      where: { code: normalized },
+      include: { destinationBusiness: true },
+    });
+    if (!referral || !referral.active || !referral.destinationBusiness.active) {
+      // 404 keeps inactive codes silent — same shape as the view endpoint.
+      throw new NotFoundException('Referral code not found');
+    }
+    await this.prisma.partnerLeadEvent.create({
+      data: {
+        workspaceId: referral.workspaceId,
+        referralCodeId: referral.id,
+        eventType,
+      },
+    });
+    return { recorded: true };
   }
 
   // ============================================================
@@ -401,12 +479,23 @@ export class PartnerNetworkService {
    *   hot  = this_week
    *   warm = this_month
    *   cold = not_sure
+   *
+   * Funnel counts come from PartnerLeadEvent. Submissions are counted from
+   * the events table (not lead rows) so they reflect the funnel even if a
+   * lead row is later deleted manually for any reason.
    */
   async getDashboard(workspaceId: string) {
-    const leads = await this.prisma.partnerLead.findMany({
-      where: { workspaceId },
-      include: { referralCode: true, sourceBusiness: true, destinationBusiness: true },
-    });
+    const [leads, eventGroups] = await Promise.all([
+      this.prisma.partnerLead.findMany({
+        where: { workspaceId },
+        include: { referralCode: true, sourceBusiness: true, destinationBusiness: true },
+      }),
+      this.prisma.partnerLeadEvent.groupBy({
+        by: ['eventType'],
+        where: { workspaceId },
+        _count: { _all: true },
+      }),
+    ]);
 
     const total = leads.length;
     const hot = leads.filter(l => l.intentTiming === 'this_week').length;
@@ -415,7 +504,9 @@ export class PartnerNetworkService {
     const estimatedTotalValue = leads.reduce((acc, l) => acc + (l.estimatedValue ?? 0), 0);
 
     const bySource = new Map<string, { businessId: string; businessName: string; count: number; value: number }>();
+    const byDest = new Map<string, { businessId: string; businessName: string; count: number; value: number }>();
     const byCode = new Map<string, { codeId: string; code: string; employeeName: string | null; count: number; value: number }>();
+    const byEmployee = new Map<string, { employeeName: string; count: number; value: number }>();
     const byStatus = new Map<PartnerLeadStatus, number>();
 
     for (const lead of leads) {
@@ -430,6 +521,17 @@ export class PartnerNetworkService {
       src.value += lead.estimatedValue;
       bySource.set(srcKey, src);
 
+      const dstKey = lead.destinationBusinessId;
+      const dst = byDest.get(dstKey) ?? {
+        businessId: lead.destinationBusinessId,
+        businessName: lead.destinationBusiness.name,
+        count: 0,
+        value: 0,
+      };
+      dst.count += 1;
+      dst.value += lead.estimatedValue;
+      byDest.set(dstKey, dst);
+
       const codeKey = lead.referralCodeId;
       const code = byCode.get(codeKey) ?? {
         codeId: lead.referralCodeId,
@@ -442,14 +544,33 @@ export class PartnerNetworkService {
       code.value += lead.estimatedValue;
       byCode.set(codeKey, code);
 
+      const employee = (lead.referralCode.employeeName ?? '').trim();
+      if (employee) {
+        const e = byEmployee.get(employee) ?? { employeeName: employee, count: 0, value: 0 };
+        e.count += 1;
+        e.value += lead.estimatedValue;
+        byEmployee.set(employee, e);
+      }
+
       byStatus.set(lead.status, (byStatus.get(lead.status) ?? 0) + 1);
     }
+
+    const eventCount = (t: PartnerLeadEventType): number =>
+      eventGroups.find(g => g.eventType === t)?._count._all ?? 0;
+    const funnel = {
+      views: eventCount(PartnerLeadEventType.page_view),
+      started: eventCount(PartnerLeadEventType.form_started),
+      submitted: eventCount(PartnerLeadEventType.form_submitted),
+    };
 
     return {
       totals: { total, hot, warm, cold, estimatedTotalValue },
       bySourceBusiness: Array.from(bySource.values()).sort((a, b) => b.count - a.count),
+      byDestinationBusiness: Array.from(byDest.values()).sort((a, b) => b.count - a.count),
       byReferralCode: Array.from(byCode.values()).sort((a, b) => b.count - a.count),
+      byEmployee: Array.from(byEmployee.values()).sort((a, b) => b.count - a.count),
       byStatus: Object.fromEntries(byStatus),
+      funnel,
     };
   }
 
@@ -476,6 +597,9 @@ export class PartnerNetworkService {
       'estimatedValue',
       'status',
       'possibleDuplicate',
+      'pageViewedAt',
+      'formStartedAt',
+      'submittedAt',
       'notes',
     ];
     const rows = leads.map(l => [
@@ -491,6 +615,9 @@ export class PartnerNetworkService {
       String(l.estimatedValue),
       l.status,
       l.possibleDuplicate ? 'yes' : 'no',
+      l.pageViewedAt?.toISOString() ?? '',
+      l.formStartedAt?.toISOString() ?? '',
+      l.submittedAt?.toISOString() ?? '',
       l.notes ?? '',
     ]);
     return [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');

@@ -30,6 +30,10 @@ export default function PublicReferral() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  // Set once the user's first input fires so we only POST form_started once
+  // per page-load — funnel counts a "started" event per visitor, not per
+  // keystroke.
+  const [startedLogged, setStartedLogged] = useState(false);
 
   const [form, setForm] = useState({
     customerName: '',
@@ -41,13 +45,26 @@ export default function PublicReferral() {
   useEffect(() => {
     let cancelled = false;
     partnerNetworkApi.getPublicReferral(code)
-      .then(v => { if (!cancelled) setView(v); })
+      .then(v => {
+        if (cancelled) return;
+        setView(v);
+        // Best-effort page_view event. We only fire when the code resolves so
+        // dead/inactive codes don't pollute the funnel.
+        partnerNetworkApi.logPublicEvent(code, 'page_view').catch(() => {});
+      })
       .catch(err => {
         if (!cancelled) setError(err?.response?.status === 404 ? 'This referral link is no longer active.' : (err?.response?.data?.message || 'Could not load this link.'));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [code]);
+
+  // Fire form_started once on the first user interaction with any input.
+  const markStarted = () => {
+    if (startedLogged) return;
+    setStartedLogged(true);
+    partnerNetworkApi.logPublicEvent(code, 'form_started').catch(() => {});
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +155,7 @@ export default function PublicReferral() {
           <input
             required
             value={form.customerName}
-            onChange={e => setForm({ ...form, customerName: e.target.value })}
+            onChange={e => { markStarted(); setForm({ ...form, customerName: e.target.value }); }}
             style={input}
             autoComplete="name"
           />
@@ -148,7 +165,7 @@ export default function PublicReferral() {
             required
             type="tel"
             value={form.customerPhone}
-            onChange={e => setForm({ ...form, customerPhone: e.target.value })}
+            onChange={e => { markStarted(); setForm({ ...form, customerPhone: e.target.value }); }}
             style={input}
             autoComplete="tel"
             placeholder="(555) 555-5555"
@@ -173,7 +190,7 @@ export default function PublicReferral() {
                   <input
                     type="radio"
                     checked={selected}
-                    onChange={() => setForm({ ...form, intentTiming: opt.value })}
+                    onChange={() => { markStarted(); setForm({ ...form, intentTiming: opt.value }); }}
                     style={{ accentColor: '#0ea5e9' }}
                   />
                   <div>
@@ -189,7 +206,7 @@ export default function PublicReferral() {
         <Field label="Notes (optional)">
           <textarea
             value={form.notes}
-            onChange={e => setForm({ ...form, notes: e.target.value })}
+            onChange={e => { markStarted(); setForm({ ...form, notes: e.target.value }); }}
             style={{ ...input, minHeight: 80, resize: 'vertical' }}
             placeholder="Anything else we should know?"
           />

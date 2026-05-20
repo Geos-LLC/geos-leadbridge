@@ -461,56 +461,56 @@ model MessageTemplate {
 // ==========================================
 
 model SavedAccount {
-  id                       String   @id @default(uuid())
-  userId                   String
-  platform                 String // "thumbtack"
-  businessId               String // Platform's business ID
-  businessName             String // Display name
-  emailHint                String? // Email used for this account (optional hint)
-  imageUrl                 String? // Business logo URL
-  webhookId                String? // Webhook subscription ID for this business
-  credentialsJson          String? // Encrypted: access_token, refresh_token for THIS account
-  agentPhoneOverride       String? // Per-business agent phone; when null, inherits User.businessPhone
+  id                          String   @id @default(uuid())
+  userId                      String
+  platform                    String // "thumbtack"
+  businessId                  String // Platform's business ID
+  businessName                String // Display name
+  emailHint                   String? // Email used for this account (optional hint)
+  imageUrl                    String? // Business logo URL
+  webhookId                   String? // Webhook subscription ID for this business
+  credentialsJson             String? // Encrypted: access_token, refresh_token for THIS account
+  agentPhoneOverride          String? // Per-business agent phone; when null, inherits User.businessPhone
   // Follow-up settings (per-account)
-  followUpMode             String? // 'off' | 'suggest' | 'auto_send'
-  aiConversationEnabled    Boolean  @default(false) // Separate toggle: auto-reply to customer messages
-  followUpPreset           String? // 'conservative' | 'standard' | 'persistent'
-  followUpReplyType        String? // 'template' | 'ai'
-  followUpActiveHoursStart String? // e.g. "09:00"
-  followUpActiveHoursEnd   String? // e.g. "21:00"
+  followUpMode                String? // 'off' | 'suggest' | 'auto_send'
+  aiConversationEnabled       Boolean  @default(false) // Separate toggle: auto-reply to customer messages
+  followUpPreset              String? // 'conservative' | 'standard' | 'persistent'
+  followUpReplyType           String? // 'template' | 'ai'
+  followUpActiveHoursStart    String? // e.g. "09:00"
+  followUpActiveHoursEnd      String? // e.g. "21:00"
   /// DEPRECATED — read via resolveTimezone(account, user); writes go to
   /// `timezoneOverride` below. Kept for one deploy cycle as a read fallback.
-  followUpTimezone         String? // e.g. "America/New_York"
+  followUpTimezone            String? // e.g. "America/New_York"
   // Single per-account override of the user's master timezone. Null = inherit
   // User.timezone. New code MUST resolve via resolveTimezone() (account-timezone.ts)
   // rather than reading any of the legacy *Timezone columns directly.
-  timezoneOverride         String? @map("timezone_override")
-  followUpSettingsJson     String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
+  timezoneOverride            String?  @map("timezone_override")
+  followUpSettingsJson        String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Business-hours wiring (User.businessHours* is the master)
-  businessHoursOverride       Json?   @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
-  callDuringBusinessHours     Boolean @default(true) @map("call_during_business_hours")     // Instant Call gate
-  firstMsgDuringBusinessHours Boolean @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
+  businessHoursOverride       Json?    @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
+  callDuringBusinessHours     Boolean  @default(true) @map("call_during_business_hours") // Instant Call gate
+  firstMsgDuringBusinessHours Boolean  @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
   // Follow-ups default to their existing quiet-hours model (broader than business
   // hours — politeness, e.g. no texting 9pm-8am). Flip this to true only if you
   // want follow-ups restricted to the master business-hours window too.
   // (Kept for backward compat; the UI now exposes followUpsApplyQuietHours instead.)
-  followUpsUseBusinessHours   Boolean @default(false) @map("follow_ups_use_business_hours")
+  followUpsUseBusinessHours   Boolean  @default(false) @map("follow_ups_use_business_hours")
   // When true, follow-ups skip during the User's master quiet-hours window.
   // Default true matches the "don't text at night" politeness convention.
-  followUpsApplyQuietHours    Boolean @default(true) @map("follow_ups_apply_quiet_hours")
+  followUpsApplyQuietHours    Boolean  @default(true) @map("follow_ups_apply_quiet_hours")
   // AI Conversation mode — three states:
   //   "always"                      — AI replies 24/7
   //   "when_dispatcher_unavailable" — AI replies ONLY outside business hours (human takes over during)
   //   "business_hours_only"         — AI replies ONLY during business hours
-  aiConversationMode          String? @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
+  aiConversationMode          String?  @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
   // Service pricing configuration (JSON — per-account pricing table)
-  servicePricingJson       String?  @db.Text
+  servicePricingJson          String?  @db.Text
   // FAQ — per-account answers to common customer questions, injected as REFERENCE in AI prompts
-  faqJson                  String?  @db.Text
+  faqJson                     String?  @db.Text
   // Team — when set, org members can access this account
-  organizationId           String?
-  lastUsedAt               DateTime @default(now())
-  createdAt                DateTime @default(now())
+  organizationId              String?
+  lastUsedAt                  DateTime @default(now())
+  createdAt                   DateTime @default(now())
 
   // Relationships
   user                 User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1575,10 +1575,17 @@ enum PartnerLeadIntent {
 enum PartnerLeadStatus {
   new
   contacted
+  interested_not_now
   qualified
   rejected
   booked
   paid_manually
+}
+
+enum PartnerLeadEventType {
+  page_view
+  form_started
+  form_submitted
 }
 
 model PartnerBusiness {
@@ -1616,6 +1623,12 @@ model PartnerRelationship {
   active                Boolean  @default(true)
   defaultOfferText      String?  @db.Text
   notes                 String?  @db.Text
+  // Widget placeholder fields — designed so the public referral form can later
+  // be embedded as <script src=".../partner-widget.js"></script>. No widget
+  // runtime exists yet; these just record intent so the future loader can
+  // decide whether to expose the relationship via the widget bundle.
+  widgetEnabled         Boolean  @default(false)
+  widgetType            String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -1643,6 +1656,10 @@ model PartnerReferralCode {
   // Stored URL path (e.g. "/r/SPOTLESS-MARIA"). Frontend prefixes with the
   // current origin to build a copy-able full URL.
   publicUrl             String
+  // Pre-rendered QR image URL. MVP uses an external image service (no QR
+  // dependency); replace with a self-hosted PNG path when we add the
+  // qrcode dependency.
+  qrUrl                 String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -1650,6 +1667,7 @@ model PartnerReferralCode {
   destinationBusiness PartnerBusiness      @relation("PartnerRefCodeDestination", fields: [destinationBusinessId], references: [id], onDelete: Cascade)
   partnerRelationship PartnerRelationship? @relation(fields: [partnerRelationshipId], references: [id], onDelete: SetNull)
   leads               PartnerLead[]
+  events              PartnerLeadEvent[]
 
   @@index([workspaceId])
   @@index([code])
@@ -1682,12 +1700,20 @@ model PartnerLead {
   utmSource             String?
   utmMedium             String?
   utmCampaign           String?
+  // Funnel timestamps mirrored from PartnerLeadEvent. Stored on the lead
+  // row too so the leads list can render per-lead funnel info without a
+  // join. pageViewedAt/formStartedAt are best-effort and stay null when
+  // the public page didn't ping the events endpoint (e.g. embedded widget).
+  pageViewedAt          DateTime?
+  formStartedAt         DateTime?
+  submittedAt           DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
   referralCode        PartnerReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
   sourceBusiness      PartnerBusiness     @relation("PartnerLeadSource", fields: [sourceBusinessId], references: [id], onDelete: Cascade)
   destinationBusiness PartnerBusiness     @relation("PartnerLeadDestination", fields: [destinationBusinessId], references: [id], onDelete: Cascade)
+  events              PartnerLeadEvent[]
 
   @@index([workspaceId])
   @@index([referralCodeId])
@@ -1696,4 +1722,27 @@ model PartnerLead {
   @@index([status])
   @@index([destinationBusinessId, customerPhone, createdAt])
   @@map("partner_leads")
+}
+
+// Lightweight funnel-tracking table. Public referral pages POST events for
+// page_view, form_started, and form_submitted. Only form_submitted creates a
+// PartnerLead (per spec: "QR scan / page view does NOT count as a lead").
+// leadId is nullable because page_view and form_started fire before a lead
+// exists; backfilled once the form is submitted.
+model PartnerLeadEvent {
+  id             String               @id @default(uuid())
+  workspaceId    String
+  referralCodeId String
+  leadId         String?
+  eventType      PartnerLeadEventType
+  createdAt      DateTime             @default(now())
+
+  referralCode PartnerReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  lead         PartnerLead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([referralCodeId])
+  @@index([leadId])
+  @@index([eventType])
+  @@map("partner_lead_events")
 }
