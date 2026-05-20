@@ -11,15 +11,24 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Loader2, CheckCircle, Phone } from 'lucide-react';
 import {
+  captureReferralSource,
   partnerNetworkApi,
+  type PartnerLeadContactPref,
   type PartnerLeadIntent,
   type PublicReferralView,
 } from '../../services/partnerNetwork';
 
 const INTENT_OPTIONS: Array<{ value: PartnerLeadIntent; label: string; hint: string }> = [
-  { value: 'this_week', label: 'This week', hint: "I need help soon" },
-  { value: 'this_month', label: 'This month', hint: "Within the next few weeks" },
-  { value: 'not_sure', label: 'Not sure / just interested', hint: 'Exploring options' },
+  { value: 'this_week', label: 'Within 1 week', hint: "I need help soon" },
+  { value: 'this_month', label: 'Within 1 month', hint: "Within the next few weeks" },
+  { value: 'future_interest', label: 'Sometime later', hint: "Maybe in a few months" },
+  { value: 'not_sure', label: 'Just exploring', hint: 'No specific timeline' },
+];
+
+const CONTACT_OPTIONS: Array<{ value: PartnerLeadContactPref; label: string }> = [
+  { value: 'call', label: 'Call' },
+  { value: 'text', label: 'Text' },
+  { value: 'either', label: 'Either' },
 ];
 
 export default function PublicReferral() {
@@ -39,11 +48,16 @@ export default function PublicReferral() {
     customerName: '',
     customerPhone: '',
     intentTiming: '' as PartnerLeadIntent | '',
+    preferredContact: 'either' as PartnerLeadContactPref,
     notes: '',
   });
 
   useEffect(() => {
     let cancelled = false;
+    // Persist the visited code so a future widget runtime can attribute a
+    // conversion that happens later on the partner's own domain. This page
+    // already has the code in the URL, so we just normalize-and-store.
+    captureReferralSource(new URLSearchParams({ ref: code }));
     partnerNetworkApi.getPublicReferral(code)
       .then(v => {
         if (cancelled) return;
@@ -79,6 +93,7 @@ export default function PublicReferral() {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim(),
         intentTiming: form.intentTiming as PartnerLeadIntent,
+        preferredContact: form.preferredContact,
         notes: form.notes.trim() || undefined,
         utmSource: searchParams.get('utm_source') || undefined,
         utmMedium: searchParams.get('utm_medium') || undefined,
@@ -197,6 +212,35 @@ export default function PublicReferral() {
                     <div style={{ fontWeight: 600, color: '#0f172a' }}>{opt.label}</div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>{opt.hint}</div>
                   </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <label style={fieldLabel}>Preferred contact</label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            {CONTACT_OPTIONS.map(opt => {
+              const selected = form.preferredContact === opt.value;
+              return (
+                <label key={opt.value} style={{
+                  flex: 1, textAlign: 'center',
+                  padding: '10px 8px',
+                  border: `1px solid ${selected ? '#0ea5e9' : '#e2e8f0'}`,
+                  borderRadius: 12,
+                  background: selected ? '#f0f9ff' : '#fff',
+                  cursor: 'pointer',
+                  transition: 'border-color 120ms',
+                  fontSize: 13, fontWeight: 600, color: '#0f172a',
+                }}>
+                  <input
+                    type="radio"
+                    checked={selected}
+                    onChange={() => { markStarted(); setForm({ ...form, preferredContact: opt.value }); }}
+                    style={{ display: 'none' }}
+                  />
+                  {opt.label}
                 </label>
               );
             })}

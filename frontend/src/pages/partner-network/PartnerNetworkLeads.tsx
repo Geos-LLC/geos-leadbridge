@@ -11,7 +11,7 @@ import {
 import { Card, Btn } from '../../components/ui';
 
 const STATUSES: PartnerLeadStatus[] = ['new', 'contacted', 'interested_not_now', 'qualified', 'rejected', 'booked', 'paid_manually'];
-const INTENTS: PartnerLeadIntent[] = ['this_week', 'this_month', 'not_sure'];
+const INTENTS: PartnerLeadIntent[] = ['this_week', 'this_month', 'future_interest', 'not_sure'];
 
 export default function PartnerNetworkLeads() {
   const [leads, setLeads] = useState<PartnerLead[]>([]);
@@ -66,6 +66,17 @@ export default function PartnerNetworkLeads() {
     try {
       await partnerNetworkApi.updateLead(lead.id, { status });
       setLeads(leads.map(l => l.id === lead.id ? { ...l, status } : l));
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Update failed');
+    }
+  };
+
+  const updateAssignedTo = async (lead: PartnerLead, assignedTo: string) => {
+    const next = assignedTo.trim() || null;
+    if (next === (lead.assignedTo ?? null)) return;
+    try {
+      await partnerNetworkApi.updateLead(lead.id, { assignedTo: next });
+      setLeads(leads.map(l => l.id === lead.id ? { ...l, assignedTo: next } : l));
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Update failed');
     }
@@ -138,12 +149,13 @@ export default function PartnerNetworkLeads() {
                 <tr style={{ color: 'var(--lb-ink-5)', textAlign: 'left' }}>
                   <th style={th}>Created</th>
                   <th style={th}>Customer</th>
-                  <th style={th}>Phone</th>
+                  <th style={th}>Phone · contact</th>
                   <th style={th}>Source → Destination</th>
                   <th style={th}>Code</th>
                   <th style={th}>Intent</th>
                   <th style={th}>Value</th>
                   <th style={th}>Status</th>
+                  <th style={th}>Assigned to</th>
                   <th style={th}>Flags</th>
                 </tr>
               </thead>
@@ -157,8 +169,11 @@ export default function PartnerNetworkLeads() {
                         <div style={{ color: 'var(--lb-ink-5)', fontSize: 11, marginTop: 2 }}>{l.notes.slice(0, 80)}{l.notes.length > 80 ? '…' : ''}</div>
                       )}
                     </td>
-                    <td style={{ ...td, fontFamily: 'var(--lb-font-mono)' }}>
-                      <a href={`tel:${l.customerPhone}`} style={{ color: 'var(--lb-accent)' }}>{l.customerPhone}</a>
+                    <td style={td}>
+                      <a href={`tel:${l.customerPhone}`} style={{ color: 'var(--lb-accent)', fontFamily: 'var(--lb-font-mono)' }}>{l.customerPhone}</a>
+                      <div style={{ fontSize: 10, color: 'var(--lb-ink-5)', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                        prefers {l.preferredContact}
+                      </div>
                     </td>
                     <td style={td}>{l.sourceBusiness.name} → {l.destinationBusiness.name}</td>
                     <td style={{ ...td, fontFamily: 'var(--lb-font-mono)', fontSize: 11 }}>
@@ -175,6 +190,15 @@ export default function PartnerNetworkLeads() {
                       <select value={l.status} onChange={e => updateStatus(l, e.target.value as PartnerLeadStatus)} style={inputStyle}>
                         {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
+                    </td>
+                    <td style={td}>
+                      <input
+                        type="text"
+                        defaultValue={l.assignedTo ?? ''}
+                        onBlur={e => updateAssignedTo(l, e.target.value)}
+                        placeholder="—"
+                        style={{ ...inputStyle, minWidth: 90 }}
+                      />
                     </td>
                     <td style={td}>
                       {l.possibleDuplicate && (
@@ -202,7 +226,8 @@ function IntentBadge({ intent }: { intent: PartnerLeadIntent }) {
   const map: Record<PartnerLeadIntent, { label: string; bg: string; fg: string }> = {
     this_week: { label: 'Hot · this week', bg: '#fee2e2', fg: '#991b1b' },
     this_month: { label: 'Warm · this month', bg: '#fef3c7', fg: '#92400e' },
-    not_sure: { label: 'Cold · not sure', bg: '#dbeafe', fg: '#1e3a8a' },
+    future_interest: { label: 'Future · later', bg: '#dbeafe', fg: '#1e3a8a' },
+    not_sure: { label: 'Cold · exploring', bg: '#e0e7ff', fg: '#3730a3' },
   };
   const m = map[intent];
   return (
