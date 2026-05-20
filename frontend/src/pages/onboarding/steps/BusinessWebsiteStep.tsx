@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone } from 'lucide-react';
-import { usersApi } from '../../../services/api';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone, Sparkles } from 'lucide-react';
+import { notificationsApi, usersApi } from '../../../services/api';
+import { useAppStore } from '../../../store/appStore';
 import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
+import type { TenantPhoneNumber } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
 
 interface Props {
@@ -38,17 +40,88 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const meta = getStepMeta('business');
 
   const [value, setValue] = useState<string>(user?.website ?? '');
-  // Business phone — same field we capture at registration. Kept on
-  // User.businessPhone (single source of truth) and surfaced here so
-  // the user can confirm / edit it during onboarding rather than
-  // hunting through Settings.
-  const [phone, setPhone] = useState<string>(user?.businessPhone ?? '');
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
     | { kind: 'checking' }
     | { kind: 'invalid'; outcome: VerifyOutcome }
     | { kind: 'valid'; outcome: VerifyOutcome }
   >({ kind: 'idle' });
+
+  // LeadBridge phone — the dedicated number purchased from Twilio via
+  // Sigcore that LeadBridge uses to text/call customers on the user's
+  // behalf. Stored on TenantPhoneNumber, NOT User.businessPhone.
+  // (User.businessPhone is the agent's own phone where alerts forward
+  //  TO; the tenant phone is what alerts/messages get sent FROM.)
+  const savedAccounts = useAppStore(s => s.savedAccounts);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [phonesLoading, setPhonesLoading] = useState(true);
+  const [areaCode, setAreaCode] = useState('');
+  const [available, setAvailable] = useState<{ phoneNumber: string; locality?: string; region?: string }[]>([]);
+  const [searchingPhone, setSearchingPhone] = useState(false);
+  const [purchasingPhone, setPurchasingPhone] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    notificationsApi.listTenantPhones()
+      .then(res => {
+        if (cancelled) return;
+        const active = (res.data || []).filter(p => p.status === 'ACTIVE' || p.status === 'GRACE_PERIOD');
+        setTenantPhones(active);
+      })
+      .catch(() => { /* non-fatal — assume no phones and let user provision */ })
+      .finally(() => { if (!cancelled) setPhonesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function searchPhones() {
+    // Need at least one SavedAccount to attach the phone to. If the
+    // user got to this step without connecting an account, gently
+    // explain — they can still save the website + come back to phone
+    // setup in Settings.
+    if (savedAccounts.length === 0) {
+      setPhoneError('Connect an account in the previous step first — phone numbers attach to a specific account.');
+      return;
+    }
+    setSearchingPhone(true);
+    setPhoneError(null);
+    try {
+      const res = await notificationsApi.searchAvailableNumbers(
+        savedAccounts[0].id,
+        'US',
+        areaCode.trim() || undefined,
+        undefined,
+      );
+      setAvailable(res.success ? res.data : []);
+      if (res.success && res.data.length === 0) {
+        setPhoneError('No numbers available for that area code. Try a different one.');
+      }
+    } catch (err: any) {
+      setPhoneError(err.response?.data?.message || 'Could not search numbers.');
+    } finally {
+      setSearchingPhone(false);
+    }
+  }
+
+  async function buyPhone(phoneNumber: string) {
+    if (savedAccounts.length === 0) return;
+    setPurchasingPhone(phoneNumber);
+    setPhoneError(null);
+    try {
+      const res = await notificationsApi.purchaseTenantPhone(savedAccounts[0].id, phoneNumber);
+      if (res.success && res.tenantPhone) {
+        setTenantPhones(prev => [...prev, res.tenantPhone!]);
+        setAvailable([]);
+        setAreaCode('');
+      } else {
+        setPhoneError(res.error || 'Could not provision number.');
+      }
+    } catch (err: any) {
+      setPhoneError(err.response?.data?.message || 'Could not provision number.');
+    } finally {
+      setPurchasingPhone(null);
+    }
+  }
 
   async function verifyAndContinue() {
     if (saving) return;
@@ -62,14 +135,10 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         setVerifyState({ kind: 'invalid', outcome });
         return;
       }
-      // Persist normalized URL + parsed metadata + (optionally) the
-      // phone the user typed. The backend's updateProfile normalizes
-      // the phone to E.164 itself; we just hand it the trimmed value.
-      const trimmedPhone = phone.trim();
+      // Persist normalized URL + parsed metadata.
       const { user: updated } = await usersApi.updateProfile({
         website: outcome.normalizedUrl,
         websiteMetadata: outcome.metadata ?? null,
-        ...(trimmedPhone.length > 0 ? { businessPhone: trimmedPhone } : {}),
       });
       if (user) {
         const token = localStorage.getItem('token') || '';
@@ -78,7 +147,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             ...user,
             website: updated.website ?? null,
             websiteMetadataJson: updated.websiteMetadataJson ?? null,
-            businessPhone: updated.businessPhone ?? user.businessPhone ?? null,
           },
           token,
         );
@@ -169,30 +237,114 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           </div>
         </label>
 
-        <label className="block">
-          <span className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-            Business phone <span className="text-slate-300 font-medium">(optional)</span>
-          </span>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Phone className="w-5 h-5" />
-            </span>
-            <input
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="(555) 123-4567"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              disabled={isChecking}
-              className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60"
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-slate-400">
-            Notifications and customer replies will be forwarded here.
-          </p>
-        </label>
       </div>
+
+      {/* LeadBridge phone number — the dedicated outbound number purchased
+          from Twilio via Sigcore. Lives on TenantPhoneNumber, not on
+          User.businessPhone. Surfaced here because it's the second
+          essential piece of "what does AI use to contact customers"
+          info — the website tells it WHAT to talk about, the number
+          tells customers WHERE the text came from. */}
+      <section className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Phone className="w-4 h-4 text-slate-500" />
+          <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
+        </div>
+        <p className="text-xs text-slate-500 leading-relaxed mb-4">
+          The phone number LeadBridge uses to text and call your customers.
+          Assigned from Twilio. You can also assign or release numbers from Settings.
+        </p>
+
+        {phonesLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Checking…
+          </div>
+        ) : tenantPhones.length > 0 ? (
+          <div className="space-y-2">
+            {tenantPhones.map(p => (
+              <div
+                key={p.id}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-mono text-sm font-semibold text-emerald-900">{p.phoneNumber}</span>
+                {p.friendlyName && p.friendlyName !== p.phoneNumber && (
+                  <span className="text-xs text-emerald-700">— {p.friendlyName}</span>
+                )}
+                {p.status === 'GRACE_PERIOD' && (
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-amber-600">
+                    Releasing
+                  </span>
+                )}
+              </div>
+            ))}
+            <p className="text-[11px] text-slate-400 mt-2">
+              Manage assignment, area code, or release from Settings later.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Area code (e.g. 415)"
+                value={areaCode}
+                onChange={e => setAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                disabled={searchingPhone || purchasingPhone !== null}
+                className="w-40 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono tracking-widest"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !searchingPhone) {
+                    e.preventDefault();
+                    void searchPhones();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void searchPhones()}
+                disabled={searchingPhone || purchasingPhone !== null || savedAccounts.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {searchingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {searchingPhone ? 'Searching…' : (available.length > 0 ? 'Search again' : 'Find numbers')}
+              </button>
+            </div>
+
+            {phoneError && (
+              <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                {phoneError}
+              </div>
+            )}
+
+            {available.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+                {available.map(num => (
+                  <button
+                    key={num.phoneNumber}
+                    type="button"
+                    onClick={() => void buyPhone(num.phoneNumber)}
+                    disabled={purchasingPhone !== null}
+                    className="flex flex-col gap-0.5 px-3 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-left hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    <div className="font-mono text-sm font-semibold text-slate-900 flex items-center gap-2">
+                      {num.phoneNumber}
+                      {purchasingPhone === num.phoneNumber && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {[num.locality, num.region].filter(Boolean).join(', ') || 'US'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-400">
+              You can also skip this and pick a number later from Settings.
+            </p>
+          </div>
+        )}
+      </section>
 
       {/* Verify result panel — replaces the inline help text once the
           user has submitted at least once. */}

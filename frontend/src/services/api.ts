@@ -1965,6 +1965,7 @@ export const onboardingApi = {
     currentStep?: import('../types').WizardStep;
     markStep?: { step: import('../types').WizardStep; status: import('../types').WizardStatus };
     completed?: boolean;
+    reset?: boolean;
   }): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
     const { data } = await api.patch('/v1/onboarding/wizard', input);
     return data;

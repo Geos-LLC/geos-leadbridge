@@ -21,6 +21,10 @@ interface WizardShellProps {
   // become clickable buttons that jump to the chosen step. The
   // container is responsible for the actual PATCH + state update.
   onStepClick?: (step: WizardStep) => void;
+  // Restart-from-scratch handler. When provided, the sidebar shows a
+  // "Restart setup" link under the "Skip for later" link so users
+  // can wipe their wizard progress without finding it in Settings.
+  onRestart?: () => void;
 }
 
 // Shared chrome for the 8-step setup wizard. Renders the left rail with
@@ -39,6 +43,7 @@ export default function WizardShell({
   saving,
   hideActions,
   onStepClick,
+  onRestart,
 }: WizardShellProps) {
   const navigate = useNavigate();
   const currentIndex = getStepIndex(currentStep);
@@ -130,12 +135,23 @@ export default function WizardShell({
             );
           })}
         </nav>
-        <button
-          onClick={() => navigate('/overview')}
-          className="m-3 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
-        >
-          ← Skip for later — go to Dashboard
-        </button>
+        <div className="m-3 space-y-1">
+          <button
+            onClick={() => navigate('/overview')}
+            className="block w-full px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
+          >
+            ← Skip for later — go to Dashboard
+          </button>
+          {onRestart && (
+            <button
+              onClick={onRestart}
+              className="block w-full px-3 py-2 text-xs font-semibold text-slate-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors text-left"
+              title="Wipe wizard progress and start over"
+            >
+              ↻ Restart setup
+            </button>
+          )}
+        </div>
       </aside>
 
       {/* Right pane */}

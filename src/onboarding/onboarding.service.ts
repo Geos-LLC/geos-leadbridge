@@ -39,6 +39,12 @@ export interface WizardPatchInput {
   // the caller to send the full map.
   markStep?: { step: WizardStep; status: WizardStatus };
   completed?: boolean;
+  // Wipes ALL wizard progress (currentStep / checklist / skipped /
+  // startedAt / completedAt). Used by the "Restart setup" affordance
+  // so the user can re-walk the whole flow from step 1 without
+  // touching the data they configured (savedAccounts, faqJson,
+  // servicePricingJson, etc. all stay).
+  reset?: boolean;
 }
 
 @Injectable()
@@ -125,6 +131,32 @@ export class OnboardingService {
 
   async patchWizard(userId: string, input: WizardPatchInput) {
     const now = new Date();
+
+    // Reset takes precedence over everything else — wipes wizard
+    // progress entirely while leaving the user's actual configured
+    // data (accounts, faq, pricing, etc.) alone.
+    if (input.reset) {
+      const profile = await this.prisma.onboardingProfile.upsert({
+        where: { userId },
+        create: {
+          userId,
+          wizardStartedAt: null,
+          wizardCompletedAt: null,
+          wizardCurrentStep: null,
+          wizardChecklistStatus: {},
+          wizardSkippedSteps: [],
+        },
+        update: {
+          wizardStartedAt: null,
+          wizardCompletedAt: null,
+          wizardCurrentStep: null,
+          wizardChecklistStatus: {},
+          wizardSkippedSteps: [],
+        },
+      });
+      this.logger.log(`[Wizard] user=${userId} reset wizard progress`);
+      return profile;
+    }
 
     // Read existing checklist so we can merge a single step update without
     // requiring the caller to send the whole map.

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
-  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedCardBanner,
+  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedCardBanner, MixedBadge,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
@@ -260,6 +260,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   }
   const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
   const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
+  const mixedQuiet    = getMixedF('quietOn', v => v ? 'On' : 'Off');
+  const mixedResume   = getMixedF('resumeDelay', v => String(v));
+  const mixedDeferral = getMixedF('deferralDelay', v => String(v));
+  const mixedHired    = getMixedF('hiredDelay', v => String(v));
 
   // Auto-save IMMEDIATELY on every USER change. Gated by dirtyRef so load
   // callbacks (which DON'T touch dirtyRef) can never trigger this.
@@ -302,6 +306,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         subtitle="Don't send follow-ups overnight."
         enabled={quietOn}
         onToggle={onQuietOn}
+        mixed={mixedQuiet.mixed}
+        mixedTooltip={mixedQuiet.tooltip}
       >
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -459,6 +465,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
           tipIcon={Sparkles}
           tip="How long to wait after your last message before starting follow-ups again."
+          mixed={mixedResume.mixed}
+          mixedTooltip={mixedResume.tooltip}
         />
         <RuleCardRow
           icon={Clock}
@@ -471,6 +479,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           tipIcon={Sparkles}
           tip="AI generates this check-in from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          mixed={mixedDeferral.mixed}
+          mixedTooltip={mixedDeferral.tooltip}
         />
         <RuleCardRow
           icon={UserX}
@@ -483,6 +493,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           tipIcon={Sparkles}
           tip="AI generates this re-engage from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          mixed={mixedHired.mixed}
+          mixedTooltip={mixedHired.tooltip}
           noBorder
         />
       </SectionCard>
@@ -521,6 +533,7 @@ function PlanStep({ n, val, unit }: { n: number; val: number; unit: string }) {
 
 function RuleCardRow({
   icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tipIcon: TipIcon, tip, noBorder,
+  mixed, mixedTooltip,
 }: {
   icon: LucideIcon;
   iconTone: IconTone;
@@ -533,6 +546,8 @@ function RuleCardRow({
   tipIcon: LucideIcon;
   tip: string;
   noBorder?: boolean;
+  mixed?: boolean;
+  mixedTooltip?: string;
 }) {
   return (
     <div style={{
@@ -540,6 +555,8 @@ function RuleCardRow({
       padding: '20px 24px',
       borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
       alignItems: 'flex-start',
+      background: mixed ? '#fffbeb' : undefined,
+      borderLeft: mixed ? '4px solid #f59e0b' : undefined,
     }}>
       <div style={{ display: 'flex', gap: 12 }}>
         <IconTile icon={icon} tone={iconTone} size="md" />
@@ -549,7 +566,10 @@ function RuleCardRow({
         </div>
       </div>
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6 }}>{fieldLabel}</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {fieldLabel}
+          {mixed && <MixedBadge tooltip={mixedTooltip} />}
+        </div>
         <Dropdown
           value={fieldValue}
           onChange={onFieldChange}
