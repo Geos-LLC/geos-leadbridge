@@ -116,23 +116,27 @@ export default function PartnerNetworkDashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Card title="Top referral employees">
+        <Card title="Top referral employees · conversion">
           <table style={{ width: '100%', fontSize: 13 }}>
             <thead>
               <tr style={{ color: 'var(--lb-ink-5)', textAlign: 'left' }}>
                 <th style={{ paddingBottom: 6 }}>Employee</th>
-                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Leads</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Opens</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Starts</th>
+                <th style={{ paddingBottom: 6, textAlign: 'right' }}>Subs</th>
                 <th style={{ paddingBottom: 6, textAlign: 'right' }}>Value</th>
               </tr>
             </thead>
             <tbody>
               {(data?.byEmployee?.length ?? 0) === 0 && (
-                <tr><td colSpan={3} style={{ color: 'var(--lb-ink-5)', padding: '8px 0' }}>No employee leads yet.</td></tr>
+                <tr><td colSpan={5} style={{ color: 'var(--lb-ink-5)', padding: '8px 0' }}>No employee leads yet.</td></tr>
               )}
               {data?.byEmployee.slice(0, 10).map(row => (
                 <tr key={row.employeeName} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
                   <td style={{ padding: '6px 0' }}>{row.employeeName}</td>
-                  <td style={{ textAlign: 'right' }}>{row.count}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>{row.pageViews}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>{row.formStarts}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>{row.submissions}</td>
                   <td style={{ textAlign: 'right', fontFamily: 'var(--lb-font-mono)' }}>${row.value}</td>
                 </tr>
               ))}
@@ -165,17 +169,22 @@ export default function PartnerNetworkDashboard() {
         </Card>
       </div>
 
-      <Card title="Funnel">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
-          <FunnelStep label="Views" value={data?.funnel.views ?? 0} />
+      <Card title="Referral funnel">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, flexWrap: 'wrap' }}>
+          <FunnelStep label="QR opens" value={data?.funnel.views ?? 0} />
           <Arrow />
           <FunnelStep label="Started" value={data?.funnel.started ?? 0} />
           <Arrow />
           <FunnelStep label="Submitted" value={data?.funnel.submitted ?? 0} />
-          <div style={{ marginLeft: 'auto', color: 'var(--lb-ink-5)', fontSize: 12 }}>
-            Page views and form starts are not counted as leads.
-          </div>
+          <Arrow />
+          <FunnelStep label="Qualified" value={data?.funnel.qualified ?? 0} />
+          <Arrow />
+          <FunnelStep label="Booked" value={data?.funnel.booked ?? 0} />
         </div>
+        <p style={{ color: 'var(--lb-ink-5)', fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+          QR opens and form starts are tracked for funnel only — they do not create leads.
+          Qualified and Booked reflect manual status updates by the admin.
+        </p>
       </Card>
 
       <Card title="Leads by status">
