@@ -997,10 +997,14 @@ export class PlatformService {
       this.logger.warn(`[saveAccount] Failed to link tenant phones: ${err.message}`);
     });
 
-    // Auto-provision Sigcore workspace for this account (idempotent, non-blocking)
-    this.autoProvisionSigcore(savedAccount.id, businessName).catch((err) => {
-      this.logger.warn(`[saveAccount] Sigcore auto-provision failed for ${savedAccount.id}: ${err.message}`);
-    });
+    // Auto-provision Sigcore workspace for this account (idempotent, non-blocking).
+    // After provisioning, seed default notification settings (first account) or
+    // inherit them from the user's existing config (additional accounts).
+    this.autoProvisionSigcore(savedAccount.id, businessName)
+      .then(() => this.seedOrInheritNotificationSettings(savedAccount.id, userId, businessName))
+      .catch((err) => {
+        this.logger.warn(`[saveAccount] Sigcore auto-provision / settings seed failed for ${savedAccount.id}: ${err.message}`);
+      });
 
     // Initialize/upgrade adaptive trial based on connected platforms
     this.trialService.onPlatformConnected(userId, platform).catch((err) => {
@@ -1076,6 +1080,166 @@ export class PlatformService {
     this.registerBusinessIdentityForAccount(savedAccountId, platformKey, sigcoreUrl).catch(e => {
       this.logger.warn(`[autoProvisionSigcore] Business identity registration deferred: ${e.message}`);
     });
+  }
+
+  /**
+   * Seed default notification settings on a newly connected account.
+   *
+   * Two paths:
+   *  1) FIRST account for the user → seed sane defaults (enable settings,
+   *     create owner-alert rule against User.businessPhone, create
+   *     customer-texting Instant Text rule).
+   *  2) ADDITIONAL account → inherit from the user-level "All Accounts"
+   *     defaults (NotificationSettings.savedAccountId=null) if present,
+   *     else copy rules from the most recently used sibling savedAccount
+   *     that already has rules.
+   *
+   * Idempotent: bails immediately if the account's settings already have
+   * `enabled=true` or any NotificationRule rows — so re-saves of an
+   * already-configured account never clobber the user's config.
+   */
+  private async seedOrInheritNotificationSettings(
+    savedAccountId: string,
+    userId: string,
+    businessName: string,
+  ): Promise<void> {
+    const existing = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      include: { notificationRules: { select: { id: true } } },
+    });
+
+    if (!existing) {
+      // autoProvisionSigcore failed earlier — nothing to seed onto.
+      return;
+    }
+    if (existing.enabled || existing.notificationRules.length > 0) {
+      // Already configured by the user (or a previous seed run).
+      return;
+    }
+
+    // Inheritance source — priority: user-level defaults, then sibling account.
+    const userLevel = await this.prisma.notificationSettings.findFirst({
+      where: { userId, savedAccountId: null },
+      include: { notificationRules: true },
+    });
+
+    let sourceSettings = userLevel && userLevel.notificationRules.length > 0 ? userLevel : null;
+    let sourceLabel = sourceSettings ? 'user-level (All Accounts)' : '';
+
+    if (!sourceSettings) {
+      const sibling = await this.prisma.savedAccount.findFirst({
+        where: {
+          userId,
+          id: { not: savedAccountId },
+          notificationSettings: { notificationRules: { some: {} } },
+        },
+        include: { notificationSettings: { include: { notificationRules: true } } },
+        orderBy: { lastUsedAt: 'desc' },
+      });
+      if (sibling?.notificationSettings) {
+        sourceSettings = sibling.notificationSettings as typeof userLevel;
+        sourceLabel = `sibling account ${sibling.id}`;
+      }
+    }
+
+    if (sourceSettings) {
+      await this.prisma.notificationSettings.update({
+        where: { savedAccountId },
+        data: {
+          enabled: sourceSettings.enabled,
+          userId,
+          destinationPhone: sourceSettings.destinationPhone,
+          senderMode: sourceSettings.senderMode,
+          template: sourceSettings.template,
+          quietHoursStart: sourceSettings.quietHoursStart,
+          quietHoursEnd: sourceSettings.quietHoursEnd,
+          quietHoursTimezone: sourceSettings.quietHoursTimezone,
+          requirePhone: sourceSettings.requirePhone,
+          customerTextingEnabled: sourceSettings.customerTextingEnabled,
+          // Do NOT copy sigcore*, inboundSmsWebhookId, smsForwardingNumber,
+          // callForwardingNumber — those are tenant-specific to THIS account
+          // and were set by autoProvisionSigcore.
+        },
+      });
+
+      for (const rule of sourceSettings.notificationRules) {
+        await this.prisma.notificationRule.create({
+          data: {
+            notificationSettingsId: existing.id,
+            name: rule.name,
+            triggerType: rule.triggerType,
+            replyTriggerMode: rule.replyTriggerMode,
+            fromPhone: null, // resolved at send-time via resolveBotPhone
+            toPhone: rule.toPhone,
+            sendToCustomer: rule.sendToCustomer,
+            template: rule.template,
+            templateId: rule.templateId,
+            delayMinutes: rule.delayMinutes,
+            stopOnCustomerReply: rule.stopOnCustomerReply,
+            stopOnLeadClosed: rule.stopOnLeadClosed,
+            stopOnOptOut: rule.stopOnOptOut,
+            enabled: rule.enabled,
+          },
+        });
+      }
+
+      this.logger.log(
+        `[seedOrInheritNotificationSettings] Inherited ${sourceSettings.notificationRules.length} rule(s) from ${sourceLabel} → account ${savedAccountId}`,
+      );
+      return;
+    }
+
+    // First account, no source to inherit from — seed sane defaults.
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+
+    const ownerTemplate =
+      'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}\nMessage: {{lead.message}}';
+    const customerTemplate = `Hi {{lead.name}}, thanks for reaching out to ${businessName || '{{account.name}}'}! We got your request and we'll get back to you shortly.`;
+
+    await this.prisma.notificationSettings.update({
+      where: { savedAccountId },
+      data: {
+        enabled: true,
+        userId,
+        destinationPhone: user?.businessPhone ?? null,
+        template: ownerTemplate,
+        customerTextingEnabled: true,
+      },
+    });
+
+    if (user?.businessPhone) {
+      await this.prisma.notificationRule.create({
+        data: {
+          notificationSettingsId: existing.id,
+          name: 'New Lead Alert',
+          triggerType: 'new_lead',
+          sendToCustomer: false,
+          toPhone: user.businessPhone,
+          template: ownerTemplate,
+          delayMinutes: 0,
+          enabled: true,
+        },
+      });
+    }
+
+    await this.prisma.notificationRule.create({
+      data: {
+        notificationSettingsId: existing.id,
+        name: 'Auto-Reply to Customer',
+        triggerType: 'new_lead',
+        sendToCustomer: true,
+        template: customerTemplate,
+        delayMinutes: 0,
+        enabled: true,
+      },
+    });
+
+    this.logger.log(
+      `[seedOrInheritNotificationSettings] Seeded first-account defaults for ${savedAccountId} (businessPhone=${user?.businessPhone ? 'set' : 'unset'})`,
+    );
   }
 
   /**
