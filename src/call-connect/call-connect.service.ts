@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
+import { TrialService } from '../trial/trial.service';
 import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
 import {
@@ -44,6 +45,7 @@ export class CallConnectService {
     private configService: ConfigService,
     private httpService: HttpService,
     private businessHours: BusinessHoursService,
+    private trialService: TrialService,
   ) {
     // SIGCORE_CALL_CONNECT_URL lets call-connect point to a different Sigcore instance
     // (e.g. staging) while notifications/SMS continue using SIGCORE_API_URL (production).
@@ -618,6 +620,14 @@ export class CallConnectService {
     leadSummary?: string;
   }): Promise<void> {
     if (!params.savedAccountId || !params.customerPhone) return;
+
+    // Trial paywall: instant call connect on a new lead. No prior conversation
+    // so no grace applies.
+    const access = await this.trialService.canProcessLead(params.userId);
+    if (!access.allowed) {
+      this.logger.log(`[triggerForLead] ✗ BLOCKED user=${params.userId} lead=${params.leadId} reason=${access.reason}`);
+      return;
+    }
 
     // Check settings
     const settings = await this.prisma.callConnectSettings.findUnique({

@@ -1393,6 +1393,25 @@ export class AutomationService implements OnModuleInit {
     this.logger.log(`Executing pending message: ${pendingId} (useAi=${rule.useAi})`);
 
     try {
+      // Trial paywall re-check: a follow-up scheduled BEFORE trial end can fire
+      // hours/days later. Re-evaluate at execute-time so post-trial firings are
+      // blocked. Look up the lead's conversation for grace eligibility.
+      const leadForGate = await this.prisma.lead.findUnique({
+        where: { id: context.leadId },
+        select: { threadId: true },
+      });
+      const access = await this.trialService.canProcessLead(context.userId, leadForGate?.threadId ?? undefined);
+      if (!access.allowed) {
+        this.logger.log(`[executePendingMessage] ✗ BLOCKED user=${context.userId} pending=${pendingId} reason=${access.reason}`);
+        if (!pendingId.startsWith('synthetic-')) {
+          await this.prisma.pendingAutomatedMessage.update({
+            where: { id: pendingId },
+            data: { status: 'cancelled', failureReason: `trial_${access.reason}` },
+          }).catch(() => undefined);
+        }
+        return;
+      }
+
       // Check active hours for follow-up rules
       const fullRule = await this.prisma.automationRule.findUnique({ where: { id: rule.id } });
       if (fullRule?.isFollowUp && fullRule.activeHoursStart && fullRule.activeHoursEnd) {
