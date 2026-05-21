@@ -730,6 +730,14 @@ export class LeadsService {
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, userId } });
     if (!lead) throw new NotFoundException('Lead not found');
 
+    // Trial paywall: pass lead.threadId so existing conversations get the 24h
+    // grace; otherwise block. Applies to both manual ('user') and AI sends.
+    const access = await this.trialService.canProcessLead(userId, lead.threadId ?? undefined);
+    if (!access.allowed) {
+      this.logger.log(`[sendMessage] BLOCKED user=${userId} lead=${leadId} reason=${access.reason}`);
+      throw new BadRequestException('Your free trial has ended. Subscribe to a plan to keep messaging leads.');
+    }
+
     // Get account-specific credentials first, then fall back to platform credentials
     let credentials: { accessToken: string; refreshToken?: string };
     if (lead.businessId) {

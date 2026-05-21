@@ -61,6 +61,7 @@ function buildSvc() {
     leadStatusService,
     /* followUpEngine */ {} as any,
     /* notifications */ {} as any,
+    /* businessHours */ {} as any,
   );
 
   return { svc, writeStatus };
@@ -288,6 +289,7 @@ describe('AutomationService.maybeFireHandoffAlert', () => {
       /* leadStatusService */ {} as any,
       /* followUpEngine */ {} as any,
       notifications,
+      /* businessHours */ {} as any,
     );
     return { svc, sendHandoffAlert, prisma };
   }

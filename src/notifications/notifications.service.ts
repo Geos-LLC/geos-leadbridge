@@ -491,6 +491,14 @@ export class NotificationsService {
       return { success: false, error: 'Lead has no phone number' };
     }
 
+    // Trial paywall: pass lead's threadId so existing conversations still get
+    // the 24h grace; new conversations after trial end are blocked.
+    const access = await this.trialService.canProcessLead(userId, lead.threadId ?? undefined);
+    if (!access.allowed) {
+      this.logger.log(`[sendAdHocSms] ✗ BLOCKED user=${userId} lead=${leadId} reason=${access.reason}`);
+      return { success: false, error: 'Your free trial has ended. Subscribe to a plan to keep messaging leads.' };
+    }
+
     // 3. Get notification settings for this account (need API key and fromPhone)
     let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
@@ -974,6 +982,15 @@ export class NotificationsService {
 
     this.logger.log(`[timing] sendLeadNotification start: +0ms`);
 
+    // Trial paywall: new-lead SMS (Customer Texting + Owner Alerts) requires an
+    // active trial or paid sub. New leads have no prior conversation, so omit
+    // conversationId — no grace applies.
+    const access = await this.trialService.canProcessLead(userId);
+    if (!access.allowed) {
+      this.logger.log(`[sendLeadNotification] ✗ BLOCKED user=${userId} lead=${leadId} reason=${access.reason}`);
+      return;
+    }
+
     // First try to get account-specific settings
     const notifRuleInclude = {
       notificationRules: {
@@ -1072,6 +1089,18 @@ export class NotificationsService {
       where: { savedAccountId },
       include: { savedAccount: { select: { userId: true } } },
     });
+
+    // Trial paywall: forwarding inbound customer SMS to the owner is a paid
+    // feature too. Block when trial ended without a paid sub. Owner-alert paths
+    // intentionally bypass the per-conversation grace (no conversationId).
+    const ownerUserId = settings?.savedAccount?.userId;
+    if (ownerUserId) {
+      const access = await this.trialService.canProcessLead(ownerUserId);
+      if (!access.allowed) {
+        this.logger.log(`[forwardInboundSms] ✗ BLOCKED user=${ownerUserId} acct=${savedAccountId} reason=${access.reason}`);
+        return;
+      }
+    }
 
     // Resolve agent phone: per-business override → user default → legacy fallback
     const destPhone = settings?.savedAccount?.userId

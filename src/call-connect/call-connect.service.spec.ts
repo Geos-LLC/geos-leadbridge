@@ -53,7 +53,9 @@ function buildService(overrides: { prisma?: any; config?: any; http?: any } = {}
   const prisma = overrides.prisma ?? buildPrismaMock();
   const config = overrides.config ?? buildConfigMock();
   const http = overrides.http ?? buildHttpMock();
-  const service = new CallConnectService(prisma, config, http);
+  const service = new CallConnectService(prisma, config, http, {} as any, {
+    canProcessLead: jest.fn().mockResolvedValue({ allowed: true, via: 'paid' }),
+  } as any);
   return { service, prisma, config, http };
 }
 
