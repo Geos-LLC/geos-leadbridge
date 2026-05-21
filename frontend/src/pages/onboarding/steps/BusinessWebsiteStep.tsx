@@ -56,6 +56,8 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [phonesLoading, setPhonesLoading] = useState(true);
   const [areaCode, setAreaCode] = useState('');
+  const [city, setCity] = useState('');
+  const [phoneSkipped, setPhoneSkipped] = useState(false);
   const [available, setAvailable] = useState<{ phoneNumber: string; locality?: string; region?: string }[]>([]);
   const [searchingPhone, setSearchingPhone] = useState(false);
   const [purchasingPhone, setPurchasingPhone] = useState<string | null>(null);
@@ -85,16 +87,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
     setSearchingPhone(true);
     setPhoneError(null);
+    setPhoneSkipped(false);
     try {
       const res = await notificationsApi.searchAvailableNumbers(
         savedAccounts[0].id,
         'US',
         areaCode.trim() || undefined,
-        undefined,
+        city.trim() || undefined,
       );
       setAvailable(res.success ? res.data : []);
       if (res.success && res.data.length === 0) {
-        setPhoneError('No numbers available for that area code. Try a different one.');
+        setPhoneError('No numbers available for that area. Try a different area code or city.');
       }
     } catch (err: any) {
       setPhoneError(err.response?.data?.message || 'Could not search numbers.');
@@ -192,6 +195,16 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
   const canSave = trimmed.length > 0 && !isChecking;
+  // Persistent "verified" indicator: the URL in the input matches
+  // what we saved AND we have metadata (which only gets written if
+  // the verify endpoint actually loaded the site). Survives wizard
+  // navigation so revisiting the step doesn't make the user re-prove.
+  const savedMetadata = user?.websiteMetadataJson ?? null;
+  const savedAndVerified =
+    !!user?.website &&
+    !!savedMetadata &&
+    user.website.trim() === trimmed &&
+    trimmed.length > 0;
 
   return (
     <div className="pt-2">
@@ -204,8 +217,18 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
 
       <div className="space-y-4">
         <label className="block">
-          <span className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-            Website URL
+          <span className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+            <span>Website URL</span>
+            {/* Persistent "verified" badge when the user's saved
+                website matches the value in the input AND we have
+                metadata (proves the site actually loaded for us at
+                some point). Survives navigation back to the step. */}
+            {savedAndVerified && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold normal-case tracking-normal">
+                <CheckCircle2 className="w-3 h-3" />
+                Verified
+              </span>
+            )}
           </span>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
@@ -226,7 +249,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
                 }
               }}
               disabled={isChecking}
-              className="w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60"
+              className={`w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
+                savedAndVerified ? 'border-emerald-300' : 'border-slate-200'
+              }`}
               onKeyDown={e => {
                 if (e.key === 'Enter' && canSave) {
                   e.preventDefault();
@@ -235,6 +260,24 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               }}
             />
           </div>
+          {/* If the user has a previously-verified site (came back to
+              this step, or refreshed the page) show what we found so
+              they have visible proof the URL really loaded. */}
+          {savedAndVerified && savedMetadata && !isChecking && (
+            <div className="mt-2 px-3 py-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-xs">
+              {savedMetadata.title && (
+                <div className="font-bold text-emerald-900 truncate">{savedMetadata.title}</div>
+              )}
+              {savedMetadata.description && (
+                <div className="text-emerald-700 mt-0.5 line-clamp-2">{savedMetadata.description}</div>
+              )}
+              {savedMetadata.phone && (
+                <div className="text-emerald-600 mt-1 font-mono text-[11px]">
+                  Phone found on site: {savedMetadata.phone}
+                </div>
+              )}
+            </div>
+          )}
         </label>
 
       </div>
@@ -282,9 +325,22 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               Manage assignment, area code, or release from Settings later.
             </p>
           </div>
+        ) : phoneSkipped ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 flex items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">
+              Skipped — you can grab a number later from <span className="font-semibold text-slate-700">Settings → Phone numbers</span>.
+            </div>
+            <button
+              type="button"
+              onClick={() => setPhoneSkipped(false)}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+            >
+              Pick now
+            </button>
+          </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 type="text"
                 inputMode="numeric"
@@ -292,7 +348,21 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
                 value={areaCode}
                 onChange={e => setAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
                 disabled={searchingPhone || purchasingPhone !== null}
-                className="w-40 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono tracking-widest"
+                className="w-32 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono tracking-widest"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !searchingPhone) {
+                    e.preventDefault();
+                    void searchPhones();
+                  }
+                }}
+              />
+              <input
+                type="text"
+                placeholder="City (e.g. San Francisco)"
+                value={city}
+                onChange={e => setCity(e.target.value)}
+                disabled={searchingPhone || purchasingPhone !== null}
+                className="flex-1 min-w-[160px] px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !searchingPhone) {
                     e.preventDefault();
@@ -339,9 +409,23 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               </div>
             )}
 
-            <p className="text-[11px] text-slate-400">
-              You can also skip this and pick a number later from Settings.
-            </p>
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <p className="text-[11px] text-slate-400">
+                Pick a number now, or skip and grab one later from Settings.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneSkipped(true);
+                  setAvailable([]);
+                  setPhoneError(null);
+                }}
+                disabled={searchingPhone || purchasingPhone !== null}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 shrink-0"
+              >
+                Skip — set up later
+              </button>
+            </div>
           </div>
         )}
       </section>
