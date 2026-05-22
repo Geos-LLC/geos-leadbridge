@@ -107,21 +107,42 @@ export class UsersService {
   }
 
   /**
-   * Get user's phone number
+   * Get user's LeadBridge dedicated phone number.
+   *
+   * Sourced from TenantPhoneNumber (the post-2026-04-24 source of truth for
+   * dedicated numbers, per the phone-spec refactor). Falls back to the legacy
+   * `User.phoneNumber` column for users whose number predates the refactor and
+   * was never migrated.
+   *
+   * TenantPhoneNumber selection order: unassigned-first (the "user-level"
+   * shared number, if any), then most recently purchased. Per-account scoping
+   * happens elsewhere via `resolveBotPhone`; this endpoint is the user-level
+   * Settings → Communication "Leadbridge number" widget, so it should surface
+   * any active number the user owns even if it's currently linked to one
+   * savedAccount.
    */
   async getUserPhoneNumber(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        phoneNumber: true,
-        sigcoreAllocationId: true,
-      },
+    const tpn = await this.prisma.tenantPhoneNumber.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      orderBy: [{ savedAccountId: 'asc' }, { purchasedAt: 'desc' }],
+      select: { phoneNumber: true, sigcoreAllocationId: true },
     });
 
+    if (tpn) {
+      return {
+        phoneNumber: tpn.phoneNumber,
+        allocationId: tpn.sigcoreAllocationId,
+        hasPhoneNumber: true,
+      };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { phoneNumber: true, sigcoreAllocationId: true },
+    });
     if (!user) {
       throw new NotFoundException('User not found');
     }
-
     return {
       phoneNumber: user.phoneNumber,
       allocationId: user.sigcoreAllocationId,
