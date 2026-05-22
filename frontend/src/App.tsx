@@ -78,10 +78,13 @@ function App() {
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
 
-          {/* Mobile design preview — pixel port of the mobile handoff,
-              mocked fixture data, no auth. Open /m on a phone or
-              /m/today in dev to click through every screen. */}
-          <Route path="/m/*" element={<MobileApp />} />
+          {/* Mobile preview gate — bare /m bounces to login if unauth,
+              otherwise drops the user into the mobile app. The full /m/*
+              tree mounts below inside <ProtectedRoute />. */}
+          <Route
+            path="/m"
+            element={isAuthenticated ? <Navigate to="/m/today" replace /> : <Navigate to="/login" replace />}
+          />
 
           {/* Partner Network public referral page — no auth, no app layout. */}
           <Route path="/r/:code" element={<PublicReferral />} />
@@ -121,6 +124,10 @@ function App() {
                 bottom action bar) and intentionally has no app sidebar /
                 trial banner so users can focus on setup. */}
             <Route path="/onboarding/setup" element={<SetupWizard />} />
+
+            {/* Mobile design preview — protected, no Layout (mobile app
+                owns its own shell + bottom tab bar). */}
+            <Route path="/m/*" element={<MobileApp />} />
 
             <Route element={<Layout />}>
               {/* Canonical paths — match the nav labels (Overview / Lead Activity /

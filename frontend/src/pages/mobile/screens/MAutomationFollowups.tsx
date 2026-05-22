@@ -1,77 +1,87 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Icon, MAppBar, MBack, MCard, MIconBox, MScopeBar, MSection, MSegmented, MShell, MStat,
-  MToggleRow,
+  Icon, MAppBar, MBack, MCard, MIconBox, MScopeBar, MSection, MShell, MToggleRow,
 } from '../components';
-import { LB_AUTOMATION } from '../data';
+import { useMobileAccounts, useAccountSettings } from '../hooks';
+import { MEmpty, MLoading } from '../states';
 
 export default function MAutomationFollowups() {
   const [enabled, setEnabled] = useState(true);
   const [accountId, setAccountId] = useState('all');
-  const [tone, setTone] = useState<'gentle' | 'friendly' | 'direct'>('friendly');
+  const accounts = useMobileAccounts();
+  const settings = useAccountSettings(accountId === 'all' ? null : accountId);
+
+  useEffect(() => {
+    if (!settings.data) return;
+    setEnabled(settings.data.followUpMode !== 'off' && settings.data.followUpMode != null);
+  }, [settings.data]);
+
   return (
     <MShell tab="auto" appBar={<MAppBar leading={<MBack label="" />} title="Follow-ups" subtitle="Engage" />}>
-      <MScopeBar accountId={accountId} setAccountId={setAccountId} />
-      <MSection title="Status">
-        <MCard>
-          <MToggleRow
-            leading={<MIconBox icon="repeat" color="#6d28d9" bg="#ede9fe" />}
-            title="Auto follow-up"
-            sub="Stops when the lead replies"
-            on={enabled} onChange={setEnabled}
-            last
-          />
-        </MCard>
-      </MSection>
+      {accounts.loading && <MLoading label="Loading your accounts…" />}
+      {!accounts.loading && (
+        <MScopeBar accountId={accountId} setAccountId={setAccountId} accounts={accounts.data || []} />
+      )}
 
-      <MSection
-        title="Schedule"
-        action={<a style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer' }}>Edit</a>}
-      >
-        <MCard>
-          {LB_AUTOMATION.followUps.schedule.map((s, i, arr) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '14px',
-              borderBottom: i === arr.length - 1 ? 'none' : '1px solid var(--line-soft)',
-            }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 99,
-                background: '#ede9fe', color: '#6d28d9',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', flexShrink: 0,
-              }}>{i + 1}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ink-1)' }}>{s.label}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--ink-5)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                  Send after {s.offset}
-                </div>
-              </div>
-              <Icon name="chevron-right" size={16} style={{ color: 'var(--ink-6)' }} />
-            </div>
-          ))}
-        </MCard>
-      </MSection>
-
-      <MSection title="Tone">
-        <MSegmented<'gentle' | 'friendly' | 'direct'>
-          value={tone} onChange={setTone}
-          options={[
-            { value: 'gentle', label: 'Gentle' },
-            { value: 'friendly', label: 'Friendly' },
-            { value: 'direct', label: 'Direct' },
-          ]}
+      {accountId === 'all' && (accounts.data?.length ?? 0) > 0 && (
+        <MEmpty
+          icon="info"
+          title="Pick an account to edit"
+          body="Follow-up schedules and modes are per-account. Use the picker above to choose one."
         />
-      </MSection>
+      )}
 
-      <MSection title="This week">
-        <MCard style={{ padding: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            <MStat label="Sent" value="12" />
-            <MStat label="Replies" value="5" delta="42%" />
-            <MStat label="Booked" value="3" delta="25%" />
-          </div>
-        </MCard>
-      </MSection>
+      {accountId !== 'all' && (
+        <>
+          <MSection title="Status">
+            <MCard>
+              <MToggleRow
+                leading={<MIconBox icon="repeat" color="#6d28d9" bg="#ede9fe" />}
+                title="Auto follow-up"
+                sub={settings.data?.followUpMode === 'auto_send' ? 'Auto-send · stops when the lead replies'
+                  : settings.data?.followUpMode === 'suggest' ? 'Suggest only · approve before sending'
+                  : 'Off'}
+                on={enabled} onChange={setEnabled}
+                last
+              />
+            </MCard>
+          </MSection>
+
+          <MSection title="Mode" action={<a style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>Edit on desktop</a>}>
+            <MCard>
+              <div style={{ padding: '14px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                Follow-up mode: <strong style={{ color: 'var(--ink-1)' }}>{settings.data?.followUpMode ?? '—'}</strong><br />
+                Reply type: <strong style={{ color: 'var(--ink-1)' }}>{settings.data?.followUpReplyType ?? '—'}</strong>
+              </div>
+            </MCard>
+          </MSection>
+
+          <MSection title="Active hours">
+            <MCard>
+              <div style={{ padding: '14px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                {settings.data?.followUpActiveHoursStart && settings.data?.followUpActiveHoursEnd
+                  ? <>From <strong style={{ color: 'var(--ink-1)', fontFamily: 'var(--font-mono)' }}>{settings.data.followUpActiveHoursStart}</strong> to <strong style={{ color: 'var(--ink-1)', fontFamily: 'var(--font-mono)' }}>{settings.data.followUpActiveHoursEnd}</strong></>
+                  : 'Always on'}
+                {settings.data?.followUpTimezone && (
+                  <>{' · '}<span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink-5)' }}>{settings.data.followUpTimezone}</span></>
+                )}
+              </div>
+            </MCard>
+          </MSection>
+
+          <MSection title="Detailed schedule">
+            <MCard>
+              <div style={{
+                padding: '14px', fontSize: 12.5, color: 'var(--ink-5)', lineHeight: 1.5,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Icon name="info" size={13} />
+                Step-by-step schedule editing lives in the desktop app for now. Mobile editing coming soon.
+              </div>
+            </MCard>
+          </MSection>
+        </>
+      )}
 
       <div style={{ height: 60 }} />
     </MShell>

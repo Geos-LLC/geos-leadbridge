@@ -4,6 +4,8 @@ import {
   Icon, MAppBar, MCard, MIconBox, MIconBtn, MRow, MScopeBar, MSection, MShell, MToggleRow,
 } from '../components';
 import type { IconName } from '../components';
+import { useMobileAccounts, useAccountSettings } from '../hooks';
+import { MLoading } from '../states';
 
 function MAutoCard({
   title, sub, badge, icon, color, bg, status, last, onClick,
@@ -42,6 +44,17 @@ export default function MAutomationHub() {
   const [instantCall, setInstantCall] = useState(true);
   const [offHours, setOffHours] = useState(true);
   const navigate = useNavigate();
+
+  const accounts = useMobileAccounts();
+  const settings = useAccountSettings(accountId === 'all' ? null : accountId);
+
+  const respondStatus = settings.data?.followUpReplyType === 'ai' ? 'On · AI mode'
+    : settings.data?.followUpReplyType === 'template' ? 'On · Template'
+    : accountId === 'all' ? 'Account-by-account' : 'Off';
+  const followUpStatus = settings.data?.followUpMode && settings.data.followUpMode !== 'off'
+    ? `On · ${settings.data.followUpMode}`
+    : accountId === 'all' ? 'Account-by-account' : 'Off';
+
   return (
     <MShell
       tab="auto"
@@ -54,29 +67,32 @@ export default function MAutomationHub() {
         />
       }
     >
-      <MScopeBar accountId={accountId} setAccountId={setAccountId} />
+      {accounts.loading && <MLoading label="Loading your accounts…" />}
+      {!accounts.loading && (
+        <MScopeBar accountId={accountId} setAccountId={setAccountId} accounts={accounts.data || []} />
+      )}
 
       <MSection title="Modes">
         <MCard>
           <MAutoCard
-            title="When a Lead Arrives" sub="Reply in <30s with AI"
+            title="When a Lead Arrives" sub="First reply when a lead lands"
             badge={{ label: 'Respond', bg: '#dcfce7', fg: '#15803d' }}
             icon="zap" color="var(--success)" bg="var(--success-tint)"
-            status="On · AI mode"
+            status={respondStatus}
             onClick={() => navigate('/m/automation/respond')}
           />
           <MAutoCard
-            title="Follow-ups" sub="4 steps over 3 days"
+            title="Follow-ups" sub="Nudge silent leads on a schedule"
             badge={{ label: 'Engage', bg: '#ede9fe', fg: '#6d28d9' }}
             icon="repeat" color="#6d28d9" bg="#ede9fe"
-            status="On · stops on reply"
+            status={followUpStatus}
             onClick={() => navigate('/m/automation/engage')}
           />
           <MAutoCard
             title="AI Conversation" sub="Continue the chat for you"
             badge={{ label: 'Convert', bg: 'var(--accent-tint)', fg: 'var(--accent)' }}
             icon="sparkles" color="var(--accent)" bg="var(--accent-tint)"
-            status="On · strategy: auto"
+            status={accountId === 'all' ? 'Account-by-account' : 'See details'}
             last
             onClick={() => navigate('/m/automation/convert')}
           />
@@ -87,7 +103,7 @@ export default function MAutomationHub() {
         <MCard>
           <MToggleRow
             leading={<MIconBox icon="phone" color="var(--success)" bg="var(--success-tint)" />}
-            title="Instant Call" sub="Ring you when sod / consult lead arrives"
+            title="Instant Call" sub="Ring you when a hot lead arrives"
             on={instantCall} onChange={setInstantCall}
           />
           <MToggleRow
@@ -103,12 +119,12 @@ export default function MAutomationHub() {
         <MCard>
           <MRow
             leading={<MIconBox icon="message-square" color="#92400e" bg="var(--warn-tint)" />}
-            title="SMS alerts" subtitle="+1 (512) 555-0100"
+            title="SMS alerts" subtitle="Configured in desktop settings"
             trailing={<Icon name="chevron-right" size={16} style={{ color: 'var(--ink-6)' }} />}
           />
           <MRow
             leading={<MIconBox icon="mail" color="var(--accent)" bg="var(--accent-tint)" />}
-            title="Email alerts" subtitle="marcus@greenfieldlawn.co"
+            title="Email alerts" subtitle="Configured in desktop settings"
             trailing={<Icon name="chevron-right" size={16} style={{ color: 'var(--ink-6)' }} />}
             last
           />

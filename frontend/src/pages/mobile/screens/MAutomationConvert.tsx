@@ -3,6 +3,8 @@ import {
   Icon, MAppBar, MBack, MCard, MIconBox, MRow, MScopeBar, MSection, MShell, MToggleRow,
 } from '../components';
 import type { IconName } from '../components';
+import { useMobileAccounts } from '../hooks';
+import { MEmpty, MLoading } from '../states';
 
 type Strategy = 'auto' | 'qualify' | 'price' | 'phone';
 
@@ -19,10 +21,22 @@ export default function MAutomationConvert() {
   const [consult, setConsult] = useState(true);
   const [bigJobs, setBigJobs] = useState(true);
   const [tough, setTough] = useState(true);
+  const accounts = useMobileAccounts();
 
   return (
     <MShell tab="auto" appBar={<MAppBar leading={<MBack label="" />} title="AI Conversation" subtitle="Convert" />}>
-      <MScopeBar accountId={accountId} setAccountId={setAccountId} />
+      {accounts.loading && <MLoading label="Loading your accounts…" />}
+      {!accounts.loading && (
+        <MScopeBar accountId={accountId} setAccountId={setAccountId} accounts={accounts.data || []} />
+      )}
+
+      {accountId === 'all' && (accounts.data?.length ?? 0) > 0 && (
+        <MEmpty
+          icon="info"
+          title="Pick an account to edit"
+          body="AI Conversation strategy is per-account. Use the picker above to choose one."
+        />
+      )}
 
       <MSection title="Strategy">
         <MCard>
@@ -67,24 +81,6 @@ export default function MAutomationConvert() {
             on={tough} onChange={setTough}
             last
           />
-        </MCard>
-      </MSection>
-
-      <MSection title="Try the prompt">
-        <MCard style={{ padding: 14, background: 'var(--ink-1)', borderColor: 'var(--ink-1)' }}>
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700, marginBottom: 8 }}>
-            Simulated lead
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.92)', lineHeight: 1.5, padding: '8px 12px', background: 'rgba(255,255,255,0.07)', borderRadius: 10 }}>
-            "Hey — looking for someone to redo my whole front lawn. Budget around $4k. When can you come look?"
-          </div>
-          <button type="button" style={{
-            marginTop: 12, padding: '10px 14px', borderRadius: 999, border: 0, cursor: 'pointer',
-            background: 'var(--accent)', color: 'white', fontWeight: 600, fontSize: 13,
-            display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%', justifyContent: 'center',
-          }}>
-            <Icon name="play" size={13} /> Run simulation
-          </button>
         </MCard>
       </MSection>
 

@@ -18,7 +18,7 @@ import {
   Menu, MessageSquare, Moon, MoreHorizontal, Paperclip, Phone, Play, Plus, Repeat, Search,
   Send, SlidersHorizontal, Sparkles, User, Users, Workflow, Zap,
 } from 'lucide-react';
-import { LB_ACCOUNTS, LB_PLATFORM_META, type LeadStatus, type Platform } from './data';
+import { LB_PLATFORM_META, type LeadStatus, type MobileAccount, type Platform } from './data';
 
 // ── Icon shim ─────────────────────────────────────────────────────────────
 // The design handoff uses string-named icons (`<Icon name="search" />`).
@@ -474,11 +474,30 @@ function MScopeOption({
 }
 
 export function MScopeBar({
-  accountId, setAccountId,
-}: { accountId: string; setAccountId: (v: string) => void }) {
+  accountId, setAccountId, accounts,
+}: {
+  accountId: string;
+  setAccountId: (v: string) => void;
+  accounts: MobileAccount[];
+}) {
   const [open, setOpen] = useState(false);
   const isAll = accountId === 'all';
-  const acct = LB_ACCOUNTS.find(a => a.id === accountId);
+  const acct = accounts.find(a => a.id === accountId);
+  const count = accounts.length;
+  if (count === 0) {
+    return (
+      <div style={{ padding: '14px 14px 0' }}>
+        <div style={{
+          padding: 14, borderRadius: 14, border: '1px dashed var(--line)',
+          background: 'var(--surface)', fontSize: 12.5, color: 'var(--ink-5)',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <Icon name="info" size={14} />
+          No accounts connected yet. Connect a source from More to start.
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, overflow: 'hidden' }}>
@@ -502,8 +521,8 @@ export function MScopeBar({
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: 'var(--ink-5)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Applies to</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {isAll || !acct ? `All ${LB_ACCOUNTS.length} accounts` : acct.shortName}
-              {!isAll && acct && (
+              {isAll || !acct ? `All ${count} accounts` : acct.shortName}
+              {!isAll && acct && acct.city && (
                 <span style={{ fontWeight: 400, color: 'var(--ink-5)', fontSize: 12 }}> · {acct.city.split(',')[0]}</span>
               )}
             </div>
@@ -516,21 +535,21 @@ export function MScopeBar({
         {open && (
           <div style={{ borderTop: '1px solid var(--line-soft)', background: 'var(--ink-10)' }}>
             <MScopeOption
-              label={`All ${LB_ACCOUNTS.length} accounts`}
+              label={`All ${count} accounts`}
               sub="Apply settings everywhere"
               active={isAll}
               onClick={() => { setAccountId('all'); setOpen(false); }}
               leading={<MIconBox icon="layers" color="var(--accent)" bg="var(--accent-tint)" size={30} />}
             />
-            {LB_ACCOUNTS.map((a, i) => (
+            {accounts.map((a, i) => (
               <MScopeOption
                 key={a.id}
                 label={a.shortName}
-                sub={a.city}
+                sub={a.city || a.name}
                 active={a.id === accountId}
                 onClick={() => { setAccountId(a.id); setOpen(false); }}
                 leading={<PlatformBadge platform={a.platform} size="md" />}
-                last={i === LB_ACCOUNTS.length - 1}
+                last={i === accounts.length - 1}
               />
             ))}
           </div>
