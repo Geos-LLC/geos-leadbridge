@@ -475,9 +475,15 @@ export function Services() {
   const [fuEnd, setFuEnd] = useState('18:00');
   const [fuTz, setFuTz] = useState('America/New_York');
   const [fuExtraWindows, setFuExtraWindows] = useState<{ start: string; end: string }[]>([]);
-  const fuStopOnReply = true; // always on — internal rule, not user-configurable
-  const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
-  const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
+  // fuStopOnReply / fuStopOnOptOut / fuStopOnBooked were vestigial JSON
+  // keys (no UI, no backend read). Behavior is governed by:
+  //   - "Resume follow-ups after conversation" toggle (fuReEnrollOnSilence)
+  //     for the on-reply pause + resume
+  //   - "Re-engage after customer hired competitor" for the hired-elsewhere case
+  //   - "Check in after customer deferral" for the deferral case
+  //   - lead.status='lost'/'booked' (set by applyCustomerReplyStatusTransition)
+  //     for the terminal opt-out / hired / booked outcomes
+  // Removed 2026-05-22.
   const [fuStrategy, setFuStrategy] = useState<'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'>('auto');
   const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
   // Switch the AI between "range" quoting (e.g. $179–$219) and "exact" quoting
@@ -693,10 +699,11 @@ export function Services() {
           setFuReplyType('ai');
         }
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
-        // Strategy mode is always 'auto', scenarios always all-enabled
-        // fuStopOnReply is always true (internal rule)
-        if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
-        if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
+        // Strategy mode is always 'auto', scenarios always all-enabled.
+        // followUpStopOn* fields removed 2026-05-22 — behavior is governed
+        // by fuReEnrollOnSilence, aiHiredCompetitorReengage, and the
+        // canonical lead.status pipeline. We still tolerate legacy values
+        // in saved JSON; we just don't load them into any UI state.
         // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
@@ -812,9 +819,8 @@ export function Services() {
         platform: accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp',
         strategyMode: 'auto',
         scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
-        stopOnReply: fuStopOnReply,
-        stopOnOptOut: fuStopOnOptOut,
-        stopOnBooked: fuStopOnBooked,
+        // stopOnReply / stopOnOptOut / stopOnBooked removed 2026-05-22 — see
+        // declaration site above for the replacement behaviors.
         urgentCapability: fuUrgentCapability,
         followUpStrategy: fuStrategy,
         followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt ? fuStrategyPrompt : null,
@@ -865,7 +871,7 @@ export function Services() {
     selectedAccountId,
     fuMode, fuReplyType, fuSmartSteps,
     fuAvailability, fuStart, fuEnd, fuTz,
-    fuStopOnReply, fuStopOnOptOut, fuStopOnBooked, fuUrgentCapability,
+    fuUrgentCapability,
     fuStrategy, fuStrategyPrompt, priceQuoteMode,
     fuExtraWindows,
     fuReEnrollOnSilence, fuReEnrollDelay,
