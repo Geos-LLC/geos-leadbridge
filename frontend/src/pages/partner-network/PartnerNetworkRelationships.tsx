@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Save, X, Loader2 } from 'lucide-react';
+import { Plus, Save, X, Loader2, Sparkles, AlertTriangle } from 'lucide-react';
 import {
   partnerNetworkApi,
   type PartnerBusiness,
@@ -17,6 +17,7 @@ interface FormState {
   widgetType: string;
   popupDelayMs: string;
   autoOpenFromReferral: boolean;
+  aiHint: string;
 }
 const EMPTY_FORM: FormState = {
   sourceBusinessId: '',
@@ -28,6 +29,7 @@ const EMPTY_FORM: FormState = {
   widgetType: '',
   popupDelayMs: '',
   autoOpenFromReferral: false,
+  aiHint: '',
 };
 
 export default function PartnerNetworkRelationships() {
@@ -39,6 +41,9 @@ export default function PartnerNetworkRelationships() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiInfo, setAiInfo] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -132,9 +137,59 @@ export default function PartnerNetworkRelationships() {
       widgetType: r.widgetType ?? '',
       popupDelayMs: r.popupDelayMs == null ? '' : String(r.popupDelayMs),
       autoOpenFromReferral: r.autoOpenFromReferral ?? false,
+      aiHint: '',
     });
+    setAiError(null);
+    setAiInfo(null);
     setShowForm(true);
   };
+
+  // AI-suggest a partnership Name + Default Offer Text. Both businesses must
+  // be picked first. Output is editable — the suggester just primes the
+  // fields, the admin still has to click Save.
+  const onAiSuggest = async () => {
+    setAiError(null);
+    setAiInfo(null);
+    if (!form.sourceBusinessId || !form.destinationBusinessId) {
+      setAiError('Pick both a source and destination business first.');
+      return;
+    }
+    if (form.sourceBusinessId === form.destinationBusinessId) {
+      setAiError('Source and destination must be different.');
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const out = await partnerNetworkApi.suggestRelationshipCopy({
+        sourceBusinessId: form.sourceBusinessId,
+        destinationBusinessId: form.destinationBusinessId,
+        hint: form.aiHint.trim() || undefined,
+      });
+      setForm(f => ({ ...f, name: out.name, defaultOfferText: out.offerText }));
+      if (!out.usedMetadata) {
+        // Output quality is meaningfully better with cached site metadata —
+        // flag this so the admin knows to click "Verify" on the business
+        // pages before generating again.
+        setAiInfo(
+          "Generated from business name + category only. For sharper, site-grounded copy, click “Verify” on each business's website first.",
+        );
+      }
+    } catch (err: any) {
+      setAiError(err?.response?.data?.message || 'AI suggestion failed.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  // True when at least one of the picked businesses has cached site metadata
+  // (set by the Verify button on the business form). Used to decide whether
+  // to show the "Click Verify first for better results" hint.
+  const hasAnyMetadata = (() => {
+    const s = businesses.find(b => b.id === form.sourceBusinessId);
+    const d = businesses.find(b => b.id === form.destinationBusinessId);
+    return !!(s?.websiteMetadataJson || d?.websiteMetadataJson);
+  })();
+  const bothPicked = !!form.sourceBusinessId && !!form.destinationBusinessId;
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -184,6 +239,60 @@ export default function PartnerNetworkRelationships() {
                 <option value="">— Select —</option>
                 {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
+            </Field>
+            <Field label="AI suggestion (optional)" wide>
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 8,
+                padding: 12, borderRadius: 8,
+                background: 'linear-gradient(135deg, #faf5ff 0%, #eff6ff 100%)',
+                border: '1px dashed #c4b5fd',
+              }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                  <input
+                    value={form.aiHint}
+                    onChange={e => setForm({ ...form, aiHint: e.target.value })}
+                    style={{ ...inputStyle, flex: 1 }}
+                    placeholder="Optional hint, e.g. 'lead with a first-time discount'"
+                    disabled={aiBusy}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void onAiSuggest()}
+                    disabled={!bothPicked || aiBusy}
+                    style={{
+                      padding: '8px 14px', fontSize: 12, fontWeight: 600,
+                      borderRadius: 8, border: '1px solid #7c3aed',
+                      background: bothPicked && !aiBusy ? '#7c3aed' : 'var(--lb-ink-10)',
+                      color: bothPicked && !aiBusy ? '#fff' : 'var(--lb-ink-5)',
+                      cursor: aiBusy ? 'wait' : (bothPicked ? 'pointer' : 'not-allowed'),
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {aiBusy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    {aiBusy ? 'Generating…' : 'Generate with AI'}
+                  </button>
+                </div>
+                {bothPicked && !hasAnyMetadata && !aiBusy && !aiError && !aiInfo && (
+                  <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                    <AlertTriangle size={12} style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+                    <span>
+                      Tip: visit Businesses and click <strong>Verify</strong> on each site first.
+                      The AI uses each site's title and description to write a sharper offer.
+                    </span>
+                  </div>
+                )}
+                {aiInfo && (
+                  <div style={{ padding: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, fontSize: 11, color: '#92400e' }}>
+                    {aiInfo}
+                  </div>
+                )}
+                {aiError && (
+                  <div style={{ padding: 8, background: 'var(--lb-danger-tint)', border: '1px solid #fecaca', borderRadius: 6, fontSize: 11, color: '#991b1b' }}>
+                    {aiError}
+                  </div>
+                )}
+              </div>
             </Field>
             <Field label="Name (optional)" wide>
               <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} placeholder="Spotless → Premium Upholstery" />

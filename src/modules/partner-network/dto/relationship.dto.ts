@@ -1,5 +1,22 @@
 import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
+// Body for POST /partner-network/relationships/ai-suggest. The endpoint
+// returns AI-generated `{ name, offerText }` grounded in the two businesses'
+// names + categories + cached website metadata (when present). `hint` lets
+// the admin steer the output, e.g. "focus on first-time discount".
+export class SuggestRelationshipCopyDto {
+  @IsUUID()
+  sourceBusinessId!: string;
+
+  @IsUUID()
+  destinationBusinessId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  hint?: string;
+}
+
 export class CreatePartnerRelationshipDto {
   @IsUUID()
   sourceBusinessId!: string;

@@ -20,6 +20,12 @@ export type PartnerLeadStatus =
 export type PartnerLeadEventType = 'page_view' | 'form_started' | 'form_submitted';
 export type PartnerLeadContactPref = 'call' | 'text' | 'either';
 
+export interface PartnerBusinessWebsiteMetadata {
+  title?: string;
+  description?: string;
+  phone?: string;
+}
+
 export interface PartnerBusiness {
   id: string;
   workspaceId: string;
@@ -27,6 +33,10 @@ export interface PartnerBusiness {
   category: string | null;
   phone: string | null;
   website: string | null;
+  // Set by the backend when the admin clicks "Verify" on the business form
+  // and successfully reaches the site. Read by the AI relationship-copy
+  // suggester so partnership offers reflect what the site actually says.
+  websiteMetadataJson: string | null;
   serviceArea: string | null;
   active: boolean;
   createdAt: string;
@@ -138,11 +148,16 @@ export const partnerNetworkApi = {
     const { data } = await api.get('/partner-network/businesses');
     return data.businesses;
   },
-  createBusiness: async (body: Partial<PartnerBusiness>): Promise<PartnerBusiness> => {
+  createBusiness: async (
+    body: Partial<PartnerBusiness> & { websiteMetadata?: PartnerBusinessWebsiteMetadata },
+  ): Promise<PartnerBusiness> => {
     const { data } = await api.post('/partner-network/businesses', body);
     return data.business;
   },
-  updateBusiness: async (id: string, body: Partial<PartnerBusiness>): Promise<PartnerBusiness> => {
+  updateBusiness: async (
+    id: string,
+    body: Partial<PartnerBusiness> & { websiteMetadata?: PartnerBusinessWebsiteMetadata },
+  ): Promise<PartnerBusiness> => {
     const { data } = await api.patch(`/partner-network/businesses/${id}`, body);
     return data.business;
   },
@@ -184,6 +199,36 @@ export const partnerNetworkApi = {
   ): Promise<PartnerRelationship> => {
     const { data } = await api.patch(`/partner-network/relationships/${id}`, body);
     return data.relationship;
+  },
+
+  // AI-suggest a partnership Name + Default Offer Text for two businesses.
+  // Backend grounds the model in each business's name, category, service
+  // area, and cached website metadata (when present). `hint` lets the admin
+  // steer the output, e.g. "lead with a first-time discount".
+  suggestRelationshipCopy: async (body: {
+    sourceBusinessId: string;
+    destinationBusinessId: string;
+    hint?: string;
+  }): Promise<{ name: string; offerText: string; usedMetadata: boolean }> => {
+    const { data } = await api.post('/partner-network/relationships/ai-suggest', body);
+    return data.suggestion;
+  },
+
+  // Live verify a business website URL. Hits the partner-network module's
+  // own endpoint — does NOT use /v1/users/me/website/verify or any other
+  // main-app endpoint. Result shape matches the main-app verifier so
+  // existing UI code can be ported with no changes.
+  verifyBusinessWebsite: async (
+    url: string,
+  ): Promise<{
+    reachable: boolean;
+    normalizedUrl: string;
+    metadata?: { title?: string; description?: string; phone?: string };
+    errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
+    errorMessage?: string;
+  }> => {
+    const { data } = await api.post('/partner-network/businesses/verify-website', { url });
+    return data;
   },
 
   // Referral codes

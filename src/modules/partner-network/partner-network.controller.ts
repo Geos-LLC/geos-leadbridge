@@ -31,6 +31,7 @@ import {
 } from './dto/business.dto';
 import {
   CreatePartnerRelationshipDto,
+  SuggestRelationshipCopyDto,
   UpdatePartnerRelationshipDto,
 } from './dto/relationship.dto';
 import {
@@ -65,6 +66,14 @@ export class PartnerNetworkController {
     return { success: true, business: await this.service.updateBusiness(user.id, id, body) };
   }
 
+  // Live verify a business website URL. Self-contained to this module — does
+  // NOT call /v1/users/me/website/verify or any UsersService code, so the
+  // entire Partner Network feature stays portable.
+  @Post('businesses/verify-website')
+  async verifyBusinessWebsite(@Body('url') url?: string) {
+    return this.service.verifyBusinessWebsite(url ?? '');
+  }
+
   // ===== Relationships =====
   @Get('relationships')
   async listRelationships(@CurrentUser() user: any) {
@@ -91,6 +100,20 @@ export class PartnerNetworkController {
     return {
       success: true,
       relationship: await this.service.updateRelationship(user.id, id, body),
+    };
+  }
+
+  // Generate Name + Default Offer Text for a partnership using the two
+  // businesses' names, categories, and cached site metadata. Nothing is
+  // persisted — the admin reviews/edits the suggestion in the form.
+  @Post('relationships/ai-suggest')
+  async suggestRelationshipCopy(
+    @CurrentUser() user: any,
+    @Body() body: SuggestRelationshipCopyDto,
+  ) {
+    return {
+      success: true,
+      suggestion: await this.service.suggestRelationshipCopy(user.id, body),
     };
   }
 

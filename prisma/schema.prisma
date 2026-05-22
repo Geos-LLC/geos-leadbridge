@@ -1605,6 +1605,12 @@ model PartnerBusiness {
   category    String?
   phone       String?
   website     String?
+  // Cached metadata harvested by UsersService.verifyWebsite — {title,
+  // description, phone}. Populated when the admin clicks "Verify" on the
+  // business form. Read by suggestRelationshipCopy to give the AI offer
+  // generator real site info to ground its output. Stored as JSON text for
+  // schema portability (matches User.websiteMetadataJson).
+  websiteMetadataJson String?
   serviceArea String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())

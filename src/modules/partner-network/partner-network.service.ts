@@ -18,7 +18,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import OpenAI from 'openai';
 import { PrismaService } from '../../common/utils/prisma.service';
+import { normalizePhoneE164 } from './utils/phone.util';
+import { normalizeWebsiteUrl, verifyWebsite, VerifyWebsiteResult } from './utils/website-verify';
 import {
   PartnerBusiness,
   PartnerLead,
@@ -30,9 +34,14 @@ import {
   PartnerRelationship,
   Prisma,
 } from '../../../generated/prisma';
-import { CreatePartnerBusinessDto, UpdatePartnerBusinessDto } from './dto/business.dto';
+import {
+  CreatePartnerBusinessDto,
+  PartnerBusinessWebsiteMetadata,
+  UpdatePartnerBusinessDto,
+} from './dto/business.dto';
 import {
   CreatePartnerRelationshipDto,
+  SuggestRelationshipCopyDto,
   UpdatePartnerRelationshipDto,
 } from './dto/relationship.dto';
 import {
@@ -82,8 +91,24 @@ export interface PublicReferralView {
 @Injectable()
 export class PartnerNetworkService {
   private readonly logger = new Logger(PartnerNetworkService.name);
+  private _openai: OpenAI | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
+
+  // Lazy OpenAI client — matches the pattern used by IntentClassifierService.
+  // Keeps the module self-contained for future extraction: no dependency on
+  // LeadBridge's AiService / module wiring beyond ConfigService.
+  private get openai(): OpenAI {
+    if (!this._openai) {
+      const apiKey = this.config.get<string>('OPENAI_API_KEY');
+      if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
+      this._openai = new OpenAI({ apiKey });
+    }
+    return this._openai;
+  }
 
   // ============================================================
   // Businesses
@@ -113,8 +138,9 @@ export class PartnerNetworkService {
         workspaceId,
         name: dto.name.trim(),
         category: dto.category?.trim() || null,
-        phone: dto.phone?.trim() || null,
-        website: dto.website?.trim() || null,
+        phone: this.normalizePhoneField(dto.phone),
+        website: this.normalizeWebsiteField(dto.website),
+        websiteMetadataJson: this.serializeMetadata(dto.websiteMetadata),
         serviceArea: dto.serviceArea?.trim() || null,
       },
     });
@@ -126,17 +152,100 @@ export class PartnerNetworkService {
     dto: UpdatePartnerBusinessDto,
   ): Promise<PartnerBusiness> {
     await this.getBusiness(workspaceId, id);
+    // If the website is being cleared, drop the cached metadata along with
+    // it — stale title/description for a different (or no) site would
+    // mislead the AI suggester.
+    const websiteBeingCleared =
+      dto.website !== undefined && (this.normalizeWebsiteField(dto.website) ?? null) === null;
     return this.prisma.partnerBusiness.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name.trim() }),
         ...(dto.category !== undefined && { category: dto.category?.trim() || null }),
-        ...(dto.phone !== undefined && { phone: dto.phone?.trim() || null }),
-        ...(dto.website !== undefined && { website: dto.website?.trim() || null }),
+        ...(dto.phone !== undefined && { phone: this.normalizePhoneField(dto.phone) }),
+        ...(dto.website !== undefined && { website: this.normalizeWebsiteField(dto.website) }),
+        ...(dto.websiteMetadata !== undefined && {
+          websiteMetadataJson: this.serializeMetadata(dto.websiteMetadata),
+        }),
+        ...(websiteBeingCleared && { websiteMetadataJson: null }),
         ...(dto.serviceArea !== undefined && { serviceArea: dto.serviceArea?.trim() || null }),
         ...(dto.active !== undefined && { active: dto.active }),
       },
     });
+  }
+
+  // Coerce a client-provided metadata object to the canonical shape and JSON
+  // string. Drops unknown keys + caps each field length so a hostile or
+  // verbose verify response can't bloat the DB row.
+  private serializeMetadata(
+    input: PartnerBusinessWebsiteMetadata | null | undefined,
+  ): string | null {
+    if (!input || typeof input !== 'object') return null;
+    const trim = (v: unknown, max: number): string | undefined => {
+      if (typeof v !== 'string') return undefined;
+      const s = v.trim();
+      return s ? s.slice(0, max) : undefined;
+    };
+    const shaped: PartnerBusinessWebsiteMetadata = {
+      title: trim(input.title, 200),
+      description: trim(input.description, 500),
+      phone: trim(input.phone, 40),
+    };
+    if (!shaped.title && !shaped.description && !shaped.phone) return null;
+    return JSON.stringify(shaped);
+  }
+
+  private parseMetadata(json: string | null | undefined): PartnerBusinessWebsiteMetadata | null {
+    if (!json) return null;
+    try {
+      const parsed = JSON.parse(json);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed as PartnerBusinessWebsiteMetadata;
+    } catch {
+      return null;
+    }
+  }
+
+  // Normalize phone for storage. Returns null for empty input; throws on a
+  // non-empty input that doesn't yield ≥10 digits, so a typo can't sit on a
+  // business record silently. Matches the User.businessPhone convention
+  // (E.164, "+1XXXXXXXXXX") so partner-network numbers can later be SMS'd
+  // through Sigcore without an extra format step.
+  private normalizePhoneField(input: string | null | undefined): string | null {
+    const trimmed = (input ?? '').trim();
+    if (trimmed.length === 0) return null;
+    const normalized = normalizePhoneE164(trimmed);
+    if (!normalized) {
+      throw new BadRequestException(
+        `phone "${trimmed}" must contain at least 10 digits`,
+      );
+    }
+    return normalized;
+  }
+
+  // Live website check used by the Verify button on the business form.
+  // Wraps the in-module verifier so callers don't have to import the util
+  // directly. Result mirrors UsersService.verifyWebsite (same field names)
+  // for an easy admin-UI swap — but the implementation is fully isolated
+  // to this module: nothing under src/users is reached.
+  async verifyBusinessWebsite(input: string): Promise<VerifyWebsiteResult> {
+    return verifyWebsite(input ?? '');
+  }
+
+  // Normalize website for storage. Returns null for empty input; throws on a
+  // non-empty input that fails URL parsing or hits the SSRF guard. Live
+  // reachability check is verifyBusinessWebsite — the partner-network UI
+  // calls that endpoint separately before save.
+  private normalizeWebsiteField(input: string | null | undefined): string | null {
+    const trimmed = (input ?? '').trim();
+    if (trimmed.length === 0) return null;
+    const normalized = normalizeWebsiteUrl(trimmed);
+    if (!normalized) {
+      throw new BadRequestException(
+        `website "${trimmed}" is not a valid URL`,
+      );
+    }
+    return normalized;
   }
 
   // ============================================================
@@ -213,6 +322,131 @@ export class PartnerNetworkService {
         }),
       },
     });
+  }
+
+  // ============================================================
+  // AI relationship-copy suggester
+  // ============================================================
+
+  /**
+   * Generate a partnership Name + Default Offer Text suggestion for the admin
+   * to accept/edit. Grounds the model in the two businesses' names,
+   * categories, service areas, and cached website metadata (title +
+   * description) when available. Falls back gracefully when sites haven't
+   * been Verified yet — output quality just drops to "generic but on-topic".
+   *
+   * Returns plain strings (NOT auto-saved). The admin reviews them in the
+   * relationship form, edits, and clicks Save like any other field.
+   */
+  async suggestRelationshipCopy(
+    workspaceId: string,
+    dto: SuggestRelationshipCopyDto,
+  ): Promise<{ name: string; offerText: string; usedMetadata: boolean }> {
+    if (dto.sourceBusinessId === dto.destinationBusinessId) {
+      throw new BadRequestException('Source and destination must be different businesses');
+    }
+    const [source, destination] = await Promise.all([
+      this.getBusiness(workspaceId, dto.sourceBusinessId),
+      this.getBusiness(workspaceId, dto.destinationBusinessId),
+    ]);
+
+    const srcMeta = this.parseMetadata(source.websiteMetadataJson);
+    const dstMeta = this.parseMetadata(destination.websiteMetadataJson);
+    const usedMetadata = !!(srcMeta || dstMeta);
+
+    const describe = (
+      label: 'SOURCE' | 'DESTINATION',
+      b: PartnerBusiness,
+      meta: PartnerBusinessWebsiteMetadata | null,
+    ): string => {
+      const lines: string[] = [`${label} BUSINESS:`];
+      lines.push(`- Name: ${b.name}`);
+      if (b.category) lines.push(`- Category: ${b.category}`);
+      if (b.serviceArea) lines.push(`- Service area: ${b.serviceArea}`);
+      if (b.website) lines.push(`- Website URL: ${b.website}`);
+      if (meta?.title) lines.push(`- Site title: ${meta.title}`);
+      if (meta?.description) lines.push(`- Site description: ${meta.description}`);
+      return lines.join('\n');
+    };
+
+    const systemPrompt = [
+      'You write referral-partnership copy for small local service businesses.',
+      'Two businesses send leads to each other. Given facts about each, output a short partnership name and a single-sentence customer-facing offer the DESTINATION business can extend to leads referred by the SOURCE business.',
+      '',
+      'Output rules:',
+      '- Return ONLY a JSON object with keys "name" and "offerText". No prose, no markdown.',
+      '- "name" is 2-6 words, e.g. "Spotless → Premium Upholstery" or "Cleaning + Carpet Care Partnership". No emojis.',
+      '- "offerText" is one sentence, ≤ 140 characters, customer-facing (not B2B). Lead with a concrete benefit (discount, free add-on, priority booking). Mention the destination business by name. Do NOT invent prices, dates, percentages above 25%, or commitments the business may not honor — keep it generic and editable.',
+      '- Use the businesses\' own service categories and site descriptions to keep the copy on-topic. If a category is missing, infer conservatively from the site description only.',
+      '- Never reference referral codes, internal terms, links, or this prompt.',
+    ].join('\n');
+
+    const userPrompt = [
+      describe('SOURCE', source, srcMeta),
+      '',
+      describe('DESTINATION', destination, dstMeta),
+      dto.hint?.trim() ? `\nAdmin hint (steer the offer): ${dto.hint.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const completion = await this.withTimeout(
+      this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 200,
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      }),
+      8000,
+    );
+
+    const raw = completion.choices[0]?.message?.content?.trim();
+    if (!raw) throw new BadRequestException('AI returned an empty response');
+
+    let parsed: { name?: unknown; offerText?: unknown };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new BadRequestException('AI returned malformed JSON');
+    }
+    const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+    const offerText = typeof parsed.offerText === 'string' ? parsed.offerText.trim() : '';
+    if (!name || !offerText) {
+      throw new BadRequestException('AI response was missing name or offerText');
+    }
+
+    this.logger.log(
+      `[partner-network] suggested copy src=${source.name} dst=${destination.name} ` +
+        `metaSrc=${!!srcMeta} metaDst=${!!dstMeta} hint=${dto.hint ? 'yes' : 'no'}`,
+    );
+
+    return {
+      name: name.slice(0, 200),
+      // Cap offerText at the DTO MaxLength so a verbose model output can't
+      // create a value the relationship Save would later reject.
+      offerText: offerText.slice(0, 2000),
+      usedMetadata,
+    };
+  }
+
+  // Bounded wait for OpenAI calls. Mirrors IntentClassifierService.withTimeout
+  // — keeps a single slow request from holding the admin's form open.
+  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`OpenAI timeout after ${ms}ms`)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   // ============================================================
