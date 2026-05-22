@@ -28,6 +28,11 @@ export interface MobileMessage {
 
 export interface MobileLead {
   id: string;
+  // Conversation/thread UUID — distinct from `id` (the Lead UUID). The AI
+  // preview endpoint that takes context needs this; passing the lead id by
+  // mistake causes the backend to look up a non-existent conversation and
+  // bail. Null when the lead has never been linked to a conversation row.
+  threadId: string | null;
   name: string;
   location: string;
   service: string;
@@ -69,14 +74,14 @@ export const LB_ACCOUNTS: MobileAccount[] = [
 
 export const LB_LEADS: MobileLead[] = [
   {
-    id: 'L-8814', name: 'Priya Desai', location: 'Northwood, Austin TX',
+    id: 'L-8814', threadId: null, name: 'Priya Desai', location: 'Northwood, Austin TX',
     service: 'Weekly lawn mowing', platform: 'thumbtack', phone: '+1 (512) 555-0168',
     amount: 85, status: 'new', ai: 'waiting', unread: true, receivedAt: '6 min ago', sort: 6,
     messages: [{ from: 'lead', text: "Hi — looking for weekly lawn service for a ~5,000 sqft front + back yard. What's your earliest availability?", at: '6m ago' }],
     snippet: 'Looking for weekly lawn service for a ~5,000 sqft yard.',
   },
   {
-    id: 'L-8813', name: 'Derek Mulligan', location: 'Cedar Park, Austin TX',
+    threadId: null, id: 'L-8813', name: 'Derek Mulligan', location: 'Cedar Park, Austin TX',
     service: 'Sod installation — 1,200 sqft', platform: 'yelp', phone: '+1 (737) 555-0112',
     amount: 1450, status: 'replied', ai: 'replied', unread: true, receivedAt: '18 min ago', sort: 18,
     messages: [
@@ -87,7 +92,7 @@ export const LB_LEADS: MobileLead[] = [
     snippet: 'Yeah, late April or early May works. Can you come by to measure?',
   },
   {
-    id: 'L-8812', name: 'Teagan O’Byrne', location: 'Round Rock, TX',
+    threadId: null, id: 'L-8812', name: 'Teagan O’Byrne', location: 'Round Rock, TX',
     service: 'Hedge trimming + cleanup', platform: 'thumbtack', phone: '+1 (512) 555-0194',
     amount: 220, status: 'quoted', ai: 'replied', unread: false, receivedAt: '1 hr ago', sort: 60,
     messages: [
@@ -98,14 +103,14 @@ export const LB_LEADS: MobileLead[] = [
     snippet: 'Sent quote: $220, Friday 10am.',
   },
   {
-    id: 'L-8810', name: 'Alicia Romero', location: 'Pflugerville, TX',
+    threadId: null, id: 'L-8810', name: 'Alicia Romero', location: 'Pflugerville, TX',
     service: 'Spring cleanup + mulch', platform: 'angi', phone: '+1 (512) 555-0143',
     amount: 640, status: 'replied', ai: 'waiting', unread: true, receivedAt: '3 hr ago', sort: 180,
     messages: [{ from: 'lead', text: 'Front and back spring cleanup, maybe 12 yards of mulch (brown).', at: '3h ago' }],
     snippet: 'Front and back spring cleanup, maybe 12 yards of mulch.',
   },
   {
-    id: 'L-8807', name: 'Brandon Liu', location: 'West Lake Hills, TX',
+    threadId: null, id: 'L-8807', name: 'Brandon Liu', location: 'West Lake Hills, TX',
     service: 'Full yard redesign — consult', platform: 'yelp', phone: '+1 (512) 555-0119',
     amount: null, status: 'replied', ai: 'handed-off', unread: false, receivedAt: 'Yesterday', sort: 1440,
     messages: [
@@ -115,7 +120,7 @@ export const LB_LEADS: MobileLead[] = [
     snippet: 'Want to redo the whole front yard — xeriscape ideas.',
   },
   {
-    id: 'L-8804', name: 'Naomi Fletcher', location: 'Austin, TX',
+    threadId: null, id: 'L-8804', name: 'Naomi Fletcher', location: 'Austin, TX',
     service: 'Weekly mowing, 0.25 ac', platform: 'thumbtack', phone: '+1 (512) 555-0107',
     amount: 60, status: 'won', ai: 'replied', unread: false, receivedAt: '2 days ago', sort: 2880,
     messages: [
@@ -125,7 +130,7 @@ export const LB_LEADS: MobileLead[] = [
     snippet: 'Confirmed — started weekly service.',
   },
   {
-    id: 'L-8801', name: 'Ken Halvorsen', location: 'Bee Cave, TX',
+    threadId: null, id: 'L-8801', name: 'Ken Halvorsen', location: 'Bee Cave, TX',
     service: 'One-time mow + edge', platform: 'yelp', phone: '+1 (512) 555-0188',
     amount: 95, status: 'lost', ai: 'replied', unread: false, receivedAt: '3 days ago', sort: 4320,
     snippet: 'Went with another pro — no reply after 3 follow-ups.',

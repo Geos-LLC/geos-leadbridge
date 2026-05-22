@@ -122,6 +122,7 @@ export function mapLead(l: Lead): MobileLead {
   const unread = lastSender === 'customer' && l.isAutoHandled !== true;
   return {
     id: l.id,
+    threadId: l.threadId ?? null,
     name: l.customerName || 'Unknown',
     location,
     service,

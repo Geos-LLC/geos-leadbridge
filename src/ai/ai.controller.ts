@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, NotFoundException, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiService, ConversationMessage } from './ai.service';
@@ -12,6 +12,8 @@ import { buildPricingGuardRules } from './pricing-guards';
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
 export class AiController {
+  private readonly logger = new Logger(AiController.name);
+
   constructor(
     private aiService: AiService,
     private prisma: PrismaService,
@@ -31,10 +33,15 @@ export class AiController {
     @Body('conversationHistory') conversationHistory: ConversationMessage[],
     @Body('strategyPrompt') strategyPrompt?: string,
   ) {
+    this.logger.log(`[AI preview-for-lead] user=${user?.id} lead=${leadId} historyLen=${conversationHistory?.length ?? 0}`);
+    if (!leadId) throw new NotFoundException('Missing leadId');
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, userId: user.id },
     });
-    if (!lead) throw new Error('Lead not found');
+    if (!lead) {
+      this.logger.warn(`[AI preview-for-lead] Lead ${leadId} not found for user ${user?.id}`);
+      throw new NotFoundException('Lead not found');
+    }
 
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
@@ -57,24 +64,30 @@ export class AiController {
       timezone: account?.followUpTimezone ?? null,
     });
 
-    const reply = await this.aiService.generateReply({
-      customerName: lead.customerName,
-      customerMessage: customerMessage || lead.message || '',
-      category: lead.category ?? undefined,
-      city: lead.city ?? undefined,
-      state: lead.state ?? undefined,
-      budget: lead.budget ? Number(lead.budget) : undefined,
-      accountName: account?.businessName ?? undefined,
-      globalPrompt: userRecord?.globalAiPrompt ?? undefined,
-      strategyPrompt,
-      businessBlock,
-      pricingBlock: pricingBlock ?? undefined,
-      faqBlock: faqBlock ?? undefined,
-      conversationHistory: conversationHistory ?? [],
-      leadDetails: details,
-      currentTime: new Date(),
-      timezone: account?.followUpTimezone ?? undefined,
-    });
+    let reply: string;
+    try {
+      reply = await this.aiService.generateReply({
+        customerName: lead.customerName,
+        customerMessage: customerMessage || lead.message || '',
+        category: lead.category ?? undefined,
+        city: lead.city ?? undefined,
+        state: lead.state ?? undefined,
+        budget: lead.budget ? Number(lead.budget) : undefined,
+        accountName: account?.businessName ?? undefined,
+        globalPrompt: userRecord?.globalAiPrompt ?? undefined,
+        strategyPrompt,
+        businessBlock,
+        pricingBlock: pricingBlock ?? undefined,
+        faqBlock: faqBlock ?? undefined,
+        conversationHistory: conversationHistory ?? [],
+        leadDetails: details,
+        currentTime: new Date(),
+        timezone: account?.followUpTimezone ?? undefined,
+      });
+    } catch (err: any) {
+      this.logger.error(`[AI preview-for-lead] generateReply failed for lead=${leadId}: ${err?.message}`, err?.stack);
+      throw err;
+    }
 
     return { reply };
   }
@@ -92,10 +105,15 @@ export class AiController {
     @Body('strategyPrompt') strategyPrompt?: string,
     @Body('contextMode') contextMode?: 'full' | 'light' | 'none',
   ) {
+    this.logger.log(`[AI preview-with-context] user=${user?.id} lead=${leadId} conv=${conversationId} mode=${contextMode ?? 'full'}`);
+    if (!leadId) throw new NotFoundException('Missing leadId');
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, userId: user.id },
     });
-    if (!lead) throw new Error('Lead not found');
+    if (!lead) {
+      this.logger.warn(`[AI preview-with-context] Lead ${leadId} not found for user ${user?.id}`);
+      throw new NotFoundException('Lead not found');
+    }
 
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
@@ -137,26 +155,32 @@ export class AiController {
     const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
-    const reply = await this.aiService.generateReply({
-      customerName: lead.customerName,
-      customerMessage: customerMessage || lead.message || '',
-      category: lead.category ?? undefined,
-      city: lead.city ?? undefined,
-      state: lead.state ?? undefined,
-      budget: lead.budget ? Number(lead.budget) : undefined,
-      accountName: account?.businessName ?? undefined,
-      globalPrompt: userRecord?.globalAiPrompt ?? undefined,
-      strategyPrompt,
-      threadContextBlock: threadContextPrompt,
-      businessBlock,
-      pricingBlock: pricingBlock ?? undefined,
-      faqBlock: faqBlock ?? undefined,
-      urgencyBlock: urgencyBlock ?? undefined,
-      conversationHistory,
-      leadDetails: details,
-      currentTime: new Date(),
-      timezone: account?.followUpTimezone ?? undefined,
-    });
+    let reply: string;
+    try {
+      reply = await this.aiService.generateReply({
+        customerName: lead.customerName,
+        customerMessage: customerMessage || lead.message || '',
+        category: lead.category ?? undefined,
+        city: lead.city ?? undefined,
+        state: lead.state ?? undefined,
+        budget: lead.budget ? Number(lead.budget) : undefined,
+        accountName: account?.businessName ?? undefined,
+        globalPrompt: userRecord?.globalAiPrompt ?? undefined,
+        strategyPrompt,
+        threadContextBlock: threadContextPrompt,
+        businessBlock,
+        pricingBlock: pricingBlock ?? undefined,
+        faqBlock: faqBlock ?? undefined,
+        urgencyBlock: urgencyBlock ?? undefined,
+        conversationHistory,
+        leadDetails: details,
+        currentTime: new Date(),
+        timezone: account?.followUpTimezone ?? undefined,
+      });
+    } catch (err: any) {
+      this.logger.error(`[AI preview-with-context] generateReply failed for lead=${leadId} conv=${conversationId}: ${err?.message}`, err?.stack);
+      throw err;
+    }
 
     return { reply, contextMode: mode };
   }

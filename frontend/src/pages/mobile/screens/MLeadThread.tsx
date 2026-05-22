@@ -80,17 +80,28 @@ export default function MLeadThread() {
     }
   }
 
-  // Generate an AI draft using the current conversation context. Drops
-  // the result into the composer so the user can review/edit before
-  // sending — never auto-sends. Mirrors what the desktop "Suggest"
-  // button does on Messages.tsx.
+  // Generate an AI draft using the current conversation. Drops the result
+  // into the composer so the user can review/edit before sending — never
+  // auto-sends. Mirrors what the desktop "Suggest" button does on
+  // Messages.tsx (Messages.tsx:2248-2256).
+  //
+  // Two endpoints, picked by whether we have a real threadId:
+  //   - previewWithContext: backend pulls thread state + history from DB.
+  //     Requires a valid Conversation.id; passing the lead id by mistake
+  //     causes a 500.
+  //   - previewForLead: dumb fallback — we pass conversationHistory
+  //     inline. Used when the lead has no linked conversation yet (new
+  //     lead, no messages, etc.) so the button still works.
   async function generate() {
     if (!id || generating) return;
-    if (!lead?.id || !messages.length) {
+    if (!lead?.id) {
+      setGenError('Lead is still loading.');
+      return;
+    }
+    if (!messages.length) {
       setGenError('Need at least one customer message before generating.');
       return;
     }
-    // The latest customer message anchors the AI's reply.
     const lastCustomer = [...messages].reverse().find((m) => m.from === 'lead');
     if (!lastCustomer) {
       setGenError('No customer message to respond to yet.');
@@ -99,13 +110,28 @@ export default function MLeadThread() {
     setGenerating(true);
     setGenError(null);
     try {
-      // previewWithContext pulls the full thread context server-side,
-      // so we don't have to re-send conversation history.
-      const conversationId = (lead as any).threadId || id;
-      const { reply } = await aiApi.previewWithContext(id, conversationId, lastCustomer.text);
+      let reply: string;
+      if (lead.threadId) {
+        const out = await aiApi.previewWithContext(id, lead.threadId, lastCustomer.text);
+        reply = out.reply;
+      } else {
+        // Convert MobileMessage history to the {role, content} shape the
+        // endpoint expects: customer → 'customer', anyone else → 'pro'.
+        const history = messages.map<{ role: 'customer' | 'pro'; content: string }>((m) => ({
+          role: m.from === 'lead' ? 'customer' : 'pro',
+          content: m.text,
+        }));
+        const out = await aiApi.previewForLead(id, lastCustomer.text, history);
+        reply = out.reply;
+      }
       setDraft(reply || '');
     } catch (err: any) {
-      setGenError(err?.message || 'Could not generate a reply');
+      // axios attaches the backend's response on err.response.data. Surface
+      // its message when present so the user sees the real reason instead
+      // of a generic "Request failed with status code 500".
+      const backendMsg = err?.response?.data?.message
+        || (typeof err?.response?.data === 'string' ? err.response.data : null);
+      setGenError(backendMsg || err?.message || 'Could not generate a reply');
     } finally {
       setGenerating(false);
     }
