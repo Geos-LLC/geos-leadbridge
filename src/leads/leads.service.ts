@@ -1725,10 +1725,14 @@ export class LeadsService {
    * Convert database lead to normalized format
    */
   // Given a list of conversation IDs, return a map<convId, isAutoHandled>.
-  // A conversation is "auto-handled" when at least one AI pro-send exists and
-  // there is no human pro-send and no customer reply. Uses Prisma `distinct`
-  // so the result set is at most ~3 rows per conversation regardless of
-  // history length.
+  //
+  // Rule: AI sent at least one pro message, no human pro message ever existed,
+  // and the customer has not replied since AI's last message. The earlier
+  // presence-based rule (`hasAi && !hasHuman && !hasCustomer`) collapsed all
+  // customer messages — including the initial inquiry that creates every TT/
+  // Yelp lead — so the filter hid almost nothing. Switching to timestamp
+  // comparison lets the initial inquiry count as "AI handled" once AI has
+  // replied to it.
   private async computeAutoHandledFlags(
     conversationIds: string[],
   ): Promise<Map<string, boolean>> {
@@ -1737,35 +1741,45 @@ export class LeadsService {
 
     const rows = await this.prisma.message.findMany({
       where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, sender: true, senderType: true },
-      distinct: ['conversationId', 'sender', 'senderType'],
+      select: { conversationId: true, sender: true, senderType: true, sentAt: true, createdAt: true },
     });
 
-    const presence = new Map<
-      string,
-      { hasAi: boolean; hasHuman: boolean; hasCustomer: boolean }
-    >();
+    type Slot = {
+      lastAi: number | null;
+      lastHuman: number | null;
+      lastCustomer: number | null;
+    };
+    const presence = new Map<string, Slot>();
     for (const row of rows) {
       if (!row.conversationId) continue;
+      const ts = (row.sentAt ?? row.createdAt)?.getTime() ?? null;
+      if (ts === null) continue;
       const slot = presence.get(row.conversationId) ?? {
-        hasAi: false,
-        hasHuman: false,
-        hasCustomer: false,
+        lastAi: null,
+        lastHuman: null,
+        lastCustomer: null,
       };
       if (row.sender === 'customer') {
-        slot.hasCustomer = true;
+        if (slot.lastCustomer === null || ts > slot.lastCustomer) slot.lastCustomer = ts;
       } else if (row.sender === 'pro') {
-        // senderType: 'ai' → AI send; 'user'/null → human send (matches the UI
-        // convention in Messages.tsx where senderType !== 'ai' is rendered as
-        // human/business).
-        if (row.senderType === 'ai') slot.hasAi = true;
-        else slot.hasHuman = true;
+        // senderType: 'ai' → AI send; 'user'/null/other → human send (matches
+        // the UI convention in Messages.tsx where senderType !== 'ai' is
+        // rendered as human/business).
+        if (row.senderType === 'ai') {
+          if (slot.lastAi === null || ts > slot.lastAi) slot.lastAi = ts;
+        } else {
+          if (slot.lastHuman === null || ts > slot.lastHuman) slot.lastHuman = ts;
+        }
       }
       presence.set(row.conversationId, slot);
     }
 
     for (const [convId, slot] of presence) {
-      result.set(convId, slot.hasAi && !slot.hasHuman && !slot.hasCustomer);
+      const isAuto =
+        slot.lastAi !== null &&
+        slot.lastHuman === null &&
+        (slot.lastCustomer === null || slot.lastCustomer < slot.lastAi);
+      result.set(convId, isAuto);
     }
     return result;
   }
