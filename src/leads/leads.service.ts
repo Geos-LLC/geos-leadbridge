@@ -867,14 +867,18 @@ export class LeadsService {
             // placeholder to make upsert idempotent.
           },
         });
-        // COALESCE-style stamp: only overwrite when column is NULL. This handles
-        // the case where the Yelp webhook echo created the row first with no
-        // senderType (webhook backfill path does not set it).
+        // COALESCE-style stamp: only overwrite when the column is NULL or
+        // when the inbound webhook handler optimistically tagged it
+        // 'manual' before our send-stamp landed (race: TT echoed the
+        // message back to us before sendMessage's first upsert wrote
+        // 'ai'/'user'). The manual stamp is a "we didn't write this"
+        // heuristic — our send path is the authoritative source, so it
+        // wins. Verified senderType 'ai'/'user' never gets clobbered.
         await this.prisma.message.updateMany({
           where: {
             platform: lead.platform,
             externalMessageId: sentMessage.externalMessageId,
-            senderType: null,
+            OR: [{ senderType: null }, { senderType: 'manual' }],
           },
           data: { senderType },
         });
