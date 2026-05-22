@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle,
+  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, ChevronDown, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail, UserCheck,
 } from 'lucide-react';
 import {
-  SettingCard, FieldRow, InfoTile, Checkbox, ActionLink,
+  SettingCard, FieldRow, Checkbox, ActionLink,
 } from '../../components/automation/ui';
-import { usersApi, templatesApi, thumbtackApi, notificationsApi, type TenantPhoneNumber } from '../../services/api';
+import { usersApi, templatesApi, thumbtackApi, notificationsApi, followUpApi, type TenantPhoneNumber } from '../../services/api';
+import type { MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
 import { LeadBridgeNumberManager } from '../../components/LeadBridgeNumberManager';
-import type { MessageTemplate, SavedAccount } from '../../types';
 
 function formatPhone(e164: string | null): string {
   if (!e164) return '—';
@@ -44,6 +44,14 @@ export function SettingsCommunication() {
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
+  // Business Alerts (per-account NotificationRule + aiConversationEnabled status)
+  const [alertAccountId, setAlertAccountId] = useState<string>('');
+  const [newLeadRule, setNewLeadRule] = useState<NotificationRule | null>(null);
+  const [customerReplyRule, setCustomerReplyRule] = useState<NotificationRule | null>(null);
+  const [aiHandoffOn, setAiHandoffOn] = useState<boolean>(false);
+  const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
+  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | null>(null);
+
   useEffect(() => {
     let alive = true;
     Promise.all([
@@ -64,22 +72,37 @@ export function SettingsCommunication() {
     return () => { alive = false; };
   }, []);
 
-  // Conventional alert template names — match what TemplateEditorModal seeds.
-  const findTpl = (...candidates: string[]): MessageTemplate | undefined => {
-    for (const name of candidates) {
-      const exact = templates.find(t => t.name === name);
-      if (exact) return exact;
+  // Default the alert-account selector once the account list arrives.
+  useEffect(() => {
+    if (!alertAccountId && accounts.length > 0) {
+      setAlertAccountId(accounts[0].id);
     }
-    // Loose match — first template whose name contains every candidate token.
-    const tokens = candidates.flatMap(c => c.toLowerCase().split(/[\s\-]+/));
-    return templates.find(t => {
-      const lower = t.name.toLowerCase();
-      return tokens.every(tok => lower.includes(tok));
-    });
-  };
-  const readyToBookTpl = findTpl('Ready to Book Alert', 'TT - Ready to Book Alert', 'AI Ready to Book Alert', 'ready book');
-  const liveContactTpl = findTpl('Live Contact Alert', 'TT - Live Contact Alert', 'AI Live Contact Alert', 'live contact');
+  }, [accounts, alertAccountId]);
 
+  // Reload the per-account rule state + handoff status whenever the
+  // alert-card account selector changes.
+  useEffect(() => {
+    if (!alertAccountId) return;
+    let alive = true;
+    setLoadingAlerts(true);
+    Promise.all([
+      notificationsApi.getRules(alertAccountId).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
+      followUpApi.getSettings(alertAccountId).catch(() => ({ success: false, settings: undefined })),
+    ]).then(([rulesRes, fuRes]) => {
+      if (!alive) return;
+      const rules = (rulesRes.rules || []) as NotificationRule[];
+      // Owner-side alerts only — exclude sendToCustomer rules (auto-reply lives on Automation).
+      setNewLeadRule(rules.find(r => r.triggerType === 'new_lead' && !r.sendToCustomer) || null);
+      setCustomerReplyRule(rules.find(r => r.triggerType === 'customer_reply' && !r.sendToCustomer) || null);
+      const aiOn = !!((fuRes as any)?.settings?.aiConversationEnabled);
+      setAiHandoffOn(aiOn);
+    }).finally(() => {
+      if (alive) setLoadingAlerts(false);
+    });
+    return () => { alive = false; };
+  }, [alertAccountId]);
+
+  // Conventional alert template names — match what TemplateEditorModal seeds.
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
 
   function toE164(raw: string): string {
@@ -91,6 +114,81 @@ export function SettingsCommunication() {
   }
   function isValidE164(value: string): boolean {
     return /^\+[1-9]\d{7,14}$/.test(value);
+  }
+
+  // Resolve the target alert phone for the currently selected account.
+  // Mirrors backend resolveAgentPhone: account override → User.businessPhone.
+  function resolveAlertPhone(accountId: string): string | null {
+    const acct = accounts.find(a => a.id === accountId);
+    return (acct?.agentPhoneOverride as any) || businessPhone || null;
+  }
+
+  async function handleToggleNewLead(on: boolean) {
+    if (!alertAccountId) return;
+    setSavingRuleKind('new_lead');
+    try {
+      if (newLeadRule) {
+        const res = await notificationsApi.updateRule(alertAccountId, newLeadRule.id, { enabled: on });
+        setNewLeadRule(res.rule);
+      } else {
+        const toPhone = resolveAlertPhone(alertAccountId);
+        if (!toPhone) {
+          notify.error('Missing phone', 'Set a business phone (above) or an alert phone for this business first.');
+          return;
+        }
+        const res = await notificationsApi.createRule(alertAccountId, {
+          name: 'Lead Alert - SMS',
+          triggerType: 'new_lead',
+          toPhone,
+          template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+          enabled: on,
+        });
+        setNewLeadRule(res.rule);
+      }
+      notify.success('Saved', on ? 'New lead alert turned on' : 'New lead alert turned off');
+    } catch (err: any) {
+      notify.error('Error', err?.response?.data?.message || err?.message || 'Failed to save');
+    } finally {
+      setSavingRuleKind(null);
+    }
+  }
+
+  async function handleToggleCustomerReply(on: boolean) {
+    if (!alertAccountId) return;
+    setSavingRuleKind('customer_reply');
+    try {
+      if (customerReplyRule) {
+        const res = await notificationsApi.updateRule(alertAccountId, customerReplyRule.id, { enabled: on });
+        setCustomerReplyRule(res.rule);
+      } else {
+        const toPhone = resolveAlertPhone(alertAccountId);
+        if (!toPhone) {
+          notify.error('Missing phone', 'Set a business phone (above) or an alert phone for this business first.');
+          return;
+        }
+        const res = await notificationsApi.createRule(alertAccountId, {
+          name: 'Customer Reply Alert',
+          triggerType: 'customer_reply',
+          replyTriggerMode: 'every_reply',
+          toPhone,
+          template: 'Lead {{lead.name}} replied: "{{message}}"',
+          enabled: on,
+        });
+        setCustomerReplyRule(res.rule);
+      }
+      notify.success('Saved', on ? 'Customer reply alert turned on' : 'Customer reply alert turned off');
+    } catch (err: any) {
+      notify.error('Error', err?.response?.data?.message || err?.message || 'Failed to save');
+    } finally {
+      setSavingRuleKind(null);
+    }
+  }
+
+  function goToTemplate(name: string) {
+    const params = new URLSearchParams({ filter: 'alerts' });
+    const t = templates.find(t => t.name.toLowerCase().includes(name.toLowerCase()));
+    if (t) params.set('highlight', t.id);
+    navigate(`/templates?${params.toString()}`, { state: fromState });
   }
 
   async function reloadTenantPhones() {
@@ -159,17 +257,6 @@ export function SettingsCommunication() {
       setSavingOverrideId(null);
     }
   }
-
-  const goTemplate = (tpl: MessageTemplate | undefined) => {
-    const params = new URLSearchParams();
-    if (tpl) {
-      params.set('highlight', tpl.id);
-      params.set('filter', tpl.type === 'prompt' ? 'prompts' : 'alerts');
-    } else {
-      params.set('filter', 'alerts');
-    }
-    navigate(`/templates?${params.toString()}`, { state: fromState });
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -336,32 +423,222 @@ export function SettingsCommunication() {
       <SettingCard
         icon={Bell}
         iconTone="orange"
-        title="AI Human Takeover Alerts"
-        subtitle="Templates used when AI alerts your team. Referenced from Automation."
+        title="Business Alerts"
+        subtitle="SMS sent to your team about lead activity. Per-business — pick an account to configure."
         contentPad="8px 24px 24px"
+        headerRight={accounts.length > 0 ? (
+          <AccountSelect
+            accounts={accounts}
+            value={alertAccountId}
+            onChange={setAlertAccountId}
+          />
+        ) : undefined}
       >
-        <FieldRow icon={FileText} iconTone="violet" label="Ready to book">
-          <InfoTile
-            title={readyToBookTpl?.name || 'Ready to Book Alert'}
-            body={readyToBookTpl?.content || 'Lead is ready to book a job. Phone: {customerPhone}…'}
-            badge={readyToBookTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
-            tooltip={readyToBookTpl?.content || undefined}
-            actionLabel={readyToBookTpl?.type === 'prompt' ? 'Edit Prompt' : 'Edit Template'}
-            onAction={() => goTemplate(readyToBookTpl)}
-          />
-        </FieldRow>
-        <FieldRow icon={FileText} iconTone="violet" label="Wants live contact" noBorder>
-          <InfoTile
-            title={liveContactTpl?.name || 'Live Contact Alert'}
-            body={liveContactTpl?.content || 'Lead wants to talk to a person. Reach them at {customerPhone}…'}
-            badge={liveContactTpl?.type === 'prompt' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
-            tooltip={liveContactTpl?.content || undefined}
-            actionLabel={liveContactTpl?.type === 'prompt' ? 'Edit Prompt' : 'Edit Template'}
-            onAction={() => goTemplate(liveContactTpl)}
-          />
-        </FieldRow>
+        {accounts.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', padding: '12px 0' }}>
+            Connect a source first to configure alerts.
+          </div>
+        ) : loadingAlerts ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13, padding: '12px 0' }}>
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : (
+          <>
+            <BusinessAlertRow
+              icon={Mail}
+              iconTone="blue"
+              label="New lead alert"
+              sublabel="When a new lead arrives from any source."
+              enabled={!!newLeadRule?.enabled}
+              saving={savingRuleKind === 'new_lead'}
+              onToggle={handleToggleNewLead}
+              templateLabel={newLeadRule?.messageTemplate?.name || (newLeadRule ? 'Inline template' : 'Default template')}
+              onEditTemplate={() => goToTemplate('Lead Alert')}
+            />
+            <BusinessAlertRow
+              icon={MessageSquare}
+              iconTone="green"
+              label="Customer reply alert"
+              sublabel="When a customer replies to your LeadBridge number."
+              enabled={!!customerReplyRule?.enabled}
+              saving={savingRuleKind === 'customer_reply'}
+              onToggle={handleToggleCustomerReply}
+              templateLabel={customerReplyRule?.messageTemplate?.name || (customerReplyRule ? 'Inline template' : 'Default template')}
+              onEditTemplate={() => goToTemplate('Customer Reply')}
+            />
+            <BusinessAlertRow
+              icon={UserCheck}
+              iconTone="orange"
+              label="AI handoff alert"
+              sublabel={aiHandoffOn
+                ? 'When AI flags the conversation for human takeover. Master switch lives in Automation → AI Conversation.'
+                : 'AI Conversation is off for this account — turn it on in Automation to enable handoff alerts.'}
+              status={aiHandoffOn ? { text: 'On in Automation', tone: 'green' } : { text: 'Off in Automation', tone: 'slate' }}
+              onEditTemplate={() => goToTemplate('Ready to Book')}
+              onConfigure={() => navigate('/automation')}
+              noBorder
+            />
+          </>
+        )}
       </SettingCard>
     </div>
+  );
+}
+
+function AccountSelect({
+  accounts, value, onChange,
+}: { accounts: SavedAccount[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ position: 'relative', minWidth: 220 }}>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          width: '100%', appearance: 'none',
+          padding: '7px 30px 7px 10px',
+          background: 'white',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 8,
+          fontSize: 12.5, fontFamily: 'inherit',
+          color: 'var(--lb-ink-1)',
+          cursor: 'pointer',
+        }}
+      >
+        {accounts.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.platform === 'yelp' ? '🔴 ' : a.platform === 'thumbtack' ? '🔵 ' : '⚪ '}{a.businessName}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} style={{
+        position: 'absolute', top: '50%', right: 9, transform: 'translateY(-50%)',
+        color: 'var(--lb-ink-5)', pointerEvents: 'none',
+      }} />
+    </div>
+  );
+}
+
+function BusinessAlertRow({
+  icon: Icon, iconTone, label, sublabel, enabled, saving, onToggle,
+  templateLabel, onEditTemplate, status, onConfigure, noBorder,
+}: {
+  icon: typeof Bell;
+  iconTone: 'blue' | 'green' | 'orange';
+  label: string;
+  sublabel: string;
+  enabled?: boolean;
+  saving?: boolean;
+  onToggle?: (v: boolean) => void;
+  templateLabel?: string;
+  onEditTemplate?: () => void;
+  status?: { text: string; tone: 'green' | 'slate' };
+  onConfigure?: () => void;
+  noBorder?: boolean;
+}) {
+  const iconBg = iconTone === 'blue' ? '#dbeafe' : iconTone === 'green' ? '#d1fae5' : '#fed7aa';
+  const iconFg = iconTone === 'blue' ? '#1d4ed8' : iconTone === 'green' ? '#047857' : '#c2410c';
+  const statusPalette = status?.tone === 'green'
+    ? { bg: '#dcfce7', fg: '#15803d' }
+    : { bg: '#f1f5f9', fg: '#475569' };
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '14px 0',
+      borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: iconBg, color: iconFg, flexShrink: 0,
+      }}>
+        <Icon size={16} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>{sublabel}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        {templateLabel && onEditTemplate && (
+          <button
+            type="button"
+            onClick={onEditTemplate}
+            style={{
+              padding: '5px 10px',
+              background: 'white', color: 'var(--lb-ink-2)',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 11.5, fontFamily: 'inherit', fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+            title={templateLabel}
+          >
+            Edit template
+          </button>
+        )}
+        {onConfigure && (
+          <button
+            type="button"
+            onClick={onConfigure}
+            style={{
+              padding: '5px 10px',
+              background: 'white', color: 'var(--lb-ink-2)',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 11.5, fontFamily: 'inherit', fontWeight: 500,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            Configure
+          </button>
+        )}
+        {status ? (
+          <span style={{
+            padding: '4px 10px', borderRadius: 999,
+            background: statusPalette.bg, color: statusPalette.fg,
+            fontSize: 11, fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}>
+            {status.text}
+          </span>
+        ) : (
+          <BusinessAlertToggle on={!!enabled} saving={!!saving} onToggle={v => onToggle?.(v)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BusinessAlertToggle({ on, saving, onToggle }: { on: boolean; saving: boolean; onToggle: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={saving}
+      onClick={() => onToggle(!on)}
+      style={{
+        position: 'relative',
+        width: 40, height: 22,
+        border: 0,
+        borderRadius: 999,
+        background: on ? 'var(--lb-accent)' : '#cbd5e1',
+        cursor: saving ? 'wait' : 'pointer',
+        transition: 'background 120ms',
+        opacity: saving ? 0.6 : 1,
+        padding: 0,
+      }}
+    >
+      <span style={{
+        position: 'absolute',
+        top: 2, left: on ? 20 : 2,
+        width: 18, height: 18, borderRadius: 999,
+        background: 'white',
+        boxShadow: '0 1px 2px rgba(10,21,48,0.18)',
+        transition: 'left 140ms',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {saving && <Loader2 size={10} className="animate-spin" style={{ color: 'var(--lb-ink-5)' }} />}
+      </span>
+    </button>
   );
 }
 
