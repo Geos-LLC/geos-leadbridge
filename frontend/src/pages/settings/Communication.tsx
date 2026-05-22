@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2, Building2,
+  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, InfoTile, Checkbox, ActionLink,
@@ -31,6 +31,10 @@ export function SettingsCommunication() {
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [loadingPerBusiness, setLoadingPerBusiness] = useState(true);
+  const [editingOverrideId, setEditingOverrideId] = useState<string | null>(null);
+  const [overrideValue, setOverrideValue] = useState('');
+  const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -71,6 +75,48 @@ export function SettingsCommunication() {
 
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
   const goEditProfile = () => navigate('/settings?tab=general');
+
+  function toE164(raw: string): string {
+    const digits = (raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return '+1' + digits;
+    if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;
+    return raw.trim().startsWith('+') ? raw.trim() : '+' + digits;
+  }
+  function isValidE164(value: string): boolean {
+    return /^\+[1-9]\d{7,14}$/.test(value);
+  }
+
+  async function handleSaveOverride(accountId: string) {
+    setOverrideError(null);
+    const trimmed = overrideValue.trim();
+    // Empty → clear override (inherit User.businessPhone).
+    // Equal to tenant default → also clear; storing the same number as the
+    // default is just noise and the resolver falls through to it anyway.
+    let value: string | null;
+    if (!trimmed) {
+      value = null;
+    } else {
+      const e164 = toE164(trimmed);
+      if (!isValidE164(e164)) {
+        setOverrideError('Phone must be E.164 (e.g. +12125550100)');
+        return;
+      }
+      value = (businessPhone && e164 === businessPhone) ? null : e164;
+    }
+    setSavingOverrideId(accountId);
+    try {
+      await thumbtackApi.updateSavedAccount(accountId, { agentPhoneOverride: value });
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, agentPhoneOverride: value } : a));
+      setEditingOverrideId(null);
+      setOverrideValue('');
+    } catch (err: any) {
+      setOverrideError(err?.response?.data?.message || err?.message || 'Failed to save');
+    } finally {
+      setSavingOverrideId(null);
+    }
+  }
+
   const goTemplate = (tpl: MessageTemplate | undefined) => {
     const params = new URLSearchParams();
     if (tpl) {
@@ -160,13 +206,30 @@ export function SettingsCommunication() {
                     badge={!assignedPhone ? null : lbShared ? { text: 'Shared', tone: 'slate' } : { text: 'Dedicated', tone: 'blue' }}
                     muted={!assignedPhone}
                   />
-                  <PerBusinessTile
-                    icon={Phone}
-                    label="Alert phone"
-                    value={alertPhone ? formatPhone(alertPhone) : 'Not set'}
-                    badge={!alertPhone ? null : usingOverride ? { text: 'Override', tone: 'amber' } : { text: 'Default', tone: 'slate' }}
-                    muted={!alertPhone}
-                  />
+                  {editingOverrideId === acct.id ? (
+                    <AlertPhoneEditor
+                      value={overrideValue}
+                      onChange={setOverrideValue}
+                      onSave={() => handleSaveOverride(acct.id)}
+                      onCancel={() => { setEditingOverrideId(null); setOverrideValue(''); setOverrideError(null); }}
+                      saving={savingOverrideId === acct.id}
+                      placeholder={businessPhone || '+12125550100'}
+                      error={overrideError}
+                    />
+                  ) : (
+                    <PerBusinessTile
+                      icon={Phone}
+                      label="Alert phone"
+                      value={alertPhone ? formatPhone(alertPhone) : 'Not set'}
+                      badge={!alertPhone ? null : usingOverride ? { text: 'Override', tone: 'amber' } : { text: 'Default', tone: 'slate' }}
+                      muted={!alertPhone}
+                      onEdit={() => {
+                        setOverrideValue(acct.agentPhoneOverride || '');
+                        setEditingOverrideId(acct.id);
+                        setOverrideError(null);
+                      }}
+                    />
+                  )}
                 </div>
               </FieldRow>
             );
@@ -234,13 +297,14 @@ export function SettingsCommunication() {
 }
 
 function PerBusinessTile({
-  icon: Icon, label, value, badge, muted,
+  icon: Icon, label, value, badge, muted, onEdit,
 }: {
   icon: typeof Phone;
   label: string;
   value: string;
   badge: { text: string; tone: 'blue' | 'amber' | 'slate' } | null;
   muted?: boolean;
+  onEdit?: () => void;
 }) {
   const tonePalette: Record<'blue' | 'amber' | 'slate', { bg: string; fg: string }> = {
     blue:  { bg: '#dbeafe', fg: '#1d4ed8' },
@@ -279,6 +343,109 @@ function PerBusinessTile({
           {badge.text}
         </span>
       )}
+      {onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label="Edit"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 24, height: 24, padding: 0,
+            background: 'transparent', border: 0,
+            color: 'var(--lb-ink-6)', cursor: 'pointer',
+            borderRadius: 6, flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#eef2f7'; e.currentTarget.style.color = 'var(--lb-ink-2)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--lb-ink-6)'; }}
+        >
+          <Pencil size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AlertPhoneEditor({
+  value, onChange, onSave, onCancel, saving, placeholder, error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  placeholder: string;
+  error: string | null;
+}) {
+  return (
+    <div style={{
+      padding: '8px 10px',
+      background: '#fffbeb',
+      border: '1.5px solid #fcd34d',
+      borderRadius: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Phone size={14} style={{ color: '#b45309', flexShrink: 0 }} />
+        <input
+          type="tel"
+          autoFocus
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') onSave();
+            if (e.key === 'Escape') onCancel();
+          }}
+          placeholder={placeholder}
+          disabled={saving}
+          style={{
+            flex: 1, minWidth: 0,
+            padding: '4px 6px',
+            background: 'white',
+            border: '1px solid #fcd34d',
+            borderRadius: 6,
+            fontSize: 13, fontFamily: 'var(--lb-font-mono)',
+            color: 'var(--lb-ink-1)',
+            outline: 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          aria-label="Save"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 26, height: 26, padding: 0,
+            background: '#16a34a', color: 'white', border: 0,
+            borderRadius: 6, cursor: saving ? 'wait' : 'pointer', flexShrink: 0,
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          aria-label="Cancel"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 26, height: 26, padding: 0,
+            background: 'white', color: 'var(--lb-ink-5)', border: '1px solid var(--lb-line)',
+            borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 4, paddingLeft: 20 }}>
+        {error ? (
+          <span style={{ color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <AlertCircle size={11} /> {error}
+          </span>
+        ) : (
+          'Leave empty to use the business default. E.164 format (+12125550100).'
+        )}
+      </div>
     </div>
   );
 }
