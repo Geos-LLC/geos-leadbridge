@@ -223,14 +223,24 @@ export function MShell({
   appBar?: ReactNode;
   hideTabBar?: boolean;
 }) {
+  // Column flex layout pinned to the parent's height (the .lb-mobile
+  // wrapper is locked to 100dvh). The app bar and tab bar are flex-fixed
+  // at top and bottom; the middle region owns the only scroll context,
+  // so the tab bar stays visible while the user scrolls through content.
   return (
     <div style={{
-      width: '100%', minHeight: '100vh',
+      width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column',
       background: 'var(--bg)', color: 'var(--ink-2)', fontSize: 14,
+      overflow: 'hidden',
     }}>
       {appBar}
-      <div style={{ flex: 1, overflow: 'auto', position: 'relative', WebkitOverflowScrolling: 'touch' as 'touch' }}>
+      <div style={{
+        flex: 1, minHeight: 0,
+        overflowY: 'auto', overflowX: 'hidden',
+        position: 'relative',
+        WebkitOverflowScrolling: 'touch' as 'touch',
+      }}>
         {children}
       </div>
       {!hideTabBar && <MTabBar active={tab} />}

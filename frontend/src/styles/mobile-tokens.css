@@ -50,6 +50,14 @@
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Lock the wrapper to one viewport height so the bottom tab bar
+     stays pinned to the screen edge while content scrolls inside the
+     middle region. `dvh` accounts for iOS Safari's collapsing address
+     bar; `vh` is the fallback for older browsers. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .lb-mobile *,

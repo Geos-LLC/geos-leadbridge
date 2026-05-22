@@ -30,7 +30,7 @@ function MobileFallback() {
 
 export default function MobileApp() {
   return (
-    <div className="lb-mobile" style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className="lb-mobile" style={{ background: 'var(--bg)' }}>
       <Suspense fallback={<MobileFallback />}>
         <Routes>
           <Route index element={<Navigate to="today" replace />} />
