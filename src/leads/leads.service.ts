@@ -1726,13 +1726,17 @@ export class LeadsService {
    */
   // Given a list of conversation IDs, return a map<convId, isAutoHandled>.
   //
-  // Rule: AI sent at least one pro message, no human pro message ever existed,
-  // and the customer has not replied since AI's last message. The earlier
-  // presence-based rule (`hasAi && !hasHuman && !hasCustomer`) collapsed all
-  // customer messages — including the initial inquiry that creates every TT/
-  // Yelp lead — so the filter hid almost nothing. Switching to timestamp
-  // comparison lets the initial inquiry count as "AI handled" once AI has
-  // replied to it.
+  // Rule: AI sent the LATEST message in the conversation. Anything else
+  // (customer reply, human reply, or no AI at all) means the lead needs the
+  // user's attention.
+  //
+  //   HIDE: pure AI thread, OR human acted then AI followed up
+  //   SHOW: customer just replied, human just replied (no AI follow-up yet),
+  //         or a new lead awaiting first response
+  //
+  // Past human/customer activity doesn't matter — only what's most recent.
+  // The earlier presence-based rule hid almost nothing because every TT/Yelp
+  // lead has a customer initial-inquiry message that disqualified it.
   private async computeAutoHandledFlags(
     conversationIds: string[],
   ): Promise<Map<string, boolean>> {
@@ -1775,10 +1779,13 @@ export class LeadsService {
     }
 
     for (const [convId, slot] of presence) {
+      // AI sent the latest message — its timestamp is strictly greater than
+      // any human pro send and any customer message. nulls are treated as
+      // -Infinity so they don't block the comparison.
       const isAuto =
         slot.lastAi !== null &&
-        slot.lastHuman === null &&
-        (slot.lastCustomer === null || slot.lastCustomer < slot.lastAi);
+        (slot.lastHuman === null || slot.lastAi > slot.lastHuman) &&
+        (slot.lastCustomer === null || slot.lastAi > slot.lastCustomer);
       result.set(convId, isAuto);
     }
     return result;
