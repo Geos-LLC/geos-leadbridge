@@ -850,34 +850,44 @@ export class AutomationService implements OnModuleInit {
     });
 
     // ── Manual-pro-recency pause ────────────────────────────────────────
-    // When a real human (manager) or a 3rd-party bridge (Telegram → TT)
-    // typed into this thread recently, the AI shouldn't talk over them.
-    // Pause ALL automated reply paths — both rule-driven (customer_reply
-    // AutomationRules below) and AI Conversation — for the configured
-    // window. Handoff alert above still fires so the dispatcher knows
-    // about high-intent customer messages even during the pause.
+    // When a real human (manager) or 3rd-party bridge (Telegram → TT)
+    // typed into this thread recently, AI shouldn't talk over them.
+    // Pause ALL automated reply paths — rule-driven customer_reply
+    // AutomationRules + AI Conversation — for the user's configured
+    // "Resume follow-ups after conversation" window. Handoff alert
+    // above still fires so dispatchers see high-intent customer messages
+    // even during the pause.
+    //
+    // We deliberately reuse the existing `fuReEnrollDelay` setting (UI:
+    // "Resume follow-ups after conversation · Wait before resuming")
+    // rather than introducing a new knob — semantically it's the same
+    // question: "after a conversation has happened, how long do we wait
+    // before automation resumes?". The string format matches the
+    // existing inline parser at follow-up-engine.service.ts:337-339
+    // ("24h", "1d", "1w", or bare minutes).
     //
     // The 'manual' senderType is stamped by the inbound webhook handler
     // when sender='pro' AND the row wasn't pre-written by our send path
     // (sendMessage stamps 'ai'/'user'). The 'user' senderType is what
-    // we set when an LB user types a manual reply through the desktop
-    // UI — same intent for this gate, treat it as "human is handling".
-    //
-    // Config: followUpSettingsJson.aiPauseAfterManualMinutes
-    //   - undefined → 30 min default
-    //   - number ≥ 0 → use as minutes
-    //   - 0          → disabled (no pause)
+    // we set when an LB user types a manual reply through the LB UI —
+    // same intent for this gate: a human is handling this thread.
     if (lead?.threadId) {
-      let pauseMinutes = 30;
+      let pauseMinutes = 60; // UI default: "1 hour"
       if (savedAccount.followUpSettingsJson) {
         try {
           const s = JSON.parse(savedAccount.followUpSettingsJson);
-          if (typeof s.aiPauseAfterManualMinutes === 'number'
-              && Number.isFinite(s.aiPauseAfterManualMinutes)
-              && s.aiPauseAfterManualMinutes >= 0) {
-            pauseMinutes = s.aiPauseAfterManualMinutes;
+          if (typeof s.fuReEnrollDelay === 'string' && s.fuReEnrollDelay) {
+            const d = s.fuReEnrollDelay.toLowerCase().trim();
+            const n = parseInt(d, 10);
+            if (Number.isFinite(n) && n >= 0) {
+              if (d.endsWith('w')) pauseMinutes = n * 10080;
+              else if (d.endsWith('d')) pauseMinutes = n * 1440;
+              else if (d.endsWith('h')) pauseMinutes = n * 60;
+              else if (d.endsWith('m') || d.endsWith('min')) pauseMinutes = n;
+              else pauseMinutes = n;
+            }
           }
-        } catch { /* invalid JSON — fall through to default */ }
+        } catch { /* invalid JSON — keep the 60-min default */ }
       }
       if (pauseMinutes > 0) {
         const cutoff = new Date(Date.now() - pauseMinutes * 60 * 1000);
@@ -893,7 +903,7 @@ export class AutomationService implements OnModuleInit {
         });
         if (manualReply) {
           this.logger.log(
-            `[AUTOMATION] ✗ Auto-reply paused — ${manualReply.senderType} pro message within ${pauseMinutes}min (msg=${manualReply.id} at=${manualReply.sentAt.toISOString()})`,
+            `[AUTOMATION] ✗ Auto-reply paused — ${manualReply.senderType} pro message within ${pauseMinutes}min via fuReEnrollDelay (msg=${manualReply.id} at=${manualReply.sentAt.toISOString()})`,
           );
           return;
         }
