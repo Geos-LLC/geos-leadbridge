@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Plus, Save, X, Loader2, Sparkles, AlertTriangle } from 'lucide-react';
+import { Plus, Save, X, Loader2, Sparkles, AlertTriangle, Eye } from 'lucide-react';
 import {
   partnerNetworkApi,
   type PartnerBusiness,
   type PartnerRelationship,
 } from '../../services/partnerNetwork';
 import { Card, Btn } from '../../components/ui';
+import {
+  WidgetPreview,
+  WIDGET_TEMPLATES,
+  OFFER_TEMPLATES,
+  type WidgetTemplate,
+} from './widgets/WidgetPreview';
 
 interface FormState {
   sourceBusinessId: string;
@@ -184,12 +190,25 @@ export default function PartnerNetworkRelationships() {
   // True when at least one of the picked businesses has cached site metadata
   // (set by the Verify button on the business form). Used to decide whether
   // to show the "Click Verify first for better results" hint.
-  const hasAnyMetadata = (() => {
-    const s = businesses.find(b => b.id === form.sourceBusinessId);
-    const d = businesses.find(b => b.id === form.destinationBusinessId);
-    return !!(s?.websiteMetadataJson || d?.websiteMetadataJson);
-  })();
+  const sourceBusiness = businesses.find(b => b.id === form.sourceBusinessId) || null;
+  const destinationBusiness = businesses.find(b => b.id === form.destinationBusinessId) || null;
+  const hasAnyMetadata = !!(sourceBusiness?.websiteMetadataJson || destinationBusiness?.websiteMetadataJson);
   const bothPicked = !!form.sourceBusinessId && !!form.destinationBusinessId;
+
+  // Constrain freeform widgetType strings to the three known templates;
+  // anything else (or empty) falls back to 'banner' so the preview always
+  // has something to render. Saved value stays a string per the existing
+  // PartnerRelationship.widgetType column.
+  const widgetTemplate: WidgetTemplate = ((): WidgetTemplate => {
+    const t = form.widgetType.trim().toLowerCase();
+    if (t === 'card' || t === 'modal' || t === 'banner') return t;
+    return 'banner';
+  })();
+  const setWidgetTemplate = (t: WidgetTemplate) => setForm(f => ({ ...f, widgetType: t }));
+
+  const applyOfferTemplate = (text: string) => {
+    setForm(f => ({ ...f, defaultOfferText: text }));
+  };
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -299,11 +318,31 @@ export default function PartnerNetworkRelationships() {
             </Field>
             <Field label="Default offer text" wide>
               <textarea value={form.defaultOfferText} onChange={e => setForm({ ...form, defaultOfferText: e.target.value })} style={{ ...inputStyle, minHeight: 80 }} placeholder="Get $25 off your first upholstery cleaning" />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--lb-ink-5)', alignSelf: 'center', textTransform: 'uppercase', letterSpacing: 0.04, fontWeight: 500 }}>
+                  Quick start:
+                </span>
+                {OFFER_TEMPLATES.map(t => (
+                  <button
+                    key={t.label}
+                    type="button"
+                    onClick={() => applyOfferTemplate(t.text(destinationBusiness?.name || 'this partner'))}
+                    style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 500,
+                      borderRadius: 999, border: '1px solid var(--lb-line)',
+                      background: 'var(--lb-surface)', color: 'var(--lb-ink-2)',
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </Field>
             <Field label="Notes" wide>
               <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} style={{ ...inputStyle, minHeight: 60 }} />
             </Field>
-            <Field label="Widget (future)" wide>
+            <Field label="Widget" wide>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
                 <input
                   type="checkbox"
@@ -312,38 +351,112 @@ export default function PartnerNetworkRelationships() {
                 />
                 Enable embeddable widget for this relationship
               </label>
-              <input
-                style={{ ...inputStyle, marginTop: 8 }}
-                placeholder="widgetType (optional, e.g. inline / popup)"
-                value={form.widgetType}
-                onChange={e => setForm({ ...form, widgetType: e.target.value })}
-                disabled={!form.widgetEnabled}
-              />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
-                <input
-                  style={inputStyle}
-                  type="number"
-                  min={0}
-                  max={120000}
-                  placeholder="popupDelayMs (e.g. 4000)"
-                  value={form.popupDelayMs}
-                  onChange={e => setForm({ ...form, popupDelayMs: e.target.value })}
-                  disabled={!form.widgetEnabled}
-                />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  <input
-                    type="checkbox"
-                    checked={form.autoOpenFromReferral}
-                    onChange={e => setForm({ ...form, autoOpenFromReferral: e.target.checked })}
-                    disabled={!form.widgetEnabled}
-                  />
-                  Auto-open when arriving with <code>?ref=</code>
-                </label>
-              </div>
-              <p style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 6 }}>
-                Placeholder — no widget runtime is shipped yet. Future loader will read these
-                flags to decide whether to expose <code>/r/:code</code> via <code>partner-widget.js</code>.
-              </p>
+
+              {form.widgetEnabled && (
+                <>
+                  {/* Template picker — three small cards, click to select.
+                      Saves the chosen key into widgetType so the future
+                      partner-widget.js runtime can read it as-is. */}
+                  <div style={{ marginTop: 12, marginBottom: 4 }}>
+                    <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.04, fontWeight: 500, marginBottom: 6 }}>
+                      Template
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      {WIDGET_TEMPLATES.map(t => {
+                        const active = widgetTemplate === t.key;
+                        return (
+                          <button
+                            key={t.key}
+                            type="button"
+                            onClick={() => setWidgetTemplate(t.key)}
+                            style={{
+                              padding: '10px 12px',
+                              borderRadius: 10,
+                              border: active ? '2px solid #7c3aed' : '1px solid var(--lb-line)',
+                              background: active ? '#faf5ff' : 'var(--lb-surface)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              fontFamily: 'inherit',
+                              transition: 'border-color 120ms, background 120ms',
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                              {t.label}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+                              {t.sublabel}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Behavior controls — only meaningful for card/modal which
+                      can pop after a delay or auto-open from ?ref=. Banner
+                      is always visible at page top, so the delay is ignored
+                      there. We keep both fields editable regardless and
+                      explain the no-op in the helper text. */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+                    <input
+                      style={inputStyle}
+                      type="number"
+                      min={0}
+                      max={120000}
+                      placeholder="popupDelayMs (e.g. 4000)"
+                      value={form.popupDelayMs}
+                      onChange={e => setForm({ ...form, popupDelayMs: e.target.value })}
+                      disabled={widgetTemplate === 'banner'}
+                    />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                      <input
+                        type="checkbox"
+                        checked={form.autoOpenFromReferral}
+                        onChange={e => setForm({ ...form, autoOpenFromReferral: e.target.checked })}
+                        disabled={widgetTemplate === 'banner'}
+                      />
+                      Auto-open when arriving with <code>?ref=</code>
+                    </label>
+                  </div>
+
+                  {/* Live preview — renders the chosen template on a mock
+                      partner-site frame using the real destination name +
+                      current offer text so the admin can iterate copy and
+                      style together. */}
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      fontSize: 11, color: 'var(--lb-ink-5)', textTransform: 'uppercase',
+                      letterSpacing: 0.04, fontWeight: 500, marginBottom: 6,
+                    }}>
+                      <Eye size={12} /> Preview
+                    </div>
+                    {bothPicked ? (
+                      <WidgetPreview
+                        template={widgetTemplate}
+                        destinationName={destinationBusiness?.name || ''}
+                        offerText={form.defaultOfferText}
+                        sourceName={sourceBusiness?.name || ''}
+                        sourceWebsite={sourceBusiness?.website || null}
+                      />
+                    ) : (
+                      <div style={{
+                        padding: 18, borderRadius: 10,
+                        border: '1px dashed var(--lb-line)',
+                        background: 'var(--lb-ink-12, #f7f7fa)',
+                        fontSize: 12, color: 'var(--lb-ink-5)', textAlign: 'center',
+                      }}>
+                        Pick a source and destination business above to see the preview.
+                      </div>
+                    )}
+                  </div>
+
+                  <p style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 10 }}>
+                    Preview only — the embed runtime (<code>partner-widget.js</code>) is shipping next.
+                    Your choices save now so the widget renders correctly the moment it goes live.
+                  </p>
+                </>
+              )}
             </Field>
           </div>
           <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
