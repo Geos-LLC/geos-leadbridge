@@ -849,6 +849,57 @@ export class AutomationService implements OnModuleInit {
       this.logger.warn(`[Handoff] alert failed: ${err.message}`);
     });
 
+    // ── Manual-pro-recency pause ────────────────────────────────────────
+    // When a real human (manager) or a 3rd-party bridge (Telegram → TT)
+    // typed into this thread recently, the AI shouldn't talk over them.
+    // Pause ALL automated reply paths — both rule-driven (customer_reply
+    // AutomationRules below) and AI Conversation — for the configured
+    // window. Handoff alert above still fires so the dispatcher knows
+    // about high-intent customer messages even during the pause.
+    //
+    // The 'manual' senderType is stamped by the inbound webhook handler
+    // when sender='pro' AND the row wasn't pre-written by our send path
+    // (sendMessage stamps 'ai'/'user'). The 'user' senderType is what
+    // we set when an LB user types a manual reply through the desktop
+    // UI — same intent for this gate, treat it as "human is handling".
+    //
+    // Config: followUpSettingsJson.aiPauseAfterManualMinutes
+    //   - undefined → 30 min default
+    //   - number ≥ 0 → use as minutes
+    //   - 0          → disabled (no pause)
+    if (lead?.threadId) {
+      let pauseMinutes = 30;
+      if (savedAccount.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(savedAccount.followUpSettingsJson);
+          if (typeof s.aiPauseAfterManualMinutes === 'number'
+              && Number.isFinite(s.aiPauseAfterManualMinutes)
+              && s.aiPauseAfterManualMinutes >= 0) {
+            pauseMinutes = s.aiPauseAfterManualMinutes;
+          }
+        } catch { /* invalid JSON — fall through to default */ }
+      }
+      if (pauseMinutes > 0) {
+        const cutoff = new Date(Date.now() - pauseMinutes * 60 * 1000);
+        const manualReply = await this.prisma.message.findFirst({
+          where: {
+            conversationId: lead.threadId,
+            sender: 'pro',
+            senderType: { in: ['manual', 'user'] },
+            sentAt: { gte: cutoff },
+          },
+          orderBy: { sentAt: 'desc' },
+          select: { id: true, senderType: true, sentAt: true },
+        });
+        if (manualReply) {
+          this.logger.log(
+            `[AUTOMATION] ✗ Auto-reply paused — ${manualReply.senderType} pro message within ${pauseMinutes}min (msg=${manualReply.id} at=${manualReply.sentAt.toISOString()})`,
+          );
+          return;
+        }
+      }
+    }
+
     // Find enabled customer_reply rules for this account
     const rules = await this.prisma.automationRule.findMany({
       where: {

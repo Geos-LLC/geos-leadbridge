@@ -660,6 +660,31 @@ export class WebhooksService {
 
     this.logger.log(`Message sender detected: from="${data.from}", sender="${sender}"`);
 
+    // Detect external pro messages — a "pro" message we didn't send. Two
+    // sources in the wild:
+    //   (a) a manager / dispatcher typing in the Thumbtack inbox directly
+    //   (b) a 3rd-party bridge (e.g. Telegram → Thumbtack) posting via TT
+    // We need to tell these apart from our own AI / manual sends so
+    // downstream automation (AI Conversation, follow-up engine) can
+    // back off and not talk over a human. Our send path stamps
+    // senderType='ai' or 'user' on the same Message row via leads.service.
+    // If we don't already have a row OR the row has senderType=null, it
+    // means it wasn't us — stamp 'manual'.
+    //
+    // Race protection: leads.service.sendMessage's COALESCE update will
+    // overwrite 'manual' → 'ai'/'user' if the webhook beats our own send.
+    let isExternalProMessage = false;
+    if (sender === 'pro') {
+      const existing = await this.prisma.message.findUnique({
+        where: { platform_externalMessageId: { platform, externalMessageId: messageId } },
+        select: { senderType: true },
+      });
+      // No row yet → we definitely didn't send it.
+      // Existing row with null senderType → also not us (sendMessage
+      //   always stamps 'ai' or 'user'). Treat as external.
+      isExternalProMessage = !existing || existing.senderType == null;
+    }
+
     // Use upsert to handle race conditions and duplicates atomically
     try {
       await this.prisma.message.upsert({
@@ -675,6 +700,10 @@ export class WebhooksService {
           platform,
           externalMessageId: messageId,
           sender,
+          // Stamp 'manual' on external pro messages so AI Conversation +
+          // follow-up engine can detect them. Customer messages keep
+          // senderType=null (we don't distinguish customer subtypes).
+          senderType: isExternalProMessage ? 'manual' : undefined,
           content: messageContent,
           isRead: sender === 'pro', // Mark own messages as read
           sentAt: messageTimestamp,
@@ -691,6 +720,19 @@ export class WebhooksService {
         return;
       }
       throw error;
+    }
+
+    // COALESCE-style stamp: if the row existed with null senderType
+    // (rare — usually means a prior duplicate webhook beat the upsert),
+    // mark it 'manual' now. Symmetric with leads.service.sendMessage's
+    // updateMany so manual/ai/user converge on the correct final value
+    // regardless of arrival order.
+    if (isExternalProMessage) {
+      await this.prisma.message.updateMany({
+        where: { platform, externalMessageId: messageId, senderType: null },
+        data: { senderType: 'manual' },
+      });
+      this.logger.log(`[manual-pro] Detected external pro message: ${messageId} (conv=${conversation.id})`);
     }
 
     // Update conversation's lastMessageAt and unread count
@@ -786,8 +828,15 @@ export class WebhooksService {
       }
     }
 
-    // Evaluate thread for follow-up enrollment after pro/AI message
-    if (sender === 'pro') {
+    // Evaluate thread for follow-up enrollment after pro/AI message.
+    // Skip on manual pro messages — a human (manager) or 3rd-party bridge
+    // chiming in mid-thread shouldn't reset / re-arm the follow-up clock.
+    // Their reply isn't an AI handoff signal; treating it as one creates
+    // enrollment churn (every manual reply spawns a new enrollment that
+    // immediately gets stopped by the next customer reply). The customer's
+    // next silence will still arm a follow-up via leads.service.sendMessage
+    // when our own AI / templated reply goes out.
+    if (sender === 'pro' && !isExternalProMessage) {
       try {
         await this.followUpEngine.evaluateThread(conversation.id, platform);
       } catch (err: any) {
