@@ -49,7 +49,13 @@ export function ProtectedRoute() {
   }, [isAuthenticated, location.pathname]);
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Preserve the user's intended destination so the post-login redirect
+    // lands them where they actually wanted to go (e.g. a deep link into
+    // /m/today from an installed PWA). Login.tsx reads `returnTo` from
+    // the query string and navigates to it on successful auth.
+    const dest = `${location.pathname}${location.search}${location.hash}`;
+    const safe = dest && dest !== '/login' ? `?returnTo=${encodeURIComponent(dest)}` : '';
+    return <Navigate to={`/login${safe}`} replace />;
   }
 
   // First-render gate: show a loading skeleton (not a blank screen) while the

@@ -1,13 +1,27 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, Zap, ShieldCheck, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../services/api';
 import { trackEvent } from '../services/analytics';
 
+// Post-login redirect target. Read from ?returnTo= and validated against
+// open-redirect: only same-origin relative paths (start with `/`, not
+// `//host`) are accepted. The mobile PWA install flow relies on this —
+// without it /m bounces to /login and login hardcodes /overview, so the
+// user never actually reaches the mobile UI.
+function safeReturnTo(raw: string | null): string {
+  if (!raw) return '/overview';
+  if (!raw.startsWith('/')) return '/overview';
+  if (raw.startsWith('//')) return '/overview';
+  return raw;
+}
+
 export function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
   const setAuth = useAuthStore((state) => state.setAuth);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +44,7 @@ export function Login() {
         localStorage.removeItem('lb_fresh_signup');
         localStorage.setItem('lb_has_logged_in', '1');
       }
-      navigate('/overview');
+      navigate(returnTo);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to sign in. Please check your credentials.');
     } finally {

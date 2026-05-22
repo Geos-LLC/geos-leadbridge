@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
@@ -66,6 +66,17 @@ const DemoInsightsView = lazy(() => import('./pages/Demo').then(m => ({ default:
 const DemoPricingView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoPricingView })));
 const DemoSettingsView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoSettingsView })));
 
+// When an already-signed-in user hits /login (e.g. they followed a
+// ?returnTo=... link), respect the returnTo instead of dumping them at
+// /overview. Same safe-redirect rules as Login.tsx (must be a relative
+// path under our own origin).
+function LoginRedirect() {
+  const [searchParams] = useSearchParams();
+  const raw = searchParams.get('returnTo');
+  const target = raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/overview';
+  return <Navigate to={target} replace />;
+}
+
 function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
@@ -79,11 +90,15 @@ function App() {
           <Route path="/" element={<Landing />} />
 
           {/* Mobile preview gate — bare /m bounces to login if unauth,
-              otherwise drops the user into the mobile app. The full /m/*
-              tree mounts below inside <ProtectedRoute />. */}
+              otherwise drops the user into the mobile app. `returnTo`
+              is the post-login redirect target — without it, login
+              hardcodes /overview (desktop) and the PWA install flow
+              never reaches the mobile UI. */}
           <Route
             path="/m"
-            element={isAuthenticated ? <Navigate to="/m/today" replace /> : <Navigate to="/login" replace />}
+            element={isAuthenticated
+              ? <Navigate to="/m/today" replace />
+              : <Navigate to="/login?returnTo=%2Fm%2Ftoday" replace />}
           />
 
           {/* Partner Network public referral page — no auth, no app layout. */}
@@ -91,7 +106,7 @@ function App() {
           <Route path="/security" element={<Security />} />
           <Route
             path="/login"
-            element={isAuthenticated ? <Navigate to="/overview" /> : <Login />}
+            element={isAuthenticated ? <LoginRedirect /> : <Login />}
           />
           <Route
             path="/register"
