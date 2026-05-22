@@ -8,6 +8,8 @@ import {
 } from '../../components/automation/ui';
 import { usersApi, templatesApi, thumbtackApi, notificationsApi, type TenantPhoneNumber } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import { notify } from '../../store/notificationStore';
+import { LeadBridgeNumberManager } from '../../components/LeadBridgeNumberManager';
 import type { MessageTemplate, SavedAccount } from '../../types';
 
 function formatPhone(e164: string | null): string {
@@ -22,8 +24,14 @@ export function SettingsCommunication() {
   const location = useLocation();
   const fromState = { from: location.pathname + location.search, fromLabel: 'Settings · Communication' };
   const user = useAuthStore(s => s.user) as any;
-  const [leadBridgeNumber, setLeadBridgeNumber] = useState<string | null>(null);
+  const authToken = useAuthStore(s => s.token);
+  const setAuth = useAuthStore(s => s.setAuth);
+  const canPurchase = !!(user?.trialActive || user?.subscriptionTier === 'PRO' || user?.subscriptionTier === 'ENTERPRISE');
   const [loadingPhone, setLoadingPhone] = useState(true);
+  const [editingBusinessPhone, setEditingBusinessPhone] = useState(false);
+  const [businessPhoneValue, setBusinessPhoneValue] = useState('');
+  const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
+  const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
   const [twoWay, setTwoWay] = useState(true);
   const [routeReplies, setRouteReplies] = useState(true);
   const [honorStop, setHonorStop] = useState(true);
@@ -43,9 +51,8 @@ export function SettingsCommunication() {
       templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
       thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
       notificationsApi.listTenantPhones().catch(() => ({ success: false, data: [] as TenantPhoneNumber[] })),
-    ]).then(([phoneRes, tplRes, acctRes, tpnRes]) => {
+    ]).then(([_phoneRes, tplRes, acctRes, tpnRes]) => {
       if (!alive) return;
-      setLeadBridgeNumber(phoneRes.phoneNumber);
       setTemplates(tplRes.templates || []);
       setAccounts(acctRes.accounts || []);
       setTenantPhones((tpnRes.data || []).filter((p: TenantPhoneNumber) => p.status === 'ACTIVE'));
@@ -74,7 +81,6 @@ export function SettingsCommunication() {
   const liveContactTpl = findTpl('Live Contact Alert', 'TT - Live Contact Alert', 'AI Live Contact Alert', 'live contact');
 
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
-  const goEditProfile = () => navigate('/settings?tab=general');
 
   function toE164(raw: string): string {
     const digits = (raw || '').replace(/\D/g, '');
@@ -85,6 +91,43 @@ export function SettingsCommunication() {
   }
   function isValidE164(value: string): boolean {
     return /^\+[1-9]\d{7,14}$/.test(value);
+  }
+
+  async function reloadTenantPhones() {
+    try {
+      const r = await notificationsApi.listTenantPhones();
+      setTenantPhones((r.data || []).filter((p: TenantPhoneNumber) => p.status === 'ACTIVE'));
+    } catch { /* keep stale list */ }
+  }
+
+  async function handleSaveBusinessPhone() {
+    setBusinessPhoneError(null);
+    const trimmed = businessPhoneValue.trim();
+    let value: string | null;
+    if (!trimmed) {
+      value = null;
+    } else {
+      const e164 = toE164(trimmed);
+      if (!isValidE164(e164)) {
+        setBusinessPhoneError('Phone must be E.164 (e.g. +12125550100)');
+        return;
+      }
+      value = e164;
+    }
+    setSavingBusinessPhone(true);
+    try {
+      const res = await usersApi.updateProfile({ businessPhone: value ?? undefined });
+      if (authToken) {
+        setAuth({ ...(user as any), ...res.user }, authToken);
+      }
+      setEditingBusinessPhone(false);
+      setBusinessPhoneValue('');
+      notify.success('Saved', value ? 'Business phone updated' : 'Business phone cleared');
+    } catch (err: any) {
+      setBusinessPhoneError(err?.response?.data?.message || err?.message || 'Failed to save');
+    } finally {
+      setSavingBusinessPhone(false);
+    }
   }
 
   async function handleSaveOverride(accountId: string) {
@@ -138,27 +181,53 @@ export function SettingsCommunication() {
         contentPad="8px 24px 24px"
       >
         <FieldRow icon={Phone} iconTone="violet" label="Business phone" sublabel="Where lead calls forward when bridged.">
-          <PhoneTile
-            number={formatPhone(businessPhone)}
-            label={businessPhone ? 'Primary' : 'Set your business phone in profile'}
-            verified={!!businessPhone}
-            onEdit={goEditProfile}
-          />
-        </FieldRow>
-        <FieldRow icon={PhoneCall} iconTone="blue" label="Leadbridge number" sublabel="The number Leadbridge texts customers from." noBorder>
-          {loadingPhone ? (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13 }}>
-              <Loader2 size={14} className="animate-spin" /> Loading…
-            </div>
+          {editingBusinessPhone ? (
+            <AlertPhoneEditor
+              value={businessPhoneValue}
+              onChange={setBusinessPhoneValue}
+              onSave={handleSaveBusinessPhone}
+              onCancel={() => { setEditingBusinessPhone(false); setBusinessPhoneValue(''); setBusinessPhoneError(null); }}
+              saving={savingBusinessPhone}
+              placeholder="+12125550100"
+              error={businessPhoneError}
+            />
           ) : (
             <PhoneTile
-              number={formatPhone(leadBridgeNumber)}
-              label={leadBridgeNumber ? 'Provisioned by Leadbridge' : 'No dedicated number yet'}
-              leadbridge
-              onEdit={goEditProfile}
+              number={formatPhone(businessPhone)}
+              label={businessPhone ? 'Primary' : 'Set your business phone'}
+              verified={!!businessPhone}
+              onEdit={() => {
+                setBusinessPhoneValue(businessPhone || '');
+                setEditingBusinessPhone(true);
+                setBusinessPhoneError(null);
+              }}
             />
           )}
         </FieldRow>
+        <div style={{ paddingTop: 16, marginTop: 16, borderTop: '1px solid var(--lb-line-soft)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+            <div style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)' }}>LeadBridge numbers</div>
+              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+                Numbers Leadbridge texts customers from. Per‑business routing shown below.
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {loadingPhone || loadingPerBusiness ? (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13 }}>
+                  <Loader2 size={14} className="animate-spin" /> Loading…
+                </div>
+              ) : (
+                <LeadBridgeNumberManager
+                  accounts={accounts}
+                  canPurchase={canPurchase}
+                  onSuccess={msg => { notify.success('Success', msg); reloadTenantPhones(); }}
+                  onError={msg => notify.error('Error', msg)}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       </SettingCard>
 
       <SettingCard
