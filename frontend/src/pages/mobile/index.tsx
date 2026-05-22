@@ -12,6 +12,7 @@ import { Route, Routes, Navigate } from 'react-router-dom';
 const MOverview = lazy(() => import('./screens/MOverview'));
 const MLeads = lazy(() => import('./screens/MLeads'));
 const MLeadThread = lazy(() => import('./screens/MLeadThread'));
+const MLeadProfile = lazy(() => import('./screens/MLeadProfile'));
 const MAutomationHub = lazy(() => import('./screens/MAutomationHub'));
 const MAutomationRespond = lazy(() => import('./screens/MAutomationRespond'));
 const MAutomationFollowups = lazy(() => import('./screens/MAutomationFollowups'));
@@ -37,6 +38,7 @@ export default function MobileApp() {
           <Route path="today" element={<MOverview />} />
           <Route path="leads" element={<MLeads />} />
           <Route path="leads/:id" element={<MLeadThread />} />
+          <Route path="leads/:id/profile" element={<MLeadProfile />} />
           <Route path="automation" element={<MAutomationHub />} />
           <Route path="automation/respond" element={<MAutomationRespond />} />
           <Route path="automation/engage" element={<MAutomationFollowups />} />

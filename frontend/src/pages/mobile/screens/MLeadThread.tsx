@@ -1,21 +1,23 @@
 import { useState, type CSSProperties } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Avatar, Icon, MAppBar, MBack, MCard, MIconBtn, MShell, PlatformBadge, StatusPill,
 } from '../components';
 import { useMobileLead, useMobileMessages } from '../hooks';
-import { leadsApi } from '../../../services/api';
+import { aiApi, leadsApi } from '../../../services/api';
 import { MErrorState, MLoading } from '../states';
 import type { MobileMessage } from '../data';
 
-function qaBtn(primary?: boolean): CSSProperties {
+function qaBtn(primary?: boolean, disabled?: boolean): CSSProperties {
   return {
     flex: 1, padding: '8px 10px',
     border: '1px solid ' + (primary ? 'var(--accent)' : 'var(--line)'),
     background: primary ? 'var(--accent)' : 'var(--surface)',
     color: primary ? 'white' : 'var(--ink-2)',
     borderRadius: 8, fontWeight: 600, fontSize: 12,
-    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
   };
 }
 
@@ -50,11 +52,15 @@ function MMessage({ m }: { m: MobileMessage }) {
 
 export default function MLeadThread() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const leadState = useMobileLead(id);
   const messagesState = useMobileMessages(id);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [showBookBanner, setShowBookBanner] = useState(false);
 
   const lead = leadState.data;
   const messages = messagesState.data || [];
@@ -66,8 +72,6 @@ export default function MLeadThread() {
     try {
       await leadsApi.sendMessage(id, draft.trim());
       setDraft('');
-      // Reload messages — bounce the state by triggering a re-fetch in the
-      // hook. Simpler: full reload from the URL.
       window.location.reload();
     } catch (err: any) {
       setSendError(err?.message || 'Send failed');
@@ -76,16 +80,55 @@ export default function MLeadThread() {
     }
   }
 
+  // Generate an AI draft using the current conversation context. Drops
+  // the result into the composer so the user can review/edit before
+  // sending — never auto-sends. Mirrors what the desktop "Suggest"
+  // button does on Messages.tsx.
+  async function generate() {
+    if (!id || generating) return;
+    if (!lead?.id || !messages.length) {
+      setGenError('Need at least one customer message before generating.');
+      return;
+    }
+    // The latest customer message anchors the AI's reply.
+    const lastCustomer = [...messages].reverse().find((m) => m.from === 'lead');
+    if (!lastCustomer) {
+      setGenError('No customer message to respond to yet.');
+      return;
+    }
+    setGenerating(true);
+    setGenError(null);
+    try {
+      // previewWithContext pulls the full thread context server-side,
+      // so we don't have to re-send conversation history.
+      const conversationId = (lead as any).threadId || id;
+      const { reply } = await aiApi.previewWithContext(id, conversationId, lastCustomer.text);
+      setDraft(reply || '');
+    } catch (err: any) {
+      setGenError(err?.message || 'Could not generate a reply');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   return (
     <MShell
       tab="leads"
-      hideTabBar
       appBar={
         <MAppBar
           leading={<MBack label="" />}
           title={lead?.name || 'Lead'}
           subtitle={lead ? `${lead.service || 'Lead'} · ${lead.location.split(',')[0] || ''}` : ''}
-          trailing={<><MIconBtn icon="phone" color="var(--accent)" /><MIconBtn icon="more-horizontal" /></>}
+          trailing={
+            <>
+              {lead?.phone && (
+                <a href={`tel:${lead.phone}`} style={{ display: 'inline-flex' }}>
+                  <MIconBtn icon="phone" color="var(--accent)" />
+                </a>
+              )}
+              <MIconBtn icon="more-horizontal" />
+            </>
+          }
         />
       }
     >
@@ -116,10 +159,65 @@ export default function MLeadThread() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button type="button" style={qaBtn(true)}><Icon name="file-text" size={13} /> Send quote</button>
-              <button type="button" style={qaBtn()}><Icon name="calendar" size={13} /> Book</button>
-              <button type="button" style={qaBtn()}><Icon name="user" size={13} /> Profile</button>
+              {/* Generate: AI-draft an answer into the composer. The user can
+                  edit before sending — never auto-sends. */}
+              <button
+                type="button"
+                onClick={() => void generate()}
+                disabled={generating}
+                style={qaBtn(true, generating)}
+              >
+                <Icon name="sparkles" size={13} /> {generating ? 'Generating…' : 'Generate'}
+              </button>
+
+              {/* Book is a teaser today — actual booking lives on
+                  service-flow.pro; show a banner instead of a fake screen. */}
+              <button
+                type="button"
+                onClick={() => setShowBookBanner((v) => !v)}
+                style={qaBtn()}
+              >
+                <Icon name="calendar" size={13} /> Book
+              </button>
+
+              {/* Profile opens the full lead detail page (desktop's
+                  right-panel content), reached via /m/leads/:id/profile. */}
+              <button
+                type="button"
+                onClick={() => navigate(`/m/leads/${id}/profile`)}
+                style={qaBtn()}
+              >
+                <Icon name="user" size={13} /> Profile
+              </button>
             </div>
+            {showBookBanner && (
+              <div style={{
+                marginTop: 10, padding: '10px 12px',
+                background: 'var(--accent-tint)', border: '1px solid var(--accent-line)',
+                borderRadius: 10, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5,
+                display: 'flex', gap: 10,
+              }}>
+                <Icon name="info" size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: 'var(--ink-1)' }}>Connect to ServiceFlow.pro to enable booking.</strong>
+                  <div style={{ marginTop: 3 }}>
+                    Bookings flow through your ServiceFlow account. Set it up once and
+                    "Book" creates a real calendar invite from here.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBookBanner(false)}
+                  style={{
+                    background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+                    color: 'var(--ink-5)', display: 'inline-flex', alignItems: 'center',
+                  }}
+                  aria-label="Dismiss"
+                >
+                  <Icon name="check" size={14} />
+                </button>
+              </div>
+            )}
           </MCard>
         </div>
       )}
@@ -135,10 +233,15 @@ export default function MLeadThread() {
         {messages.map((m, i) => <MMessage key={i} m={m} />)}
       </div>
 
+      {genError && (
+        <div style={{ padding: '0 14px 8px', fontSize: 12, color: 'var(--danger)' }}>{genError}</div>
+      )}
       {sendError && (
         <div style={{ padding: '0 14px 8px', fontSize: 12, color: 'var(--danger)' }}>{sendError}</div>
       )}
 
+      {/* Composer — sticky inside the scrollable region, so it sits at
+          the bottom of the scroll area just above the bottom tab bar. */}
       <div style={{
         position: 'sticky', bottom: 0,
         padding: '8px 12px 12px', background: 'var(--surface)',
