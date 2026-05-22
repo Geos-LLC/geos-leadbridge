@@ -133,8 +133,11 @@ export function SettingsCommunication() {
           </div>
         ) : (
           accounts.map((acct, idx) => {
+            // Mirror backend resolveBotPhone: account-scoped → unassigned → any active TPN.
+            // When only one number exists tenant-wide, it serves every business as "Shared".
             const assignedPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
               || tenantPhones.find(p => !p.savedAccountId)
+              || tenantPhones[0]
               || null;
             const lbShared = !!assignedPhone && assignedPhone.savedAccountId !== acct.id;
             const alertPhone = acct.agentPhoneOverride || businessPhone;
