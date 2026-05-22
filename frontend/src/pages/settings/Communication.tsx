@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2,
+  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, FileText, Check, Zap, Loader2, Building2,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, InfoTile, Checkbox, ActionLink,
 } from '../../components/automation/ui';
-import { usersApi, templatesApi } from '../../services/api';
+import { usersApi, templatesApi, thumbtackApi, notificationsApi, type TenantPhoneNumber } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
-import type { MessageTemplate } from '../../types';
+import type { MessageTemplate, SavedAccount } from '../../types';
 
 function formatPhone(e164: string | null): string {
   if (!e164) return '—';
@@ -28,17 +28,28 @@ export function SettingsCommunication() {
   const [routeReplies, setRouteReplies] = useState(true);
   const [honorStop, setHonorStop] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [loadingPerBusiness, setLoadingPerBusiness] = useState(true);
 
   useEffect(() => {
     let alive = true;
     Promise.all([
       usersApi.getMyPhoneNumber().catch(() => ({ phoneNumber: null as string | null, allocationId: null, hasPhoneNumber: false })),
       templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
-    ]).then(([phoneRes, tplRes]) => {
+      thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
+      notificationsApi.listTenantPhones().catch(() => ({ success: false, data: [] as TenantPhoneNumber[] })),
+    ]).then(([phoneRes, tplRes, acctRes, tpnRes]) => {
       if (!alive) return;
       setLeadBridgeNumber(phoneRes.phoneNumber);
       setTemplates(tplRes.templates || []);
-    }).finally(() => { if (alive) setLoadingPhone(false); });
+      setAccounts(acctRes.accounts || []);
+      setTenantPhones((tpnRes.data || []).filter((p: TenantPhoneNumber) => p.status === 'ACTIVE'));
+    }).finally(() => {
+      if (!alive) return;
+      setLoadingPhone(false);
+      setLoadingPerBusiness(false);
+    });
     return () => { alive = false; };
   }, []);
 
@@ -105,6 +116,62 @@ export function SettingsCommunication() {
       </SettingCard>
 
       <SettingCard
+        icon={Building2}
+        iconTone="blue"
+        title="Per business"
+        subtitle="Which LeadBridge number and alert phone each connected source uses."
+        contentPad="8px 24px 24px"
+      >
+        {loadingPerBusiness ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13, padding: '12px 0' }}>
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : accounts.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', padding: '12px 0' }}>
+            No connected sources yet. Connect Thumbtack, Yelp or Angi from the
+            {' '}<ActionLink onClick={() => navigate('/settings?tab=accounts')}>Connected Sources</ActionLink> tab.
+          </div>
+        ) : (
+          accounts.map((acct, idx) => {
+            const assignedPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
+              || tenantPhones.find(p => !p.savedAccountId)
+              || null;
+            const lbShared = !!assignedPhone && assignedPhone.savedAccountId !== acct.id;
+            const alertPhone = acct.agentPhoneOverride || businessPhone;
+            const usingOverride = !!acct.agentPhoneOverride;
+            return (
+              <FieldRow
+                key={acct.id}
+                icon={Building2}
+                iconTone={acct.platform === 'yelp' ? 'orange' : 'blue'}
+                label={acct.businessName}
+                sublabel={acct.platform.charAt(0).toUpperCase() + acct.platform.slice(1)}
+                align="top"
+                noBorder={idx === accounts.length - 1}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <PerBusinessTile
+                    icon={PhoneCall}
+                    label="LeadBridge number"
+                    value={assignedPhone ? formatPhone(assignedPhone.phoneNumber) : 'Not assigned'}
+                    badge={!assignedPhone ? null : lbShared ? { text: 'Shared', tone: 'slate' } : { text: 'Dedicated', tone: 'blue' }}
+                    muted={!assignedPhone}
+                  />
+                  <PerBusinessTile
+                    icon={Phone}
+                    label="Alert phone"
+                    value={alertPhone ? formatPhone(alertPhone) : 'Not set'}
+                    badge={!alertPhone ? null : usingOverride ? { text: 'Override', tone: 'amber' } : { text: 'Default', tone: 'slate' }}
+                    muted={!alertPhone}
+                  />
+                </div>
+              </FieldRow>
+            );
+          })
+        )}
+      </SettingCard>
+
+      <SettingCard
         icon={MessageSquare}
         iconTone="green"
         title="SMS"
@@ -159,6 +226,56 @@ export function SettingsCommunication() {
           />
         </FieldRow>
       </SettingCard>
+    </div>
+  );
+}
+
+function PerBusinessTile({
+  icon: Icon, label, value, badge, muted,
+}: {
+  icon: typeof Phone;
+  label: string;
+  value: string;
+  badge: { text: string; tone: 'blue' | 'amber' | 'slate' } | null;
+  muted?: boolean;
+}) {
+  const tonePalette: Record<'blue' | 'amber' | 'slate', { bg: string; fg: string }> = {
+    blue:  { bg: '#dbeafe', fg: '#1d4ed8' },
+    amber: { bg: '#fef3c7', fg: '#b45309' },
+    slate: { bg: '#f1f5f9', fg: '#475569' },
+  };
+  const tone = badge ? tonePalette[badge.tone] : null;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '10px 12px',
+      background: '#f8fafc',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+      minWidth: 0,
+    }}>
+      <Icon size={14} style={{ color: 'var(--lb-ink-6)', flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 700,
+          color: muted ? 'var(--lb-ink-5)' : 'var(--lb-ink-1)',
+          fontFamily: 'var(--lb-font-mono)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {value}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', marginTop: 1 }}>{label}</div>
+      </div>
+      {badge && tone && (
+        <span style={{
+          padding: '2px 8px', borderRadius: 999,
+          background: tone.bg, color: tone.fg,
+          fontSize: 10.5, fontWeight: 600,
+          whiteSpace: 'nowrap',
+        }}>
+          {badge.text}
+        </span>
+      )}
     </div>
   );
 }
