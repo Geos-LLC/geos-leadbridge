@@ -588,13 +588,19 @@ export class FollowUpEngineController {
     if (availability !== undefined) extendedSettings.followUpAvailability = availability;
     if (strategyMode !== undefined) extendedSettings.followUpStrategyMode = strategyMode;
     if (scenarios !== undefined) extendedSettings.followUpScenarios = scenarios;
-    if (stopOnReply !== undefined) extendedSettings.followUpStopOnReply = stopOnReply;
-    if (stopOnOptOut !== undefined) extendedSettings.followUpStopOnOptOut = stopOnOptOut;
-    if (stopOnBooked !== undefined) extendedSettings.followUpStopOnBooked = stopOnBooked;
+    // Removed 2026-05-22: stopOnReply / stopOnOptOut / stopOnBooked were
+    // write-only JSON keys (no UI input, no backend read at runtime).
+    // Real behavior is governed by fuReEnrollOnSilence (resume after
+    // conversation), aiHiredCompetitorReengage / aiDeferralCheckIn (per-
+    // intent re-engage), and the canonical Lead.status pipeline
+    // (applyCustomerReplyStatusTransition → 'lost' / 'booked' →
+    // terminal-status gate in follow-up + AI Conversation paths).
     if (onNo !== undefined) extendedSettings.followUpOnNo = onNo;
     if (retryDays !== undefined) extendedSettings.followUpRetryDays = retryDays;
     if (urgentCapability !== undefined) extendedSettings.followUpUrgentCapability = urgentCapability;
-    if (body.applyToExisting !== undefined) extendedSettings.followUpApplyToExisting = body.applyToExisting;
+    // applyToExisting was a duplicate of includeHistorical — same value
+    // sent under two names by the frontend. includeHistorical drives the
+    // actual backfill below; this JSON-only write was vestigial.
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
     // 'range' | 'exact' — toggles range-vs-exact pricing instruction in the AI prompt.

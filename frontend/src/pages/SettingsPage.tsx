@@ -1086,7 +1086,6 @@ export default function SettingsPage() {
                             try {
                               await followUpApi.saveSettings(importAccountId, {
                                 includeHistorical: next,
-                                applyToExisting: next,
                               } as any);
                             } catch {
                               // Revert on failure so the UI doesn't lie about state.
@@ -1492,7 +1491,6 @@ export default function SettingsPage() {
                               try {
                                 await followUpApi.saveSettings(importAccountId, {
                                   includeHistorical: next,
-                                  applyToExisting: next,
                                 } as any);
                               } catch {
                                 setImportFuHistorical(!next);
