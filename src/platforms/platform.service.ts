@@ -1112,8 +1112,14 @@ export class PlatformService {
       // autoProvisionSigcore failed earlier — nothing to seed onto.
       return;
     }
-    if (existing.enabled || existing.notificationRules.length > 0) {
-      // Already configured by the user (or a previous seed run).
+    // Skip ONLY when there's a real rule on this account. `enabled=true` by
+    // itself is unreliable — autoProvisionSigcore (or an admin tool) can flip
+    // the settings row to enabled without creating any rules, which would
+    // otherwise leave the account stuck in "configured but unusable" state
+    // (zero rules → health check returns "No new_lead SMS rules configured").
+    // Without this loosening, re-saves / reconnects on a stuck account would
+    // bail before re-seeding and the account never recovers.
+    if (existing.notificationRules.length > 0) {
       return;
     }
 
