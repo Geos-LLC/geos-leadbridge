@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, ChevronDown, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail, UserCheck,
+  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail, UserCheck,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Checkbox, ActionLink,
@@ -44,13 +44,14 @@ export function SettingsCommunication() {
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
-  // Business Alerts (per-account NotificationRule + aiConversationEnabled status)
-  const [alertAccountId, setAlertAccountId] = useState<string>('');
-  const [newLeadRule, setNewLeadRule] = useState<NotificationRule | null>(null);
-  const [customerReplyRule, setCustomerReplyRule] = useState<NotificationRule | null>(null);
-  const [aiHandoffOn, setAiHandoffOn] = useState<boolean>(false);
+  // Business Alerts state — cascades across every connected account.
+  // We keep per-account snapshots so toggles can derive an aggregate
+  // (all-on / all-off / mixed) without an extra fetch.
+  const [newLeadByAccount, setNewLeadByAccount] = useState<Record<string, NotificationRule | null>>({});
+  const [customerReplyByAccount, setCustomerReplyByAccount] = useState<Record<string, NotificationRule | null>>({});
+  const [aiHandoffByAccount, setAiHandoffByAccount] = useState<Record<string, boolean>>({});
   const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
-  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | null>(null);
+  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | 'ai_handoff' | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -72,35 +73,41 @@ export function SettingsCommunication() {
     return () => { alive = false; };
   }, []);
 
-  // Default the alert-account selector once the account list arrives.
+  // Load the Business Alerts state across EVERY account whenever the
+  // account list arrives. Cascade design — there is no per-account
+  // selector here; the toggles act on all accounts in parallel.
   useEffect(() => {
-    if (!alertAccountId && accounts.length > 0) {
-      setAlertAccountId(accounts[0].id);
-    }
-  }, [accounts, alertAccountId]);
-
-  // Reload the per-account rule state + handoff status whenever the
-  // alert-card account selector changes.
-  useEffect(() => {
-    if (!alertAccountId) return;
+    if (accounts.length === 0) return;
     let alive = true;
     setLoadingAlerts(true);
-    Promise.all([
-      notificationsApi.getRules(alertAccountId).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
-      followUpApi.getSettings(alertAccountId).catch(() => ({ success: false, settings: undefined })),
-    ]).then(([rulesRes, fuRes]) => {
+    Promise.all(accounts.map(a =>
+      Promise.all([
+        notificationsApi.getRules(a.id).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
+        followUpApi.getSettings(a.id).catch(() => ({ success: false, settings: undefined })),
+      ]).then(([rulesRes, fuRes]) => ({
+        accountId: a.id,
+        rules: (rulesRes.rules || []) as NotificationRule[],
+        aiOn: !!((fuRes as any)?.settings?.aiConversationEnabled),
+      })),
+    )).then(results => {
       if (!alive) return;
-      const rules = (rulesRes.rules || []) as NotificationRule[];
-      // Owner-side alerts only — exclude sendToCustomer rules (auto-reply lives on Automation).
-      setNewLeadRule(rules.find(r => r.triggerType === 'new_lead' && !r.sendToCustomer) || null);
-      setCustomerReplyRule(rules.find(r => r.triggerType === 'customer_reply' && !r.sendToCustomer) || null);
-      const aiOn = !!((fuRes as any)?.settings?.aiConversationEnabled);
-      setAiHandoffOn(aiOn);
+      const newLeadMap: Record<string, NotificationRule | null> = {};
+      const replyMap: Record<string, NotificationRule | null> = {};
+      const aiMap: Record<string, boolean> = {};
+      for (const { accountId, rules, aiOn } of results) {
+        // Owner-side alerts only — exclude sendToCustomer rules (auto-reply lives on Automation).
+        newLeadMap[accountId] = rules.find(r => r.triggerType === 'new_lead' && !r.sendToCustomer) || null;
+        replyMap[accountId]   = rules.find(r => r.triggerType === 'customer_reply' && !r.sendToCustomer) || null;
+        aiMap[accountId]      = aiOn;
+      }
+      setNewLeadByAccount(newLeadMap);
+      setCustomerReplyByAccount(replyMap);
+      setAiHandoffByAccount(aiMap);
     }).finally(() => {
       if (alive) setLoadingAlerts(false);
     });
     return () => { alive = false; };
-  }, [alertAccountId]);
+  }, [accounts]);
 
   // Conventional alert template names — match what TemplateEditorModal seeds.
   const businessPhone = (user?.businessPhone as string | null | undefined) ?? null;
@@ -116,71 +123,112 @@ export function SettingsCommunication() {
     return /^\+[1-9]\d{7,14}$/.test(value);
   }
 
-  // Resolve the target alert phone for the currently selected account.
+  // Resolve the target alert phone for a given account.
   // Mirrors backend resolveAgentPhone: account override → User.businessPhone.
   function resolveAlertPhone(accountId: string): string | null {
     const acct = accounts.find(a => a.id === accountId);
     return (acct?.agentPhoneOverride as any) || businessPhone || null;
   }
 
-  async function handleToggleNewLead(on: boolean) {
-    if (!alertAccountId) return;
-    setSavingRuleKind('new_lead');
-    try {
-      if (newLeadRule) {
-        const res = await notificationsApi.updateRule(alertAccountId, newLeadRule.id, { enabled: on });
-        setNewLeadRule(res.rule);
-      } else {
-        const toPhone = resolveAlertPhone(alertAccountId);
-        if (!toPhone) {
-          notify.error('Missing phone', 'Set a business phone (above) or an alert phone for this business first.');
-          return;
-        }
-        const res = await notificationsApi.createRule(alertAccountId, {
+  // Aggregate helpers — derive all-on / all-off / mixed from the per-account map.
+  function aggregate(states: boolean[]): { allOn: boolean; allOff: boolean; mixed: boolean; on: number; total: number } {
+    const total = states.length;
+    const on = states.filter(Boolean).length;
+    return { allOn: total > 0 && on === total, allOff: on === 0, mixed: on > 0 && on < total, on, total };
+  }
+
+  async function cascadeRule(
+    kind: 'new_lead' | 'customer_reply',
+    on: boolean,
+  ) {
+    setSavingRuleKind(kind);
+    const ruleByAccount = kind === 'new_lead' ? newLeadByAccount : customerReplyByAccount;
+    const setter = kind === 'new_lead' ? setNewLeadByAccount : setCustomerReplyByAccount;
+    const defaults = kind === 'new_lead'
+      ? {
           name: 'Lead Alert - SMS',
-          triggerType: 'new_lead',
-          toPhone,
+          triggerType: 'new_lead' as const,
           template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
-          enabled: on,
+        }
+      : {
+          name: 'Customer Reply Alert',
+          triggerType: 'customer_reply' as const,
+          replyTriggerMode: 'every_reply' as const,
+          template: 'Lead {{lead.name}} replied: "{{message}}"',
+        };
+
+    const missingPhone: string[] = [];
+    const results = await Promise.all(accounts.map(async a => {
+      const existing = ruleByAccount[a.id];
+      try {
+        if (existing) {
+          // Idempotent — re-issuing the same enabled value is fine.
+          const res = await notificationsApi.updateRule(a.id, existing.id, { enabled: on });
+          return { accountId: a.id, rule: res.rule, error: null as string | null };
+        }
+        if (!on) {
+          // No rule and target is OFF: nothing to do.
+          return { accountId: a.id, rule: null, error: null };
+        }
+        const toPhone = resolveAlertPhone(a.id);
+        if (!toPhone) {
+          missingPhone.push(a.businessName);
+          return { accountId: a.id, rule: null, error: 'no_phone' };
+        }
+        const res = await notificationsApi.createRule(a.id, {
+          ...defaults,
+          toPhone,
+          enabled: true,
         });
-        setNewLeadRule(res.rule);
+        return { accountId: a.id, rule: res.rule, error: null };
+      } catch (err: any) {
+        return { accountId: a.id, rule: existing || null, error: err?.response?.data?.message || err?.message || 'failed' };
       }
-      notify.success('Saved', on ? 'New lead alert turned on' : 'New lead alert turned off');
-    } catch (err: any) {
-      notify.error('Error', err?.response?.data?.message || err?.message || 'Failed to save');
-    } finally {
-      setSavingRuleKind(null);
+    }));
+
+    setter(prev => {
+      const next = { ...prev };
+      for (const r of results) next[r.accountId] = r.rule;
+      return next;
+    });
+    setSavingRuleKind(null);
+
+    const failed = results.filter(r => r.error && r.error !== 'no_phone');
+    if (missingPhone.length > 0) {
+      notify.error(
+        'Missing alert phone',
+        `Set an alert phone for ${missingPhone.length} ${missingPhone.length === 1 ? 'business' : 'businesses'} (${missingPhone.slice(0, 3).join(', ')}${missingPhone.length > 3 ? '…' : ''}).`,
+      );
+    } else if (failed.length > 0) {
+      notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed to update.`);
+    } else {
+      notify.success('Saved', on ? `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert on for ${accounts.length} accounts` : `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert off`);
     }
   }
 
-  async function handleToggleCustomerReply(on: boolean) {
-    if (!alertAccountId) return;
-    setSavingRuleKind('customer_reply');
-    try {
-      if (customerReplyRule) {
-        const res = await notificationsApi.updateRule(alertAccountId, customerReplyRule.id, { enabled: on });
-        setCustomerReplyRule(res.rule);
-      } else {
-        const toPhone = resolveAlertPhone(alertAccountId);
-        if (!toPhone) {
-          notify.error('Missing phone', 'Set a business phone (above) or an alert phone for this business first.');
-          return;
-        }
-        const res = await notificationsApi.createRule(alertAccountId, {
-          name: 'Customer Reply Alert',
-          triggerType: 'customer_reply',
-          replyTriggerMode: 'every_reply',
-          toPhone,
-          template: 'Lead {{lead.name}} replied: "{{message}}"',
-          enabled: on,
-        });
-        setCustomerReplyRule(res.rule);
+  async function cascadeAiHandoff(on: boolean) {
+    setSavingRuleKind('ai_handoff');
+    const results = await Promise.all(accounts.map(async a => {
+      try {
+        await followUpApi.saveSettings(a.id, { aiConversationEnabled: on } as any);
+        return { accountId: a.id, ok: true };
+      } catch (err: any) {
+        return { accountId: a.id, ok: false };
       }
-      notify.success('Saved', on ? 'Customer reply alert turned on' : 'Customer reply alert turned off');
-    } catch (err: any) {
-      notify.error('Error', err?.response?.data?.message || err?.message || 'Failed to save');
-    } finally {
-      setSavingRuleKind(null);
+    }));
+    setAiHandoffByAccount(prev => {
+      const next = { ...prev };
+      for (const r of results) if (r.ok) next[r.accountId] = on;
+      return next;
+    });
+    setSavingRuleKind(null);
+    const failed = results.filter(r => !r.ok);
+    if (failed.length === 0) {
+      notify.success('Saved', on ? `AI handoff alerts on for ${accounts.length} accounts` : 'AI handoff alerts off');
+    } else if (failed.length === accounts.length) {
+      notify.error('Error', 'Failed to update AI Conversation setting');
+    } else {
+      notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed.`);
     }
   }
 
@@ -424,15 +472,10 @@ export function SettingsCommunication() {
         icon={Bell}
         iconTone="orange"
         title="Business Alerts"
-        subtitle="SMS sent to your team about lead activity. Per-business — pick an account to configure."
+        subtitle={accounts.length > 0
+          ? `SMS sent to your team about lead activity. Applies to all ${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}.`
+          : 'SMS sent to your team about lead activity.'}
         contentPad="8px 24px 24px"
-        headerRight={accounts.length > 0 ? (
-          <AccountSelect
-            accounts={accounts}
-            value={alertAccountId}
-            onChange={setAlertAccountId}
-          />
-        ) : undefined}
       >
         {accounts.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', padding: '12px 0' }}>
@@ -442,104 +485,69 @@ export function SettingsCommunication() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13, padding: '12px 0' }}>
             <Loader2 size={14} className="animate-spin" /> Loading…
           </div>
-        ) : (
-          <>
-            <BusinessAlertRow
-              icon={Mail}
-              iconTone="blue"
-              label="New lead alert"
-              sublabel="When a new lead arrives from any source."
-              enabled={!!newLeadRule?.enabled}
-              saving={savingRuleKind === 'new_lead'}
-              onToggle={handleToggleNewLead}
-              templateLabel={newLeadRule?.messageTemplate?.name || (newLeadRule ? 'Inline template' : 'Default template')}
-              onEditTemplate={() => goToTemplate('Lead Alert')}
-            />
-            <BusinessAlertRow
-              icon={MessageSquare}
-              iconTone="green"
-              label="Customer reply alert"
-              sublabel="When a customer replies to your LeadBridge number."
-              enabled={!!customerReplyRule?.enabled}
-              saving={savingRuleKind === 'customer_reply'}
-              onToggle={handleToggleCustomerReply}
-              templateLabel={customerReplyRule?.messageTemplate?.name || (customerReplyRule ? 'Inline template' : 'Default template')}
-              onEditTemplate={() => goToTemplate('Customer Reply')}
-            />
-            <BusinessAlertRow
-              icon={UserCheck}
-              iconTone="orange"
-              label="AI handoff alert"
-              sublabel={aiHandoffOn
-                ? 'When AI flags the conversation for human takeover. Master switch lives in Automation → AI Conversation.'
-                : 'AI Conversation is off for this account — turn it on in Automation to enable handoff alerts.'}
-              status={aiHandoffOn ? { text: 'On in Automation', tone: 'green' } : { text: 'Off in Automation', tone: 'slate' }}
-              onEditTemplate={() => goToTemplate('Ready to Book')}
-              onConfigure={() => navigate('/automation')}
-              noBorder
-            />
-          </>
-        )}
+        ) : (() => {
+          const newLeadAgg = aggregate(accounts.map(a => !!newLeadByAccount[a.id]?.enabled));
+          const replyAgg = aggregate(accounts.map(a => !!customerReplyByAccount[a.id]?.enabled));
+          const aiAgg = aggregate(accounts.map(a => !!aiHandoffByAccount[a.id]));
+          return (
+            <>
+              <BusinessAlertRow
+                icon={Mail}
+                iconTone="blue"
+                label="New lead alert"
+                sublabel="When a new lead arrives from any source."
+                agg={newLeadAgg}
+                saving={savingRuleKind === 'new_lead'}
+                onToggle={on => cascadeRule('new_lead', on)}
+                onEditTemplate={() => goToTemplate('Lead Alert')}
+              />
+              <BusinessAlertRow
+                icon={MessageSquare}
+                iconTone="green"
+                label="Customer reply alert"
+                sublabel="When a customer replies to your LeadBridge number."
+                agg={replyAgg}
+                saving={savingRuleKind === 'customer_reply'}
+                onToggle={on => cascadeRule('customer_reply', on)}
+                onEditTemplate={() => goToTemplate('Customer Reply')}
+              />
+              <BusinessAlertRow
+                icon={UserCheck}
+                iconTone="orange"
+                label="AI handoff alert"
+                sublabel="When AI flags the conversation for human takeover. Also enables AI auto-replies in Automation."
+                agg={aiAgg}
+                saving={savingRuleKind === 'ai_handoff'}
+                onToggle={cascadeAiHandoff}
+                onEditTemplate={() => goToTemplate('Ready to Book')}
+                onConfigure={() => navigate('/automation')}
+                noBorder
+              />
+            </>
+          );
+        })()}
       </SettingCard>
     </div>
   );
 }
 
-function AccountSelect({
-  accounts, value, onChange,
-}: { accounts: SavedAccount[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div style={{ position: 'relative', minWidth: 220 }}>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          width: '100%', appearance: 'none',
-          padding: '7px 30px 7px 10px',
-          background: 'white',
-          border: '1px solid var(--lb-line)',
-          borderRadius: 8,
-          fontSize: 12.5, fontFamily: 'inherit',
-          color: 'var(--lb-ink-1)',
-          cursor: 'pointer',
-        }}
-      >
-        {accounts.map(a => (
-          <option key={a.id} value={a.id}>
-            {a.platform === 'yelp' ? '🔴 ' : a.platform === 'thumbtack' ? '🔵 ' : '⚪ '}{a.businessName}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={14} style={{
-        position: 'absolute', top: '50%', right: 9, transform: 'translateY(-50%)',
-        color: 'var(--lb-ink-5)', pointerEvents: 'none',
-      }} />
-    </div>
-  );
-}
-
 function BusinessAlertRow({
-  icon: Icon, iconTone, label, sublabel, enabled, saving, onToggle,
-  templateLabel, onEditTemplate, status, onConfigure, noBorder,
+  icon: Icon, iconTone, label, sublabel, agg, saving, onToggle,
+  onEditTemplate, onConfigure, noBorder,
 }: {
   icon: typeof Bell;
   iconTone: 'blue' | 'green' | 'orange';
   label: string;
   sublabel: string;
-  enabled?: boolean;
+  agg: { allOn: boolean; allOff: boolean; mixed: boolean; on: number; total: number };
   saving?: boolean;
-  onToggle?: (v: boolean) => void;
-  templateLabel?: string;
+  onToggle: (v: boolean) => void;
   onEditTemplate?: () => void;
-  status?: { text: string; tone: 'green' | 'slate' };
   onConfigure?: () => void;
   noBorder?: boolean;
 }) {
   const iconBg = iconTone === 'blue' ? '#dbeafe' : iconTone === 'green' ? '#d1fae5' : '#fed7aa';
   const iconFg = iconTone === 'blue' ? '#1d4ed8' : iconTone === 'green' ? '#047857' : '#c2410c';
-  const statusPalette = status?.tone === 'green'
-    ? { bg: '#dcfce7', fg: '#15803d' }
-    : { bg: '#f1f5f9', fg: '#475569' };
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 14,
@@ -554,11 +562,22 @@ function BusinessAlertRow({
         <Icon size={16} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</div>
+          {agg.mixed && (
+            <span style={{
+              padding: '2px 8px', borderRadius: 999,
+              background: '#fef3c7', color: '#b45309',
+              fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
+            }} title={`${agg.on} of ${agg.total} accounts have this alert on`}>
+              Mixed · {agg.on}/{agg.total} on
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>{sublabel}</div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        {templateLabel && onEditTemplate && (
+        {onEditTemplate && (
           <button
             type="button"
             onClick={onEditTemplate}
@@ -570,7 +589,6 @@ function BusinessAlertRow({
               cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}
-            title={templateLabel}
           >
             Edit template
           </button>
@@ -590,37 +608,36 @@ function BusinessAlertRow({
             Configure
           </button>
         )}
-        {status ? (
-          <span style={{
-            padding: '4px 10px', borderRadius: 999,
-            background: statusPalette.bg, color: statusPalette.fg,
-            fontSize: 11, fontWeight: 600,
-            whiteSpace: 'nowrap',
-          }}>
-            {status.text}
-          </span>
-        ) : (
-          <BusinessAlertToggle on={!!enabled} saving={!!saving} onToggle={v => onToggle?.(v)} />
-        )}
+        <BusinessAlertToggle agg={agg} saving={!!saving} onToggle={onToggle} />
       </div>
     </div>
   );
 }
 
-function BusinessAlertToggle({ on, saving, onToggle }: { on: boolean; saving: boolean; onToggle: (v: boolean) => void }) {
+function BusinessAlertToggle({
+  agg, saving, onToggle,
+}: {
+  agg: { allOn: boolean; mixed: boolean };
+  saving: boolean;
+  onToggle: (v: boolean) => void;
+}) {
+  // Mixed → flipping the toggle cascades all to ON (consistent with old UX).
+  const targetWhenClicked = !agg.allOn;
+  const visualOn = agg.allOn;
+  const bg = agg.mixed ? '#f59e0b' : visualOn ? 'var(--lb-accent)' : '#cbd5e1';
   return (
     <button
       type="button"
       role="switch"
-      aria-checked={on}
+      aria-checked={visualOn}
       disabled={saving}
-      onClick={() => onToggle(!on)}
+      onClick={() => onToggle(targetWhenClicked)}
       style={{
         position: 'relative',
         width: 40, height: 22,
         border: 0,
         borderRadius: 999,
-        background: on ? 'var(--lb-accent)' : '#cbd5e1',
+        background: bg,
         cursor: saving ? 'wait' : 'pointer',
         transition: 'background 120ms',
         opacity: saving ? 0.6 : 1,
@@ -629,7 +646,7 @@ function BusinessAlertToggle({ on, saving, onToggle }: { on: boolean; saving: bo
     >
       <span style={{
         position: 'absolute',
-        top: 2, left: on ? 20 : 2,
+        top: 2, left: visualOn ? 20 : 2,
         width: 18, height: 18, borderRadius: 999,
         background: 'white',
         boxShadow: '0 1px 2px rgba(10,21,48,0.18)',
