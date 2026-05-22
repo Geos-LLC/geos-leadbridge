@@ -103,6 +103,7 @@ export interface Lead {
     sender: string; // 'pro' | 'customer' | 'system'
     sentAt: string;
   };
+  isAutoHandled?: boolean; // Drives the "Hide auto-handled" sidebar filter.
   raw?: any;
 }
 

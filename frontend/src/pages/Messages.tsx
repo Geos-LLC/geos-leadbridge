@@ -248,6 +248,15 @@ export function Messages() {
   const dateFilter = searchParams.get('date') || 'all';
   // Status group filter — keys match StatusGroupId in lib/leadStatus.ts.
   const statusFilter = (searchParams.get('status') || 'all') as 'all' | StatusGroupId;
+  // "Hide auto-handled" toggle: hides leads whose only outbound activity is
+  // AI sends (no human reply, no customer reply). Default on so the inbox
+  // surfaces leads needing human attention; persisted per-browser.
+  const [hideAutoHandled, setHideAutoHandled] = useState<boolean>(
+    () => localStorage.getItem('lb_hide_auto_handled') !== 'false',
+  );
+  useEffect(() => {
+    localStorage.setItem('lb_hide_auto_handled', String(hideAutoHandled));
+  }, [hideAutoHandled]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Message cache: stores loaded timeline + summary per lead ID to avoid re-fetching
   const messageCache = useRef<Record<string, { timeline: TimelineEvent[]; summary: CommunicationSummary; cachedAt: number }>>({});
@@ -1387,8 +1396,15 @@ export function Messages() {
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.message?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesAccount && matchesDate && matchesStatus && matchesSearch;
+    // Hide leads where the only outbound activity is AI auto-send. Backend
+    // sets isAutoHandled when an AI message exists but no human send and no
+    // customer reply do — see leads.service.ts::computeAutoHandledFlags.
+    const matchesAutoHandled = !hideAutoHandled || !lead.isAutoHandled;
+    return matchesAccount && matchesDate && matchesStatus && matchesSearch && matchesAutoHandled;
   });
+  const autoHandledHiddenCount = hideAutoHandled
+    ? leadsFromSavedAccounts.filter((l) => l.isAutoHandled).length
+    : 0;
 
   if (loading) {
     return (
@@ -1622,6 +1638,22 @@ export function Messages() {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
           </div>
         </div>
+
+        {/* Hide auto-handled toggle */}
+        <label className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-3 cursor-pointer select-none">
+          <span className="text-sm font-medium text-slate-700">
+            Hide auto-handled
+            {hideAutoHandled && autoHandledHiddenCount > 0 && (
+              <span className="ml-1 text-xs text-slate-400">({autoHandledHiddenCount})</span>
+            )}
+          </span>
+          <input
+            type="checkbox"
+            checked={hideAutoHandled}
+            onChange={(e) => setHideAutoHandled(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          />
+        </label>
 
         <div className="flex-1 overflow-y-auto">
           {filteredLeads.length === 0 ? (

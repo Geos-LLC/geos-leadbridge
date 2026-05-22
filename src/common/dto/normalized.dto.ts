@@ -100,6 +100,12 @@ export class NormalizedLead {
     sentAt: Date;
   };
 
+  // True when the only outbound activity on the conversation has been AI sends
+  // (senderType='ai') with no human send and no customer reply. Drives the
+  // "Hide auto-handled" sidebar filter so the inbox surfaces leads that need
+  // human attention (new leads, customer-responded leads, human-touched leads).
+  isAutoHandled?: boolean;
+
   raw?: any; // Original platform payload for debugging
 }
 

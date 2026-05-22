@@ -72,6 +72,15 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // callbacks don't touch this, so the auto-save effect never fires after a
   // tab switch unless the user actually changed something.
   const dirtyRef = useRef(false);
+  // Set of FIELD NAMES the user touched since the last save. Without this,
+  // flipping one toggle in All-Accounts mode would fan out the entire local
+  // state to every account, wiping out their per-account values for any
+  // setting the user never touched on this visit.
+  type FollowupsField =
+    | 'quietOn' | 'deliveryMode' | 'messageMode'
+    | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
+    | 'resumeDelay' | 'deferralDelay' | 'hiredDelay';
+  const dirtyFieldsRef = useRef<Set<FollowupsField>>(new Set());
   // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
   // for compatibility with effect deps below.
   const scopeKey = isAll ? '__all__' : accountId;
@@ -89,7 +98,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   }, [accountId, isAll, accounts]);
 
   // Reset dirty on scope change so the next user action triggers save fresh.
-  useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
+  useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
 
   const parseSettings = (s: any, accountHoursQuiet?: boolean): CachedFollowups => ({
     quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
@@ -195,35 +204,63 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll, accounts]);
 
-  const handleSave = async () => {
-    // Pass extended fields via saveWizardSettings (broader Record type) so we
-    // can include the 3 rule-card delays + the platform hint.
-    const payload: Record<string, unknown> = {
-      mode: deliveryMode === 'active' ? 'auto_send' : 'suggest',
-      preset: 'smart',
-      replyType: messageMode,
-      activeHoursStart,
-      activeHoursEnd,
-      timezone,
-      fuReEnrollDelay: resumeDelay,
-      aiDeferralDelay: deferralDelay,
-      aiHiredCompetitorDelay: hiredDelay,
-    };
-    // Optimistic cache write — keep the mixed-state badge accurate before the
-    // API round-trip lands.
-    const cached: CachedFollowups = {
-      quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-      resumeDelay, deferralDelay, hiredDelay,
-    };
+  // Save ONLY the fields the user touched since the last save. Untouched
+  // fields are NOT written, so each account keeps its per-account values
+  // for anything the user didn't explicitly change here.
+  const handleSave = async (fields: Set<FollowupsField>) => {
+    if (fields.size === 0) return;
+    // wizard payload — only include keys for fields actually touched.
+    const wizardPayload: Record<string, unknown> = {};
+    if (fields.has('deliveryMode'))     wizardPayload.mode      = deliveryMode === 'active' ? 'auto_send' : 'suggest';
+    if (fields.has('messageMode'))      wizardPayload.replyType = messageMode;
+    if (fields.has('activeHoursStart')) wizardPayload.activeHoursStart = activeHoursStart;
+    if (fields.has('activeHoursEnd'))   wizardPayload.activeHoursEnd   = activeHoursEnd;
+    if (fields.has('timezone'))         wizardPayload.timezone         = timezone;
+    if (fields.has('resumeDelay'))      wizardPayload.fuReEnrollDelay        = resumeDelay;
+    if (fields.has('deferralDelay'))    wizardPayload.aiDeferralDelay        = deferralDelay;
+    if (fields.has('hiredDelay'))       wizardPayload.aiHiredCompetitorDelay = hiredDelay;
+    // 'preset' was always passed before — keep only when deliveryMode is part
+    // of this save, since the backend ignores it for unrelated saves anyway.
+    if (fields.has('deliveryMode')) wizardPayload.preset = 'smart';
+
+    const hasWizardWork = Object.keys(wizardPayload).length > 0;
+    const hasHoursWork  = fields.has('quietOn');
+
+    // Optimistic cache merge — keep prior values for fields the user didn't
+    // touch on each account.
     const targets = isAll ? accounts : (accounts.find(a => a.id === accountId) ? [accounts.find(a => a.id === accountId)!] : []);
-    targets.forEach(a => followupsCache.set(a.id, cached));
+    targets.forEach(a => {
+      const prev = followupsCache.get(a.id);
+      if (!prev) {
+        followupsCache.set(a.id, {
+          quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
+          resumeDelay, deferralDelay, hiredDelay,
+        });
+        return;
+      }
+      followupsCache.set(a.id, {
+        quietOn:          fields.has('quietOn')          ? quietOn          : prev.quietOn,
+        deliveryMode:     fields.has('deliveryMode')     ? deliveryMode     : prev.deliveryMode,
+        messageMode:      fields.has('messageMode')      ? messageMode      : prev.messageMode,
+        activeHoursStart: fields.has('activeHoursStart') ? activeHoursStart : prev.activeHoursStart,
+        activeHoursEnd:   fields.has('activeHoursEnd')   ? activeHoursEnd   : prev.activeHoursEnd,
+        timezone:         fields.has('timezone')         ? timezone         : prev.timezone,
+        resumeDelay:      fields.has('resumeDelay')      ? resumeDelay      : prev.resumeDelay,
+        deferralDelay:    fields.has('deferralDelay')    ? deferralDelay    : prev.deferralDelay,
+        hiredDelay:       fields.has('hiredDelay')       ? hiredDelay       : prev.hiredDelay,
+      });
+    });
+
     setSaving(true); setError(null);
     try {
-      // Save follow-up settings + per-account quiet-hours flag in parallel.
       const writes: Promise<unknown>[] = [];
       for (const a of targets) {
-        writes.push(followUpApi.saveWizardSettings(a.id, { ...payload, platform: a.platform }).catch(() => undefined));
-        writes.push(usersApi.updateAccountHours(a.id, { followUpsApplyQuietHours: quietOn }).catch(() => undefined));
+        if (hasWizardWork) {
+          writes.push(followUpApi.saveWizardSettings(a.id, { ...wizardPayload, platform: a.platform }).catch(() => undefined));
+        }
+        if (hasHoursWork) {
+          writes.push(usersApi.updateAccountHours(a.id, { followUpsApplyQuietHours: quietOn }).catch(() => undefined));
+        }
       }
       await Promise.all(writes);
       setSavedAt(Date.now());
@@ -265,24 +302,26 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const mixedDeferral = getMixedF('deferralDelay', v => String(v));
   const mixedHired    = getMixedF('hiredDelay', v => String(v));
 
-  // Auto-save IMMEDIATELY on every USER change. Gated by dirtyRef so load
-  // callbacks (which DON'T touch dirtyRef) can never trigger this.
+  // Auto-save IMMEDIATELY on every USER change. We snapshot the dirty-fields
+  // set, clear it, then pass to handleSave so only those fields are written.
   useEffect(() => {
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
+    const fields = new Set(dirtyFieldsRef.current);
+    dirtyFieldsRef.current = new Set();
     setSavedAt(Date.now()); // optimistic
-    handleSave();
+    handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay]);
 
-  // markDirty-wrapped setters used by JSX. Plain setX setters are reserved
-  // for the load callbacks above.
-  const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; setDeliveryMode(v); };
-  const onMessageMode   = (v: 'template' | 'ai') => { dirtyRef.current = true; setMessageMode(v); };
-  const onQuietOn       = (v: boolean) => { dirtyRef.current = true; setQuietOn(v); };
-  const onResumeDelay   = (v: string) => { dirtyRef.current = true; setResumeDelay(v); };
-  const onDeferralDelay = (v: string) => { dirtyRef.current = true; setDeferralDelay(v); };
-  const onHiredDelay    = (v: string) => { dirtyRef.current = true; setHiredDelay(v); };
+  // markDirty-wrapped setters used by JSX. Each setter adds its specific
+  // field name so the save only writes the keys the user changed.
+  const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; dirtyFieldsRef.current.add('deliveryMode');  setDeliveryMode(v); };
+  const onMessageMode   = (v: 'template' | 'ai')    => { dirtyRef.current = true; dirtyFieldsRef.current.add('messageMode');   setMessageMode(v); };
+  const onQuietOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('quietOn');       setQuietOn(v); };
+  const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
+  const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
+  const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 

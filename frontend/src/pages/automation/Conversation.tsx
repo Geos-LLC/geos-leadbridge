@@ -62,6 +62,15 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // Dirty flag set only by user-facing setters below. Load callbacks DON'T
   // touch this, so the auto-save effect never fires on tab switch or load.
   const dirtyRef = useRef(false);
+  // Set of dotted field keys the user has touched since the last save. The
+  // auto-save effect only writes THESE fields — without this, flipping one
+  // toggle in All-Accounts mode would fan out the WHOLE local state to every
+  // account, wiping out per-account values the user never touched.
+  type DirtyField =
+    | 'strategy' | 'priceMode' | 'availability'
+    | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
+    | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified';
+  const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
   useEffect(() => {
     if (!savedAt) return;
@@ -70,7 +79,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   }, [savedAt]);
 
   // Reset dirty on scope change so the next user action starts fresh.
-  useEffect(() => { dirtyRef.current = false; }, [accountId, isAll]);
+  useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
 
   // Helper: parse a settings payload into our local shape.
   const parseSettings = (s: any): CachedConvSettings => ({
@@ -169,25 +178,57 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll, accounts]);
 
-  const handleSave = async () => {
-    const payload = {
-      followUpStrategy: strategy,
-      priceQuoteMode: priceMode,
-      followUpAvailability: availability === 'hours' ? 'active_hours' : 'always',
-      aiStopOnOptOut: stopRules.not_contacted,
-      aiStopOnBooked: stopRules.booked,
-      aiStopOnPriceAgreed: stopRules.price_agreed,
-      handoffTriggerAgreed: takeover.ready,
-      handoffTriggerWantsLiveContact: takeover.live,
-      handoffTriggerProvidedPhone: takeover.phone,
-      handoffTriggerProvidedSquareFootage: takeover.sqft,
-      handoffTriggerQualificationComplete: takeover.qualified,
-    };
-    // Optimistically update cache BEFORE the API call so the mixed-state
-    // badge reflects the new values immediately.
-    const cached: CachedConvSettings = { strategy, priceMode, availability, stopRules, takeover };
+  // Save ONLY the fields the user touched since the last save. Untouched
+  // fields are NOT included in the payload, so each account keeps its
+  // existing values for anything the user didn't explicitly change. This is
+  // critical in All-Accounts mode — without it, flipping one toggle would
+  // wipe out per-account values for every other setting.
+  const handleSave = async (fields: Set<DirtyField>) => {
+    if (fields.size === 0) return;
+    const payload: Record<string, unknown> = {};
+    if (fields.has('strategy'))     payload.followUpStrategy     = strategy;
+    if (fields.has('priceMode'))    payload.priceQuoteMode       = priceMode;
+    if (fields.has('availability')) payload.followUpAvailability = availability === 'hours' ? 'active_hours' : 'always';
+    if (fields.has('stopRules.not_contacted')) payload.aiStopOnOptOut      = stopRules.not_contacted;
+    if (fields.has('stopRules.booked'))        payload.aiStopOnBooked      = stopRules.booked;
+    if (fields.has('stopRules.price_agreed'))  payload.aiStopOnPriceAgreed = stopRules.price_agreed;
+    // stopRules.done is local-only (no backend column), so we skip writing.
+    if (fields.has('takeover.ready'))     payload.handoffTriggerAgreed                = takeover.ready;
+    if (fields.has('takeover.live'))      payload.handoffTriggerWantsLiveContact      = takeover.live;
+    if (fields.has('takeover.phone'))     payload.handoffTriggerProvidedPhone         = takeover.phone;
+    if (fields.has('takeover.sqft'))      payload.handoffTriggerProvidedSquareFootage = takeover.sqft;
+    if (fields.has('takeover.qualified')) payload.handoffTriggerQualificationComplete = takeover.qualified;
+
+    // Optimistic cache update — merge ONLY the changed fields onto each
+    // account's existing cached values. Don't replace the whole object, or
+    // mixed-state badges would think untouched fields changed too.
     const targets = isAll ? accounts.map(a => a.id) : [accountId];
-    targets.forEach(id => convCache.set(id, cached));
+    targets.forEach(id => {
+      const prev = convCache.get(id);
+      if (!prev) {
+        convCache.set(id, { strategy, priceMode, availability, stopRules, takeover });
+        return;
+      }
+      const next: CachedConvSettings = { ...prev };
+      if (fields.has('strategy'))     next.strategy     = strategy;
+      if (fields.has('priceMode'))    next.priceMode    = priceMode;
+      if (fields.has('availability')) next.availability = availability;
+      const nextStop = { ...prev.stopRules };
+      if (fields.has('stopRules.not_contacted')) nextStop.not_contacted = stopRules.not_contacted;
+      if (fields.has('stopRules.booked'))        nextStop.booked        = stopRules.booked;
+      if (fields.has('stopRules.price_agreed'))  nextStop.price_agreed  = stopRules.price_agreed;
+      if (fields.has('stopRules.done'))          nextStop.done          = stopRules.done;
+      next.stopRules = nextStop;
+      const nextTake = { ...prev.takeover };
+      if (fields.has('takeover.ready'))     nextTake.ready     = takeover.ready;
+      if (fields.has('takeover.live'))      nextTake.live      = takeover.live;
+      if (fields.has('takeover.phone'))     nextTake.phone     = takeover.phone;
+      if (fields.has('takeover.sqft'))      nextTake.sqft      = takeover.sqft;
+      if (fields.has('takeover.qualified')) nextTake.qualified = takeover.qualified;
+      next.takeover = nextTake;
+      convCache.set(id, next);
+    });
+
     setSaving(true); setError(null);
     try {
       await Promise.all(targets.map(id => followUpApi.saveWizardSettings(id, payload).catch(() => undefined)));
@@ -269,24 +310,35 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const mxTakeSqft         = getMixedSubKey('takeover', 'sqft');
   const mxTakeQualified    = getMixedSubKey('takeover', 'qualified');
 
-  // Auto-save on every USER change (gated by dirtyRef).
+  // Auto-save on every USER change. We snapshot the dirty-fields set, clear
+  // it, then pass the snapshot to handleSave so only those fields are written.
   useEffect(() => {
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
+    const fields = new Set(dirtyFieldsRef.current);
+    dirtyFieldsRef.current = new Set();
     setSavedAt(Date.now());
-    handleSave();
+    handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strategy, priceMode, availability, stopRules, takeover]);
 
-  // markDirty-wrapped setters used by JSX.
-  const onStrategy     = (v: StrategyKey) => { dirtyRef.current = true; setStrategy(v); };
-  const onPriceMode    = (v: 'range' | 'exact') => { dirtyRef.current = true; setPriceMode(v); };
-  const onAvailability = (v: 'always' | 'hours') => { dirtyRef.current = true; setAvailability(v); };
-  const onStopRules    = (next: typeof stopRules) => { dirtyRef.current = true; setStopRules(next); };
-  const onTakeover     = (next: typeof takeover) => { dirtyRef.current = true; setTakeover(next); };
+  // markDirty-wrapped setters used by JSX. Each setter records BOTH the
+  // dirty flag (gates the save effect) AND the specific field name(s) so we
+  // only write what the user actually changed.
+  const onStrategy     = (v: StrategyKey)            => { dirtyRef.current = true; dirtyFieldsRef.current.add('strategy');     setStrategy(v); };
+  const onPriceMode    = (v: 'range' | 'exact')      => { dirtyRef.current = true; dirtyFieldsRef.current.add('priceMode');    setPriceMode(v); };
+  const onAvailability = (v: 'always' | 'hours')     => { dirtyRef.current = true; dirtyFieldsRef.current.add('availability'); setAvailability(v); };
 
-  const toggleStop = (k: keyof typeof stopRules) => onStopRules({ ...stopRules, [k]: !stopRules[k] });
-  const toggleTakeover = (k: keyof typeof takeover) => onTakeover({ ...takeover, [k]: !takeover[k] });
+  const toggleStop = (k: keyof typeof stopRules) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add(`stopRules.${k}` as DirtyField);
+    setStopRules({ ...stopRules, [k]: !stopRules[k] });
+  };
+  const toggleTakeover = (k: keyof typeof takeover) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add(`takeover.${k}` as DirtyField);
+    setTakeover({ ...takeover, [k]: !takeover[k] });
+  };
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });

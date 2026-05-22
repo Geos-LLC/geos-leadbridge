@@ -77,6 +77,16 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // through one of the wrapped setters below. Load callbacks DON'T touch this,
   // so the auto-save effect never fires on tab switch or initial load.
   const dirtyRef = useRef(false);
+  // Set of FIELD NAMES the user touched since the last save. The save logic
+  // only writes the endpoints/fields named here — without this, flipping one
+  // toggle in All-Accounts mode would fan out the entire local state to every
+  // account, wiping out their per-account values for untouched settings.
+  type RespondField =
+    | 'instantReplyOn' | 'replyType'
+    | 'instantTextOn'
+    | 'instantCallOn' | 'connMode'
+    | 'textBizHours' | 'callBizHours';
+  const dirtyFieldsRef = useRef<Set<RespondField>>(new Set());
   // Cancel in-flight save when scope changes so a slow save can't overwrite
   // a freshly-loaded account.
   const saveAbortRef = useRef<AbortController | null>(null);
@@ -102,6 +112,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // A background fetch (next effect) refreshes the cache for any drift.
   useEffect(() => {
     dirtyRef.current = false;
+    dirtyFieldsRef.current = new Set();
     if (isAll) {
       const cached = accounts.map(a => accountCache.get(a.id)).filter(Boolean) as CachedAccount[];
       if (cached.length > 0) {
@@ -232,102 +243,112 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, isAll, accounts]);
 
-  // Auto-save IMMEDIATELY on every USER change. Gate on dirtyRef so load
-  // setters can't trigger this (they don't touch dirtyRef).
+  // Auto-save IMMEDIATELY on every USER change. We snapshot the dirty fields
+  // set, clear it, then pass to handleSave so we only write what the user
+  // actually changed.
   useEffect(() => {
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
+    const fields = new Set(dirtyFieldsRef.current);
+    dirtyFieldsRef.current = new Set();
     setSavedAt(Date.now()); // optimistic
-    handleSave();
+    handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode, textBizHours, callBizHours]);
 
-  // markDirty-wrapped setters — these are what the JSX uses. The plain setX
-  // setters are reserved for load callbacks (which DON'T mark dirty).
-  const onInstantReplyOn = (v: boolean) => { dirtyRef.current = true; setInstantReplyOn(v); };
-  const onInstantTextOn  = (v: boolean) => { dirtyRef.current = true; setInstantTextOn(v); };
-  const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; setInstantCallOn(v); };
-  const onReplyType      = (v: 'ai' | 'template') => { dirtyRef.current = true; setReplyType(v); };
-  const onConnMode       = (v: 'agent-first' | 'parallel') => { dirtyRef.current = true; setConnMode(v); };
-  const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; setTextBizHours(v); };
-  const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; setCallBizHours(v); };
+  // markDirty-wrapped setters — each one records both the dirty flag AND the
+  // specific field name so the save only writes that field's endpoint.
+  const onInstantReplyOn = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantReplyOn'); setInstantReplyOn(v); };
+  const onInstantTextOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextOn');  setInstantTextOn(v); };
+  const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantCallOn');  setInstantCallOn(v); };
+  const onReplyType      = (v: 'ai' | 'template')           => { dirtyRef.current = true; dirtyFieldsRef.current.add('replyType');      setReplyType(v); };
+  const onConnMode       = (v: 'agent-first' | 'parallel')  => { dirtyRef.current = true; dirtyFieldsRef.current.add('connMode');       setConnMode(v); };
+  const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('textBizHours');   setTextBizHours(v); };
+  const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('callBizHours');   setCallBizHours(v); };
 
-  // Save the current display state to one or more accounts. For each account
-  // we look up the rule fresh (don't trust component state — it can be stale
-  // after a tab switch or a load races our user-edit) and create the rule on
-  // the fly if the account doesn't have one yet. Cache is updated BEFORE
-  // each write (optimistic) so any subsequent render reads the new values,
-  // and the mixed-state warning recomputes against the just-changed values
-  // rather than the pre-edit ones.
-  const saveOneAccount = async (id: string) => {
-    // Optimistic cache write — happens BEFORE the API call so the mixed-state
-    // badge on the All-Accounts tab reflects the user's intent immediately.
+  // Save only the touched fields for one account. Each settings family lives
+  // on its own endpoint — we skip the endpoint entirely if no field in that
+  // family was touched. For partial endpoints (automation rule, call-connect
+  // settings, account-hours), we only include the keys whose fields are dirty
+  // so the backend's merge semantics leave other keys alone.
+  const saveOneAccount = async (id: string, fields: Set<RespondField>) => {
+    // Optimistic cache merge — keep the prior cached values for fields the
+    // user didn't touch on THIS account. Without this, we'd clobber per-
+    // account values in the cache too and the mixed badges would lie.
     const prev = accountCache.get(id);
-    accountCache.set(id, {
-      instantReplyOn,
-      instantTextOn,
-      instantCallOn,
-      replyType,
-      connMode,
-      textBizHours,
-      callBizHours,
-      newLeadRuleId: prev?.newLeadRuleId ?? null,
+    const nextCache: CachedAccount = {
+      instantReplyOn: fields.has('instantReplyOn') ? instantReplyOn : (prev?.instantReplyOn ?? instantReplyOn),
+      instantTextOn:  fields.has('instantTextOn')  ? instantTextOn  : (prev?.instantTextOn  ?? instantTextOn),
+      instantCallOn:  fields.has('instantCallOn')  ? instantCallOn  : (prev?.instantCallOn  ?? instantCallOn),
+      replyType:      fields.has('replyType')      ? replyType      : (prev?.replyType      ?? replyType),
+      connMode:       fields.has('connMode')       ? connMode       : (prev?.connMode       ?? connMode),
+      textBizHours:   fields.has('textBizHours')   ? textBizHours   : (prev?.textBizHours   ?? textBizHours),
+      callBizHours:   fields.has('callBizHours')   ? callBizHours   : (prev?.callBizHours   ?? callBizHours),
+      newLeadRuleId:      prev?.newLeadRuleId      ?? null,
       customerTextRuleId: prev?.customerTextRuleId ?? null,
-      hasCallSettings: true,
-    });
+      hasCallSettings:    prev?.hasCallSettings    ?? true,
+    };
+    accountCache.set(id, nextCache);
+
     const ops: Promise<unknown>[] = [];
-    // 0. Per-account business-hours gating (firstMsg + call). Persisted via
-    //    usersApi.updateAccountHours; these are the "Only send during
-    //    business hours" checkboxes on the Instant Text + Instant Call cards.
-    ops.push(usersApi.updateAccountHours(id, {
-      firstMsgDuringBusinessHours: textBizHours,
-      callDuringBusinessHours: callBizHours,
-    }).catch(() => undefined));
-    // 1. Instant Reply — automation rule (new_lead, delay=0)
-    ops.push((async () => {
-      const autoRes = await automationApi.getRulesForAccount(id).catch(() => ({ rules: [] as AutomationRule[] }));
-      const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
-      if (nl) {
-        await automationApi.updateRule(nl.id, {
-          enabled: instantReplyOn,
-          useAi: replyType === 'ai',
-        });
-      } else {
-        // No new-lead rule on this account — seed one so the toggle actually
-        // does something. Without this branch the user's click would be a
-        // silent no-op and the setting wouldn't persist.
-        await automationApi.createRule({
-          savedAccountId: id,
-          name: 'Instant Reply',
-          triggerType: 'new_lead',
-          enabled: instantReplyOn,
-          useAi: replyType === 'ai',
-          delayMinutes: 0,
-        }).catch(() => undefined);
-      }
-    })());
-    // 2. Instant Text — notification rule (customer-texting; new_lead + sendToCustomer)
-    ops.push((async () => {
-      const notifRes = await notificationsApi.getRules(id).catch(() => ({ rules: [] as NotificationRule[] }));
-      const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
-      if (ct) {
-        await notificationsApi.updateRule(id, ct.id, { enabled: instantTextOn });
-      }
-      // If no customer-texting rule, do nothing — creating one requires extra
-      // info (template, fromPhone, etc.) that we don't have in this UI.
-    })());
-    // 3. Instant Call — call-connect settings (always upsert; the API treats
-    //    the endpoint as upsert when settings don't yet exist).
-    ops.push(callConnectApi.saveSettings(id, {
-      enabled: instantCallOn,
-      mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode,
-    }).catch(() => undefined));
+
+    // 0. Per-account business-hours gating — only write the keys whose
+    //    checkboxes were actually toggled.
+    if (fields.has('textBizHours') || fields.has('callBizHours')) {
+      const hours: Record<string, boolean> = {};
+      if (fields.has('textBizHours')) hours.firstMsgDuringBusinessHours = textBizHours;
+      if (fields.has('callBizHours')) hours.callDuringBusinessHours     = callBizHours;
+      ops.push(usersApi.updateAccountHours(id, hours).catch(() => undefined));
+    }
+
+    // 1. Instant Reply — automation rule (only touch if the toggle or its
+    //    reply-type child was changed; otherwise leave the rule alone).
+    if (fields.has('instantReplyOn') || fields.has('replyType')) {
+      ops.push((async () => {
+        const autoRes = await automationApi.getRulesForAccount(id).catch(() => ({ rules: [] as AutomationRule[] }));
+        const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
+        const patch: Record<string, unknown> = {};
+        if (fields.has('instantReplyOn')) patch.enabled = instantReplyOn;
+        if (fields.has('replyType'))      patch.useAi   = replyType === 'ai';
+        if (nl) {
+          await automationApi.updateRule(nl.id, patch);
+        } else {
+          // No new-lead rule on this account — seed one with the touched
+          // fields plus sensible defaults for anything not touched.
+          await automationApi.createRule({
+            savedAccountId: id,
+            name: 'Instant Reply',
+            triggerType: 'new_lead',
+            enabled: fields.has('instantReplyOn') ? instantReplyOn : (nextCache.instantReplyOn),
+            useAi:   fields.has('replyType')      ? (replyType === 'ai') : (nextCache.replyType === 'ai'),
+            delayMinutes: 0,
+          }).catch(() => undefined);
+        }
+      })());
+    }
+
+    // 2. Instant Text — notification rule (only if the toggle changed).
+    if (fields.has('instantTextOn')) {
+      ops.push((async () => {
+        const notifRes = await notificationsApi.getRules(id).catch(() => ({ rules: [] as NotificationRule[] }));
+        const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+        if (ct) await notificationsApi.updateRule(id, ct.id, { enabled: instantTextOn });
+      })());
+    }
+
+    // 3. Instant Call — call-connect settings (only the touched keys).
+    if (fields.has('instantCallOn') || fields.has('connMode')) {
+      const ccPatch: Record<string, unknown> = {};
+      if (fields.has('instantCallOn')) ccPatch.enabled = instantCallOn;
+      if (fields.has('connMode'))      ccPatch.mode    = (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as CallConnectMode;
+      ops.push(callConnectApi.saveSettings(id, ccPatch).catch(() => undefined));
+    }
+
     await Promise.all(ops);
-    // Cache was written optimistically at the top of this function — no need
-    // to write again here, the values are already there.
   };
 
-  const handleSave = async () => {
+  const handleSave = async (fields: Set<RespondField>) => {
+    if (fields.size === 0) return;
     // Cancel any in-flight save from a prior toggle so the latest values win.
     if (saveAbortRef.current) saveAbortRef.current.abort();
     const controller = new AbortController();
@@ -335,7 +356,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSaving(true); setError(null);
     try {
       const targets = isAll ? accounts.map(a => a.id) : [accountId];
-      await Promise.all(targets.map(saveOneAccount));
+      await Promise.all(targets.map(id => saveOneAccount(id, fields)));
       if (!controller.signal.aborted) setSavedAt(Date.now());
     } catch (e: any) {
       if (!controller.signal.aborted) setError(e?.response?.data?.message || e?.message || 'Failed to save');

@@ -253,6 +253,7 @@ export class LeadsService {
         include: {
           conversation: {
             select: {
+              id: true,
               lastMessageAt: true,
               // Latest message on the conversation. Cache invalidates whenever
               // a webhook stores a new message (see invalidateLeadMessagesAndList),
@@ -276,7 +277,19 @@ export class LeadsService {
 
       const leads = await this.prisma.lead.findMany(queryOptions);
 
-      return leads.map((lead) => this.convertToNormalizedLead(lead));
+      // Compute isAutoHandled per conversation in a single distinct query —
+      // far cheaper than expanding the messages include. We only need the set
+      // of (sender, senderType) tuples that exist per conversation.
+      const autoHandledByConv = await this.computeAutoHandledFlags(
+        leads.map((l: any) => l.conversation?.id).filter(Boolean),
+      );
+
+      return leads.map((lead: any) => {
+        const normalized = this.convertToNormalizedLead(lead);
+        const convId = lead.conversation?.id;
+        normalized.isAutoHandled = convId ? autoHandledByConv.get(convId) ?? false : false;
+        return normalized;
+      });
     };
 
     if (!isCacheable) return loader();
@@ -1711,6 +1724,52 @@ export class LeadsService {
   /**
    * Convert database lead to normalized format
    */
+  // Given a list of conversation IDs, return a map<convId, isAutoHandled>.
+  // A conversation is "auto-handled" when at least one AI pro-send exists and
+  // there is no human pro-send and no customer reply. Uses Prisma `distinct`
+  // so the result set is at most ~3 rows per conversation regardless of
+  // history length.
+  private async computeAutoHandledFlags(
+    conversationIds: string[],
+  ): Promise<Map<string, boolean>> {
+    const result = new Map<string, boolean>();
+    if (conversationIds.length === 0) return result;
+
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId: { in: conversationIds } },
+      select: { conversationId: true, sender: true, senderType: true },
+      distinct: ['conversationId', 'sender', 'senderType'],
+    });
+
+    const presence = new Map<
+      string,
+      { hasAi: boolean; hasHuman: boolean; hasCustomer: boolean }
+    >();
+    for (const row of rows) {
+      if (!row.conversationId) continue;
+      const slot = presence.get(row.conversationId) ?? {
+        hasAi: false,
+        hasHuman: false,
+        hasCustomer: false,
+      };
+      if (row.sender === 'customer') {
+        slot.hasCustomer = true;
+      } else if (row.sender === 'pro') {
+        // senderType: 'ai' → AI send; 'user'/null → human send (matches the UI
+        // convention in Messages.tsx where senderType !== 'ai' is rendered as
+        // human/business).
+        if (row.senderType === 'ai') slot.hasAi = true;
+        else slot.hasHuman = true;
+      }
+      presence.set(row.conversationId, slot);
+    }
+
+    for (const [convId, slot] of presence) {
+      result.set(convId, slot.hasAi && !slot.hasHuman && !slot.hasCustomer);
+    }
+    return result;
+  }
+
   private convertToNormalizedLead(lead: any): NormalizedLead {
     // Get lastMessageAt from conversation if available, otherwise use lead's createdAt
     const lastMessageAt = lead.conversation?.lastMessageAt || lead.createdAt;
