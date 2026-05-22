@@ -22,6 +22,7 @@ import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 import { NotificationsService } from '../notifications/notifications.service';
+import { isAutomationOwner, logSkippedAutomation } from '../common/automation-owner';
 
 /**
  * Customer-reply phrase sets used by both:
@@ -420,9 +421,19 @@ export class AutomationService implements OnModuleInit {
   }
 
   /**
-   * On startup, restore pending messages and reschedule them
+   * On startup, restore pending messages and reschedule them.
+   *
+   * AUTOMATION_OWNER guard: staging shares the production DB, so when
+   * staging boots it would otherwise read prod's pending rows and create
+   * its own setTimeout for each — leading to a double-send when both
+   * timers fire. Non-owners skip rehydration entirely. See
+   * src/common/automation-owner.ts.
    */
   async onModuleInit(): Promise<void> {
+    if (!isAutomationOwner()) {
+      logSkippedAutomation(this.logger, 'restorePendingMessages on boot');
+      return;
+    }
     await this.restorePendingMessages();
   }
 
@@ -1311,6 +1322,17 @@ export class AutomationService implements OnModuleInit {
     rule: any,
     context: AutomationTriggerContext,
   ): Promise<void> {
+    // AUTOMATION_OWNER guard: never enqueue or fire a send on a non-owner
+    // instance. Staging has no business sending on behalf of a tenant,
+    // even when an API call happens to land here. We log the skip so an
+    // operator looking at Loki can tell why nothing happened.
+    if (!isAutomationOwner()) {
+      logSkippedAutomation(this.logger, 'scheduleAutomatedMessage', {
+        ruleId: rule?.id, negotiationId: context.negotiationId,
+      });
+      return;
+    }
+
     // Synthetic AI Conversation rules (id `ai-conversation-<accountId>`) have no
     // matching AutomationRule row, so we can't create a PendingAutomatedMessage
     // (FK violation) or bump triggerCount. Execute in-memory with a synthetic
@@ -1719,6 +1741,24 @@ export class AutomationService implements OnModuleInit {
           city: context.city,
           state: context.state,
         });
+      }
+
+      // Atomic claim — placed here (not at the top of the method) so the
+      // gating checks above (trial paywall, active hours, stopOnCustomerReply)
+      // can still reschedule or cancel the row without the claim leaving it
+      // stuck in a transient state. By the time we reach this line we've
+      // decided we're actually going to send; if a sibling runner beat us
+      // here we bail before touching the platform API. Synthetic
+      // ai-conversation rows have no DB row, so skip the claim for them.
+      if (!pendingId.startsWith('synthetic-')) {
+        const claim = await this.prisma.pendingAutomatedMessage.updateMany({
+          where: { id: pendingId, status: 'pending' },
+          data: { status: 'sending' },
+        });
+        if (claim.count === 0) {
+          this.logger.log(`[executePendingMessage] skip — pending=${pendingId} already claimed (status != 'pending')`);
+          return;
+        }
       }
 
       // Send the message
