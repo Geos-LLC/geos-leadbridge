@@ -50,6 +50,12 @@ const PublicReferral = lazy(() => import('./pages/partner-network/PublicReferral
 // Demo sub-views share one module so a single dynamic import lands the whole
 // demo experience. Splitting per view would add 9 round-trips for a flow where
 // users almost always navigate laterally between sections.
+// Mobile design preview — pixel port of docs/LeadbridgeMobileDesign.
+// Public for now (no auth gate) since it ships with mocked fixture data;
+// real LB API wiring lands in a follow-up PR and the route can move
+// under <ProtectedRoute /> at that point.
+const MobileApp = lazy(() => import('./pages/mobile'));
+
 const DemoLayout = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoLayout })));
 const DemoOverviewView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoOverviewView })));
 const DemoAutomationView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoAutomationView })));
@@ -71,6 +77,11 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+
+          {/* Mobile design preview — pixel port of the mobile handoff,
+              mocked fixture data, no auth. Open /m on a phone or
+              /m/today in dev to click through every screen. */}
+          <Route path="/m/*" element={<MobileApp />} />
 
           {/* Partner Network public referral page — no auth, no app layout. */}
           <Route path="/r/:code" element={<PublicReferral />} />
