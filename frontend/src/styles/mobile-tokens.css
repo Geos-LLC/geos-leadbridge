@@ -1,0 +1,73 @@
+/* Mobile design system tokens — sourced from docs/LeadbridgeMobileDesign.
+   Scoped under .lb-mobile so they cannot leak into the existing desktop
+   styles. Apply by setting class="lb-mobile" on the mobile root wrapper. */
+
+.lb-mobile {
+  /* Ink scale (navy-tinted neutrals) */
+  --ink-0: #050a1a;
+  --ink-1: #0a1530;
+  --ink-2: #132044;
+  --ink-3: #223058;
+  --ink-4: #3d4a6d;
+  --ink-5: #5b6784;
+  --ink-6: #8b94ab;
+  --ink-7: #b4bbcc;
+  --ink-8: #d4d9e4;
+  --ink-9: #e9edf3;
+  --ink-10: #f3f5fa;
+
+  /* Surface */
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --line: #e5e9f2;
+  --line-soft: #eef1f7;
+
+  /* Accent (Leadbridge blue) */
+  --accent: #2563eb;
+  --accent-hover: #1d4fd4;
+  --accent-tint: #e7efff;
+  --accent-line: #c3d4ff;
+
+  /* Semantic */
+  --success: #16a34a;
+  --success-tint: #dcfce7;
+  --warn: #f59e0b;
+  --warn-tint: #fef3c7;
+  --danger: #dc2626;
+  --danger-tint: #fee2e2;
+
+  /* Radii */
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  /* Type */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  font-family: var(--font-sans);
+  color: var(--ink-2);
+  background: var(--bg);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Lock the wrapper to one viewport height so the bottom tab bar
+     stays pinned to the screen edge while content scrolls inside the
+     middle region. `dvh` accounts for iOS Safari's collapsing address
+     bar; `vh` is the fallback for older browsers. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.lb-mobile *,
+.lb-mobile *::before,
+.lb-mobile *::after {
+  box-sizing: border-box;
+}
+
+/* Reset some inheritance Tailwind/preflight applies that conflicts with
+   inline-styled mobile primitives. */
+.lb-mobile button {
+  font-family: inherit;
+}

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './tailwind.css'
 import './index.css'
+import './styles/mobile-tokens.css'
 import App from './App.tsx'
 import { initAnalytics } from './services/analytics'
 
@@ -19,6 +20,20 @@ window.addEventListener('vite:preloadError', () => {
   sessionStorage.setItem(KEY, String(Date.now()))
   window.location.reload()
 })
+
+// PWA: register the mobile service worker. Production-only so dev HMR
+// isn't fighting a cache. Scoped to '/' so it can handle navigations
+// across the whole origin (the mobile app navigates to /login when
+// signed out, and to deep desktop routes from the More tab). The SW
+// itself is conservative — API calls always go to the network, and
+// only static assets + the app shell get cached. See public/mobile-sw.js.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/mobile-sw.js', { scope: '/' })
+      .catch((err) => console.warn('[pwa] sw registration failed:', err));
+  });
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

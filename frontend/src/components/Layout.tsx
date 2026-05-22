@@ -84,6 +84,9 @@ export function Layout() {
     },
     { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
     { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
+    // Partner Network Beta lives under Settings → Partner Network (last tab)
+    // while in beta. The top-level /partner-network/* routes remain available
+    // for direct deep-links and for the public /r/:code page.
   ];
 
   const getPageName = () => {
@@ -98,6 +101,7 @@ export function Layout() {
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
+    if (path.startsWith('/partner-network')) return 'Partner Network Beta';
     return 'Leadbridge';
   };
 

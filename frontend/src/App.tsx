@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
@@ -37,9 +37,25 @@ const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
 const AdminTenantNumbers = lazy(() => import('./pages/admin/AdminTenantNumbers'));
 const SetupWizard = lazy(() => import('./pages/onboarding/SetupWizard'));
 
+// Partner Network Beta — isolated module, lazy-loaded as its own chunk so
+// the rest of LeadBridge isn't burdened by it. The /r/:code public page is
+// the only entrypoint that does NOT require auth.
+const PartnerNetworkDashboard = lazy(() => import('./pages/partner-network/PartnerNetworkDashboard'));
+const PartnerNetworkBusinesses = lazy(() => import('./pages/partner-network/PartnerNetworkBusinesses'));
+const PartnerNetworkRelationships = lazy(() => import('./pages/partner-network/PartnerNetworkRelationships'));
+const PartnerNetworkReferralCodes = lazy(() => import('./pages/partner-network/PartnerNetworkReferralCodes'));
+const PartnerNetworkLeads = lazy(() => import('./pages/partner-network/PartnerNetworkLeads'));
+const PublicReferral = lazy(() => import('./pages/partner-network/PublicReferral'));
+
 // Demo sub-views share one module so a single dynamic import lands the whole
 // demo experience. Splitting per view would add 9 round-trips for a flow where
 // users almost always navigate laterally between sections.
+// Mobile design preview — pixel port of docs/LeadbridgeMobileDesign.
+// Public for now (no auth gate) since it ships with mocked fixture data;
+// real LB API wiring lands in a follow-up PR and the route can move
+// under <ProtectedRoute /> at that point.
+const MobileApp = lazy(() => import('./pages/mobile'));
+
 const DemoLayout = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoLayout })));
 const DemoOverviewView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoOverviewView })));
 const DemoAutomationView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoAutomationView })));
@@ -49,6 +65,17 @@ const DemoPhoneView = lazy(() => import('./pages/Demo').then(m => ({ default: m.
 const DemoInsightsView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoInsightsView })));
 const DemoPricingView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoPricingView })));
 const DemoSettingsView = lazy(() => import('./pages/Demo').then(m => ({ default: m.DemoSettingsView })));
+
+// When an already-signed-in user hits /login (e.g. they followed a
+// ?returnTo=... link), respect the returnTo instead of dumping them at
+// /overview. Same safe-redirect rules as Login.tsx (must be a relative
+// path under our own origin).
+function LoginRedirect() {
+  const [searchParams] = useSearchParams();
+  const raw = searchParams.get('returnTo');
+  const target = raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/overview';
+  return <Navigate to={target} replace />;
+}
 
 function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -61,10 +88,25 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+
+          {/* Mobile preview gate — bare /m bounces to login if unauth,
+              otherwise drops the user into the mobile app. `returnTo`
+              is the post-login redirect target — without it, login
+              hardcodes /overview (desktop) and the PWA install flow
+              never reaches the mobile UI. */}
+          <Route
+            path="/m"
+            element={isAuthenticated
+              ? <Navigate to="/m/today" replace />
+              : <Navigate to="/login?returnTo=%2Fm%2Ftoday" replace />}
+          />
+
+          {/* Partner Network public referral page — no auth, no app layout. */}
+          <Route path="/r/:code" element={<PublicReferral />} />
           <Route path="/security" element={<Security />} />
           <Route
             path="/login"
-            element={isAuthenticated ? <Navigate to="/overview" /> : <Login />}
+            element={isAuthenticated ? <LoginRedirect /> : <Login />}
           />
           <Route
             path="/register"
@@ -97,6 +139,10 @@ function App() {
                 bottom action bar) and intentionally has no app sidebar /
                 trial banner so users can focus on setup. */}
             <Route path="/onboarding/setup" element={<SetupWizard />} />
+
+            {/* Mobile design preview — protected, no Layout (mobile app
+                owns its own shell + bottom tab bar). */}
+            <Route path="/m/*" element={<MobileApp />} />
 
             <Route element={<Layout />}>
               {/* Canonical paths — match the nav labels (Overview / Lead Activity /
@@ -139,6 +185,14 @@ function App() {
               <Route path="/admin/users/:userId" element={<AdminUserDetails />} />
               <Route path="/admin/phone-pool" element={<Navigate to="/admin/tenant-numbers" />} />
               <Route path="/admin/tenant-numbers" element={<AdminTenantNumbers />} />
+
+              {/* Partner Network Beta — admin pages live under /partner-network. */}
+              <Route path="/partner-network" element={<Navigate to="/partner-network/dashboard" replace />} />
+              <Route path="/partner-network/dashboard" element={<PartnerNetworkDashboard />} />
+              <Route path="/partner-network/businesses" element={<PartnerNetworkBusinesses />} />
+              <Route path="/partner-network/relationships" element={<PartnerNetworkRelationships />} />
+              <Route path="/partner-network/referral-codes" element={<PartnerNetworkReferralCodes />} />
+              <Route path="/partner-network/leads" element={<PartnerNetworkLeads />} />
             </Route>
           </Route>
 

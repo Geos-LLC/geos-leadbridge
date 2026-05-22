@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -11,16 +11,20 @@ import { SettingsHours } from './Hours';
 import { SettingsTeam } from './Team';
 import { SettingsAccounts } from './Accounts';
 import { SettingsBilling } from './Billing';
+import { SettingsPartnerNetwork } from './PartnerNetwork';
 
-type TabKey = 'general' | 'communication' | 'hours' | 'team' | 'accounts' | 'billing';
+type TabKey = 'general' | 'communication' | 'hours' | 'team' | 'accounts' | 'billing' | 'partner-network';
 
-const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string }[] = [
-  { key: 'general',       label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
-  { key: 'communication', label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
-  { key: 'hours',         label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
-  { key: 'team',          label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
-  { key: 'accounts',      label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
-  { key: 'billing',       label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
+const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
+  { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
+  { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
+  { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
+  { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
+  { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
+  { key: 'billing',         label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
+  // Tucked away in Settings while in beta. Has its own internal sub-nav for
+  // Dashboard / Businesses / Relationships / Referral codes / Leads.
+  { key: 'partner-network', label: 'Partner Network',   icon: Share2,        sublabel: 'Referral partners', beta: true },
 ];
 
 const SUBTITLES: Record<TabKey, string> = {
@@ -30,6 +34,7 @@ const SUBTITLES: Record<TabKey, string> = {
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
   billing: 'Plan, payment method, and invoices.',
+  'partner-network': 'Refer leads between businesses with QR codes, intent forms, and lead-value tracking. Beta.',
 };
 
 export default function SettingsPage() {
@@ -45,12 +50,13 @@ export default function SettingsPage() {
 
   let body: ReactNode = null;
   switch (tab) {
-    case 'general':       body = <SettingsGeneral />; break;
-    case 'communication': body = <SettingsCommunication />; break;
-    case 'hours':         body = <SettingsHours />; break;
-    case 'team':          body = <SettingsTeam />; break;
-    case 'accounts':      body = <SettingsAccounts />; break;
-    case 'billing':       body = <SettingsBilling />; break;
+    case 'general':         body = <SettingsGeneral />; break;
+    case 'communication':   body = <SettingsCommunication />; break;
+    case 'hours':           body = <SettingsHours />; break;
+    case 'team':            body = <SettingsTeam />; break;
+    case 'accounts':        body = <SettingsAccounts />; break;
+    case 'billing':         body = <SettingsBilling />; break;
+    case 'partner-network': body = <SettingsPartnerNetwork />; break;
   }
 
   return (
@@ -101,7 +107,20 @@ function SettingsTabs({ value, onChange }: { value: TabKey; onChange: (k: TabKey
           >
             <Icon size={14} style={{ color: active ? 'var(--lb-accent)' : 'var(--lb-ink-6)' }} />
             <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: 13, fontWeight: active ? 700 : 500, lineHeight: 1.2 }}>{t.label}</div>
+              <div style={{
+                fontSize: 13, fontWeight: active ? 700 : 500, lineHeight: 1.2,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}>
+                {t.label}
+                {t.beta && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: 0.06,
+                    padding: '1px 5px', borderRadius: 4,
+                    background: '#ede9fe', color: '#6d28d9',
+                    textTransform: 'uppercase',
+                  }}>Beta</span>
+                )}
+              </div>
               <div style={{
                 fontSize: 10.5, color: 'var(--lb-ink-6)', marginTop: 2,
                 fontFamily: 'var(--lb-font-mono)', letterSpacing: 0.04,
