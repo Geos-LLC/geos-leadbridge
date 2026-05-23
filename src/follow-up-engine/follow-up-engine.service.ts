@@ -10,6 +10,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../common/utils/prisma.service';
 import { resolveTimezone } from '../common/utils/account-timezone';
+import { parseDuration } from '../common/utils/parse-duration';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
 
@@ -333,10 +334,10 @@ export class FollowUpEngineService {
             try {
               const s = JSON.parse(acct.followUpSettingsJson);
               if (s.fuReEnrollDelay) {
-                const d = s.fuReEnrollDelay;
-                if (d.endsWith('h')) reEnrollDelayMinutes = parseInt(d) * 60;
-                else if (d.endsWith('d')) reEnrollDelayMinutes = parseInt(d) * 1440;
-                else reEnrollDelayMinutes = parseInt(d) || 1440;
+                // Shared parser handles compact ("24h", "1w") + long form
+                // ("1 hour", "3 days") + bare numbers (minutes). Default
+                // fallback 1440 (1 day) matches the prior behavior.
+                reEnrollDelayMinutes = parseDuration(s.fuReEnrollDelay, 1440);
               }
             } catch {}
           }
@@ -998,21 +999,15 @@ export class FollowUpEngineService {
   }
 
   /**
-   * Parse the human-readable UI delay string ("2 min", "1 hour", "3 days", …)
-   * into minutes. Mirror of FollowUpSchedulerService.parseDelay — kept here
-   * so enrollInSequence can use user-configured delays when computing the
-   * first step's nextDue instead of the seed-template defaults.
+   * Parse the human-readable UI delay string ("2 min", "1 hour", "3 days",
+   * "24h", "1w", …) into minutes. Delegates to the shared parseDuration
+   * helper so all three legacy parsers (this one, the inline
+   * fuReEnrollDelay parser at ~line 337, and parseShortDelay in the
+   * controller) share one implementation. Kept as a method on this class
+   * for callsite back-compat — internal callers still write
+   * this.parseDelayString(x.delay).
    */
   parseDelayString(delay: string | null | undefined): number {
-    if (!delay) return 60;
-    const d = String(delay).toLowerCase().trim();
-    const num = parseFloat(d) || 1;
-    if (d.includes('min')) return Math.round(num);
-    if (d.includes('hour') || d.includes('hr')) return Math.round(num * 60);
-    if (d.includes('day')) return Math.round(num * 1440);
-    if (d.includes('week') || d.includes('wk')) return Math.round(num * 10080);
-    if (d.includes('month') || d.includes('mo')) return Math.round(num * 43200);
-    if (d.includes('year') || d.includes('yr')) return Math.round(num * 525600);
-    return Math.round(num);
+    return parseDuration(delay, 60);
   }
 }
