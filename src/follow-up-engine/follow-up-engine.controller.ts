@@ -593,7 +593,7 @@ export class FollowUpEngineController {
 
     // Extract extended settings into JSON
     const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
-      steps, timing, customSteps, smartSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
+      steps, timing, customSteps, smartSteps, availability, stopOnReply, stopOnOptOut, stopOnBooked,
       onNo, retryDays, urgentCapability, includeHistorical, ...rest } = body;
 
     // Merge with existing followUpSettingsJson so partial saves (e.g. only the
@@ -610,8 +610,6 @@ export class FollowUpEngineController {
     if (customSteps !== undefined) extendedSettings.followUpCustomSteps = customSteps;
     if (smartSteps !== undefined) extendedSettings.followUpSmartSteps = smartSteps;
     if (availability !== undefined) extendedSettings.followUpAvailability = availability;
-    if (strategyMode !== undefined) extendedSettings.followUpStrategyMode = strategyMode;
-    if (scenarios !== undefined) extendedSettings.followUpScenarios = scenarios;
     // Removed 2026-05-22: stopOnReply / stopOnOptOut / stopOnBooked were
     // write-only JSON keys (no UI input, no backend read at runtime).
     // Real behavior is governed by fuReEnrollOnSilence (resume after

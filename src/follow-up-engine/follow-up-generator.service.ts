@@ -153,24 +153,8 @@ export class FollowUpGeneratorService {
       // Use suggestStrategy() to pick the best strategy from thread context
       const suggestion = await this.conversationContext.suggestStrategy(conversationId);
       if (suggestion) {
-        // Filter by enabled strategies in account settings
-        const enabledStrategies = await this.getEnabledStrategies(conversationId);
-        if (enabledStrategies && enabledStrategies.includes(suggestion.suggested)) {
-          strategyKey = suggestion.suggested;
-          strategyReason = suggestion.reason;
-        } else if (enabledStrategies) {
-          // Suggested strategy is disabled — pick the highest-scoring enabled one
-          const bestEnabled = Object.entries(suggestion.scores)
-            .filter(([key]) => enabledStrategies.includes(key))
-            .sort(([, a], [, b]) => b - a)[0];
-          if (bestEnabled) {
-            strategyKey = bestEnabled[0];
-            strategyReason = `fallback (${suggestion.suggested} disabled)`;
-          }
-        } else {
-          strategyKey = suggestion.suggested;
-          strategyReason = suggestion.reason;
-        }
+        strategyKey = suggestion.suggested;
+        strategyReason = suggestion.reason;
       }
     }
 
@@ -585,38 +569,6 @@ export class FollowUpGeneratorService {
       const entry = uiSteps[stepOrder];
       const text = entry?.message;
       return typeof text === 'string' && text.trim().length > 0 ? text : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Get enabled strategies from account follow-up settings.
-   * Returns null if no restrictions (all enabled).
-   */
-  private async getEnabledStrategies(conversationId: string): Promise<string[] | null> {
-    try {
-      const lead = await this.prisma.lead.findFirst({
-        where: { threadId: conversationId },
-        select: { businessId: true, userId: true },
-      });
-      if (!lead?.businessId) return null;
-
-      const account = await this.prisma.savedAccount.findFirst({
-        where: { userId: lead.userId, businessId: lead.businessId },
-        select: { followUpSettingsJson: true },
-      });
-      if (!account?.followUpSettingsJson) return null;
-
-      const settings = JSON.parse(account.followUpSettingsJson);
-      // Auto mode = all strategies enabled (no filtering)
-      if (settings.followUpStrategyMode === 'auto') return null;
-      const scenarios = settings.followUpScenarios;
-      if (!scenarios) return null;
-
-      return Object.entries(scenarios)
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => key);
     } catch {
       return null;
     }

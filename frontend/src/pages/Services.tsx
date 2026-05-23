@@ -699,11 +699,11 @@ export function Services() {
           setFuReplyType('ai');
         }
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
-        // Strategy mode is always 'auto', scenarios always all-enabled.
-        // followUpStopOn* fields removed 2026-05-22 — behavior is governed
-        // by fuReEnrollOnSilence, aiHiredCompetitorReengage, and the
-        // canonical lead.status pipeline. We still tolerate legacy values
-        // in saved JSON; we just don't load them into any UI state.
+        // followUpStrategyMode / followUpScenarios / followUpStopOn* removed
+        // 2026-05-22..23 — behavior is governed by followUpStrategy (the AI
+        // Strategy picker), fuReEnrollOnSilence, aiHiredCompetitorReengage,
+        // and the canonical lead.status pipeline. We still tolerate legacy
+        // values in saved JSON; we just don't load them into any UI state.
         // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
@@ -817,10 +817,9 @@ export function Services() {
         activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null,
         timezone: fuTz,
         platform: accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp',
-        strategyMode: 'auto',
-        scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
-        // stopOnReply / stopOnOptOut / stopOnBooked removed 2026-05-22 — see
-        // declaration site above for the replacement behaviors.
+        // strategyMode / scenarios / stopOnReply / stopOnOptOut / stopOnBooked
+        // removed 2026-05-22..23 — see declaration site above for the
+        // replacement behaviors (followUpStrategy + fuReEnrollOnSilence).
         urgentCapability: fuUrgentCapability,
         followUpStrategy: fuStrategy,
         followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt ? fuStrategyPrompt : null,
