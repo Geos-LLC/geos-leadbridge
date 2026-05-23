@@ -1064,9 +1064,16 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — classifier=${intent} conf=${classification.confidence.toFixed(2)} (manager paged)`);
           return;
         }
-        if (intent === 'deferring' && aiRules.aiStopOnDeferral !== false) {
+        // "Check in after customer deferral" — single UI toggle
+        // (aiDeferralCheckIn) gates the whole flow: silencing the AI here
+        // AND scheduling the nudge below. Toggle off in the UI = AI keeps
+        // talking + no nudge. Replaces the old split between aiStopOnDeferral
+        // (hidden, default-ON) and aiDeferralCheckIn (UI). The matching UI
+        // copy already says "silence the AI and schedule one nudge later"
+        // — this aligns runtime with the copy.
+        if (intent === 'deferring' && aiRules.aiDeferralCheckIn !== false) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=deferring conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
-          if (aiRules.aiDeferralCheckIn !== false && context.leadId && lead?.threadId) {
+          if (context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_deferred',
               context.leadId,
@@ -1142,8 +1149,9 @@ export class AutomationService implements OnModuleInit {
       // Rule: stop on customer deferral — phrases that explicitly signal "I'm
       // pausing the conversation" (e.g. "I'll get back to you", "let me think").
       // Replying after these reads as pestering and is a top complaint source.
-      // Defaults ON; opt out per-account by setting aiStopOnDeferral=false.
-      if (aiRules.aiStopOnDeferral !== false && context.customerMessage) {
+      // Gated by the same "Check in after customer deferral" toggle the UI
+      // exposes (aiDeferralCheckIn). Defaults ON.
+      if (aiRules.aiDeferralCheckIn !== false && context.customerMessage) {
         const deferralPhrases = [
           'get back to you', 'get back to u',
           'let me think', 'let me check', 'let me look',
@@ -1169,7 +1177,9 @@ export class AutomationService implements OnModuleInit {
         const matched = deferralPhrases.find(p => msgLower.includes(p));
         if (matched) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer signaled deferral ("${matched}")`);
-          if (aiRules.aiDeferralCheckIn !== false && context.leadId && lead?.threadId) {
+          // Outer gate above already confirmed aiDeferralCheckIn is on,
+          // so unconditionally schedule the check-in nudge here.
+          if (context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_deferred',
               context.leadId,
@@ -1186,16 +1196,14 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Rule: max replies per conversation
-      if (aiRules.aiMaxReplies && aiRules.aiMaxReplies > 0 && lead?.threadId) {
-        const aiReplyCount = await this.prisma.message.count({
-          where: { conversationId: lead.threadId, sender: 'pro', senderType: 'ai' },
-        });
-        if (aiReplyCount >= aiRules.aiMaxReplies) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — reached max ${aiRules.aiMaxReplies} replies (sent ${aiReplyCount})`);
-          return;
-        }
-      }
+      // aiMaxReplies removed 2026-05-23 — runaway AI conversations are
+      // already prevented by: (a) classifier-driven hand-off intents
+      // (agreed / wants_live_contact / opt_out / hired_elsewhere / deferring),
+      // (b) the per-account "Customer Reply Alerts" handoff SMS that pages
+      // the manager on high intent, (c) terminal lead.status gates, and
+      // (d) per-account follow-up step limits in the Automation settings.
+      // A separate reply-count cap was unused (no UI), redundant, and
+      // surfaced no clear use case the existing stop paths don't cover.
 
       // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage
       const syntheticRule = {
