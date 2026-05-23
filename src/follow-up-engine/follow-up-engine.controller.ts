@@ -640,7 +640,9 @@ export class FollowUpEngineController {
     if (body.aiStopOnOptOut !== undefined) extendedSettings.aiStopOnOptOut = body.aiStopOnOptOut;
     if (body.aiStopOnBooked !== undefined) extendedSettings.aiStopOnBooked = body.aiStopOnBooked;
     if (body.aiStopOnPriceAgreed !== undefined) extendedSettings.aiStopOnPriceAgreed = body.aiStopOnPriceAgreed;
-    if (body.aiMaxReplies !== undefined) extendedSettings.aiMaxReplies = body.aiMaxReplies;
+    // aiMaxReplies removed 2026-05-23 — redundant with classifier-driven
+    // hand-off intents, per-account follow-up step limits, and terminal
+    // status gates. See note in automation.service.ts.
     // Customer-reply trigger follow-ups (deferral / hired-competitor)
     if (body.aiDeferralCheckIn !== undefined) extendedSettings.aiDeferralCheckIn = body.aiDeferralCheckIn;
     if (body.aiDeferralDelay !== undefined) extendedSettings.aiDeferralDelay = body.aiDeferralDelay;
