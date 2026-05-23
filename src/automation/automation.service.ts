@@ -6,6 +6,7 @@
 import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
+import { parseDuration } from '../common/utils/parse-duration';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { resolveTimezone } from '../common/utils/account-timezone';
 import { TemplatesService } from '../templates/templates.service';
@@ -885,20 +886,16 @@ export class AutomationService implements OnModuleInit {
     // we set when an LB user types a manual reply through the LB UI —
     // same intent for this gate: a human is handling this thread.
     if (lead?.threadId) {
-      let pauseMinutes = 60; // UI default: "1 hour"
+      // Shared parseDuration handles compact ("24h", "1w") + long form
+      // ("1 hour", "3 days") + bare numbers — all the shapes the saved
+      // JSON can carry. Default fallback 60 min ("1 hour") matches the UI
+      // placeholder for "Resume follow-ups after conversation".
+      let pauseMinutes = 60;
       if (savedAccount.followUpSettingsJson) {
         try {
           const s = JSON.parse(savedAccount.followUpSettingsJson);
           if (typeof s.fuReEnrollDelay === 'string' && s.fuReEnrollDelay) {
-            const d = s.fuReEnrollDelay.toLowerCase().trim();
-            const n = parseInt(d, 10);
-            if (Number.isFinite(n) && n >= 0) {
-              if (d.endsWith('w')) pauseMinutes = n * 10080;
-              else if (d.endsWith('d')) pauseMinutes = n * 1440;
-              else if (d.endsWith('h')) pauseMinutes = n * 60;
-              else if (d.endsWith('m') || d.endsWith('min')) pauseMinutes = n;
-              else pauseMinutes = n;
-            }
+            pauseMinutes = parseDuration(s.fuReEnrollDelay, 60);
           }
         } catch { /* invalid JSON — keep the 60-min default */ }
       }

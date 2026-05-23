@@ -10,6 +10,7 @@ import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRe
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
+import { parseDuration } from '../common/utils/parse-duration';
 import { TenancyService } from '../common/tenancy/tenancy.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
@@ -732,14 +733,11 @@ export class FollowUpEngineController {
         this.logger.warn(`[saveSettings] ensureCustomerReplyPresets failed: ${err.message}`);
       }
 
-      const parseShortDelay = (d: string): number => {
-        const s = String(d || '').toLowerCase().trim();
-        const num = parseInt(s) || 0;
-        if (s.endsWith('h')) return num * 60;
-        if (s.endsWith('d')) return num * 1440;
-        if (s.endsWith('w')) return num * 10080;
-        return num || 4320; // safety fallback: 3 days
-      };
+      // Compact / long-form delay parser. Delegates to the shared helper
+      // so all three legacy parsers across the codebase converge to one
+      // implementation. Fallback 4320 (3 days) matches the prior behavior
+      // for the deferral / hired-competitor delay use case.
+      const parseShortDelay = (d: string): number => parseDuration(d, 4320);
 
       // When the user picked AI mode for the follow-up plan, the deferral
       // and hired-competitor messages should also be AI-generated. The
