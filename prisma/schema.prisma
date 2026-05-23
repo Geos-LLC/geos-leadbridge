@@ -133,6 +133,20 @@ model User {
   // AI settings
   globalAiPrompt String? @map("global_ai_prompt") @db.Text // Global AI system prompt — applied to all AI replies
 
+  // AI Conversation master switch — user-scope. Single source of truth
+  // for "do I want AI Conversation capability at all on my plan". The
+  // per-account SavedAccount.aiConversationMode answers the orthogonal
+  // question "when should AI reply on THIS account" (always /
+  // when_dispatcher_unavailable / business_hours_only).
+  //
+  // Promoted from per-account to per-user on 2026-05-23. The old
+  // per-account column was fan-out-synced by the UI but drifted on
+  // partial saves: FargiPro incident — enabled=false on the account
+  // while mode='always' → AI silently off. One column, one truth.
+  // SavedAccount.aiConversationEnabled is kept for one release as a
+  // read fallback during the rollover.
+  aiConversationEnabled Boolean @default(false) @map("ai_conversation_enabled")
+
   // ============================================================
   // Single source of truth for the user's wall-clock timezone.
   // Resolved everywhere via resolveTimezone() in account-timezone.ts:

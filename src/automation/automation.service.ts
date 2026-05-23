@@ -312,14 +312,17 @@ export class AutomationService implements OnModuleInit {
   private async maybeFireHandoffAlert(
     classification: IntentClassification | undefined,
     context: CustomerReplyContext,
-    savedAccount: { id: string; followUpSettingsJson: string | null; aiConversationEnabled?: boolean | null; businessName?: string | null },
+    savedAccount: { id: string; followUpSettingsJson: string | null; businessName?: string | null },
+    aiConversationEnabled: boolean,
   ): Promise<void> {
     if (!classification || !classification.fromLlm) return;
     if (classification.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) return;
 
     // Auto-gate: handoff only makes sense when AI is actively conversing.
-    if (!savedAccount.aiConversationEnabled) {
-      this.logger.log(`[Handoff] skipped — AI Conversation off`);
+    // aiConversationEnabled is user-scope as of 2026-05-23 (single source
+    // of truth, no more per-account fanout). Caller passes it through.
+    if (!aiConversationEnabled) {
+      this.logger.log(`[Handoff] skipped — AI Conversation off (user-level)`);
       return;
     }
 
@@ -837,6 +840,16 @@ export class AutomationService implements OnModuleInit {
       return;
     }
 
+    // Resolve the user-level AI Conversation master switch ONCE per
+    // customer-reply handling. Used by both maybeFireHandoffAlert (gate)
+    // and the main AI Conversation block below. Promoted from per-account
+    // to per-user on 2026-05-23 — see User.aiConversationEnabled in schema.
+    const userAi = await this.prisma.user.findUnique({
+      where: { id: context.userId },
+      select: { aiConversationEnabled: true },
+    });
+    const aiConversationEnabled = userAi?.aiConversationEnabled === true;
+
     // ── Handoff Alert ────────────────────────────────────────────────────
     // Classifier-driven manager notification. Fires when the customer
     // signals high intent — ready to book ('agreed') OR wants a live
@@ -845,7 +858,7 @@ export class AutomationService implements OnModuleInit {
     // conversation, the moment the customer says "I want a human now."
     // Re-engagement covers the AI-off / follow-up-running case; handoff
     // covers the AI-conversation-in-progress case.
-    await this.maybeFireHandoffAlert(classification, context, savedAccount).catch(err => {
+    await this.maybeFireHandoffAlert(classification, context, savedAccount, aiConversationEnabled).catch(err => {
       this.logger.warn(`[Handoff] alert failed: ${err.message}`);
     });
 
@@ -937,10 +950,13 @@ export class AutomationService implements OnModuleInit {
       await this.scheduleAutomatedMessage(rule, enrichedContext);
     }
 
-    // AI Conversation: if no customer_reply rules but account has aiConversationEnabled,
-    // auto-reply to customer messages using AI (ongoing conversation handling)
-    if (rules.length === 0 && savedAccount.aiConversationEnabled) {
-      this.logger.log(`[AUTOMATION] AI Conversation enabled for ${savedAccount.businessName} — generating AI reply to customer message`);
+    // AI Conversation: if no customer_reply rules and the user has the
+    // master switch on, auto-reply to customer messages using AI (ongoing
+    // conversation handling). aiConversationEnabled is user-scope as of
+    // 2026-05-23 — single source of truth, no per-account fanout. Read
+    // above into `aiConversationEnabled`.
+    if (rules.length === 0 && aiConversationEnabled) {
+      this.logger.log(`[AUTOMATION] AI Conversation enabled (user-level) — generating AI reply for ${savedAccount.businessName}`);
 
       // Load AI conversation rules from settings
       let aiRules: any = {};

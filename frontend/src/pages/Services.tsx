@@ -3444,29 +3444,23 @@ export function Services() {
                 // Always allow turning OFF. Only block turning ON for non-Convert tiers.
                 if (on && !canUseConvert) return;
                 setAiConversationOn(on);
-                // Save synchronously (await), then refetch to guarantee DB state
-                // matches what the user sees in the toggle. Catches the case where
-                // the immediate save succeeds but a stale auto-save from earlier
-                // overwrites it with the previous value.
+                // aiConversationEnabled is user-scope as of 2026-05-23 —
+                // one column on the User row, no per-account fanout. The
+                // backend's saveSettings endpoint accepts it via any
+                // per-account call for back-compat (it redirects the
+                // write to the user row), so the call shape stays the
+                // same. We just skip the multi-account fanout loop and
+                // skip the per-account refetch confirmation.
                 (async () => {
                   try {
                     await followUpApi.saveSettings(selectedAccountId, { aiConversationEnabled: on } as any);
-                    const others = fanoutOthers();
-                    if (others.length > 0) {
-                      await Promise.allSettled(others.map(id =>
-                        followUpApi.saveSettings(id, { aiConversationEnabled: on } as any)
-                      ));
-                    }
-                    // Refetch and confirm the DB value matches our optimistic state
                     const fresh = await followUpApi.getSettings(selectedAccountId);
                     const dbValue = (fresh?.settings as any)?.aiConversationEnabled;
                     if (typeof dbValue === 'boolean' && dbValue !== on) {
-                      // DB came back different — something is overwriting. Sync UI to DB.
                       setAiConversationOn(dbValue);
                       setError(`AI Conversation save mismatch (DB=${dbValue}). Try again or hard-refresh.`);
                     } else {
-                      const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
-                      showSuccess(`AI Conversation ${on ? 'enabled' : 'disabled'}${fanoutSuffix}`);
+                      showSuccess(`AI Conversation ${on ? 'enabled' : 'disabled'}`);
                     }
                   } catch (err: any) {
                     setAiConversationOn(!on); // rollback
