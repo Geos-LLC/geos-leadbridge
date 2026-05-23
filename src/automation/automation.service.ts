@@ -961,11 +961,10 @@ export class AutomationService implements OnModuleInit {
         try { aiRules = JSON.parse(savedAccount.followUpSettingsJson); } catch {}
       }
 
-      // AI Conversation availability — tri-state on `savedAccount.aiConversationMode`:
+      // AI Conversation availability — two-state on `savedAccount.aiConversationMode`:
       //   "always"                      — reply 24/7
       //   "when_dispatcher_unavailable" — reply ONLY outside business hours
       //                                   (human handles during business hours)
-      //   "business_hours_only"         — reply ONLY during business hours
       // Falls back to the legacy `followUpAvailability` / `followUpActiveHours*`
       // settings if `aiConversationMode` is null (pre-migration accounts).
       const aiMode = (savedAccount as any).aiConversationMode as string | null | undefined;
@@ -973,12 +972,6 @@ export class AutomationService implements OnModuleInit {
         const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
         if (inHours) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — dispatcher available (inside business hours)`);
-          return;
-        }
-      } else if (aiMode === 'business_hours_only') {
-        const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
-        if (!inHours) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside business hours`);
           return;
         }
       } else if (aiMode == null) {

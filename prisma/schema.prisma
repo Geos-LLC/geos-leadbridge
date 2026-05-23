@@ -137,7 +137,7 @@ model User {
   // for "do I want AI Conversation capability at all on my plan". The
   // per-account SavedAccount.aiConversationMode answers the orthogonal
   // question "when should AI reply on THIS account" (always /
-  // when_dispatcher_unavailable / business_hours_only).
+  // when_dispatcher_unavailable).
   //
   // Promoted from per-account to per-user on 2026-05-23. The old
   // per-account column was fan-out-synced by the UI but drifted on
@@ -514,10 +514,9 @@ model SavedAccount {
   // When true, follow-ups skip during the User's master quiet-hours window.
   // Default true matches the "don't text at night" politeness convention.
   followUpsApplyQuietHours    Boolean  @default(true) @map("follow_ups_apply_quiet_hours")
-  // AI Conversation mode — three states:
+  // AI Conversation mode — two states:
   //   "always"                      — AI replies 24/7
   //   "when_dispatcher_unavailable" — AI replies ONLY outside business hours (human takes over during)
-  //   "business_hours_only"         — AI replies ONLY during business hours
   aiConversationMode          String?  @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
   // Service pricing configuration (JSON — per-account pricing table)
   servicePricingJson          String?  @db.Text

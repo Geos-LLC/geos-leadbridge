@@ -360,7 +360,7 @@ export class UsersService {
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
       followUpsApplyQuietHours?: boolean;
-      aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+      aiConversationMode?: 'always' | 'when_dispatcher_unavailable';
     },
   ) {
     const account = await this.prisma.savedAccount.findFirst({
@@ -375,7 +375,7 @@ export class UsersService {
     if (dto.firstMsgDuringBusinessHours !== undefined) data.firstMsgDuringBusinessHours = !!dto.firstMsgDuringBusinessHours;
     if (dto.followUpsApplyQuietHours !== undefined) data.followUpsApplyQuietHours = !!dto.followUpsApplyQuietHours;
     if (dto.aiConversationMode !== undefined) {
-      const valid = ['always', 'when_dispatcher_unavailable', 'business_hours_only'];
+      const valid = ['always', 'when_dispatcher_unavailable'];
       if (!valid.includes(dto.aiConversationMode)) {
         throw new NotFoundException(`Invalid aiConversationMode: ${dto.aiConversationMode}`);
       }

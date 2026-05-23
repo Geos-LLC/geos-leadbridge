@@ -158,7 +158,7 @@ export class UsersController {
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
       followUpsApplyQuietHours?: boolean;
-      aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+      aiConversationMode?: 'always' | 'when_dispatcher_unavailable';
     },
   ) {
     return this.usersService.updateAccountHoursSettings(req.user.id, accountId, body);
