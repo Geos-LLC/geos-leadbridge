@@ -1219,7 +1219,7 @@ export const usersApi = {
     callDuringBusinessHours: boolean;
     firstMsgDuringBusinessHours: boolean;
     followUpsApplyQuietHours: boolean;
-    aiConversationMode: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+    aiConversationMode: 'always' | 'when_dispatcher_unavailable';
   }> => {
     const { data } = await api.get(`/v1/users/me/account-hours/${accountId}`);
     return data;
@@ -1231,7 +1231,7 @@ export const usersApi = {
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
       followUpsApplyQuietHours?: boolean;
-      aiConversationMode?: 'always' | 'when_dispatcher_unavailable' | 'business_hours_only';
+      aiConversationMode?: 'always' | 'when_dispatcher_unavailable';
     },
   ): Promise<{
     override: any;
