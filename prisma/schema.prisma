@@ -487,7 +487,12 @@ model SavedAccount {
   agentPhoneOverride          String? // Per-business agent phone; when null, inherits User.businessPhone
   // Follow-up settings (per-account)
   followUpMode                String? // 'off' | 'suggest' | 'auto_send'
-  aiConversationEnabled       Boolean  @default(false) // Separate toggle: auto-reply to customer messages
+  // Removed from schema 2026-05-23 — `ai_conversation_enabled` column was
+  // promoted to User-scope on 2026-05-23 (see User.aiConversationEnabled).
+  // Kept as a schema-level read fallback for one release; that release has
+  // shipped (PR #169 + downstream), so the column drop lives in the same
+  // migration as `follow_ups_use_business_hours`. No code references the
+  // SavedAccount.aiConversationEnabled column anymore.
   followUpPreset              String? // 'conservative' | 'standard' | 'persistent'
   followUpReplyType           String? // 'template' | 'ai'
   followUpActiveHoursStart    String? // e.g. "09:00"
