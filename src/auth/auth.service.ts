@@ -97,6 +97,7 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         businessPhone: user.businessPhone,
         website: user.website ?? null,
+        aiConversationEnabled: user.aiConversationEnabled,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -143,6 +144,7 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         businessPhone: user.businessPhone,
         website: user.website ?? null,
+        aiConversationEnabled: user.aiConversationEnabled,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -171,6 +173,7 @@ export class AuthService {
         businessPhone: true,
         website: true,
         websiteMetadataJson: true,
+        aiConversationEnabled: true,
         createdAt: true,
         // Trial fields — used to compute `trialActive` so the frontend can
         // unlock Engage/Convert features for trial users without an extra

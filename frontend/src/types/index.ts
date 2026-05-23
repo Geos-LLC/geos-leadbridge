@@ -51,6 +51,10 @@ export interface User {
   hasOwnNumber?: boolean;
   phoneNumber?: string | null;
   businessPhone?: string | null;
+  // AI Conversation master switch — user-scope as of 2026-05-23. Single
+  // source of truth for "do I want AI Conversation capability". The
+  // per-account SavedAccount.aiConversationMode answers "when".
+  aiConversationEnabled?: boolean;
   // Business website — captured by the onboarding wizard's Business
   // step (free text, may be a domain like "myco.com" or a full URL).
   website?: string | null;

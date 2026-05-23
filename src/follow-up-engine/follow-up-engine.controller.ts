@@ -122,14 +122,24 @@ export class FollowUpEngineController {
     const savedAccountPromise = lead?.businessId
       ? this.prisma.savedAccount.findFirst({
           where: { userId: lead.userId, businessId: lead.businessId },
-          select: { aiConversationEnabled: true, followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
+          select: { followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
+        })
+      : Promise.resolve(null);
+    // aiConversationEnabled is user-scope as of 2026-05-23 — read once
+    // here and merge into the response below. Fetched in parallel with
+    // savedAccount so latency is bounded by the slower of the two.
+    const userAiPromise = lead?.userId
+      ? this.prisma.user.findUnique({
+          where: { id: lead.userId },
+          select: { aiConversationEnabled: true },
         })
       : Promise.resolve(null);
 
     if (!enrollment) {
-      // Round 2: savedAccount + lastEnrollment.
-      const [acct, lastEnrollment] = await Promise.all([
+      // Round 2: savedAccount + user + lastEnrollment.
+      const [acct, userAi, lastEnrollment] = await Promise.all([
         savedAccountPromise,
+        userAiPromise,
         this.prisma.followUpEnrollment.findFirst({
           where: { conversationId },
           orderBy: { createdAt: 'desc' },
@@ -137,7 +147,7 @@ export class FollowUpEngineController {
         }),
       ]);
 
-      let aiConversationOn = false;
+      let aiConversationOn = userAi?.aiConversationEnabled === true;
       let followUpMode: string | null = null;
       let aiAvailability: string | null = null;
       let aiActiveHoursStart: string | null = null;
@@ -146,7 +156,6 @@ export class FollowUpEngineController {
       let aiExtraWindows: any[] | null = null;
       let accountStrategy: string | null = null;
       if (acct) {
-        aiConversationOn = acct.aiConversationEnabled ?? false;
         followUpMode = acct.followUpMode || null;
         aiActiveHoursStart = acct.followUpActiveHoursStart || null;
         aiActiveHoursEnd = acct.followUpActiveHoursEnd || null;
@@ -188,9 +197,10 @@ export class FollowUpEngineController {
 
     const currentStep = enrollment.currentStepIndex;
 
-    // Round 2: savedAccount + pendingSuggestion + sentCount.
-    const [acct, pendingSuggestion, sentCount] = await Promise.all([
+    // Round 2: savedAccount + user + pendingSuggestion + sentCount.
+    const [acct, userAi, pendingSuggestion, sentCount] = await Promise.all([
       savedAccountPromise,
+      userAiPromise,
       this.prisma.followUpStepExecution.findFirst({
         where: { enrollmentId: enrollment.id, stepIndex: currentStep, status: 'suggested' },
         select: { id: true, generatedMessage: true, strategyUsed: true },
@@ -200,7 +210,7 @@ export class FollowUpEngineController {
       }),
     ]);
 
-    let aiConversationOn = false;
+    let aiConversationOn = userAi?.aiConversationEnabled === true;
     let aiAvailability: string = 'always';
     let aiActiveHoursStart: string | null = null;
     let aiActiveHoursEnd: string | null = null;
@@ -209,7 +219,6 @@ export class FollowUpEngineController {
     let accountStrategy: string | null = null;
     let userSteps: SequenceStep[] | null = null;
     if (acct) {
-      aiConversationOn = acct.aiConversationEnabled ?? false;
       aiActiveHoursStart = acct.followUpActiveHoursStart || null;
       aiActiveHoursEnd = acct.followUpActiveHoursEnd || null;
       aiTimezone = acct.followUpTimezone || null;
@@ -532,13 +541,27 @@ export class FollowUpEngineController {
         followUpActiveHoursEnd: true,
         followUpTimezone: true,
         followUpSettingsJson: true,
-        aiConversationEnabled: true,
       },
     });
     if (!account) return { success: false, error: 'Account not found' };
+    // aiConversationEnabled is user-scope as of 2026-05-23 — pull it from
+    // the User row so the response stays compatible with the existing
+    // frontend shape (settings.aiConversationEnabled). Caller validates
+    // owner identity above via savedAccountId scoped to user.id.
+    const userAi = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { aiConversationEnabled: true },
+    });
     // Merge extended settings from JSON into the flat response
     const extended = account.followUpSettingsJson ? JSON.parse(account.followUpSettingsJson) : {};
-    return { success: true, settings: { ...account, ...extended } };
+    return {
+      success: true,
+      settings: {
+        ...account,
+        aiConversationEnabled: userAi?.aiConversationEnabled === true,
+        ...extended,
+      },
+    };
   }
 
   /**
@@ -649,11 +672,17 @@ export class FollowUpEngineController {
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset
     // unrelated columns to defaults.
+    //
+    // aiConversationEnabled was promoted from SavedAccount to User on
+    // 2026-05-23 — it's a single user-level master switch, not per-account.
+    // The frontend still sends it inside per-account saveSettings calls
+    // for back-compat; we redirect the write to the user row here.
+    // Per-account column kept in schema for one release as a read fallback,
+    // but new writes only target User.
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },
       data: {
         followUpMode: mode ?? undefined,
-        aiConversationEnabled: body.aiConversationEnabled ?? undefined,
         followUpPreset: preset ?? undefined,
         followUpReplyType: replyType ?? undefined,
         followUpActiveHoursStart: activeHoursStart ?? undefined,
@@ -668,6 +697,16 @@ export class FollowUpEngineController {
         followUpSettingsJson: Object.keys(extendedSettings).length > 0 ? JSON.stringify(extendedSettings) : undefined,
       },
     });
+
+    // User-level write for the AI Conversation master switch. Only runs
+    // when the caller actually sent the field — partial saves that omit
+    // it don't touch the user.
+    if (body.aiConversationEnabled !== undefined) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { aiConversationEnabled: !!body.aiConversationEnabled },
+      });
+    }
 
     // Propagate the customer-reply trigger settings to the corresponding
     // FollowUpSequenceTemplate. The templates are the source of truth for
@@ -882,18 +921,19 @@ export class FollowUpEngineController {
               select: { sender: true },
             });
             if (lastMessage?.sender === 'customer') {
-              // Check if AI conversation is on for this account
+              // Check if AI conversation is on for this user — user-scope
+              // as of 2026-05-23 (was per-account, fan-out was fragile).
               const leadForAi = await this.prisma.lead.findUnique({
                 where: { id: lead.id },
-                select: { businessId: true, userId: true },
+                select: { userId: true },
               });
               let aiOn = false;
-              if (leadForAi?.businessId) {
-                const acct = await this.prisma.savedAccount.findFirst({
-                  where: { userId: leadForAi.userId, businessId: leadForAi.businessId },
+              if (leadForAi?.userId) {
+                const u = await this.prisma.user.findUnique({
+                  where: { id: leadForAi.userId },
                   select: { aiConversationEnabled: true },
                 });
-                aiOn = acct?.aiConversationEnabled ?? false;
+                aiOn = u?.aiConversationEnabled === true;
               }
               if (!aiOn) { skipped.customerTurn++; continue; }
             }
