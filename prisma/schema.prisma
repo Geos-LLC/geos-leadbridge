@@ -504,11 +504,13 @@ model SavedAccount {
   businessHoursOverride       Json?    @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
   callDuringBusinessHours     Boolean  @default(true) @map("call_during_business_hours") // Instant Call gate
   firstMsgDuringBusinessHours Boolean  @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
-  // Follow-ups default to their existing quiet-hours model (broader than business
-  // hours — politeness, e.g. no texting 9pm-8am). Flip this to true only if you
-  // want follow-ups restricted to the master business-hours window too.
-  // (Kept for backward compat; the UI now exposes followUpsApplyQuietHours instead.)
-  followUpsUseBusinessHours   Boolean  @default(false) @map("follow_ups_use_business_hours")
+  // Removed from schema 2026-05-23 — `follow_ups_use_business_hours` column
+  // had zero readers and zero writers in `src/` and `frontend/src/`. The
+  // feature it described (follow-ups restricted to the master business-hours
+  // window) is covered by followUpsApplyQuietHours below + the global
+  // BusinessHoursService. Phased drop: schema removed this release; the
+  // DROP COLUMN migration lands in a follow-up release once we've confirmed
+  // prod stays green.
   // When true, follow-ups skip during the User's master quiet-hours window.
   // Default true matches the "don't text at night" politeness convention.
   followUpsApplyQuietHours    Boolean  @default(true) @map("follow_ups_apply_quiet_hours")
