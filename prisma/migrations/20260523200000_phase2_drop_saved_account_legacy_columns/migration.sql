@@ -11,4 +11,9 @@
 --    column has been a no-op since that PR shipped.
 
 ALTER TABLE "saved_accounts" DROP COLUMN IF EXISTS "follow_ups_use_business_hours";
+-- The per-account ai_conversation_enabled was declared without @map, so the
+-- actual DB column is the camelCase "aiConversationEnabled". The snake_case
+-- form below is kept as a no-op safety net in case a future redeploy with
+-- @map happens before this migration runs.
+ALTER TABLE "saved_accounts" DROP COLUMN IF EXISTS "aiConversationEnabled";
 ALTER TABLE "saved_accounts" DROP COLUMN IF EXISTS "ai_conversation_enabled";
