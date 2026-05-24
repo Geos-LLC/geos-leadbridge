@@ -16,12 +16,20 @@ const USER = { id: 'user-1' };
 
 function buildController(opts: {
   cachedLeadsByFilter?: (filter: any) => any[];
+  enrichedNames?: Record<string, string>; // businessId → businessName
 } = {}) {
   const calls: Array<{ filter: any }> = [];
   const leadsService: any = {
     getCachedLeads: jest.fn(async (_userId: string, filter: any) => {
       calls.push({ filter });
       return opts.cachedLeadsByFilter ? opts.cachedLeadsByFilter(filter) : [];
+    }),
+    enrichLeadsWithAccountInfo: jest.fn(async (_userId: string, leads: any[]) => {
+      if (!opts.enrichedNames) return leads;
+      return leads.map((l) => ({
+        ...l,
+        businessName: l.businessId ? opts.enrichedNames![l.businessId] : undefined,
+      }));
     }),
     // Not exercised by these tests; included to satisfy the controller's typed
     // dependency in case an unused branch evaluates it.
@@ -98,5 +106,87 @@ describe('LeadsController.getAllLeads — account-scope', () => {
     await controller.getAllLeads(USER, undefined, undefined, '50' as any, 'biz-A', undefined);
 
     expect(calls[0].filter.limit).toBe(50);
+  });
+});
+
+describe('LeadsController.getAllLeads — canonical cross-platform contract for SF', () => {
+  // These tests pin the SF migration target: SF should call `/v1/leads?scope=all`
+  // instead of `/v1/thumbtack/leads?scope=all`. The response shape includes
+  // businessId (stable sync key) + businessName (display, via enrichment).
+  it('scope=all (no platform) → returns leads from every platform', async () => {
+    const { controller, calls } = buildController({
+      cachedLeadsByFilter: () => [
+        { id: 't1', platform: 'thumbtack', businessId: 'tt-tampa', createdAt: new Date() },
+        { id: 't2', platform: 'thumbtack', businessId: 'tt-jax', createdAt: new Date() },
+        { id: 'y1', platform: 'yelp', businessId: 'yelp-tampa', createdAt: new Date() },
+        { id: 'y2', platform: 'yelp', businessId: 'yelp-jax', createdAt: new Date() },
+      ],
+    });
+
+    const out = await controller.getAllLeads(USER, undefined, undefined, undefined, undefined, 'all');
+
+    expect(calls[0].filter.platform).toBeUndefined();
+    expect(calls[0].filter.businessId).toBeUndefined();
+    expect(out.count).toBe(4);
+    expect(out.leads.map((l: any) => l.platform).sort()).toEqual([
+      'thumbtack', 'thumbtack', 'yelp', 'yelp',
+    ]);
+  });
+
+  it('scope=all + platform=thumbtack → Thumbtack only', async () => {
+    const { controller, calls } = buildController({
+      cachedLeadsByFilter: (f) =>
+        f.platform === 'thumbtack'
+          ? [{ id: 't1', platform: 'thumbtack', businessId: 'tt-tampa', createdAt: new Date() }]
+          : [],
+    });
+
+    const out = await controller.getAllLeads(USER, 'thumbtack', undefined, undefined, undefined, 'all');
+
+    expect(calls[0].filter.platform).toBe('thumbtack');
+    expect(out.leads).toHaveLength(1);
+    expect(out.leads[0].platform).toBe('thumbtack');
+  });
+
+  it('scope=all + platform=yelp → Yelp only', async () => {
+    const { controller, calls } = buildController({
+      cachedLeadsByFilter: (f) =>
+        f.platform === 'yelp'
+          ? [{ id: 'y1', platform: 'yelp', businessId: 'yelp-tampa', createdAt: new Date() }]
+          : [],
+    });
+
+    const out = await controller.getAllLeads(USER, 'yelp', undefined, undefined, undefined, 'all');
+
+    expect(calls[0].filter.platform).toBe('yelp');
+    expect(out.leads).toHaveLength(1);
+    expect(out.leads[0].platform).toBe('yelp');
+  });
+
+  it('businessId → returns only that one account, regardless of platform', async () => {
+    const { controller, calls } = buildController({
+      cachedLeadsByFilter: (f) => [
+        { id: 'y1', platform: 'yelp', businessId: f.businessId, createdAt: new Date() },
+      ],
+    });
+
+    const out = await controller.getAllLeads(USER, undefined, undefined, undefined, 'yelp-tampa', undefined);
+
+    expect(calls[0].filter.businessId).toBe('yelp-tampa');
+    expect(out.leads).toHaveLength(1);
+    expect(out.leads[0].businessId).toBe('yelp-tampa');
+  });
+
+  it('enrichment attaches businessName from SavedAccount', async () => {
+    const { controller } = buildController({
+      cachedLeadsByFilter: () => [
+        { id: 'y1', platform: 'yelp', businessId: 'yelp-tampa', createdAt: new Date() },
+      ],
+      enrichedNames: { 'yelp-tampa': 'Spotless Tampa (Yelp)' },
+    });
+
+    const out = await controller.getAllLeads(USER, undefined, undefined, undefined, undefined, 'all');
+
+    expect(out.leads[0].businessName).toBe('Spotless Tampa (Yelp)');
   });
 });

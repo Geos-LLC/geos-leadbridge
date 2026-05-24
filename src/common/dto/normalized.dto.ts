@@ -32,6 +32,14 @@ export class NormalizedLead {
   @IsString()
   businessId?: string; // Platform's business ID (for multi-account filtering)
 
+  // Human-readable business/account name, joined from SavedAccount.businessName.
+  // Populated by LeadsService.enrichLeadsWithAccountInfo for list endpoints —
+  // not stored on Lead and absent on cache-only paths. Stable sync key is
+  // businessId; this is for display only.
+  @IsOptional()
+  @IsString()
+  businessName?: string;
+
   @IsString()
   externalRequestId: string; // Platform's request/lead ID
 

@@ -27,6 +27,7 @@ import { YelpAdapter } from './yelp.adapter';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import { TrialService } from '../../trial/trial.service';
+import { LeadsService } from '../../leads/leads.service';
 import { parseAccountScope } from '../../common/account-scope/account-scope.util';
 
 @Controller('v1/yelp')
@@ -42,6 +43,7 @@ export class YelpController {
     private prisma: PrismaService,
     private configService: ConfigService,
     private trialService: TrialService,
+    private leadsService: LeadsService,
   ) {
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
     this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
@@ -444,26 +446,38 @@ export class YelpController {
   }
 
   /**
-   * Yelp leads list — diagnostic endpoint, used by ops dashboards.
+   * Yelp leads list — platform-scoped (Yelp only, never merged with Thumbtack).
    *
    * Account-scope contract:
    *   ?businessId=<yelpBusinessId>  → only that account's leads
-   *   ?scope=all                    → all of the user's Yelp leads
+   *   ?scope=all                    → all of the user's Yelp leads (no cap)
    *   neither                       → 400
    *   both                          → 400
+   *
+   * Response: `{ platform, count, leads: NormalizedLead[] }` — same shape as
+   * `/v1/thumbtack/leads` and `/v1/leads`. `leads[]` includes the SF-sync
+   * required fields: id, platform, businessId, businessName, customerName,
+   * customerPhone, customerEmail, status, createdAt, updatedAt, lastMessageAt.
+   *
+   * No default limit — full Yelp dataset is returned for SF sync. Pass `?limit`
+   * to cap. Pre-fix, this endpoint hard-coded `take: 100` and returned raw
+   * Prisma rows, masking the true dataset size (e.g. Spotless Yelp = 323 leads,
+   * showed as 100).
    */
   @Get('leads')
   async getLeads(
     @CurrentUser() user: any,
     @Query('businessId') businessId?: string,
     @Query('scope') scope?: string,
+    @Query('limit') limitRaw?: string,
   ) {
     const accountScope = parseAccountScope({ businessId, scope });
 
-    const where: { userId: string; platform: string; businessId?: string } = {
-      userId: user.id,
-      platform: PlatformName.YELP,
-    };
+    const options: { businessId?: string; scope?: 'all'; limit?: number } = {};
+    if (limitRaw) {
+      const parsed = parseInt(limitRaw, 10);
+      if (Number.isFinite(parsed) && parsed > 0) options.limit = parsed;
+    }
 
     if (accountScope.kind === 'account') {
       // Verify the businessId is one of this user's Yelp accounts before querying.
@@ -476,14 +490,13 @@ export class YelpController {
           `businessId '${accountScope.businessId}' is not a Yelp saved account for this user`,
         );
       }
-      where.businessId = accountScope.businessId;
+      options.businessId = accountScope.businessId;
+    } else {
+      options.scope = 'all';
     }
 
-    const leads = await this.prisma.lead.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
-    return { platform: PlatformName.YELP, count: leads.length, leads };
+    const leads = await this.leadsService.getLeads(user.id, PlatformName.YELP, options);
+    const enriched = await this.leadsService.enrichLeadsWithAccountInfo(user.id, leads);
+    return { platform: PlatformName.YELP, count: enriched.length, leads: enriched };
   }
 }

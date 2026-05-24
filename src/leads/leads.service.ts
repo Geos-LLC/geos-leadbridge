@@ -309,6 +309,53 @@ export class LeadsService {
   }
 
   /**
+   * Post-cache enrichment: attach `businessName` (from SavedAccount) to every
+   * lead in the array. Runs a single batched query over the unique
+   * (platform, businessId) pairs and joins in memory — does not mutate or
+   * pollute the leads list cache (which is keyed off filters, not enrichment).
+   *
+   * Why platform+businessId, not just businessId: Thumbtack and Yelp
+   * businessIds occupy independent namespaces; collisions across platforms are
+   * theoretically possible. Always key by both.
+   *
+   * Safe to call on already-enriched results — re-assigns the same value.
+   * Leads with no businessId are returned unchanged. SavedAccount lookups
+   * are scoped to `userId` so cross-tenant names cannot leak.
+   */
+  async enrichLeadsWithAccountInfo(
+    userId: string,
+    leads: NormalizedLead[],
+  ): Promise<NormalizedLead[]> {
+    if (!leads.length) return leads;
+
+    const pairs = new Map<string, { platform: string; businessId: string }>();
+    for (const lead of leads) {
+      if (lead.businessId && lead.platform) {
+        const key = `${lead.platform}:${lead.businessId}`;
+        if (!pairs.has(key)) pairs.set(key, { platform: lead.platform, businessId: lead.businessId });
+      }
+    }
+    if (pairs.size === 0) return leads;
+
+    const businessIds = [...new Set([...pairs.values()].map((p) => p.businessId))];
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId, businessId: { in: businessIds } },
+      select: { platform: true, businessId: true, businessName: true },
+    });
+
+    const nameMap = new Map<string, string>();
+    for (const a of accounts) {
+      if (a.businessId) nameMap.set(`${a.platform}:${a.businessId}`, a.businessName);
+    }
+
+    return leads.map((lead) => {
+      if (!lead.businessId || !lead.platform) return lead;
+      const name = nameMap.get(`${lead.platform}:${lead.businessId}`);
+      return name ? { ...lead, businessName: name } : lead;
+    });
+  }
+
+  /**
    * Get messages for a lead/negotiation.
    *
    * Wrapped in Redis (5-min TTL, userId-scoped key). Cache is invalidated on:

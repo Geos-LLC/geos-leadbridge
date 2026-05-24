@@ -18,6 +18,7 @@ import {
   HttpException,
   HttpStatus,
   Header,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -34,6 +35,7 @@ import { parseAccountScope } from '../../common/account-scope/account-scope.util
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
 export class ThumbtackController {
+  private readonly logger = new Logger(ThumbtackController.name);
   private readonly frontendUrl: string;
 
   constructor(
@@ -417,19 +419,32 @@ export class ThumbtackController {
   // ==========================================
 
   /**
-   * Despite living under `/v1/thumbtack`, this endpoint serves the unified inbox
-   * (Thumbtack + Yelp merged). It is the primary leads-list call from the
-   * frontend Messages page.
+   * DEPRECATED CROSS-PLATFORM BEHAVIOR — see header `X-LeadBridge-Deprecated`.
+   *
+   * Despite living under `/v1/thumbtack`, the `scope=all` branch of this
+   * endpoint currently serves a unified inbox (Thumbtack + Yelp merged) for
+   * back-compat with the LB frontend Messages page. The platform-correct
+   * cross-platform endpoint is `GET /v1/leads?scope=all`.
+   *
+   * Migration plan:
+   *   1. (this commit) Add deprecation header + warn log on cross-platform
+   *      branch. Behavior unchanged.
+   *   2. Frontend `leadsApi.getLeads` migrates to `/v1/leads?scope=all`.
+   *   3. External callers (Service Flow sync) migrate.
+   *   4. Strip the Yelp merge — endpoint becomes Thumbtack-only.
    *
    * Account-scope contract:
-   *   ?businessId=<id>   → only leads for that saved account (one platform)
-   *   ?scope=all         → unified across all of the user's accounts (legacy behavior)
+   *   ?businessId=<id>   → only leads for that saved account (one platform —
+   *                        no deprecation header, this branch is stable)
+   *   ?scope=all         → CROSS-PLATFORM merge (deprecated; will become
+   *                        Thumbtack-only). Header emitted to flag callers.
    *   neither            → 400
    *   both               → 400
    */
   @Get('leads')
   async getLeads(
     @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: Response,
     @Query('limit') limit?: number,
     @Query('since') since?: string,
     @Query('businessId') businessId?: string,
@@ -460,10 +475,23 @@ export class ThumbtackController {
         ...options,
         businessId: account.businessId!,
       });
-      return { count: leads.length, leads };
+      const enriched = await this.leadsService.enrichLeadsWithAccountInfo(user.id, leads);
+      return { count: enriched.length, leads: enriched };
     }
 
-    // Unified scope (explicit scope=all only — strict mode, no transition).
+    // ----- DEPRECATED cross-platform merge branch -----
+    // Flag callers so we can drive the SF + frontend migration.
+    res.setHeader('X-LeadBridge-Deprecated', 'cross-platform-merge');
+    res.setHeader(
+      'X-LeadBridge-Deprecation-Replacement',
+      '/v1/leads?scope=all',
+    );
+    // Structured warn log — picked up by Loki, grep for this string to find
+    // unmigrated callers via service_name + ip/userAgent.
+    this.logger.warn(
+      `[LeadBridge API Deprecated] endpoint=/v1/thumbtack/leads scope=all behavior=cross_platform_merge replacement=/v1/leads?scope=all userId=${user.id}`,
+    );
+
     const unifiedOptions = { ...options, scope: 'all' as const };
     const [thumbtackLeads, yelpLeads] = await Promise.all([
       this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, unifiedOptions),
@@ -472,8 +500,9 @@ export class ThumbtackController {
     const leads = [...thumbtackLeads, ...yelpLeads].sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
+    const enriched = await this.leadsService.enrichLeadsWithAccountInfo(user.id, leads);
 
-    return { count: leads.length, leads };
+    return { count: enriched.length, leads: enriched };
   }
 
   @Get('leads/:id')

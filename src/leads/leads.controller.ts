@@ -138,7 +138,13 @@ export class LeadsController {
   }
 
   /**
-   * Get leads for the user.
+   * Get leads for the user — CANONICAL CROSS-PLATFORM ENDPOINT.
+   *
+   * This is the endpoint Service Flow (and any future external consumer)
+   * should call for a full inventory of the user's leads. The platform
+   * endpoints (`/v1/thumbtack/leads`, `/v1/yelp/leads`) are platform-scoped;
+   * the historical cross-platform merge on `/v1/thumbtack/leads?scope=all` is
+   * deprecated and emits `X-LeadBridge-Deprecated: cross-platform-merge`.
    *
    * Account-scope contract (see `src/common/account-scope/account-scope.util.ts`):
    *   ?businessId=<id>  → scope to one saved account
@@ -148,6 +154,16 @@ export class LeadsController {
    *
    * `?platform=` may be combined with either: it filters the result to one
    * platform AFTER the account scope is applied.
+   *
+   * Response shape (per lead, NormalizedLead):
+   *   id, externalRequestId, platform, businessId, businessName,
+   *   customerName, customerPhone, customerEmail, message, status,
+   *   thumbtackStatus, threadId, createdAt, updatedAt, lastMessageAt,
+   *   lastMessage (latest sender+content+sentAt for sidebar previews).
+   *
+   * No default limit — pass `?limit=N` to cap. Tested counts are in the
+   * low thousands; if the dataset grows past ~10k revisit with cursor
+   * pagination.
    */
   @Get()
   async getAllLeads(
@@ -170,9 +186,14 @@ export class LeadsController {
       limit: limit ? parseInt(limit.toString(), 10) : undefined,
     });
 
-    return {
-      count: leads.length,
+    const enriched = await this.leadsService.enrichLeadsWithAccountInfo(
+      user.id,
       leads,
+    );
+
+    return {
+      count: enriched.length,
+      leads: enriched,
     };
   }
 
