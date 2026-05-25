@@ -30,6 +30,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { SfInboundStatusService } from './sf-inbound-status.service';
+import { isReplayEligible } from './sf-event-replay';
 
 @Controller('v1/integrations/service-flow')
 export class ServiceFlowInboundController {
@@ -203,8 +204,13 @@ export class ServiceFlowInboundController {
       where: { id, userId: user.id },
     });
     if (!event) throw new NotFoundException('event not found');
-    if (!['deferred', 'unmapped_status', 'dry_run'].includes(event.status)) {
-      throw new BadRequestException(`cannot replay event in status ${event.status}`);
+    // Replay-eligibility lives in sf-event-replay.ts so the matrix (status +
+    // result string) is unit-testable without bootstrapping Nest.
+    const eligibility = isReplayEligible({ status: event.status, result: event.result });
+    if (!eligibility.replayable) {
+      throw new BadRequestException(
+        `cannot replay event (${eligibility.reason})`,
+      );
     }
     if (!event.sfSubscriptionId) {
       throw new BadRequestException('no subscription context');
