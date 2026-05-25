@@ -119,12 +119,21 @@ export class ServiceFlowInboundController {
       throw err;
     }
 
+    // Enrichment fields are passed through verbatim so SF's lifecycle_drift
+    // classifier can read `skipReason` + `currentStatus` directly without an
+    // extra round-trip. Older callers ignore unknown fields.
     return res.status(outcome.httpStatus).json({
       status: outcome.httpStatus === 200 ? 'accepted' : 'rejected',
       event_id: outcome.eventId,
       result: outcome.result,
       lead_id: outcome.leadId ?? null,
       error: outcome.error,
+      skipReason: outcome.skipReason ?? null,
+      currentStatus: outcome.currentStatus ?? null,
+      currentPlatformStatus: outcome.currentPlatformStatus ?? null,
+      sfJobId: outcome.sfJobId ?? null,
+      externalRequestId: outcome.externalRequestId ?? null,
+      platform: outcome.platform ?? null,
     });
   }
 
