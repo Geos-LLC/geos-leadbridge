@@ -244,6 +244,258 @@ describe('LeadStatusService', () => {
     );
   });
 
+  describe('guard 3: SF archived-reactivation carve-out', () => {
+    // SF (and only SF) may reactivate archived → fulfillment lifecycle states.
+    // Every other source stays blocked. This carve-out is the narrowest possible
+    // exception to HARD_TERMINAL; all other guards (stale, dedup, downgrade)
+    // continue to apply on top.
+
+    function buildMetricsMock() {
+      return {
+        recordSkip: jest.fn(),
+        recordSfReactivation: jest.fn(),
+        countSkipLastHour: jest.fn().mockReturnValue(0),
+        countSfReactivationsLastHour: jest.fn().mockReturnValue(0),
+      } as any;
+    }
+
+    it.each([
+      ['booked'],
+      ['scheduled'],
+      ['in_progress'],
+      ['completed'],
+      ['cancelled'],
+      ['no_show'],
+    ] as const)('allows service_flow archived → %s', async (target) => {
+      const prisma = buildPrismaMock({ status: 'archived', statusUpdatedAt: new Date('2026-01-01') });
+      const metrics = buildMetricsMock();
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: target,
+        sourceEventId: `sf_evt_${target}`,
+        occurredAt: new Date('2026-05-25T17:30:19Z'),
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe(target);
+      expect(prisma._state.lead.status).toBe(target);
+      expect(prisma._state.lead.statusSource).toBe('service_flow');
+      expect(prisma._state.audits[0].reason).toBe('sf_reactivated_archived');
+      expect(prisma._state.audits[0].source).toBe('service_flow');
+      expect(prisma._state.audits[0].oldStatus).toBe('archived');
+      expect(prisma._state.audits[0].newStatus).toBe(target);
+      expect(metrics.recordSfReactivation).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves caller-supplied reason over default sf_reactivated_archived', async () => {
+      const prisma = buildPrismaMock({ status: 'archived', statusUpdatedAt: new Date('2026-01-01') });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_keep_reason',
+        reason: 'job_142288_created',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(prisma._state.audits[0].reason).toBe('job_142288_created');
+    });
+
+    it.each([
+      ['new'],
+      ['contacted'],
+      ['engaged'],
+      ['quoted'],
+      ['lost'],
+    ] as const)('blocks service_flow archived → %s (not in reactivation allowlist)', async (target) => {
+      const prisma = buildPrismaMock({ status: 'archived' });
+      const metrics = buildMetricsMock();
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: target,
+        sourceEventId: `sf_evt_block_${target}`,
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('hard_terminal');
+      expect(prisma._state.audits.length).toBe(0);
+      expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
+    });
+
+    it.each([['lb_automation'], ['manual'], ['backfill']] as const)(
+      'blocks %s archived → scheduled outright (carve-out is SF-only)',
+      async (source) => {
+        const prisma = buildPrismaMock({ status: 'archived' });
+        const metrics = buildMetricsMock();
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source,
+          newStatus: 'scheduled',
+          sourceEventId: `${source}_evt_block`,
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('hard_terminal');
+        expect(prisma._state.lead.status).toBe('archived');
+        expect(prisma._state.audits.length).toBe(0);
+        expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
+      },
+    );
+
+    it('platform_sync cannot reactivate canonical (Lead.status stays archived) even though platformStatus still flows', async () => {
+      // applyPlatformSync intentionally writes platformStatus separately from
+      // canonical status — that is existing partial-write behavior, not a
+      // reactivation. What the carve-out guarantees: Lead.status MUST remain
+      // archived for platform_sync, no audit row for canonical reactivation,
+      // no metric bump.
+      const prisma = buildPrismaMock({ status: 'archived', platformStatus: null, platform: 'yelp' });
+      const metrics = buildMetricsMock();
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'scheduled',
+        platformStatus: 'Active',
+        sourceEventId: 'yelp_scrape_evt_block',
+      });
+
+      // partial_skip: platformStatus row was written, canonical blocked.
+      expect(res.skipReason).toBe('hard_terminal');
+      expect(res.status).toBe('archived');
+      expect(prisma._state.lead.status).toBe('archived');
+      expect(prisma._state.lead.platformStatus).toBe('Active');
+      expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
+    });
+
+    it('stale_event guard wins over reactivation (older SF event cannot reactivate)', async () => {
+      const prisma = buildPrismaMock({
+        status: 'archived',
+        statusUpdatedAt: new Date('2026-05-25T18:00:00Z'),
+      });
+      const metrics = buildMetricsMock();
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_stale',
+        occurredAt: new Date('2026-05-25T17:30:19Z'),
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('stale_event');
+      expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
+    });
+
+    it('duplicate guard wins over reactivation (replay of same eventId is idempotent)', async () => {
+      const prisma = buildPrismaMock({ status: 'archived', statusUpdatedAt: new Date('2026-01-01') });
+      // Mock dedup lookup to find a prior audit row.
+      prisma.leadStatusAuditLog.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce({ id: 'audit-prior' });
+      const metrics = buildMetricsMock();
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig(), metrics);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_duplicate',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('duplicate');
+      expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-canonical target even from SF', async () => {
+      const prisma = buildPrismaMock({ status: 'archived' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      await expect(
+        svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'service_flow',
+          newStatus: 'snoozed',
+          sourceEventId: 'sf_evt_invalid',
+        }),
+      ).rejects.toThrow(/Invalid status/);
+    });
+
+    it('after SF reactivates archived→scheduled, platform downgrade to contacted is held back (canonical stays scheduled)', async () => {
+      const prisma = buildPrismaMock({
+        status: 'archived',
+        statusUpdatedAt: new Date('2026-01-01'),
+        platform: 'yelp',
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      // Step 1: SF reactivates.
+      const r1 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_reactivate',
+        occurredAt: new Date('2026-05-25T17:30:19Z'),
+      });
+      expect(r1.applied).toBe(true);
+      expect(prisma._state.lead.status).toBe('scheduled');
+
+      // Step 2: a later platform_sync says Active (→contacted) — must NOT
+      // downgrade the canonical status, but platformStatus is allowed to move.
+      const r2 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'contacted',
+        platformStatus: 'Active',
+        sourceEventId: 'yelp_scrape_active',
+        occurredAt: new Date('2026-05-25T18:00:00Z'),
+      });
+
+      // partial_skip: platformStatus flowed, Lead.status held by pipeline_downgrade.
+      expect(r2.applied).toBe(true);
+      expect(r2.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.platformStatus).toBe('Active');
+    });
+
+    it('reactivation log line includes reason=sf_reactivated_archived', async () => {
+      const prisma = buildPrismaMock({ status: 'archived', statusUpdatedAt: new Date('2026-01-01') });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const logSpy = jest.spyOn((svc as any).logger, 'log');
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_log_check',
+      });
+
+      expect(res.applied).toBe(true);
+      const reactivationLog = logSpy.mock.calls
+        .map((c) => String(c[0]))
+        .find((line) => line.includes('reason=sf_reactivated_archived'));
+      expect(reactivationLog).toBeDefined();
+      expect(reactivationLog).toMatch(/result=applied/);
+      expect(reactivationLog).toMatch(/source=service_flow/);
+      expect(reactivationLog).toMatch(/old_status=archived/);
+      expect(reactivationLog).toMatch(/status=scheduled/);
+    });
+  });
+
   describe('guard 4: SF_STATUS_WINS protection', () => {
     it('blocks lb_automation on SF-linked lead when SF_STATUS_WINS=true', async () => {
       const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new' });

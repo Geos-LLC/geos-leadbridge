@@ -86,6 +86,7 @@ export class IntegrationsHealthController {
         noop: noopCount,
         failed: failedCount,
         sf_protected: this.metrics.countSkipLastHour('sf_protected'),
+        sf_archived_reactivations: this.metrics.countSfReactivationsLastHour(),
       },
       crm: {
         '5xx': crm5xxCount,
