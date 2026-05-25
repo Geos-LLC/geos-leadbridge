@@ -32,6 +32,27 @@ import {
   isPipelineDowngrade,
 } from './canonical-status';
 
+/**
+ * Canonical statuses SF may transition a lead INTO via the archived-reactivation
+ * carve-out (Guard 3 exception). Restricted to fulfillment lifecycle states —
+ * pre-fulfillment values (new/contacted/engaged/quoted) are excluded because a
+ * real SF job implies post-acquisition work; reactivating archived into the
+ * funnel would corrupt funnel metrics. `lost` is excluded as a sideways terminal
+ * swap with no useful semantics, and `archived → archived` is a no-op.
+ *
+ * This allowlist is consulted ONLY when source === 'service_flow'. Every other
+ * source (platform_sync, lb_automation, manual, backfill) remains hard-blocked
+ * by the HARD_TERMINAL guard.
+ */
+const SF_REACTIVATION_TARGETS: ReadonlySet<string> = new Set([
+  'booked',
+  'scheduled',
+  'in_progress',
+  'completed',
+  'cancelled',
+  'no_show',
+]);
+
 export type StatusSource =
   | 'service_flow'
   | 'platform_sync'
@@ -274,10 +295,26 @@ export class LeadStatusService {
       );
     }
 
-    // ── Guard 3: hard-terminal blocks all sources ─────────────────────────
+    // ── Guard 3: hard-terminal blocks all sources, with one carve-out ─────
+    // SF (and only SF) may reactivate an archived lead into a fulfillment
+    // lifecycle state. Required because SF is the operational lifecycle
+    // owner: a real job/customer in SF must override a stale marketplace
+    // "archived" sweep. Every other source — platform_sync, lb_automation,
+    // manual, backfill — stays hard-blocked.
+    let sfReactivation = false;
     if (HARD_TERMINAL.has(oldStatus)) {
-      this.logSkip(input, lead.id, oldStatus, newStatus, 'hard_terminal', null, 'warn');
-      return this.skipped(lead, 'hard_terminal');
+      if (
+        input.source === 'service_flow' &&
+        SF_REACTIVATION_TARGETS.has(newStatus)
+      ) {
+        // Mark for downstream metric/log; counter is bumped only after the
+        // remaining guards (dedup, stale_event) pass and the write actually
+        // commits, so we don't over-count rejected replays.
+        sfReactivation = true;
+      } else {
+        this.logSkip(input, lead.id, oldStatus, newStatus, 'hard_terminal', null, 'warn');
+        return this.skipped(lead, 'hard_terminal');
+      }
     }
 
     // ── Guard 4: SF_STATUS_WINS protection (lb_automation only) ───────────
@@ -352,7 +389,9 @@ export class LeadStatusService {
       reengageAtUpdate = { reengageAt: null };
     }
 
-    const auditReason = input.reason ?? input.lostReason ?? null;
+    const auditReason = sfReactivation
+      ? (input.reason ?? 'sf_reactivated_archived')
+      : (input.reason ?? input.lostReason ?? null);
 
     const { conflict, auditLogId } = await this.prisma.$transaction(async (tx) => {
       await tx.lead.update({
@@ -423,6 +462,10 @@ export class LeadStatusService {
       return { conflict: conflictInfo, auditLogId: audit.id };
     });
 
+    if (sfReactivation) {
+      this.metrics?.recordSfReactivation();
+    }
+
     if (conflict) {
       this.events.emit(`lead.status.conflict.${lead.userId}`, {
         leadId: lead.id,
@@ -435,7 +478,8 @@ export class LeadStatusService {
     }
 
     this.logger.log(
-      `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=${input.source} result=${conflict ? 'applied_with_conflict' : 'applied'} skip_reason=null status=${newStatus} platform_status=${lead.platformStatus ?? 'null'} old_status=${oldStatus}`,
+      `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=${input.source} result=${conflict ? 'applied_with_conflict' : 'applied'} skip_reason=null status=${newStatus} platform_status=${lead.platformStatus ?? 'null'} old_status=${oldStatus}` +
+        (sfReactivation ? ' reason=sf_reactivated_archived' : ''),
     );
 
     return {

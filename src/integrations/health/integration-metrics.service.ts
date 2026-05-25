@@ -28,6 +28,14 @@ export class IntegrationMetricsService {
     this.bump(`skip:${reason}`);
   }
 
+  recordSfReactivation(): void {
+    this.bump('sf_archived_reactivations_total');
+  }
+
+  countSfReactivationsLastHour(): number {
+    return this.countLastHour('sf_archived_reactivations_total');
+  }
+
   countLastHour(key: string): number {
     const arr = this.hits.get(key);
     if (!arr || arr.length === 0) return 0;
