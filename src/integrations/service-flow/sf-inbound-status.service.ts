@@ -61,9 +61,73 @@ export interface ProcessOutcome {
   eventId: string;
   leadId?: string | null;
   error?: string;
+  /**
+   * Enrichment fields for SF's lifecycle_drift classifier. Populated whenever
+   * the lead is known (i.e. lookup hit, not deferred). Optional everywhere so
+   * old callers + auth-failure paths stay untouched.
+   *
+   *  - skipReason:           guard name when the write was rejected
+   *                          ('hard_terminal' | 'stale_event' | 'duplicate' |
+   *                           'pipeline_downgrade' | 'status_unchanged' |
+   *                           'older_than_last_sf_event' | 'unmapped_status' | ...)
+   *  - currentStatus:        Lead.status as LB sees it right now
+   *  - currentPlatformStatus: Lead.platformStatus (or thumbtackStatus fallback)
+   *  - sfJobId:              from the lead row when linked, else echo payload
+   *  - externalRequestId:    canonical marketplace lead id
+   *  - platform:             marketplace channel (thumbtack/yelp/...)
+   */
+  skipReason?: string | null;
+  currentStatus?: string | null;
+  currentPlatformStatus?: string | null;
+  sfJobId?: string | null;
+  externalRequestId?: string | null;
+  platform?: string | null;
 }
 
 const SIGNATURE_SKEW_SECONDS = 300;
+
+/**
+ * Build the lead-context enrichment object for a ProcessOutcome. Pulled out so
+ * every return statement that has a lead row produces the same shape — SF's
+ * lifecycle_drift classifier reads `skipReason` + `currentStatus` directly
+ * from these fields.
+ *
+ * `currentPlatformStatus` falls back to the legacy `thumbtackStatus` column for
+ * TT leads whose platformStatus hasn't been backfilled yet, matching the
+ * canonical resolution `LeadStatusService.applyPlatformSync` uses.
+ */
+interface LeadEnrichmentSource {
+  status: string;
+  platformStatus: string | null;
+  thumbtackStatus: string | null;
+  sfJobId: string | null;
+  externalRequestId: string;
+  platform: string;
+}
+
+export interface LeadEnrichment {
+  skipReason: string | null;
+  currentStatus: string;
+  currentPlatformStatus: string | null;
+  sfJobId: string | null;
+  externalRequestId: string;
+  platform: string;
+}
+
+function leadEnrichment(
+  lead: LeadEnrichmentSource,
+  payload: { sf_job_id?: string | null },
+  skipReason: string | null,
+): LeadEnrichment {
+  return {
+    skipReason,
+    currentStatus: lead.status,
+    currentPlatformStatus: lead.platformStatus ?? lead.thumbtackStatus ?? null,
+    sfJobId: lead.sfJobId ?? payload.sf_job_id ?? null,
+    externalRequestId: lead.externalRequestId,
+    platform: lead.platform,
+  };
+}
 
 @Injectable()
 export class SfInboundStatusService {
@@ -232,7 +296,18 @@ export class SfInboundStatusService {
         payloadJson: payload,
       });
       this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=null result=deferred error=lead_not_found sf_job_id=${payload.sf_job_id}`);
-      return { httpStatus: 200, result: 'deferred', eventId: payload.event_id, leadId: null };
+      // No lead → can't surface currentStatus/currentPlatformStatus, but we can
+      // echo the payload-side identifiers so SF doesn't have to re-derive them.
+      return {
+        httpStatus: 200,
+        result: 'deferred',
+        eventId: payload.event_id,
+        leadId: null,
+        skipReason: 'lead_not_found',
+        sfJobId: payload.sf_job_id ?? null,
+        externalRequestId: payload.external_request_id ?? null,
+        platform: payload.channel ?? null,
+      };
     }
 
     // ------------------------ Loop guard ------------------------
@@ -256,7 +331,13 @@ export class SfInboundStatusService {
         payloadJson: payload,
       });
       this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=stale error=older_than_last_sf_event`);
-      return { httpStatus: 200, result: 'stale', eventId: payload.event_id, leadId: lead.id };
+      return {
+        httpStatus: 200,
+        result: 'stale',
+        eventId: payload.event_id,
+        leadId: lead.id,
+        ...leadEnrichment(lead, payload, 'older_than_last_sf_event'),
+      };
     }
 
     // ------------------------ Map status ------------------------
@@ -282,6 +363,7 @@ export class SfInboundStatusService {
         eventId: payload.event_id,
         leadId: lead.id,
         error: `unknown SF status: ${payload.status.new}`,
+        ...leadEnrichment(lead, payload, 'unmapped_status'),
       };
     }
 
@@ -300,7 +382,13 @@ export class SfInboundStatusService {
         payloadJson: payload,
       });
       this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=noop error=null`);
-      return { httpStatus: 200, result: 'noop', eventId: payload.event_id, leadId: lead.id };
+      return {
+        httpStatus: 200,
+        result: 'noop',
+        eventId: payload.event_id,
+        leadId: lead.id,
+        ...leadEnrichment(lead, payload, 'status_unchanged'),
+      };
     }
 
     // ------------------------ Dry-run check ------------------------
@@ -318,7 +406,13 @@ export class SfInboundStatusService {
         payloadJson: payload,
       });
       this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=dry_run error=null would_apply=${canonical}`);
-      return { httpStatus: 200, result: 'dry_run', eventId: payload.event_id, leadId: lead.id };
+      return {
+        httpStatus: 200,
+        result: 'dry_run',
+        eventId: payload.event_id,
+        leadId: lead.id,
+        ...leadEnrichment(lead, payload, null),
+      };
     }
 
     // ------------------------ Transactional write via LeadStatusService ----
@@ -365,7 +459,25 @@ export class SfInboundStatusService {
         payloadJson: payload,
       });
       this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=${result} error=lead_status_skip:${skip ?? 'unknown'}`);
-      return { httpStatus: 200, result, eventId: payload.event_id, leadId: lead.id };
+      // Use writeResult.{status,platformStatus} for currentStatus/currentPlatformStatus —
+      // those are the freshly-read values from inside writeStatus's transaction
+      // (writeStatus.skipped() returns the lead snapshot it read). lead.* could
+      // be microseconds stale if another tx raced.
+      return {
+        httpStatus: 200,
+        result,
+        eventId: payload.event_id,
+        leadId: lead.id,
+        ...leadEnrichment(
+          {
+            ...lead,
+            status: writeResult.status,
+            platformStatus: writeResult.platformStatus,
+          },
+          payload,
+          skip ?? 'unknown',
+        ),
+      };
     }
 
     // Inbound event record (applied)
@@ -394,7 +506,24 @@ export class SfInboundStatusService {
       `[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=applied error=null status=${canonical} old_status=${oldStatus} sf_job_id=${payload.sf_job_id}`,
     );
 
-    return { httpStatus: 200, result: 'applied', eventId: payload.event_id, leadId: lead.id };
+    // Use the freshly-written canonical status. writeResult.platformStatus is
+    // unchanged for source='service_flow' (applyPlatformSync isn't called).
+    return {
+      httpStatus: 200,
+      result: 'applied',
+      eventId: payload.event_id,
+      leadId: lead.id,
+      ...leadEnrichment(
+        {
+          ...lead,
+          status: writeResult.status,
+          platformStatus: writeResult.platformStatus,
+          sfJobId: lead.sfJobId ?? payload.sf_job_id,
+        },
+        payload,
+        null,
+      ),
+    };
   }
 
   // ──────────────────────────────────────────────────────────────────

@@ -103,6 +103,12 @@ function okLead(overrides: Partial<any> = {}) {
     userId: USER_ID,
     threadId: CONV_ID,
     status: 'contacted',
+    // Fields read by the enrichment helper. Tests that exercise the response
+    // shape rely on these being populated; tests that don't are unaffected.
+    platform: 'yelp',
+    externalRequestId: 'M7SgM8SY8slQdmBB1pcD7A',
+    platformStatus: null,
+    thumbtackStatus: null,
     sfJobId: null,
     sfLastEventAt: null,
     statusSource: null,
@@ -457,6 +463,219 @@ describe('SfInboundStatusService', () => {
 
       expect(engine.stopEnrollment).not.toHaveBeenCalled();
       expect(engine.switchToLongTermMode).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('process — response enrichment for SF lifecycle_drift classifier', () => {
+    // Every response that has a lead row must carry the enrichment block so
+    // SF's drainer can populate its lifecycle_drift Loki anchor without an
+    // extra round-trip.
+
+    it('hard_terminal noop returns skipReason + currentStatus + platform context', async () => {
+      // The Phase C smoke shape: lead is archived (Yelp scrape), SF event
+      // sends scheduled, writeStatus rejects with hard_terminal.
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({
+          status: 'archived',
+          platformStatus: 'archived',
+          platform: 'yelp',
+          externalRequestId: 'M7SgM8SY8slQdmBB1pcD7A',
+        }),
+      );
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'archived',
+        platformStatus: 'archived',
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'hard_terminal',
+      });
+
+      const r = await service.process(
+        basePayload({ status: { new: 'pending' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('hard_terminal');
+      expect(r.currentStatus).toBe('archived');
+      expect(r.currentPlatformStatus).toBe('archived');
+      expect(r.platform).toBe('yelp');
+      expect(r.externalRequestId).toBe('M7SgM8SY8slQdmBB1pcD7A');
+      expect(r.sfJobId).toBe(JOB_ID); // from payload (lead.sfJobId is null)
+    });
+
+    it('stale (stale_event from writeStatus) returns skipReason + currentStatus', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'scheduled', platformStatus: 'Scheduled', platform: 'thumbtack' }),
+      );
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'scheduled',
+        platformStatus: 'Scheduled',
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'stale_event',
+      });
+
+      const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
+
+      expect(r.result).toBe('stale');
+      expect(r.skipReason).toBe('stale_event');
+      expect(r.currentStatus).toBe('scheduled');
+      expect(r.currentPlatformStatus).toBe('Scheduled');
+      expect(r.platform).toBe('thumbtack');
+    });
+
+    it('duplicate returns skipReason and currentStatus', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'in_progress' }));
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'in_progress',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'duplicate',
+      });
+
+      const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
+
+      expect(r.result).toBe('stale');
+      expect(r.skipReason).toBe('duplicate');
+      expect(r.currentStatus).toBe('in_progress');
+    });
+
+    it('pipeline_downgrade returns skipReason and currentStatus', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'completed' }));
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'completed',
+        platformStatus: 'Done',
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'pipeline_downgrade',
+      });
+
+      const r = await service.process(
+        basePayload({ status: { new: 'pending' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('pipeline_downgrade');
+      expect(r.currentStatus).toBe('completed');
+      expect(r.currentPlatformStatus).toBe('Done');
+    });
+
+    it('loop-guard stale (older than last SF event) returns skipReason=older_than_last_sf_event + lead context', async () => {
+      const past = new Date('2026-05-25T18:00:00Z');
+      const evt = new Date('2026-05-25T17:30:00Z');
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({
+          status: 'scheduled',
+          platformStatus: 'Hired',
+          statusSource: 'service_flow',
+          sfLastEventAt: past,
+          sfJobId: '142288',
+        }),
+      );
+
+      const r = await service.process(
+        basePayload({ occurred_at: evt.toISOString(), status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('stale');
+      expect(r.skipReason).toBe('older_than_last_sf_event');
+      expect(r.currentStatus).toBe('scheduled');
+      expect(r.currentPlatformStatus).toBe('Hired');
+      expect(r.sfJobId).toBe('142288');
+    });
+
+    it('status_unchanged noop returns skipReason + currentStatus', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'completed', sfJobId: JOB_ID, platformStatus: 'Done' }),
+      );
+
+      const r = await service.process(
+        basePayload({ status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('status_unchanged');
+      expect(r.currentStatus).toBe('completed');
+      expect(r.currentPlatformStatus).toBe('Done');
+    });
+
+    it('applied response carries currentStatus + currentPlatformStatus (no skipReason)', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted', platform: 'yelp' }));
+      // Default leadStatus.writeStatus mock returns applied=true; let it ride.
+
+      const r = await service.process(
+        basePayload({ status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('applied');
+      expect(r.skipReason).toBeNull();
+      // currentStatus reflects the freshly-written canonical (from writeResult).
+      expect(r.currentStatus).toBeDefined();
+      expect(r.platform).toBe('yelp');
+      expect(r.externalRequestId).toBe('M7SgM8SY8slQdmBB1pcD7A');
+    });
+
+    it('deferred (lead_not_found) carries payload-side identifiers only', async () => {
+      prisma.lead.findFirst.mockResolvedValue(null);
+
+      const r = await service.process(
+        basePayload({
+          sf_job_id: '142288',
+          external_request_id: 'M7SgM8SY8slQdmBB1pcD7A',
+          channel: 'yelp',
+        }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('deferred');
+      expect(r.skipReason).toBe('lead_not_found');
+      expect(r.sfJobId).toBe('142288');
+      expect(r.externalRequestId).toBe('M7SgM8SY8slQdmBB1pcD7A');
+      expect(r.platform).toBe('yelp');
+      // Lead-side fields stay absent — no lead = no currentStatus.
+      expect(r.currentStatus).toBeUndefined();
+      expect(r.currentPlatformStatus).toBeUndefined();
+    });
+
+    it('falls back currentPlatformStatus to legacy thumbtackStatus when platformStatus is null', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({
+          status: 'archived',
+          platform: 'thumbtack',
+          platformStatus: null,
+          thumbtackStatus: 'Archived',
+        }),
+      );
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'archived',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'hard_terminal',
+      });
+
+      const r = await service.process(
+        basePayload({ status: { new: 'pending' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.currentPlatformStatus).toBe('Archived');
     });
   });
 });
