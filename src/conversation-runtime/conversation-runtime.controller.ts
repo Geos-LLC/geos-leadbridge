@@ -224,8 +224,11 @@ export class ConversationRuntimeController {
     // SfOrchestrationClient yet. They start populating when PR-B2 wires
     // the client into the booking orchestrator and a tenant is added to
     // BOOKING_ORCHESTRATION_ENABLED_USER_IDS.
+    // PR-C1: isEnabledForUser is now async (consults SfConnectionResolver).
+    // enabledTenantCount stays sync (CSV-only diagnostic — see flag docstring).
+    const flagEnabledForTenant = await this.orchestrationFlag.isEnabledForUser(userId);
     const orchestrationFlag = {
-      flagEnabledForTenant: this.orchestrationFlag.isEnabledForUser(userId),
+      flagEnabledForTenant,
       enabledTenantCount: this.orchestrationFlag.getEnabledTenantCount(),
     };
     const orchestrationMetrics: OrchestrationCountersSnapshot =

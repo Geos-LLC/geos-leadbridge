@@ -56,6 +56,7 @@ import {
   type OrchestrationSuccess,
 } from './sf-orchestration.contracts';
 import { OrchestrationMetricsService } from './orchestration-metrics.service';
+import { SfConnectionResolver } from './sf-connection-resolver.service';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -80,6 +81,7 @@ export class SfOrchestrationClient {
   constructor(
     private readonly config: ConfigService,
     private readonly metrics: OrchestrationMetricsService,
+    private readonly resolver: SfConnectionResolver,
   ) {}
 
   // ─── Public API — one method per endpoint ──────────────────────────────
@@ -171,27 +173,31 @@ export class SfOrchestrationClient {
   // ─── Internal request loop ─────────────────────────────────────────────
 
   private async doRequest<T>(opts: DoRequestOptions): Promise<OrchestrationResult<T>> {
-    const baseUrl = this.config.get<string>('SF_ORCHESTRATION_BASE_URL', '') ?? '';
-    const apiKey = this.config.get<string>('SF_ORCHESTRATION_API_KEY', '') ?? '';
-    if (!baseUrl || !apiKey) {
-      // No env wired up. Surface a typed failure so PR-B2 callers route
-      // to handoff fallback. Do NOT throw — that would crash automation.
+    // Phase 2C: credentials resolved per-call via SfConnectionResolver.
+    // Ladder: per-tenant SfConnection row → env canary → none. When
+    // disabled, return orchestration_disabled without making any HTTP
+    // call (matches the previous PR-B1 "missing config" safety property).
+    const resolved = await this.resolver.resolveForUser(opts.userId);
+    if (!resolved.enabled || !resolved.baseUrl || !resolved.orchestrationToken) {
       const failure: OrchestrationFailure = {
         ok: false,
         code: 'orchestration_disabled',
         status: null,
         body: null,
-        message: 'SF_ORCHESTRATION_BASE_URL or SF_ORCHESTRATION_API_KEY not configured',
+        message: `resolver returned disabled (reason=${resolved.disabledReason ?? 'unknown'})`,
         correlationId: randomUUID(),
         idempotencyKey: opts.idempotencyKey,
         attemptCount: 0,
         latencyMs: 0,
       };
       this.logger.warn(
-        `[SfOrchestration] event=skipped endpoint=${opts.endpoint} user_id=${opts.userId} reason=missing_config`,
+        `[SfOrchestration] event=skipped endpoint=${opts.endpoint} user_id=${opts.userId}` +
+          ` reason=resolver_disabled source=${resolved.source} disabled_reason=${resolved.disabledReason ?? 'null'}`,
       );
       return failure;
     }
+    const baseUrl = resolved.baseUrl;
+    const apiKey = resolved.orchestrationToken;
 
     const timeoutMs = this.parseIntEnv('SF_ORCHESTRATION_TIMEOUT_MS', DEFAULT_TIMEOUT_MS);
     const maxAttempts = this.parseIntEnv(
@@ -221,7 +227,8 @@ export class SfOrchestrationClient {
       this.logger.log(
         `[SfOrchestration] event=attempt endpoint=${opts.endpoint} user_id=${opts.userId}` +
           ` correlation_id=${correlationId} idempotency_key=${opts.idempotencyKey}` +
-          ` attempt=${attempt} max_attempts=${maxAttempts}`,
+          ` attempt=${attempt} max_attempts=${maxAttempts} source=${resolved.source}` +
+          (resolved.usedPreviousToken ? ' used_previous_token=true' : ''),
       );
 
       let response: any;

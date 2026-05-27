@@ -2,11 +2,17 @@ import { ConfigService } from '@nestjs/config';
 import { ConversationRuntimeController } from './conversation-runtime.controller';
 import { OrchestrationFeatureFlag } from '../sf-orchestration/orchestration-feature-flag';
 import { OrchestrationMetricsService } from '../sf-orchestration/orchestration-metrics.service';
+import type { SfConnectionResolver, ResolvedSfCredentials } from '../sf-orchestration/sf-connection-resolver.service';
 
 const USER_A = { id: 'user-A' };
 const USER_B = { id: 'user-B' };
 
-/** Build a fresh flag + metrics pair for one test. */
+/**
+ * PR-C1: Flag now consults SfConnectionResolver async. The controller's
+ * summary endpoint awaits flag.isEnabledForUser, so the test deps need
+ * a resolver stub. Default stub: env-CSV-only (matches the PR-B1 spec
+ * baseline behavior — userId in CSV → enabled).
+ */
 function buildOrchestrationDeps(envCsv = ''): {
   flag: OrchestrationFeatureFlag;
   metrics: OrchestrationMetricsService;
@@ -17,8 +23,20 @@ function buildOrchestrationDeps(envCsv = ''): {
       return def;
     }) as any,
   } as ConfigService;
+  const enabledUserIds = envCsv.split(',').map((s) => s.trim()).filter(Boolean);
+  const resolver: Partial<SfConnectionResolver> = {
+    isEnabledForUser: jest.fn(async (uid: string | null | undefined) =>
+      !!uid && enabledUserIds.includes(uid),
+    ),
+    resolveForUser: jest.fn(
+      async (uid: string | null | undefined): Promise<ResolvedSfCredentials> =>
+        !!uid && enabledUserIds.includes(uid)
+          ? { enabled: true, source: 'env_canary', baseUrl: 'x', orchestrationToken: 'y' }
+          : { enabled: false, source: 'none' },
+    ),
+  };
   return {
-    flag: new OrchestrationFeatureFlag(config),
+    flag: new OrchestrationFeatureFlag(config, resolver as SfConnectionResolver),
     metrics: new OrchestrationMetricsService(),
   };
 }
