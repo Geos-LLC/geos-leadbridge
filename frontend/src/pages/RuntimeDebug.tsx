@@ -12,6 +12,8 @@
  */
 
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuthStore } from '../store/authStore';
 import { LeadRuntimePanel } from '../components/runtime/LeadRuntimePanel';
 import { LegacyComparisonCard } from '../components/runtime/LegacyComparisonCard';
 import { RuntimeSummaryCard } from '../components/runtime/RuntimeSummaryCard';
@@ -19,6 +21,16 @@ import { RuntimeSummaryCard } from '../components/runtime/RuntimeSummaryCard';
 export default function RuntimeDebug() {
   const [leadId, setLeadId] = useState('');
   const [submittedLeadId, setSubmittedLeadId] = useState<string | null>(null);
+
+  // Admin-only — same gate the Dashboard already uses for admin-impersonation
+  // flows. Non-admin tenant users redirect silently to /overview rather than
+  // surface an access-denied page (this route is intentionally unlinked, so
+  // anyone who reaches it without admin role was probably URL-guessing).
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'ADMIN';
+  if (!isAdmin) {
+    return <Navigate to="/overview" replace />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: 24, maxWidth: 1200, margin: '0 auto' }}>
