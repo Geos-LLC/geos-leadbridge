@@ -316,6 +316,17 @@ model Lead {
   sfJobId                String? // SF jobs.id — sticky mapping
   sfJobMappedAt          DateTime?
   sfLastEventAt          DateTime? // Last accepted SF event occurred_at
+  // ─── Phase 1 — SF operational lifecycle mirror (additive) ───────────
+  // SF owns operational job lifecycle (pending/in_progress/completed/...).
+  // Today that lifecycle lands in Lead.status, which conflates it with
+  // LB's acquisition pipeline. sfJobOutcome holds SF's view independently
+  // so the conversation-centric UI can show "Job: completed" without
+  // depending on Lead.status. Written by sf-inbound (always, regardless
+  // of whether the canonical Lead.status write succeeds — carve-out /
+  // dedup / downgrade guards may block that). Stale-protected by
+  // sfJobOutcomeAt comparison.
+  sfJobOutcome           String?
+  sfJobOutcomeAt         DateTime?
   statusSource           String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
   statusUpdatedAt        DateTime? // When Lead.status last changed; used for ordering
   // Last time a customer message arrived on this lead. Provider-agnostic
@@ -1193,6 +1204,43 @@ model ThreadContext {
   customerMessages Int @default(0)
   businessMessages Int @default(0)
   aiMessages       Int @default(0)
+
+  // ─── Phase 1 — Conversation runtime state (additive) ─────────────────
+  // Owned by the LeadBridge conversation/automation layer. Written in
+  // parallel with existing fields; read paths still use the legacy fields
+  // until Phase 3. Vocabulary lives in
+  // src/conversation-context/conversation-runtime.ts.
+  //
+  // conversationState: high-level state of the conversation itself —
+  //   new | ai_engaging | awaiting_customer | customer_replied |
+  //   human_handling | deferred | opted_out | hired_elsewhere |
+  //   booked_in_lb | long_silent | closed
+  //
+  // aiStatus: durable mirror of the AI decision pipeline —
+  //   disabled | active | paused_human | paused_deferral |
+  //   stopped_terminal | stopped_booked | unavailable
+  //
+  // lastClassifiedIntent / lastClassifiedConfidence: most recent intent
+  // classifier output for the conversation. Today the classifier result
+  // is ephemeral; persisting it lets the UI show "customer asked for
+  // human 10 min ago" without re-classifying.
+  //
+  // handoffRequestedAt / handoffRequestedReason / handoffResolvedAt:
+  // durable lifecycle of a human-takeover signal. Today handoff SMS is
+  // fire-and-forget with no state; this lets a future UI badge surface
+  // "human takeover requested" without re-deriving it.
+  conversationState        String?
+  conversationStateAt      DateTime?
+  conversationStateReason  String?
+  aiStatus                 String?
+  aiStatusAt               DateTime?
+  aiStatusReason           String?
+  lastClassifiedIntent     String?
+  lastClassifiedConfidence Float?
+  lastClassifiedAt         DateTime?
+  handoffRequestedAt       DateTime?
+  handoffRequestedReason   String?
+  handoffResolvedAt        DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

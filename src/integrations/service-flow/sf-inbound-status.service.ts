@@ -367,6 +367,33 @@ export class SfInboundStatusService {
       };
     }
 
+    // ─── Phase 1: SF operational lifecycle mirror ──────────────────────
+    // Always tracks SF's most recent view, independent of whether the LB
+    // canonical status write succeeds (carve-out, dedup, downgrade guards
+    // may all block that). Stale-protected by occurredAt comparison so an
+    // out-of-order replay won't overwrite a newer value.
+    //
+    // This is intentionally a SEPARATE write from the canonical Lead.status
+    // path. SF owns operational lifecycle; LB's acquisition pipeline is a
+    // distinct domain. Phase 5 will stop writing Lead.status from this path
+    // entirely; sfJobOutcome is the migration target.
+    try {
+      await this.prisma.lead.updateMany({
+        where: {
+          id: lead.id,
+          OR: [
+            { sfJobOutcomeAt: null },
+            { sfJobOutcomeAt: { lt: occurredAt } },
+          ],
+        },
+        data: { sfJobOutcome: canonical, sfJobOutcomeAt: occurredAt },
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `[SfInbound] sfJobOutcome write failed lead_id=${lead.id} err=${e?.message ?? e}`,
+      );
+    }
+
     // ------------------------ No-op detection ------------------------
     if (canonical === lead.status && lead.sfJobId === payload.sf_job_id) {
       await this.recordEvent({

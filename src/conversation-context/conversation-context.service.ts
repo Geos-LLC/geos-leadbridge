@@ -302,6 +302,10 @@ export class ConversationContextService {
           stage: 'new',
           engagementLevel: isCustomer ? 'warm' : 'unknown',
           awaitingCustomerReply: !isCustomer,
+          // Phase 1: durable waiting-since clock. Pro/AI's first message
+          // starts the customer wait; customer's first message means we
+          // never had to wait (waitingSince stays null).
+          waitingSince: isCustomer ? null : now,
           totalMessages: 1,
           customerMessages: isCustomer ? 1 : 0,
           businessMessages: isBusiness ? 1 : 0,
@@ -323,6 +327,18 @@ export class ConversationContextService {
       totalMessages: { increment: 1 },
       awaitingCustomerReply: !isCustomer, // flip: if customer just spoke, we're NOT awaiting
     };
+
+    // Phase 1: durable "waiting since" timestamp for the UI's
+    // "Waiting 2h" badge. Set when awaitingCustomerReply transitions
+    // false → true (business/AI just spoke). Preserve when already true
+    // (consecutive pro messages shouldn't reset the clock). Clear when
+    // customer speaks (so the next pro message starts a fresh count).
+    if (isCustomer) {
+      updates.waitingSince = null;
+    } else if (!existing.awaitingCustomerReply) {
+      updates.waitingSince = now;
+    }
+    // else: pro sending while already awaiting customer — preserve existing waitingSince
 
     if (isCustomer) {
       updates.customerMessages = { increment: 1 };

@@ -12,7 +12,115 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { resolveTimezone } from '../common/utils/account-timezone';
 import { parseDuration } from '../common/utils/parse-duration';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { ConversationRuntimeService } from '../conversation-context/conversation-runtime.service';
+import {
+  AI_STATUS_REASONS,
+  CONVERSATION_STATE_REASONS,
+} from '../conversation-context/conversation-runtime';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
+
+/**
+ * Map a free-form stopEnrollment `reason` string to the canonical
+ * conversation/AI runtime state. Returns null when the reason doesn't map
+ * to a known durable state — that's fine, the caller's audit log already
+ * records the raw reason.
+ *
+ * Exported for unit testing. Pure function — no DB access.
+ *
+ * Phase 1 contract: this only WRITES a parallel mirror; the existing
+ * audit log + enrollment.stoppedReason remain authoritative.
+ */
+export function mapStopReasonToRuntime(reason: string): {
+  aiStatus?: string | null;
+  aiStatusReason?: string | null;
+  conversationState?: string | null;
+  conversationStateReason?: string | null;
+} | null {
+  const r = (reason || '').toLowerCase();
+  if (!r) return null;
+
+  // Classifier-driven terminals
+  if (r === 'classifier_opt_out') {
+    return {
+      aiStatus: 'stopped_terminal',
+      aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_OPT_OUT,
+      conversationState: 'opted_out',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_OPT_OUT,
+    };
+  }
+  if (r === 'classifier_hired_elsewhere' || r === 'classifier_completed') {
+    return {
+      aiStatus: 'stopped_terminal',
+      aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
+      conversationState: 'hired_elsewhere',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
+    };
+  }
+  if (r === 'classifier_agreed') {
+    return {
+      aiStatus: 'stopped_booked',
+      aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_AGREED,
+      conversationState: 'booked_in_lb',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+    };
+  }
+  if (r === 'classifier_wants_live_contact') {
+    return {
+      aiStatus: 'stopped_booked',
+      aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+      conversationState: 'human_handling',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+    };
+  }
+  if (r === 'classifier_deferring') {
+    return {
+      aiStatus: 'paused_deferral',
+      aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_DEFERRING,
+      conversationState: 'deferred',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_DEFERRING,
+    };
+  }
+
+  // Customer reply — does NOT pause AI (it may resume on next inbound).
+  // Only mirrors conversationState.
+  if (r === 'customer_replied') {
+    return {
+      conversationState: 'customer_replied',
+      conversationStateReason: CONVERSATION_STATE_REASONS.CUSTOMER_REPLIED,
+    };
+  }
+
+  // Operator manually stopped the sequence.
+  if (r === 'manual') {
+    return {
+      aiStatus: 'paused_human',
+      aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
+      conversationState: 'human_handling',
+      conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
+    };
+  }
+
+  // SF lifecycle (carve-out path) — `sf_status_${canonical}` shape.
+  if (r.startsWith('sf_status_')) {
+    return {
+      aiStatus: 'stopped_terminal',
+      aiStatusReason: AI_STATUS_REASONS.CRM_TERMINAL_LEGACY,
+      conversationStateReason: CONVERSATION_STATE_REASONS.SF_TERMINAL,
+    };
+  }
+
+  // Legacy Lead.status terminal — `lead_status_${value}` shape. The reason
+  // tag flags this as Phase-3-replaceable.
+  if (r.startsWith('lead_status_')) {
+    return {
+      aiStatus: 'stopped_terminal',
+      aiStatusReason: AI_STATUS_REASONS.CRM_TERMINAL_LEGACY,
+      conversationStateReason: CONVERSATION_STATE_REASONS.CRM_TERMINAL_LEGACY,
+    };
+  }
+
+  return null;
+}
 
 /**
  * Audit metadata for enrollment state-change calls. All fields optional —
@@ -38,6 +146,9 @@ export class FollowUpEngineService {
     private readonly conversationContext: ConversationContextService,
     private readonly stateService: FollowUpStateService,
     private readonly eventEmitter: EventEmitter2,
+    // Phase 1 — parallel-write durable runtime state on every stopEnrollment
+    // so the UI can show "AI stopped: classifier_opt_out" without re-classifying.
+    private readonly conversationRuntime: ConversationRuntimeService,
   ) {}
 
   /**
@@ -613,6 +724,15 @@ export class FollowUpEngineService {
           followUpStatus: 'stopped',
         },
       });
+
+      // Phase 1: reason-mapped conversation runtime mirror. Maps the
+      // free-form `reason` strings used by stopEnrollment callers to the
+      // canonical conversation/AI state vocabulary. Best-effort; never
+      // throws back to the caller.
+      const runtime = mapStopReasonToRuntime(reason);
+      if (runtime) {
+        await this.conversationRuntime.setState(enrollment.conversationId, runtime);
+      }
     }
   }
 

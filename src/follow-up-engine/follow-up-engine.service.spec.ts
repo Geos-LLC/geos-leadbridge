@@ -114,7 +114,21 @@ describe('FollowUpEngineService', () => {
     contextService = buildContextMock();
     stateService = buildStateMock();
     eventEmitter = { emit: jest.fn() };
-    service = new FollowUpEngineService(prisma, contextService, stateService, eventEmitter);
+    const conversationRuntime = {
+      setConversationState: jest.fn().mockResolvedValue(undefined),
+      setAiStatus: jest.fn().mockResolvedValue(undefined),
+      setState: jest.fn().mockResolvedValue(undefined),
+      recordClassifierIntent: jest.fn().mockResolvedValue(undefined),
+      setHandoffRequested: jest.fn().mockResolvedValue(undefined),
+      resolveHandoff: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    service = new FollowUpEngineService(
+      prisma,
+      contextService,
+      stateService,
+      eventEmitter,
+      conversationRuntime,
+    );
     jest.clearAllMocks();
   });
 

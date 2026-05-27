@@ -62,6 +62,14 @@ function buildSvc() {
     /* followUpEngine */ {} as any,
     /* notifications */ {} as any,
     /* businessHours */ {} as any,
+    /* conversationRuntime */ {
+      setConversationState: jest.fn().mockResolvedValue(undefined),
+      setAiStatus: jest.fn().mockResolvedValue(undefined),
+      setState: jest.fn().mockResolvedValue(undefined),
+      recordClassifierIntent: jest.fn().mockResolvedValue(undefined),
+      setHandoffRequested: jest.fn().mockResolvedValue(undefined),
+      resolveHandoff: jest.fn().mockResolvedValue(undefined),
+    } as any,
   );
 
   return { svc, writeStatus };
@@ -290,6 +298,14 @@ describe('AutomationService.maybeFireHandoffAlert', () => {
       /* followUpEngine */ {} as any,
       notifications,
       /* businessHours */ {} as any,
+      /* conversationRuntime */ {
+        setConversationState: jest.fn().mockResolvedValue(undefined),
+        setAiStatus: jest.fn().mockResolvedValue(undefined),
+        setState: jest.fn().mockResolvedValue(undefined),
+        recordClassifierIntent: jest.fn().mockResolvedValue(undefined),
+        setHandoffRequested: jest.fn().mockResolvedValue(undefined),
+        resolveHandoff: jest.fn().mockResolvedValue(undefined),
+      } as any,
     );
     return { svc, sendHandoffAlert, prisma };
   }
@@ -319,7 +335,13 @@ describe('AutomationService.maybeFireHandoffAlert', () => {
   }
 
   function fire(svc: AutomationService, cls: any, acct: any, message = 'test message') {
-    return (svc as any).maybeFireHandoffAlert(cls, ctx(message), acct);
+    // 4th arg `aiConversationEnabled` was added by the User-scope promotion
+    // (commit d7488df) and is normally passed by handleCustomerReply. These
+    // tests pre-date that change — read it from the account override so
+    // existing test bodies (which set `aiConversationEnabled` on the acct)
+    // keep working without rewriting every call site.
+    const aiEnabled = acct?.aiConversationEnabled !== false;
+    return (svc as any).maybeFireHandoffAlert(cls, ctx(message), acct, aiEnabled);
   }
 
   describe('safety gates', () => {
