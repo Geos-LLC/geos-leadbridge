@@ -363,7 +363,12 @@ export class ConversationRuntimeController {
         {
           ...userScope,
           lead: { userId, user: { aiConversationEnabled: false } },
-          aiStatus: { notIn: ['disabled', null] as any },
+          // "aiStatus is set to something other than 'disabled'". Prisma's
+          // `notIn` doesn't accept null mixed with strings — express the
+          // intent as `in <every-active-status>` instead.
+          aiStatus: {
+            in: ['active', 'paused_human', 'paused_deferral', 'stopped_terminal', 'stopped_booked', 'unavailable'],
+          },
         },
       ),
       waiting_customer_without_waitingSince: await cat(
