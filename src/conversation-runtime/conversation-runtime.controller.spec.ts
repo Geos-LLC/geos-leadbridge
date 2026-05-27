@@ -1,7 +1,33 @@
+import { ConfigService } from '@nestjs/config';
 import { ConversationRuntimeController } from './conversation-runtime.controller';
+import { OrchestrationFeatureFlag } from '../sf-orchestration/orchestration-feature-flag';
+import { OrchestrationMetricsService } from '../sf-orchestration/orchestration-metrics.service';
 
 const USER_A = { id: 'user-A' };
 const USER_B = { id: 'user-B' };
+
+/** Build a fresh flag + metrics pair for one test. */
+function buildOrchestrationDeps(envCsv = ''): {
+  flag: OrchestrationFeatureFlag;
+  metrics: OrchestrationMetricsService;
+} {
+  const config = {
+    get: ((key: string, def?: any) => {
+      if (key === 'BOOKING_ORCHESTRATION_ENABLED_USER_IDS') return envCsv ?? def;
+      return def;
+    }) as any,
+  } as ConfigService;
+  return {
+    flag: new OrchestrationFeatureFlag(config),
+    metrics: new OrchestrationMetricsService(),
+  };
+}
+
+/** Convenience: build controller with stub orchestration deps. */
+function buildController(prisma: any, envCsv = ''): ConversationRuntimeController {
+  const deps = buildOrchestrationDeps(envCsv);
+  return new ConversationRuntimeController(prisma, deps.flag, deps.metrics);
+}
 
 /**
  * Lightweight Prisma fake. Records every where clause we received so we
@@ -54,7 +80,7 @@ describe('ConversationRuntimeController', () => {
   describe('GET /v1/conversation-runtime/summary', () => {
     it('scopes every query to the calling user', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       await ctrl.summary(USER_A);
 
       // Every threadContext query must filter on lead.userId
@@ -75,7 +101,7 @@ describe('ConversationRuntimeController', () => {
 
     it('returns null-safe structure when the tenant has no data', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.summary(USER_A);
 
       expect(result.tenantUserId).toBe(USER_A.id);
@@ -93,7 +119,7 @@ describe('ConversationRuntimeController', () => {
 
     it('returns byBookingState with one entry per Phase 2A vocabulary state plus _null', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.summary(USER_A);
 
       // Lock the expected keys. Add/remove only via a deliberate vocab
@@ -120,7 +146,7 @@ describe('ConversationRuntimeController', () => {
 
     it('scopes every bookingState count query to the calling user', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       await ctrl.summary(USER_A);
 
       const bookingCountCalls = prisma._state.threadContextCalls.filter(
@@ -136,6 +162,68 @@ describe('ConversationRuntimeController', () => {
       }
     });
 
+    it('Phase 2B PR-B1: returns orchestrationFlag block — false on fresh deploy', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = buildController(prisma /* envCsv = '' */);
+      const result = await ctrl.summary(USER_A);
+      expect(result.orchestrationFlag).toEqual({
+        flagEnabledForTenant: false,
+        enabledTenantCount: 0,
+      });
+    });
+
+    it('Phase 2B PR-B1: flag flips to true when tenant is in CSV', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = buildController(prisma, 'user-A,user-B');
+      const result = await ctrl.summary(USER_A);
+      expect(result.orchestrationFlag.flagEnabledForTenant).toBe(true);
+      expect(result.orchestrationFlag.enabledTenantCount).toBe(2);
+    });
+
+    it('Phase 2B PR-B1: orchestrationMetrics is an all-zero snapshot for a fresh tenant', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = buildController(prisma);
+      const result = await ctrl.summary(USER_A);
+      const m = result.orchestrationMetrics;
+      for (const ep of ['availability', 'booking_request', 'booking_cancel', 'handoff'] as const) {
+        expect(m.attempts[ep]).toBe(0);
+        expect(m.successes[ep]).toBe(0);
+        expect(m.failures[ep]).toBe(0);
+        expect(m.retries[ep]).toBe(0);
+        expect(m.lastLatencyMs[ep]).toBeNull();
+      }
+      for (const code of [
+        'slot_taken',
+        'slot_token_expired',
+        'validation_failed',
+        'orchestration_disabled',
+        'not_found',
+        'timeout',
+        'network_error',
+        'server_error',
+        'unknown',
+      ] as const) {
+        expect(m.failuresByCode[code]).toBe(0);
+      }
+    });
+
+    it('Phase 2B PR-B1: orchestrationMetrics is tenant-scoped', async () => {
+      // Two controllers with independent metrics services; writes for
+      // tenant A must not appear in tenant B's snapshot.
+      const prisma = buildPrismaMock();
+      const depsA = buildOrchestrationDeps('user-A');
+      const ctrlA = new ConversationRuntimeController(prisma, depsA.flag, depsA.metrics);
+      depsA.metrics.recordSuccess('user-A', 'availability', 99);
+      depsA.metrics.recordFailure('user-A', 'booking_request', 'slot_taken', 11);
+      const resA = await ctrlA.summary(USER_A);
+      const resB = await ctrlA.summary(USER_B);
+
+      expect(resA.orchestrationMetrics.successes.availability).toBe(1);
+      expect(resA.orchestrationMetrics.failures.booking_request).toBe(1);
+      expect(resB.orchestrationMetrics.successes.availability).toBe(0);
+      expect(resB.orchestrationMetrics.failures.booking_request).toBe(0);
+    });
+
     it('aggregates byLastClassifiedIntent from groupBy rows', async () => {
       const prisma = buildPrismaMock();
       prisma._state.groupByReturns.threadContext = [
@@ -143,7 +231,7 @@ describe('ConversationRuntimeController', () => {
         { lastClassifiedIntent: 'wants_live_contact', _count: { _all: 3 } },
         { lastClassifiedIntent: 'engaged', _count: { _all: 42 } },
       ];
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.summary(USER_A);
       expect(result.byLastClassifiedIntent).toEqual({
         agreed: 7,
@@ -157,7 +245,7 @@ describe('ConversationRuntimeController', () => {
       // The summary calls lead.count many times in a row — they all return
       // the same value from this fake. We just need ratio = populated/total.
       prisma._state.countReturns.lead = 50;
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.summary(USER_A);
       expect(result.sfOutcomeCoverage.populated).toBe(50);
       expect(result.sfOutcomeCoverage.sfLinkedTotal).toBe(50);
@@ -166,7 +254,7 @@ describe('ConversationRuntimeController', () => {
 
     it('does NOT mutate state (count + findMany + groupBy only)', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       await ctrl.summary(USER_A);
       // Assert no write-shaped methods exist on the mock
       expect(prisma.threadContext.update).toBeUndefined();
@@ -188,7 +276,7 @@ describe('ConversationRuntimeController', () => {
   describe('GET /v1/conversation-runtime/legacy-comparison', () => {
     it('scopes every category query to the calling user', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       await ctrl.legacyComparison(USER_B);
       // Tenant-scoping check across both threadContext and lead queries
       for (const c of prisma._state.threadContextCalls) {
@@ -204,7 +292,7 @@ describe('ConversationRuntimeController', () => {
 
     it('returns all 7 categories with count + examples shape', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.legacyComparison(USER_A);
       const expectedCats = [
         'legacy_status_terminal_but_runtime_active',
@@ -226,7 +314,7 @@ describe('ConversationRuntimeController', () => {
 
     it('clamps examplesPerCategory to [1, 20]', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
 
       const r1 = await ctrl.legacyComparison(USER_A, '0');
       expect(r1.examplesPerCategory).toBe(1);
@@ -261,7 +349,7 @@ describe('ConversationRuntimeController', () => {
           updatedAt: new Date(),
         },
       ];
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       const result = await ctrl.legacyComparison(USER_A);
       // Inspect first category's first example
       const ex = (Object.values(result.categories) as any[])[0].examples[0];
@@ -278,7 +366,7 @@ describe('ConversationRuntimeController', () => {
 
     it('does NOT mutate state', async () => {
       const prisma = buildPrismaMock();
-      const ctrl = new ConversationRuntimeController(prisma);
+      const ctrl = buildController(prisma);
       await ctrl.legacyComparison(USER_A);
       const allMethods = [
         ...prisma._state.threadContextCalls.map((c: any) => c.method),

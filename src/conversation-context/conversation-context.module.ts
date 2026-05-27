@@ -16,11 +16,21 @@ import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { ConversationContextService } from './conversation-context.service';
 import { ConversationContextController } from './conversation-context.controller';
 import { ConversationRuntimeService } from './conversation-runtime.service';
+import { BookingRuntimeService } from './booking-runtime.service';
 
 @Module({
   imports: [ConfigModule, TenancyModule],
-  providers: [ConversationContextService, ConversationRuntimeService, PrismaService],
+  providers: [
+    ConversationContextService,
+    ConversationRuntimeService,
+    BookingRuntimeService,
+    PrismaService,
+  ],
   controllers: [ConversationContextController],
-  exports: [ConversationContextService, ConversationRuntimeService],
+  exports: [
+    ConversationContextService,
+    ConversationRuntimeService,
+    BookingRuntimeService,
+  ],
 })
 export class ConversationContextModule {}

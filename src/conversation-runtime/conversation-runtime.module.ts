@@ -14,10 +14,15 @@
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { TenancyModule } from '../common/tenancy/tenancy.module';
+import { SfOrchestrationModule } from '../sf-orchestration/sf-orchestration.module';
 import { ConversationRuntimeController } from './conversation-runtime.controller';
 
 @Module({
-  imports: [TenancyModule],
+  // SfOrchestrationModule is imported (not duplicated) so the controller
+  // can read OrchestrationMetricsService + OrchestrationFeatureFlag for
+  // the orchestrationMetrics + orchestrationFlag summary blocks. The
+  // metrics service is a tenant-scoped singleton across the app.
+  imports: [TenancyModule, SfOrchestrationModule],
   providers: [PrismaService],
   controllers: [ConversationRuntimeController],
 })

@@ -757,6 +757,21 @@ export interface RuntimeSummaryResponse {
     handoffRequested: number;
     sfJobOutcome: number;
   };
+  // Phase 2B PR-B1 — orchestration observability. flagEnabledForTenant
+  // and every counter is zero/false on first deploy because PR-B1 ships
+  // no callers of SfOrchestrationClient.
+  orchestrationFlag: {
+    flagEnabledForTenant: boolean;
+    enabledTenantCount: number;
+  };
+  orchestrationMetrics: {
+    attempts: Record<string, number>;
+    successes: Record<string, number>;
+    failures: Record<string, number>;
+    retries: Record<string, number>;
+    failuresByCode: Record<string, number>;
+    lastLatencyMs: Record<string, number | null>;
+  };
 }
 
 export interface LegacyComparisonExample {
