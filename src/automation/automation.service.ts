@@ -17,6 +17,11 @@ import { AiService } from '../ai/ai.service';
 import { IntentClassifierService, IntentClassification, HandoffReason } from '../ai/intent-classifier.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { ConversationRuntimeService } from '../conversation-context/conversation-runtime.service';
+import {
+  AI_STATUS_REASONS,
+  CONVERSATION_STATE_REASONS,
+} from '../conversation-context/conversation-runtime';
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
@@ -214,6 +219,9 @@ export class AutomationService implements OnModuleInit {
     private followUpEngine: FollowUpEngineService,
     private notifications: NotificationsService,
     private businessHours: BusinessHoursService,
+    // Phase 1 — durable conversation runtime state. Parallel-write only;
+    // no read paths in Phase 1.
+    private conversationRuntime: ConversationRuntimeService,
   ) {}
 
   /**
@@ -422,6 +430,24 @@ export class AutomationService implements OnModuleInit {
 
     await this.notifications.sendHandoffAlert(context.userId, savedAccount.id, rendered);
     this.logger.log(`[Handoff] fired for ${context.customerName} — reason=${reason} conf=${classification.confidence.toFixed(2)}`);
+
+    // Phase 1: durable handoff state. Lets the UI show "Human takeover
+    // requested 5 min ago" without re-running the classifier. Resolved
+    // when a manual reply lands (see manual-recency-pause branch).
+    if (context.leadId) {
+      try {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: context.leadId },
+          select: { threadId: true },
+        });
+        if (lead?.threadId) {
+          await this.conversationRuntime.setHandoffRequested(lead.threadId, reason);
+        }
+      } catch (err: any) {
+        // never block on the runtime mirror
+        this.logger.warn(`[Handoff] runtime state write failed: ${err?.message ?? err}`);
+      }
+    }
   }
 
   /**
@@ -819,6 +845,16 @@ export class AutomationService implements OnModuleInit {
         })
       : undefined;
 
+    // Phase 1: persist the classifier output so the UI can surface
+    // "customer asked for human 10 min ago" without re-classifying.
+    // Best-effort; never blocks the decision path.
+    if (lead?.threadId && classification?.intent) {
+      await this.conversationRuntime.recordClassifierIntent(lead.threadId, {
+        intent: classification.intent,
+        confidence: classification.confidence ?? null,
+      });
+    }
+
     // ── Canonical status transition ───────────────────────────────────────
     // Fires on every customer reply, independent of whether automation rules
     // or AI Conversation handle the response. The LeadStatusService guards
@@ -850,6 +886,16 @@ export class AutomationService implements OnModuleInit {
       select: { aiConversationEnabled: true },
     });
     const aiConversationEnabled = userAi?.aiConversationEnabled === true;
+
+    // Phase 1: durable mirror of the master switch. Writes 'disabled' when
+    // the user toggled AI off; downstream skips will overwrite with more
+    // specific status if applicable.
+    if (lead?.threadId && !aiConversationEnabled) {
+      await this.conversationRuntime.setAiStatus(lead.threadId, {
+        status: 'disabled',
+        reason: AI_STATUS_REASONS.USER_DISABLED,
+      });
+    }
 
     // ── Handoff Alert ────────────────────────────────────────────────────
     // Classifier-driven manager notification. Fires when the customer
@@ -915,6 +961,16 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(
             `[AUTOMATION] ✗ Auto-reply paused — ${manualReply.senderType} pro message within ${pauseMinutes}min via fuReEnrollDelay (msg=${manualReply.id} at=${manualReply.sentAt.toISOString()})`,
           );
+          // Phase 1: durable mirror of the recency-window pause. A human is
+          // handling this thread; surface that in the UI without making it
+          // re-run the 60-min Message query.
+          await this.conversationRuntime.setState(lead.threadId, {
+            aiStatus: 'paused_human',
+            aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
+            conversationState: 'human_handling',
+            conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
+          });
+          await this.conversationRuntime.resolveHandoff(lead.threadId);
           return;
         }
       }
@@ -972,6 +1028,12 @@ export class AutomationService implements OnModuleInit {
         const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
         if (inHours) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — dispatcher available (inside business hours)`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setAiStatus(lead.threadId, {
+              status: 'unavailable',
+              reason: AI_STATUS_REASONS.OUTSIDE_BUSINESS_HOURS,
+            });
+          }
           return;
         }
       } else if (aiMode == null) {
@@ -992,6 +1054,12 @@ export class AutomationService implements OnModuleInit {
         if (aiAvailability === 'active_hours' && ahStart && ahEnd) {
           if (!this.isInActiveHours(ahStart, ahEnd, ahTz)) {
             this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside active hours (${ahStart}-${ahEnd} ${ahTz}) [legacy mode]`);
+            if (lead?.threadId) {
+              await this.conversationRuntime.setAiStatus(lead.threadId, {
+                status: 'unavailable',
+                reason: AI_STATUS_REASONS.OUTSIDE_BUSINESS_HOURS,
+              });
+            }
             return;
           }
         }
@@ -1006,6 +1074,15 @@ export class AutomationService implements OnModuleInit {
         const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'completed', 'archived', 'lost'];
         if (terminal.includes(s) || terminal.includes(ts)) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — lead status is "${s || ts}"`);
+          if (lead.threadId) {
+            // Phase 1: reason tag explicitly flags this as a CRM-pipeline
+            // check; Phase 3 will replace this branch with a conversation-
+            // state check (opted_out / hired_elsewhere / booked_in_lb / ...).
+            await this.conversationRuntime.setAiStatus(lead.threadId, {
+              status: 'stopped_terminal',
+              reason: AI_STATUS_REASONS.CRM_TERMINAL_LEGACY,
+            });
+          }
           return;
         }
       }
@@ -1022,10 +1099,26 @@ export class AutomationService implements OnModuleInit {
         const intent = classification.intent;
         if (intent === 'opt_out' && aiRules.aiStopOnOptOut !== false) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=opt_out conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_terminal',
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_OPT_OUT,
+              conversationState: 'opted_out',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_OPT_OUT,
+            });
+          }
           return;
         }
         if ((intent === 'hired_elsewhere' || intent === 'completed') && aiRules.aiStopOnBooked !== false) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=${intent} conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_terminal',
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
+              conversationState: 'hired_elsewhere',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
+            });
+          }
           if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_hired_competitor',
@@ -1055,6 +1148,19 @@ export class AutomationService implements OnModuleInit {
         if ((intent === 'agreed' || intent === 'wants_live_contact')
             && aiRules.aiStopOnPriceAgreed !== false) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — classifier=${intent} conf=${classification.confidence.toFixed(2)} (manager paged)`);
+          if (lead?.threadId) {
+            const isWantsLive = intent === 'wants_live_contact';
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: isWantsLive
+                ? AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
+                : AI_STATUS_REASONS.CLASSIFIER_AGREED,
+              conversationState: isWantsLive ? 'human_handling' : 'booked_in_lb',
+              conversationStateReason: isWantsLive
+                ? CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
+                : CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+            });
+          }
           return;
         }
         // "Check in after customer deferral" — single UI toggle
@@ -1066,6 +1172,14 @@ export class AutomationService implements OnModuleInit {
         // — this aligns runtime with the copy.
         if (intent === 'deferring' && aiRules.aiDeferralCheckIn !== false) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=deferring conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'paused_deferral',
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_DEFERRING,
+              conversationState: 'deferred',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_DEFERRING,
+            });
+          }
           if (context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_deferred',

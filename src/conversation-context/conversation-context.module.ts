@@ -15,11 +15,12 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { ConversationContextService } from './conversation-context.service';
 import { ConversationContextController } from './conversation-context.controller';
+import { ConversationRuntimeService } from './conversation-runtime.service';
 
 @Module({
   imports: [ConfigModule, TenancyModule],
-  providers: [ConversationContextService, PrismaService],
+  providers: [ConversationContextService, ConversationRuntimeService, PrismaService],
   controllers: [ConversationContextController],
-  exports: [ConversationContextService],
+  exports: [ConversationContextService, ConversationRuntimeService],
 })
 export class ConversationContextModule {}

@@ -651,6 +651,71 @@ describe('SfInboundStatusService', () => {
       expect(r.currentPlatformStatus).toBeUndefined();
     });
 
+    it('writes Lead.sfJobOutcome on every successful path (Phase 1 mirror)', async () => {
+      // Tests the Phase 1 SF operational lifecycle mirror. sfJobOutcome
+      // is written regardless of whether the canonical Lead.status write
+      // succeeds (carve-out, dedup, downgrade may all block that).
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted' }));
+
+      const occurredAt = new Date('2026-05-25T17:30:19Z');
+      await service.process(
+        basePayload({
+          occurred_at: occurredAt.toISOString(),
+          status: { new: 'completed' },
+        }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      // Find the updateMany call that wrote sfJobOutcome
+      const updateManyCalls = prisma.lead.updateMany.mock.calls;
+      const sfJobOutcomeCall = updateManyCalls.find((c: any[]) =>
+        c[0]?.data?.sfJobOutcome !== undefined,
+      );
+      expect(sfJobOutcomeCall).toBeDefined();
+      expect(sfJobOutcomeCall[0].data).toEqual({
+        sfJobOutcome: 'completed',
+        sfJobOutcomeAt: occurredAt,
+      });
+      // Stale-protection clause must be present
+      expect(sfJobOutcomeCall[0].where.OR).toEqual([
+        { sfJobOutcomeAt: null },
+        { sfJobOutcomeAt: { lt: occurredAt } },
+      ]);
+    });
+
+    it('writes Lead.sfJobOutcome even when LB canonical status is unchanged (no-op branch)', async () => {
+      // SF resends the same status as LB has. LB returns noop, but
+      // sfJobOutcomeAt should still bump to reflect "SF saying the same
+      // thing again."
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'completed', sfJobId: JOB_ID }),
+      );
+
+      await service.process(
+        basePayload({ status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      const updateManyCalls = prisma.lead.updateMany.mock.calls;
+      const sfJobOutcomeCall = updateManyCalls.find((c: any[]) =>
+        c[0]?.data?.sfJobOutcome !== undefined,
+      );
+      expect(sfJobOutcomeCall).toBeDefined();
+      expect(sfJobOutcomeCall[0].data.sfJobOutcome).toBe('completed');
+    });
+
+    it('does NOT write sfJobOutcome on unmapped status (canonical=null)', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead());
+      await service.process(
+        basePayload({ status: { new: 'on_hold' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+      const sfJobOutcomeCalls = prisma.lead.updateMany.mock.calls.filter(
+        (c: any[]) => c[0]?.data?.sfJobOutcome !== undefined,
+      );
+      expect(sfJobOutcomeCalls).toHaveLength(0);
+    });
+
     it('falls back currentPlatformStatus to legacy thumbtackStatus when platformStatus is null', async () => {
       prisma.lead.findFirst.mockResolvedValue(
         okLead({
