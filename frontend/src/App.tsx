@@ -26,6 +26,7 @@ const NotificationSettings = lazy(() => import('./pages/NotificationSettings').t
 const SmsHistory = lazy(() => import('./pages/SmsHistory').then(m => ({ default: m.SmsHistory })));
 const Services = lazy(() => import('./pages/Services').then(m => ({ default: m.Services })));
 const ApiTest = lazy(() => import('./pages/ApiTest').then(m => ({ default: m.ApiTest })));
+const RuntimeDebug = lazy(() => import('./pages/RuntimeDebug'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const SettingsPage = lazy(() => import('./pages/settings'));
 const SettingsPageLegacy = lazy(() => import('./pages/SettingsPage'));
@@ -159,6 +160,11 @@ function App() {
               <Route path="/automation-classic" element={<Services />} />
               <Route path="/templates" element={<MessageSettings />} />
               <Route path="/insights" element={<Analytics />} />
+
+              {/* Phase 1.5 operator-only runtime diagnostic — not linked
+                  from the main nav. Operators navigate directly via the
+                  URL. Read-only; never mutates state. */}
+              <Route path="/runtime/debug" element={<RuntimeDebug />} />
 
               {/* Legacy URL redirects — keep old bookmarks/links working. */}
               <Route path="/dashboard" element={<Navigate to="/overview" replace />} />

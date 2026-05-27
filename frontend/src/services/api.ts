@@ -658,6 +658,162 @@ export const conversationContextApi = {
   },
 };
 
+/**
+ * Conversation Runtime — Phase 1.5 observability layer.
+ *
+ * Read-only diagnostic endpoints comparing legacy Lead.status against the
+ * new durable conversation runtime state (conversationState, aiStatus,
+ * lastClassifiedIntent, handoff lifecycle, sfJobOutcome, waitingSince).
+ *
+ * These endpoints are SAFE TO POLL — they perform no writes, no auto-fix,
+ * and never expose customer message body / phone / email / name. Used by
+ * the UI runtime-state panel + drift dashboard. Not yet wired into the
+ * primary lead UI — those callers stay on the existing Lead.status pill
+ * until Phase 3 swaps decision logic.
+ */
+export interface RuntimeStateResponse {
+  success: boolean;
+  leadId: string;
+  error?: string;
+  lead?: {
+    status: string;
+    statusSource: string | null;
+    statusUpdatedAt: string | null;
+    platform: string;
+    externalRequestId: string;
+    sfJobId: string | null;
+    sfJobOutcome: string | null;
+    sfJobOutcomeAt: string | null;
+    sfLastEventAt: string | null;
+  };
+  threadContext?: {
+    conversationState: string | null;
+    conversationStateAt: string | null;
+    conversationStateReason: string | null;
+    aiStatus: string | null;
+    aiStatusAt: string | null;
+    aiStatusReason: string | null;
+    lastClassifiedIntent: string | null;
+    lastClassifiedConfidence: number | null;
+    lastClassifiedAt: string | null;
+    handoffRequestedAt: string | null;
+    handoffRequestedReason: string | null;
+    handoffResolvedAt: string | null;
+    waitingSince: string | null;
+    lastCustomerMessageAt: string | null;
+    lastBusinessMessageAt: string | null;
+    lastAiMessageAt: string | null;
+    awaitingCustomerReply: boolean;
+    followUpStatus: string | null;
+    nextFollowUpAt: string | null;
+    activeEnrollmentId: string | null;
+  } | null;
+  followUp?: {
+    enrollmentId: string | null;
+    status: string | null;
+    stoppedReason: string | null;
+    currentStepIndex: number | null;
+    nextFollowUpAt: string | null;
+    followUpMode: string | null;
+    modeReason: string | null;
+  } | null;
+  displayLabels?: {
+    conversationState: string;
+    aiStatus: string;
+    lastClassifiedIntent: string;
+    sfJobOutcome: string;
+    followUp: string;
+    handoff: string;
+  };
+}
+
+export interface RuntimeSummaryResponse {
+  tenantUserId: string;
+  generatedAt: string;
+  totals: { threadContexts: number; leadsSfLinked: number };
+  byConversationState: Record<string, number> & { _null: number };
+  byAiStatus: Record<string, number> & { _null: number };
+  byLastClassifiedIntent: Record<string, number>;
+  sfJobOutcomeCounts: Record<string, number>;
+  sfOutcomeCoverage: {
+    populated: number;
+    sfLinkedTotal: number;
+    ratio: number | null;
+  };
+  mismatchCounts: {
+    legacyTerminalRuntimeActive: number;
+    runtimeTerminalLegacyActive: number;
+  };
+  waitingSinceCount: number;
+  handoffOpen: number;
+  staleWaiting: number;
+  updatedLast24h: {
+    conversationState: number;
+    aiStatus: number;
+    classifiedIntent: number;
+    handoffRequested: number;
+    sfJobOutcome: number;
+  };
+}
+
+export interface LegacyComparisonExample {
+  leadId: string | null;
+  platform: string | null;
+  legacyStatus: string | null;
+  conversationState?: string | null;
+  conversationStateReason?: string | null;
+  aiStatus?: string | null;
+  aiStatusReason?: string | null;
+  waitingSince?: string | null;
+  handoffRequestedAt?: string | null;
+  handoffResolvedAt?: string | null;
+  lastCustomerMessageAt?: string | null;
+  lastClassifiedAt?: string | null;
+  // For Lead-shaped examples (sf_outcome_present_but_lead_status_not_sf_owned):
+  statusSource?: string | null;
+  sfJobOutcome?: string | null;
+  sfJobOutcomeAt?: string | null;
+  sfJobId?: string | null;
+  sfLastEventAt?: string | null;
+}
+
+export interface LegacyComparisonCategory {
+  description: string;
+  count: number;
+  examples: LegacyComparisonExample[];
+}
+
+export interface LegacyComparisonResponse {
+  tenantUserId: string;
+  generatedAt: string;
+  examplesPerCategory: number;
+  categories: Record<string, LegacyComparisonCategory>;
+}
+
+export const conversationRuntimeApi = {
+  /** Per-lead runtime snapshot. `{success: false}` if not owned by caller. */
+  getLeadRuntimeState: async (leadId: string): Promise<RuntimeStateResponse> => {
+    const { data } = await api.get(`/v1/leads/${leadId}/runtime-state`);
+    return data;
+  },
+
+  /** Tenant-wide counts. Snapshot at request time. */
+  getSummary: async (): Promise<RuntimeSummaryResponse> => {
+    const { data } = await api.get('/v1/conversation-runtime/summary');
+    return data;
+  },
+
+  /** Legacy/runtime drift diagnostic. examplesPerCategory clamped 1..20. */
+  getLegacyComparison: async (
+    examplesPerCategory = 5,
+  ): Promise<LegacyComparisonResponse> => {
+    const { data } = await api.get('/v1/conversation-runtime/legacy-comparison', {
+      params: { examplesPerCategory },
+    });
+    return data;
+  },
+};
+
 export const automationApi = {
   getRules: async (): Promise<{ rules: AutomationRule[] }> => {
     const { data } = await api.get('/v1/automation/rules');
