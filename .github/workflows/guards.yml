@@ -1,8 +1,11 @@
 name: Code Guards
 
 on:
+  # Run the guard on every PR regardless of base branch. Stacked PRs
+  # (e.g. PR-B1 targeting PR-A's branch) need the same coverage as
+  # PRs targeting main directly. Push filter stays narrow because we
+  # only need post-merge re-runs on the canonical branches.
   pull_request:
-    branches: [staging, main]
   push:
     branches: [staging, main]
 
