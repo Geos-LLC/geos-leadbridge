@@ -102,6 +102,13 @@ export function RuntimeSummaryCard({ refreshMs = 0 }: RuntimeSummaryCardProps) {
           ['handoff', String(data.orchestrationMetrics.attempts.handoff ?? 0)],
         ]}/>
 
+        <KvBlock title="SF service events (inbound)" rows={[
+          ['service_scheduled',   String(data.serviceEventCounts?.service_scheduled ?? 0)],
+          ['service_rescheduled', String(data.serviceEventCounts?.service_rescheduled ?? 0)],
+          ['service_cancelled',   String(data.serviceEventCounts?.service_cancelled ?? 0)],
+          ['service_completed',   String(data.serviceEventCounts?.service_completed ?? 0)],
+        ]}/>
+
         <KvBlock title="Orchestration failures by code" rows={
           Object.entries(data.orchestrationMetrics.failuresByCode).map(
             ([k, v]) => [k, String(v)] as [string, string],

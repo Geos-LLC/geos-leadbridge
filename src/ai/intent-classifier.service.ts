@@ -19,6 +19,7 @@ export type CustomerIntent =
   | 'completed'          // job done by us or another party — no longer needed
   | 'agreed'             // "book it" / "sounds good" — handoff to manager
   | 'wants_live_contact' // customer wants a live call/meeting/Zoom — high-intent handoff signal
+  | 'wants_to_schedule'  // customer is naming a specific time slot to book at — booking orchestrator entry (Phase 2B)
   | 'deferring'          // BOUNDED pause with intent to return: "back next week" / "let me think for a couple days" / "check with my husband"
   | 'terminal_defer'     // UNBOUNDED / indefinite deflection: "maybe later" / "someday" / "not now, hard to say" / "we'll see"
   | 'asking'             // active question that needs an AI reply
@@ -116,7 +117,9 @@ Intents (pick exactly one):
 
 - agreed — Customer accepts a proposal/quote and is ready to book. Examples: "sounds good", "let's do it", "book it", "yes please", "I'm in", "perfect, when can you come?". Active forward motion.
 
-- wants_live_contact — Customer is requesting a live phone call, video call, Zoom, or in-person meeting at a specific time / soon. This is a high-intent handoff signal: they want a HUMAN, not a chat. Examples: "Can we talk by 6pm today?", "Let's hop on a call", "What's a good time to call you?", "Can you Zoom at 3?", "Give me a call when you're free", "I'd like to schedule a call", "Can we get on a call to discuss?", "what's your number — I want to call you", "would love to set up a meeting". Distinguish from 'asking' (where the customer is asking an information question that AI can answer in text). If the message is fundamentally "let's move this off chat onto a call/meeting", it's wants_live_contact.
+- wants_live_contact — Customer is requesting a live phone call, video call, Zoom, or in-person meeting WITH A HUMAN. This is a "move off chat onto a call" signal — NOT a booking signal. Examples: "Can we talk by 6pm today?", "Let's hop on a call", "What's a good time to call you?", "Can you Zoom at 3?", "Give me a call when you're free", "I'd like to schedule a call", "Can we get on a call to discuss?", "what's your number — I want to call you", "would love to set up a meeting". Distinguish from 'asking' (information question AI can answer in text). Distinguish from 'wants_to_schedule' (customer is picking a service appointment time, NOT requesting a live call with a human). If the message is fundamentally "let's move this off chat onto a call/meeting", it's wants_live_contact.
+
+- wants_to_schedule — Customer is naming a specific service appointment time, picking from offered slots, or proposing a time for the SERVICE to happen. This is a booking-orchestrator signal: they want the cleaner/provider to come at a specific time. Examples: "I want Tuesday morning", "How about Friday at 2pm?", "Can you come tomorrow at 10?", "the 9am slot works", "I'll take Thursday", "what about next Wednesday 3pm", "let's do Saturday morning", "schedule me for the 11am one". Distinguish from 'agreed' (customer accepts an offer WITHOUT naming a specific time — "yes book it"). Distinguish from 'wants_live_contact' (wants a CALL with a human, not a service appointment). Distinguish from 'asking' ("what times do you have?" is asking, not picking). When the customer says BOTH "yes" AND a specific time ("yes Friday at 2pm works"), classify as 'agreed' — clean acceptance keeps the existing handoff path. wants_to_schedule fires when the customer is proposing/picking a time without clear acceptance language. ALSO set handoff.shouldHandoff=true with reason='agreed' on this intent when the customer's tone shows commitment ("I want", "let's do", "schedule me", "I'll take") so dispatchers are paged regardless of whether the booking orchestrator is enabled for the tenant.
 
 - deferring — Customer is pausing the conversation BUT clearly intends to return, with either an explicit return window or a concrete decision-making step. Examples: "back in 2 weeks", "I'll reach out next month", "let me check with my husband and get back to you", "I'm traveling, will be in touch when I'm home in 10 days", "shopping around — will let you know by Friday". The pause is bounded by a stated time, a stated decision, or a clear come-back signal.
 
@@ -294,7 +297,7 @@ export class IntentClassifierService {
 
   private coerceIntent(value: unknown): CustomerIntent | null {
     const allowed: CustomerIntent[] = [
-      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'wants_live_contact', 'deferring', 'terminal_defer', 'asking', 'engaged',
+      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'wants_live_contact', 'wants_to_schedule', 'deferring', 'terminal_defer', 'asking', 'engaged',
     ];
     if (typeof value !== 'string') return null;
     return (allowed as string[]).includes(value) ? (value as CustomerIntent) : null;

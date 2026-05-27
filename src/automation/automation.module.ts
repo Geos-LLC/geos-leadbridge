@@ -13,6 +13,7 @@ import { AiModule } from '../ai/ai.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { BookingOrchestratorModule } from '../booking-orchestrator/booking-orchestrator.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ConversationContextModule,
     forwardRef(() => FollowUpEngineModule),
     NotificationsModule,
+    forwardRef(() => BookingOrchestratorModule),
   ],
   controllers: [AutomationController],
   providers: [AutomationService],

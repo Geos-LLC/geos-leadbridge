@@ -772,6 +772,9 @@ export interface RuntimeSummaryResponse {
     failuresByCode: Record<string, number>;
     lastLatencyMs: Record<string, number | null>;
   };
+  // Phase 2B PR-B2 — inbound service_* event counts (DB-backed via
+  // SfInboundEvent table — survives restart, unlike orchestrationMetrics).
+  serviceEventCounts: Record<string, number>;
 }
 
 export interface LegacyComparisonExample {
