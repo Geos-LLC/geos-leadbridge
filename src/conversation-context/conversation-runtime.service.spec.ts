@@ -156,4 +156,133 @@ describe('ConversationRuntimeService', () => {
       expect(prisma._calls[0].data.handoffResolvedAt).toBeInstanceOf(Date);
     });
   });
+
+  describe('structured log emission (Phase 1.5)', () => {
+    function captureLogs(svc: ConversationRuntimeService): string[] {
+      const lines: string[] = [];
+      jest.spyOn((svc as any).logger, 'log').mockImplementation((msg: any) => {
+        lines.push(String(msg));
+      });
+      return lines;
+    }
+
+    it('setConversationState emits event=conversation_state_write with meta', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.setConversationState(
+        'conv-1',
+        { state: 'opted_out', reason: 'classifier_opt_out' },
+        { leadId: 'lead-9', userId: 'user-7', sourceEventId: 'evt_x' },
+      );
+      const line = logs.find((l) => l.includes('event=conversation_state_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('conversation_id=conv-1');
+      expect(line).toContain('new_state=opted_out');
+      expect(line).toContain('reason=classifier_opt_out');
+      expect(line).toContain('lead_id=lead-9');
+      expect(line).toContain('user_id=user-7');
+      expect(line).toContain('source_event_id=evt_x');
+    });
+
+    it('setAiStatus emits event=ai_status_write', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.setAiStatus('conv-2', { status: 'paused_human', reason: 'manual_reply_recency_window' });
+      const line = logs.find((l) => l.includes('event=ai_status_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('new_status=paused_human');
+      expect(line).toContain('reason=manual_reply_recency_window');
+    });
+
+    it('setState emits event=state_write with both new_conversation_state and new_ai_status', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.setState(
+        'conv-3',
+        {
+          conversationState: 'deferred',
+          conversationStateReason: 'classifier_deferring',
+          aiStatus: 'paused_deferral',
+          aiStatusReason: 'classifier_deferring',
+        },
+        { leadId: 'lead-3' },
+      );
+      const line = logs.find((l) => l.includes('event=state_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('new_conversation_state=deferred');
+      expect(line).toContain('new_ai_status=paused_deferral');
+      expect(line).toContain('lead_id=lead-3');
+    });
+
+    it('recordClassifierIntent emits event=classifier_intent_write with confidence', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.recordClassifierIntent('conv-4', { intent: 'wants_live_contact', confidence: 0.91 });
+      const line = logs.find((l) => l.includes('event=classifier_intent_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('intent=wants_live_contact');
+      expect(line).toContain('confidence=0.91');
+    });
+
+    it('setHandoffRequested emits event=handoff_write action=requested', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.setHandoffRequested('conv-5', 'agreed', { leadId: 'lead-5' });
+      const line = logs.find((l) => l.includes('event=handoff_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('action=requested');
+      expect(line).toContain('reason=agreed');
+    });
+
+    it('resolveHandoff emits event=handoff_write action=resolved when a row flipped', async () => {
+      const prisma = buildPrismaMock();
+      // Default updateMany mock returns { count: 1 } — simulates a row flip
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.resolveHandoff('conv-6');
+      const line = logs.find((l) => l.includes('event=handoff_write'));
+      expect(line).toBeDefined();
+      expect(line).toContain('action=resolved');
+    });
+
+    it('resolveHandoff is silent when no row flipped (count=0)', async () => {
+      const prisma = buildPrismaMock();
+      prisma.threadContext.updateMany = jest.fn().mockResolvedValue({ count: 0 });
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.resolveHandoff('conv-7');
+      const line = logs.find((l) => l.includes('event=handoff_write'));
+      expect(line).toBeUndefined();
+    });
+
+    it('failed writes do NOT emit success log (only warn)', async () => {
+      const prisma: any = {
+        threadContext: { updateMany: jest.fn().mockRejectedValue(new Error('boom')) },
+      };
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      const warns: string[] = [];
+      jest.spyOn((svc as any).logger, 'warn').mockImplementation((m: any) => warns.push(String(m)));
+      await svc.setAiStatus('conv-8', { status: 'disabled', reason: 'user_ai_conversation_disabled' });
+      expect(logs.find((l) => l.includes('event=ai_status_write'))).toBeUndefined();
+      expect(warns.find((l) => l.includes('setAiStatus failed'))).toBeDefined();
+    });
+
+    it('does not leak PII — log fields are only state values + ids', async () => {
+      const prisma = buildPrismaMock();
+      const svc = new ConversationRuntimeService(prisma);
+      const logs = captureLogs(svc);
+      await svc.setConversationState('conv-pii', { state: 'opted_out', reason: 'classifier_opt_out' });
+      const line = logs.find((l) => l.includes('event=conversation_state_write'))!;
+      // No customer message body, phone, email, or name leaks
+      expect(line).not.toMatch(/customer/i);
+      expect(line).not.toMatch(/@/); // no email
+      expect(line).not.toMatch(/\+\d{10,}/); // no phone
+    });
+  });
 });

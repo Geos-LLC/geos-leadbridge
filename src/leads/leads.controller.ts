@@ -31,6 +31,14 @@ import {
   SseBusinessIdResolver,
   passesAccountFilter,
 } from './sse-account-filter';
+import {
+  labelConversationState,
+  labelAiStatus,
+  labelClassifierIntent,
+  labelSfJobOutcome,
+  labelFollowUp,
+  labelHandoff,
+} from '../conversation-context/conversation-runtime-display';
 
 @Controller('v1/leads')
 @UseGuards(JwtSseAuthGuard)
@@ -203,6 +211,145 @@ export class LeadsController {
   @Get(':id')
   async getLead(@CurrentUser() user: any, @Param('id') id: string) {
     return this.leadsService.getLead(user.id, id);
+  }
+
+  /**
+   * Phase 1.5 — per-lead runtime-state diagnostic.
+   *
+   * Returns the legacy Lead.status fields side-by-side with the new
+   * conversation runtime (conversationState / aiStatus / classifier
+   * intent / handoff lifecycle / sfJobOutcome / waitingSince) so the
+   * future UI and operators can compare them BEFORE we migrate decision
+   * logic in Phase 3.
+   *
+   * READ-ONLY. Tenant-scoped: 404 if the lead doesn't belong to the
+   * caller. No PII (message body, customer phone/email) is included —
+   * only state fields, timestamps, and the legacy lead fields the UI
+   * already shows on the lead detail page.
+   */
+  @Get(':id/runtime-state')
+  async getLeadRuntimeState(@CurrentUser() user: any, @Param('id') id: string) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: {
+        id: true,
+        userId: true,
+        platform: true,
+        externalRequestId: true,
+        status: true,
+        statusSource: true,
+        statusUpdatedAt: true,
+        sfJobId: true,
+        sfJobOutcome: true,
+        sfJobOutcomeAt: true,
+        sfLastEventAt: true,
+        threadId: true,
+      },
+    });
+    if (!lead) {
+      return { success: false, error: 'Lead not found', leadId: id };
+    }
+
+    // ThreadContext (1:1 with Conversation by threadId). Skip if the lead
+    // has no thread yet (e.g. brand-new lead before first message).
+    const tc = lead.threadId
+      ? await this.prisma.threadContext.findUnique({
+          where: { conversationId: lead.threadId },
+          select: {
+            conversationState: true,
+            conversationStateAt: true,
+            conversationStateReason: true,
+            aiStatus: true,
+            aiStatusAt: true,
+            aiStatusReason: true,
+            lastClassifiedIntent: true,
+            lastClassifiedConfidence: true,
+            lastClassifiedAt: true,
+            handoffRequestedAt: true,
+            handoffRequestedReason: true,
+            handoffResolvedAt: true,
+            waitingSince: true,
+            lastCustomerMessageAt: true,
+            lastBusinessMessageAt: true,
+            lastAiMessageAt: true,
+            awaitingCustomerReply: true,
+            followUpStatus: true,
+            nextFollowUpAt: true,
+            activeEnrollmentId: true,
+          },
+        })
+      : null;
+
+    // Pull the active follow-up enrollment for the canonical (non-cached)
+    // nextStepDueAt + currentStepIndex. ThreadContext.nextFollowUpAt is the
+    // cache; the enrollment is the source of truth.
+    const enrollment = lead.threadId
+      ? await this.prisma.followUpEnrollment.findFirst({
+          where: { conversationId: lead.threadId, status: 'active' },
+          select: {
+            id: true,
+            status: true,
+            stoppedReason: true,
+            currentStepIndex: true,
+            nextStepDueAt: true,
+            followUpMode: true,
+            modeReason: true,
+          },
+        })
+      : null;
+
+    return {
+      success: true,
+      leadId: lead.id,
+      lead: {
+        status: lead.status,
+        statusSource: lead.statusSource,
+        statusUpdatedAt: lead.statusUpdatedAt,
+        platform: lead.platform,
+        externalRequestId: lead.externalRequestId,
+        sfJobId: lead.sfJobId,
+        sfJobOutcome: lead.sfJobOutcome,
+        sfJobOutcomeAt: lead.sfJobOutcomeAt,
+        sfLastEventAt: lead.sfLastEventAt,
+      },
+      threadContext: tc ?? null,
+      followUp: enrollment
+        ? {
+            enrollmentId: enrollment.id,
+            status: enrollment.status,
+            stoppedReason: enrollment.stoppedReason,
+            currentStepIndex: enrollment.currentStepIndex,
+            nextFollowUpAt: enrollment.nextStepDueAt,
+            followUpMode: enrollment.followUpMode,
+            modeReason: enrollment.modeReason,
+          }
+        : tc?.followUpStatus
+        ? {
+            // No active enrollment; expose whatever the cache says
+            enrollmentId: tc.activeEnrollmentId,
+            status: tc.followUpStatus,
+            stoppedReason: null,
+            currentStepIndex: null,
+            nextFollowUpAt: tc.nextFollowUpAt,
+            followUpMode: null,
+            modeReason: null,
+          }
+        : null,
+      displayLabels: {
+        conversationState: labelConversationState(tc?.conversationState ?? null),
+        aiStatus: labelAiStatus(tc?.aiStatus ?? null),
+        lastClassifiedIntent: labelClassifierIntent(tc?.lastClassifiedIntent ?? null),
+        sfJobOutcome: labelSfJobOutcome(lead.sfJobOutcome ?? null),
+        followUp: labelFollowUp(
+          enrollment?.status ?? tc?.followUpStatus ?? null,
+          enrollment?.nextStepDueAt ?? tc?.nextFollowUpAt ?? null,
+        ),
+        handoff: labelHandoff(
+          tc?.handoffRequestedAt ?? null,
+          tc?.handoffResolvedAt ?? null,
+        ),
+      },
+    };
   }
 
   /**
