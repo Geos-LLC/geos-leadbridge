@@ -89,6 +89,24 @@ export function RuntimeSummaryCard({ refreshMs = 0 }: RuntimeSummaryCardProps) {
           ['handoffRequested', String(data.updatedLast24h.handoffRequested)],
           ['sfJobOutcome', String(data.updatedLast24h.sfJobOutcome)],
         ]}/>
+
+        <KvBlock title="Orchestration flag (Phase 2B)" rows={[
+          ['Enabled for this tenant', data.orchestrationFlag.flagEnabledForTenant ? 'yes' : 'no'],
+          ['Tenants enabled globally', String(data.orchestrationFlag.enabledTenantCount)],
+        ]}/>
+
+        <KvBlock title="Orchestration attempts" rows={[
+          ['availability', String(data.orchestrationMetrics.attempts.availability ?? 0)],
+          ['booking_request', String(data.orchestrationMetrics.attempts.booking_request ?? 0)],
+          ['booking_cancel', String(data.orchestrationMetrics.attempts.booking_cancel ?? 0)],
+          ['handoff', String(data.orchestrationMetrics.attempts.handoff ?? 0)],
+        ]}/>
+
+        <KvBlock title="Orchestration failures by code" rows={
+          Object.entries(data.orchestrationMetrics.failuresByCode).map(
+            ([k, v]) => [k, String(v)] as [string, string],
+          )
+        }/>
       </div>
     </div>
   );

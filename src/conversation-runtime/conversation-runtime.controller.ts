@@ -24,6 +24,11 @@ import {
   type ConversationState,
 } from '../conversation-context/conversation-runtime';
 import { BOOKING_STATES } from '../conversation-context/booking-runtime';
+import { OrchestrationFeatureFlag } from '../sf-orchestration/orchestration-feature-flag';
+import {
+  OrchestrationMetricsService,
+  type OrchestrationCountersSnapshot,
+} from '../sf-orchestration/orchestration-metrics.service';
 
 /**
  * Lead.status values considered "terminal" in the legacy CRM-pipeline sense.
@@ -65,7 +70,11 @@ const CLASSIFIER_MISSING_HOURS = 1;
 @Controller('v1/conversation-runtime')
 @UseGuards(JwtAuthGuard)
 export class ConversationRuntimeController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly orchestrationFlag: OrchestrationFeatureFlag,
+    private readonly orchestrationMetrics: OrchestrationMetricsService,
+  ) {}
 
   /**
    * Tenant-wide counts across the new runtime fields. Snapshot at request
@@ -210,6 +219,18 @@ export class ConversationRuntimeController {
       where: { lead: { userId } },
     });
 
+    // ─── Phase 2B PR-B1 — orchestration observability blocks ─────────────
+    // Both are zero/false on a fresh deploy because no runtime path calls
+    // SfOrchestrationClient yet. They start populating when PR-B2 wires
+    // the client into the booking orchestrator and a tenant is added to
+    // BOOKING_ORCHESTRATION_ENABLED_USER_IDS.
+    const orchestrationFlag = {
+      flagEnabledForTenant: this.orchestrationFlag.isEnabledForUser(userId),
+      enabledTenantCount: this.orchestrationFlag.getEnabledTenantCount(),
+    };
+    const orchestrationMetrics: OrchestrationCountersSnapshot =
+      this.orchestrationMetrics.getCountersForUser(userId);
+
     return {
       tenantUserId: userId,
       generatedAt: new Date().toISOString(),
@@ -221,6 +242,8 @@ export class ConversationRuntimeController {
       byAiStatus: { ...byAiStatus, _null: aiStatusNull },
       byBookingState: { ...byBookingState, _null: bookingStateNull },
       byLastClassifiedIntent,
+      orchestrationFlag,
+      orchestrationMetrics,
       sfJobOutcomeCounts,
       sfOutcomeCoverage: {
         populated: sfOutcomePopulated,
