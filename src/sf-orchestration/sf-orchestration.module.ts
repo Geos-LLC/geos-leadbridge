@@ -1,16 +1,20 @@
 /**
- * SF Orchestration Module — Phase 2B PR-B1.
+ * SF Orchestration Module.
  *
- * Outbound LB → SF orchestration client + supporting plumbing
- * (feature flag, in-process metrics). Pure infrastructure: callable
- * but uncalled in PR-B1. PR-B2 will wire SfOrchestrationClient into
- * the booking orchestrator behind the feature flag.
+ * Phase 2B PR-B1: introduced SfOrchestrationClient + feature flag +
+ *   in-process metrics. Outbound infrastructure, callable-but-uncalled.
+ * Phase 2B PR-B2: wired into the BookingOrchestrator state machine
+ *   behind BOOKING_ORCHESTRATION_ENABLED_USER_IDS env canary.
+ * Phase 2C PR-C1: added SfConnectionResolver — per-tenant SF-issued
+ *   credentials from the new `sf_connections` table take priority over
+ *   the env canary. Env canary retained as emergency override only.
  *
- * Public exports — all three are consumed by the runtime summary
- * endpoint for read-only observability:
- *   - SfOrchestrationClient
- *   - OrchestrationFeatureFlag
- *   - OrchestrationMetricsService
+ * Public exports — consumed by booking-orchestrator + runtime summary
+ * endpoint:
+ *   - SfOrchestrationClient        — outbound HTTP client
+ *   - OrchestrationFeatureFlag     — gate API (now async, delegates to resolver)
+ *   - OrchestrationMetricsService  — in-process per-tenant counters
+ *   - SfConnectionResolver         — credential ladder (DB → env → none)
  */
 
 import { Module } from '@nestjs/common';
@@ -18,16 +22,20 @@ import { ConfigModule } from '@nestjs/config';
 
 import { OrchestrationFeatureFlag } from './orchestration-feature-flag';
 import { OrchestrationMetricsService } from './orchestration-metrics.service';
+import { SfConnectionResolver } from './sf-connection-resolver.service';
 import { SfOrchestrationClient } from './sf-orchestration.client';
+import { PrismaModule } from '../common/utils/prisma.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, PrismaModule],
   providers: [
+    SfConnectionResolver,
     OrchestrationFeatureFlag,
     OrchestrationMetricsService,
     SfOrchestrationClient,
   ],
   exports: [
+    SfConnectionResolver,
     OrchestrationFeatureFlag,
     OrchestrationMetricsService,
     SfOrchestrationClient,

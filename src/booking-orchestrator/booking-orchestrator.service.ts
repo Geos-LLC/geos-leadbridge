@@ -154,7 +154,9 @@ export class BookingOrchestratorService {
 
   async handleClassifiedIntent(input: OrchestratorClassifiedInput): Promise<OrchestratorOutcome> {
     // Hard gate — anything below this line is suppressed for non-canary tenants.
-    if (!this.flag.isEnabledForUser(input.userId)) {
+    // As of PR-C1 the gate consults SfConnectionResolver (DB → env → none),
+    // so await is required.
+    if (!(await this.flag.isEnabledForUser(input.userId))) {
       return { decision: 'flag_disabled' };
     }
 
@@ -238,10 +240,10 @@ export class BookingOrchestratorService {
   // ═══════════════════════════════════════════════════════════════════════
 
   async handleServiceOutcomeEvent(input: ServiceOutcomeEventInput): Promise<void> {
-    // Even when flag is enabled, we drop events for tenants not in the
-    // canary CSV. Defence-in-depth — SF dark-launch should not be sending
-    // events for non-canary tenants, but we don't trust the upstream.
-    if (!this.flag.isEnabledForUser(input.userId)) {
+    // Defense-in-depth — drop events for tenants not enabled (DB or env).
+    // SF dark-launch should not be sending events for non-canary tenants,
+    // but we don't trust the upstream. PR-C1: gate is async.
+    if (!(await this.flag.isEnabledForUser(input.userId))) {
       this.log('event_handler', 'flag_disabled', input.conversationId, {
         event_id: input.eventId,
         event_type: input.eventType,

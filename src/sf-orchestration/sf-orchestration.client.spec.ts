@@ -7,6 +7,7 @@ const axios = require('axios');
 import { ConfigService } from '@nestjs/config';
 import { OrchestrationMetricsService } from './orchestration-metrics.service';
 import { SfOrchestrationClient } from './sf-orchestration.client';
+import type { SfConnectionResolver, ResolvedSfCredentials } from './sf-connection-resolver.service';
 
 function buildConfig(env: Record<string, string | undefined>): ConfigService {
   return {
@@ -17,9 +18,36 @@ function buildConfig(env: Record<string, string | undefined>): ConfigService {
   } as ConfigService;
 }
 
+/**
+ * PR-C1: the client no longer reads env directly — it consults a
+ * resolver. This stub mimics the resolver's enabled/disabled return
+ * shape so the existing happy-path + retry + error-code assertions
+ * remain meaningful without bringing in real Prisma.
+ */
+function buildResolver(opts: {
+  enabled?: boolean;
+  source?: 'connection' | 'env_canary' | 'none';
+  baseUrl?: string;
+  token?: string;
+  usedPreviousToken?: boolean;
+} = {}): SfConnectionResolver {
+  return {
+    resolveForUser: jest.fn(async (): Promise<ResolvedSfCredentials> =>
+      opts.enabled === false
+        ? { enabled: false, source: 'none', disabledReason: 'test_disabled' }
+        : {
+            enabled: true,
+            source: opts.source ?? 'env_canary',
+            baseUrl: opts.baseUrl ?? 'https://sf.example.com',
+            orchestrationToken: opts.token ?? 'test-api-key-xyz',
+            usedPreviousToken: opts.usedPreviousToken ?? false,
+          },
+    ),
+    isEnabledForUser: jest.fn(async () => opts.enabled !== false),
+  } as unknown as SfConnectionResolver;
+}
+
 const BASE_ENV = {
-  SF_ORCHESTRATION_BASE_URL: 'https://sf.example.com',
-  SF_ORCHESTRATION_API_KEY: 'test-api-key-xyz',
   SF_ORCHESTRATION_TIMEOUT_MS: '5000',
   SF_ORCHESTRATION_MAX_ATTEMPTS: '3',
 };
@@ -31,7 +59,7 @@ describe('SfOrchestrationClient', () => {
   beforeEach(() => {
     axios.request.mockReset();
     metrics = new OrchestrationMetricsService();
-    client = new SfOrchestrationClient(buildConfig(BASE_ENV), metrics);
+    client = new SfOrchestrationClient(buildConfig(BASE_ENV), metrics, buildResolver());
   });
 
   describe('getAvailability — happy path', () => {
@@ -298,11 +326,12 @@ describe('SfOrchestrationClient', () => {
     }, 10000);
   });
 
-  describe('Missing config (safe degradation, not a throw)', () => {
-    it('returns ok=false code=orchestration_disabled if base URL is missing', async () => {
+  describe('Resolver-disabled (safe degradation, no HTTP call)', () => {
+    it('returns ok=false code=orchestration_disabled when resolver says disabled', async () => {
       const c = new SfOrchestrationClient(
-        buildConfig({ ...BASE_ENV, SF_ORCHESTRATION_BASE_URL: '' }),
+        buildConfig(BASE_ENV),
         metrics,
+        buildResolver({ enabled: false }),
       );
       const result = await c.getAvailability(
         { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
@@ -314,19 +343,26 @@ describe('SfOrchestrationClient', () => {
       expect(result.code).toBe('orchestration_disabled');
     });
 
-    it('returns ok=false code=orchestration_disabled if API key is missing', async () => {
+    it('uses resolver-supplied baseUrl + token, not env (covers DB-path tenants)', async () => {
       const c = new SfOrchestrationClient(
-        buildConfig({ ...BASE_ENV, SF_ORCHESTRATION_API_KEY: '' }),
+        buildConfig(BASE_ENV),
         metrics,
+        buildResolver({
+          source: 'connection',
+          baseUrl: 'https://tenant-specific.sf',
+          token: 'TENANT-TOKEN-DB',
+        }),
       );
-      const result = await c.getAvailability(
+      axios.request.mockResolvedValue({ status: 200, data: { slots: [], cachedForSeconds: 0 } });
+      await c.getAvailability(
         { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
         'idem',
       );
-      expect(axios.request).not.toHaveBeenCalled();
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.code).toBe('orchestration_disabled');
+      const call = axios.request.mock.calls[0][0];
+      expect(call.url).toBe(
+        'https://tenant-specific.sf/api/integrations/leadbridge/orchestration/availability',
+      );
+      expect(call.headers.Authorization).toBe('Bearer TENANT-TOKEN-DB');
     });
   });
 

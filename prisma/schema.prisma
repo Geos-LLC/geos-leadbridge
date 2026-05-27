@@ -203,6 +203,7 @@ model User {
   followUpSequenceTemplates   FollowUpSequenceTemplate[]
   orgMemberships              OrgMembership[]
   crmWebhookSubscriptions     CrmWebhookSubscription[]
+  sfConnection                SfConnection?
   accountHealthStatuses       AccountHealthStatus[]
   onboardingProfile           OnboardingProfile?
 
@@ -1493,10 +1494,91 @@ model CrmWebhookSubscription {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Phase 2C — back-relation for SfConnection.inboundSubscription (1:1).
+  // When a SF Connection links this row as its inbound subscription,
+  // SfConnection holds the FK; this side is nullable + unique on
+  // SfConnection.inboundSubscriptionId.
+  sfConnection SfConnection?
+
   @@unique([userId, direction, webhookUrl])
   @@index([userId, isActive])
   @@index([direction, isActive])
   @@map("crm_webhook_subscriptions")
+}
+
+// ==========================================
+// Phase 2C — ServiceFlow Connection (PR-C1)
+// Per-tenant SF-issued authority credentials. Replaces global env vars
+// as the primary runtime gate. SF is operational authority; LB stores
+// the encrypted bearer token + rotation grace window. Env canary path
+// retained as emergency override only.
+//
+// Lifecycle:   pending → active ⇄ rotating → disconnected | revoked | error
+// Resolution:  SfConnectionResolver consults this table first; falls
+//              through to env canary (BOOKING_ORCHESTRATION_ENABLED_USER_IDS
+//              + SF_ORCHESTRATION_BASE_URL/API_KEY) when no active row.
+// ==========================================
+model SfConnection {
+  id                          String   @id @default(uuid())
+  userId                      String   @unique
+
+  // ─── SF-issued tenant identity ────────────────────────────────────
+  sfTenantId                  String   // SF's internal tenant id (authoritative)
+  sfTenantName                String?  // Display name (info only)
+  baseUrl                     String   // SF orchestration endpoint base
+
+  // ─── Current SF-issued authority token (opaque to LB) ─────────────
+  // Encrypted via EncryptionUtil (AES-256-GCM + ENCRYPTION_KEY). LB
+  // never parses the token contents — bearer-of-token IS the tenant
+  // SF authorized. token* metadata below is SF-declared, informational.
+  orchestrationToken          String   // Encrypted bearer
+  orchestrationTokenKid       String?  // SF signing key id (if SF exposes one)
+  orchestrationTokenScope     String?  // SF-declared scope (info only)
+  tokenIssuedAt               DateTime
+  tokenExpiresAt              DateTime?
+  tokenLastReceivedAt         DateTime
+  tokenLastRotationSource     String?  // 'sf_push' | 'lb_initiated' | 'handshake'
+
+  // ─── Rotation grace window ─────────────────────────────────────────
+  // During a rotation, the prior token is preserved for 5 min as a
+  // safety net. SF accepts both during this window. LB always sends
+  // the current token; the previous is kept for the case where the
+  // new token decrypt fails (e.g. ENCRYPTION_KEY rotation race).
+  previousOrchestrationToken  String?  // Encrypted; cleared after grace
+  previousTokenExpiresAt      DateTime?
+
+  // ─── Inbound SF → LB linkage ──────────────────────────────────────
+  // 1:1 with the CrmWebhookSubscription that carries the HMAC secret
+  // SF uses to sign /orchestration-event + /connection/token-rotated
+  // + /connection/revoked callbacks.
+  inboundSubscriptionId       String?  @unique
+  inboundSubscription         CrmWebhookSubscription? @relation(fields: [inboundSubscriptionId], references: [id], onDelete: SetNull)
+
+  // ─── Feature scope (events SF will deliver) ───────────────────────
+  events                      String[]
+
+  // ─── Lifecycle ─────────────────────────────────────────────────────
+  isActive                    Boolean  @default(true)
+  status                      String   @default("pending")
+  // status: pending | active | rotating | disconnected | revoked | error
+  disconnectInitiator         String?  // 'lb_user' | 'sf_authority' | 'lb_admin'
+  lastHealthAt                DateTime?
+  lastHealthOk                Boolean?
+  lastErrorAt                 DateTime?
+  lastErrorMessage            String?
+
+  // ─── Audit ─────────────────────────────────────────────────────────
+  connectedAt                 DateTime @default(now())
+  disconnectedAt              DateTime?
+  updatedAt                   DateTime @updatedAt
+
+  user                        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([isActive])
+  @@index([tokenExpiresAt])
+  @@index([previousTokenExpiresAt])
+  @@map("sf_connections")
 }
 
 // ==========================================
