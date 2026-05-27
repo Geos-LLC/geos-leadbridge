@@ -11,8 +11,8 @@
  * navigate to it directly. The primary lead UI is untouched until Phase 3.
  */
 
-import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { LeadRuntimePanel } from '../components/runtime/LeadRuntimePanel';
 import { LegacyComparisonCard } from '../components/runtime/LegacyComparisonCard';
@@ -22,14 +22,37 @@ export default function RuntimeDebug() {
   const [leadId, setLeadId] = useState('');
   const [submittedLeadId, setSubmittedLeadId] = useState<string | null>(null);
 
-  // Admin-only — same gate the Dashboard already uses for admin-impersonation
-  // flows. Non-admin tenant users redirect silently to /overview rather than
-  // surface an access-denied page (this route is intentionally unlinked, so
-  // anyone who reaches it without admin role was probably URL-guessing).
+  // Admin-only. We deliberately do the check in an effect (not as a
+  // synchronous <Navigate> at render-time) because the previous render-time
+  // gate raced with zustand-persist hydration: on first render `user` is
+  // briefly null even for signed-in admins, which triggered an instant
+  // redirect to /overview before the persisted store could re-populate.
+  // Matches AdminDashboard.tsx's useEffect-on-user pattern.
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === 'ADMIN';
-  if (!isAdmin) {
-    return <Navigate to="/overview" replace />;
+  const navigate = useNavigate();
+  useEffect(() => {
+    // Only act after hydration has populated `user`. If they're not admin,
+    // send them home. Admins fall through and render normally.
+    if (user && user.role !== 'ADMIN') {
+      navigate('/overview', { replace: true });
+    }
+  }, [user, navigate]);
+
+  // Brief loading state while the persisted store re-hydrates. Once `user`
+  // lands, we either render the page (admin) or the effect above redirects.
+  if (!user) {
+    return (
+      <div style={{ padding: 24, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+        Loading…
+      </div>
+    );
+  }
+
+  // Non-admin shouldn't see the page; the effect above is redirecting.
+  // Render nothing in the transition so they don't see a flash of the
+  // debug UI before navigating away.
+  if (user.role !== 'ADMIN') {
+    return null;
   }
 
   return (
