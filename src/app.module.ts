@@ -25,6 +25,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { CallConnectModule } from './call-connect/call-connect.module';
 import { ConversationSyncModule } from './conversation-sync/conversation-sync.module';
 import { ConversationContextModule } from './conversation-context/conversation-context.module';
+import { ConversationRuntimeObservabilityModule } from './conversation-runtime/conversation-runtime.module';
 import { FollowUpEngineModule } from './follow-up-engine/follow-up-engine.module';
 import { TeamsModule } from './teams/teams.module';
 import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
@@ -72,6 +73,7 @@ import { AuditModule } from './common/audit/audit.module';
     CallConnectModule,
     ConversationSyncModule,
     ConversationContextModule,
+    ConversationRuntimeObservabilityModule,
     FollowUpEngineModule,
     TeamsModule,
     CrmWebhookModule,

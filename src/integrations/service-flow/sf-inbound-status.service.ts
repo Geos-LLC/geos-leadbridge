@@ -378,7 +378,7 @@ export class SfInboundStatusService {
     // distinct domain. Phase 5 will stop writing Lead.status from this path
     // entirely; sfJobOutcome is the migration target.
     try {
-      await this.prisma.lead.updateMany({
+      const sfWriteResult = await this.prisma.lead.updateMany({
         where: {
           id: lead.id,
           OR: [
@@ -388,6 +388,11 @@ export class SfInboundStatusService {
         },
         data: { sfJobOutcome: canonical, sfJobOutcomeAt: occurredAt },
       });
+      if (sfWriteResult.count > 0) {
+        this.logger.log(
+          `[ConversationRuntime] event=sf_job_outcome_write lead_id=${lead.id} new_outcome=${canonical} sf_job_id=${payload.sf_job_id} source_event_id=${payload.event_id} user_id=${subscription.userId}`,
+        );
+      }
     } catch (e: any) {
       this.logger.warn(
         `[SfInbound] sfJobOutcome write failed lead_id=${lead.id} err=${e?.message ?? e}`,

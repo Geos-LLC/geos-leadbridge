@@ -34,11 +34,46 @@ export interface ClassifierIntentInput {
   confidence?: number | null;
 }
 
+/**
+ * Optional context for structured logging. Callers pass what they already
+ * know (no extra DB lookups) — every field is optional.
+ */
+export interface RuntimeWriteMeta {
+  leadId?: string | null;
+  userId?: string | null;
+  sourceEventId?: string | null;
+}
+
 @Injectable()
 export class ConversationRuntimeService {
   private readonly logger = new Logger(ConversationRuntimeService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Standard structured-log line. Loki/dashboards filter on `event=` and
+   * `conversation_id=`. No customer PII/message body is ever logged here —
+   * only state fields, leadId/userId/sourceEventId.
+   */
+  private logRuntimeWrite(
+    event: string,
+    conversationId: string,
+    fields: Record<string, any>,
+    meta: RuntimeWriteMeta | undefined,
+  ): void {
+    const parts = [
+      `[ConversationRuntime] event=${event}`,
+      `conversation_id=${conversationId}`,
+    ];
+    for (const [k, v] of Object.entries(fields)) {
+      const value = v === null || v === undefined ? 'null' : String(v);
+      parts.push(`${k}=${value}`);
+    }
+    if (meta?.leadId) parts.push(`lead_id=${meta.leadId}`);
+    if (meta?.userId) parts.push(`user_id=${meta.userId}`);
+    if (meta?.sourceEventId) parts.push(`source_event_id=${meta.sourceEventId}`);
+    this.logger.log(parts.join(' '));
+  }
 
   /**
    * Write conversationState + (optionally) reason. Bumps conversationStateAt
@@ -47,6 +82,7 @@ export class ConversationRuntimeService {
   async setConversationState(
     conversationId: string | null | undefined,
     input: ConversationStateInput,
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId) return;
     const data: Record<string, any> = {};
@@ -63,6 +99,12 @@ export class ConversationRuntimeService {
         where: { conversationId },
         data,
       });
+      this.logRuntimeWrite(
+        'conversation_state_write',
+        conversationId,
+        { new_state: input.state ?? null, reason: input.reason ?? null },
+        meta,
+      );
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] setConversationState failed conversation_id=${conversationId} err=${e?.message ?? e}`,
@@ -76,6 +118,7 @@ export class ConversationRuntimeService {
   async setAiStatus(
     conversationId: string | null | undefined,
     input: AiStatusInput,
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId) return;
     const data: Record<string, any> = {};
@@ -92,6 +135,12 @@ export class ConversationRuntimeService {
         where: { conversationId },
         data,
       });
+      this.logRuntimeWrite(
+        'ai_status_write',
+        conversationId,
+        { new_status: input.status ?? null, reason: input.reason ?? null },
+        meta,
+      );
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] setAiStatus failed conversation_id=${conversationId} err=${e?.message ?? e}`,
@@ -112,6 +161,7 @@ export class ConversationRuntimeService {
       aiStatus?: string | null;
       aiStatusReason?: string | null;
     },
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId) return;
     const now = new Date();
@@ -136,6 +186,17 @@ export class ConversationRuntimeService {
         where: { conversationId },
         data,
       });
+      this.logRuntimeWrite(
+        'state_write',
+        conversationId,
+        {
+          new_conversation_state: input.conversationState ?? null,
+          conversation_reason: input.conversationStateReason ?? null,
+          new_ai_status: input.aiStatus ?? null,
+          ai_reason: input.aiStatusReason ?? null,
+        },
+        meta,
+      );
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] setState failed conversation_id=${conversationId} err=${e?.message ?? e}`,
@@ -150,6 +211,7 @@ export class ConversationRuntimeService {
   async recordClassifierIntent(
     conversationId: string | null | undefined,
     input: ClassifierIntentInput,
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId || !input?.intent) return;
     try {
@@ -161,6 +223,12 @@ export class ConversationRuntimeService {
           lastClassifiedAt: new Date(),
         },
       });
+      this.logRuntimeWrite(
+        'classifier_intent_write',
+        conversationId,
+        { intent: input.intent, confidence: input.confidence ?? null },
+        meta,
+      );
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] recordClassifierIntent failed conversation_id=${conversationId} err=${e?.message ?? e}`,
@@ -175,6 +243,7 @@ export class ConversationRuntimeService {
   async setHandoffRequested(
     conversationId: string | null | undefined,
     reason: string,
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId) return;
     try {
@@ -186,6 +255,12 @@ export class ConversationRuntimeService {
           handoffResolvedAt: null,
         },
       });
+      this.logRuntimeWrite(
+        'handoff_write',
+        conversationId,
+        { action: 'requested', reason },
+        meta,
+      );
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] setHandoffRequested failed conversation_id=${conversationId} err=${e?.message ?? e}`,
@@ -200,10 +275,11 @@ export class ConversationRuntimeService {
    */
   async resolveHandoff(
     conversationId: string | null | undefined,
+    meta?: RuntimeWriteMeta,
   ): Promise<void> {
     if (!conversationId) return;
     try {
-      await this.prisma.threadContext.updateMany({
+      const result = await this.prisma.threadContext.updateMany({
         where: {
           conversationId,
           handoffRequestedAt: { not: null },
@@ -211,6 +287,16 @@ export class ConversationRuntimeService {
         },
         data: { handoffResolvedAt: new Date() },
       });
+      // Only log when a row actually flipped — resolveHandoff is called
+      // unconditionally on every manual reply, so most invocations are no-ops.
+      if (result.count > 0) {
+        this.logRuntimeWrite(
+          'handoff_write',
+          conversationId,
+          { action: 'resolved' },
+          meta,
+        );
+      }
     } catch (e: any) {
       this.logger.warn(
         `[ConvRuntime] resolveHandoff failed conversation_id=${conversationId} err=${e?.message ?? e}`,
