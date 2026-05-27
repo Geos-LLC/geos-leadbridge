@@ -3,6 +3,7 @@ import {
   labelAiStatus,
   labelClassifierIntent,
   labelSfJobOutcome,
+  labelBookingState,
   labelFollowUp,
   labelHandoff,
 } from './conversation-runtime-display';
@@ -58,8 +59,43 @@ describe('conversation-runtime-display helpers', () => {
       expect(labelClassifierIntent('wants_live_contact')).toBe('Wants live contact');
       expect(labelClassifierIntent('deferring')).toBe('Deferring');
     });
+    it('maps wants_to_schedule distinctly from wants_live_contact', () => {
+      // Phase 2A separates "wants someone to call" from "wants to pick a
+      // time". Labels must reflect that distinction so the operator can
+      // tell which path the conversation went down.
+      expect(labelClassifierIntent('wants_to_schedule')).toBe('Wants to schedule');
+      expect(labelClassifierIntent('wants_to_schedule')).not.toBe(
+        labelClassifierIntent('wants_live_contact'),
+      );
+    });
     it('null → em-dash', () => {
       expect(labelClassifierIntent(null)).toBe('—');
+    });
+  });
+
+  describe('labelBookingState', () => {
+    it.each([
+      ['idle', 'No booking'],
+      ['gathering_preferences', 'Gathering preferences'],
+      ['awaiting_availability', 'Awaiting availability'],
+      ['offering_slots', 'Offering slots'],
+      ['awaiting_slot_selection', 'Awaiting slot pick'],
+      ['booking_requested', 'Booking requested'],
+      ['service_scheduled', 'Scheduled in SF'],
+      ['service_rescheduled', 'Rescheduled in SF'],
+      ['service_cancelled', 'Cancelled in SF'],
+      ['service_completed', 'Completed in SF'],
+      ['booking_failed', 'Booking failed'],
+    ])('maps %s → %s', (state, expected) => {
+      expect(labelBookingState(state)).toBe(expected);
+    });
+
+    it.each([null, undefined, ''])('returns em-dash for %s', (v) => {
+      expect(labelBookingState(v as any)).toBe('—');
+    });
+
+    it('falls back to raw value for unknown state', () => {
+      expect(labelBookingState('totally_made_up')).toBe('totally_made_up');
     });
   });
 

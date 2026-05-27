@@ -38,7 +38,12 @@ const CLASSIFIER_INTENT_LABELS: Record<string, string> = {
   engaged: 'Engaged',
   asking: 'Asking question',
   agreed: 'Ready to book',
+  // Phase 2A distinguishes "wants someone to call me" (handoff) from
+  // "wants to pick a time" (booking). See src/conversation-context/
+  // booking-runtime.ts. Classifier upgrade is a later PR; label is
+  // forward-declared so renderings line up when it lands.
   wants_live_contact: 'Wants live contact',
+  wants_to_schedule: 'Wants to schedule',
   provided_phone_number: 'Provided phone',
   provided_square_footage: 'Provided sqft',
   qualification_complete: 'Qualification done',
@@ -47,6 +52,20 @@ const CLASSIFIER_INTENT_LABELS: Record<string, string> = {
   hired_elsewhere: 'Hired elsewhere',
   completed: 'Says completed',
   terminal_defer: 'Long-term defer',
+};
+
+const BOOKING_STATE_LABELS: Record<string, string> = {
+  idle: 'No booking',
+  gathering_preferences: 'Gathering preferences',
+  awaiting_availability: 'Awaiting availability',
+  offering_slots: 'Offering slots',
+  awaiting_slot_selection: 'Awaiting slot pick',
+  booking_requested: 'Booking requested',
+  service_scheduled: 'Scheduled in SF',
+  service_rescheduled: 'Rescheduled in SF',
+  service_cancelled: 'Cancelled in SF',
+  service_completed: 'Completed in SF',
+  booking_failed: 'Booking failed',
 };
 
 const SF_JOB_OUTCOME_LABELS: Record<string, string> = {
@@ -80,6 +99,11 @@ export function labelClassifierIntent(intent: string | null | undefined): string
 export function labelSfJobOutcome(outcome: string | null | undefined): string {
   if (!outcome) return '—';
   return SF_JOB_OUTCOME_LABELS[outcome] ?? outcome;
+}
+
+export function labelBookingState(state: string | null | undefined): string {
+  if (!state) return '—';
+  return BOOKING_STATE_LABELS[state] ?? state;
 }
 
 export function labelFollowUp(

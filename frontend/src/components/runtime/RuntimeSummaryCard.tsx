@@ -59,6 +59,7 @@ export function RuntimeSummaryCard({ refreshMs = 0 }: RuntimeSummaryCardProps) {
       <div style={gridStyle}>
         <DistributionBlock title="Conversation state" counts={data.byConversationState} />
         <DistributionBlock title="AI status" counts={data.byAiStatus} />
+        <DistributionBlock title="Booking state" counts={data.byBookingState} />
         <DistributionBlock title="Last classifier intent" counts={data.byLastClassifiedIntent} />
         <DistributionBlock title="SF job outcome" counts={data.sfJobOutcomeCounts} />
       </div>
