@@ -30,6 +30,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { SfInboundStatusService } from './sf-inbound-status.service';
+import { SfOrchestrationEventService } from './sf-orchestration-event.service';
 import { isReplayEligible } from './sf-event-replay';
 
 @Controller('v1/integrations/service-flow')
@@ -39,6 +40,7 @@ export class ServiceFlowInboundController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sfInbound: SfInboundStatusService,
+    private readonly sfOrchestrationEvent: SfOrchestrationEventService,
   ) {}
 
   /**
@@ -135,6 +137,58 @@ export class ServiceFlowInboundController {
       sfJobId: outcome.sfJobId ?? null,
       externalRequestId: outcome.externalRequestId ?? null,
       platform: outcome.platform ?? null,
+    });
+  }
+
+  /**
+   * Phase 2B PR-B2 — orchestration lifecycle events from SF.
+   * Distinct from /job-status; handles only service_scheduled,
+   * service_rescheduled, service_cancelled, service_completed.
+   *
+   * Same HMAC contract as /job-status (X-SF-Subscription-Id +
+   * X-SF-Timestamp + X-SF-Signature). Reuses the existing inbound
+   * CrmWebhookSubscription — one secret per tenant covers both
+   * endpoints. Triple-gated:
+   *   1. SF_ORCHESTRATION_INBOUND_ENABLED env (operator kill-switch)
+   *   2. HMAC signature verification
+   *   3. BOOKING_ORCHESTRATION_ENABLED_USER_IDS (per-tenant canary)
+   *      — events for non-canary tenants are recorded but produce no
+   *      runtime mutation.
+   */
+  @Public()
+  @Post('orchestration-event')
+  async receiveOrchestrationEvent(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Headers('x-sf-signature') signature: string,
+    @Headers('x-sf-timestamp') timestamp: string,
+    @Headers('x-sf-subscription-id') subscriptionId: string,
+  ): Promise<Response> {
+    const rawBuf = (req as any).rawBody as Buffer | undefined;
+    const rawBody: string =
+      rawBuf?.toString('utf8') ??
+      (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+
+    let outcome;
+    try {
+      outcome = await this.sfOrchestrationEvent.ingest(rawBody, {
+        signature,
+        timestamp,
+        subscriptionId,
+      });
+    } catch (err: any) {
+      const msg = (err?.message ?? String(err)).slice(0, 300).replace(/\s+/g, ' ');
+      this.logger.error(
+        `[SfOrchestrationEvent] result=exception error=${msg} sub_id=${subscriptionId ?? 'null'}`,
+      );
+      return res.status(500).json({ status: 'error', error: msg });
+    }
+    return res.status(outcome.httpStatus).json({
+      status: outcome.httpStatus < 300 ? 'accepted' : 'rejected',
+      event_id: outcome.eventId,
+      result: outcome.result,
+      lead_id: outcome.leadId ?? null,
+      error: outcome.error,
     });
   }
 

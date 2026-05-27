@@ -18,6 +18,7 @@ import { IntentClassifierService, IntentClassification, HandoffReason } from '..
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { ConversationRuntimeService } from '../conversation-context/conversation-runtime.service';
+import { BookingOrchestratorService } from '../booking-orchestrator/booking-orchestrator.service';
 import {
   AI_STATUS_REASONS,
   CONVERSATION_STATE_REASONS,
@@ -222,6 +223,10 @@ export class AutomationService implements OnModuleInit {
     // Phase 1 — durable conversation runtime state. Parallel-write only;
     // no read paths in Phase 1.
     private conversationRuntime: ConversationRuntimeService,
+    // Phase 2B — booking orchestrator. Flag-gated, additive. No-ops on
+    // every tenant not in BOOKING_ORCHESTRATION_ENABLED_USER_IDS.
+    @Inject(forwardRef(() => BookingOrchestratorService))
+    private bookingOrchestrator: BookingOrchestratorService,
   ) {}
 
   /**
@@ -883,7 +888,7 @@ export class AutomationService implements OnModuleInit {
     // to per-user on 2026-05-23 — see User.aiConversationEnabled in schema.
     const userAi = await this.prisma.user.findUnique({
       where: { id: context.userId },
-      select: { aiConversationEnabled: true },
+      select: { aiConversationEnabled: true, sigcoreBusinessId: true },
     });
     const aiConversationEnabled = userAi?.aiConversationEnabled === true;
 
@@ -908,6 +913,41 @@ export class AutomationService implements OnModuleInit {
     await this.maybeFireHandoffAlert(classification, context, savedAccount, aiConversationEnabled).catch(err => {
       this.logger.warn(`[Handoff] alert failed: ${err.message}`);
     });
+
+    // ── Booking orchestrator entry (Phase 2B) ─────────────────────────
+    // Flag-gated inside the service — for non-canary tenants this call
+    // returns { decision: 'flag_disabled' } as a no-op without touching
+    // any state. Runs AFTER maybeFireHandoffAlert so the existing
+    // handoff path remains the safety net regardless of flag state:
+    // even if the booking orchestrator does nothing, the LLM's
+    // handoff.shouldHandoff=true signal on wants_to_schedule still
+    // pages the dispatcher.
+    //
+    // The orchestrator returns an OrchestratorOutcome with an optional
+    // outboundMessage; PR-B2 deliberately does NOT wire that into the
+    // SMS send path. The PR ships dark — flag OFF, no callers act on
+    // the message. Tenant-2 enablement is a separate step that may
+    // additionally wire outboundMessage into notifications.sendAdHocSms.
+    if (
+      classification?.intent === 'wants_to_schedule' &&
+      lead?.threadId &&
+      context.customerMessage
+    ) {
+      await this.bookingOrchestrator
+        .handleClassifiedIntent({
+          userId: context.userId,
+          leadId: context.leadId,
+          conversationId: lead.threadId,
+          customerMessage: context.customerMessage,
+          intent: 'wants_to_schedule',
+          sigcoreBusinessId: userAi?.sigcoreBusinessId ?? null,
+          serviceType: lead.category ?? context.category ?? null,
+          accountName: savedAccount.businessName ?? null,
+        })
+        .catch((err) => {
+          this.logger.warn(`[BookingOrchestrator] entry failed: ${err.message}`);
+        });
+    }
 
     // ── Manual-pro-recency pause ────────────────────────────────────────
     // When a real human (manager) or 3rd-party bridge (Telegram → TT)

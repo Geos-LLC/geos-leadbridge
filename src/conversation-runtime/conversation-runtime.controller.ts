@@ -231,6 +231,27 @@ export class ConversationRuntimeController {
     const orchestrationMetrics: OrchestrationCountersSnapshot =
       this.orchestrationMetrics.getCountersForUser(userId);
 
+    // ─── Phase 2B PR-B2 — SF orchestration-event counts ──────────────────
+    // Count inbound service_* events from /v1/integrations/service-flow/
+    // orchestration-event grouped by event_type, scoped to tenant. Survives
+    // restarts (DB-backed, unlike in-process orchestrationMetrics). All
+    // values stay at zero until SF starts emitting events for canary
+    // tenants — independent of LB-side flag state.
+    const serviceEventTypes = [
+      'service_scheduled',
+      'service_rescheduled',
+      'service_cancelled',
+      'service_completed',
+    ] as const;
+    const serviceEventCounts: Record<string, number> = {};
+    await Promise.all(
+      serviceEventTypes.map(async (et) => {
+        serviceEventCounts[et] = await this.prisma.sfInboundEvent.count({
+          where: { userId, eventType: et },
+        });
+      }),
+    );
+
     return {
       tenantUserId: userId,
       generatedAt: new Date().toISOString(),
@@ -244,6 +265,7 @@ export class ConversationRuntimeController {
       byLastClassifiedIntent,
       orchestrationFlag,
       orchestrationMetrics,
+      serviceEventCounts,
       sfJobOutcomeCounts,
       sfOutcomeCoverage: {
         populated: sfOutcomePopulated,

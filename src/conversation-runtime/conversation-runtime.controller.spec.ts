@@ -38,7 +38,8 @@ function buildPrismaMock() {
   const state: any = {
     threadContextCalls: [] as Array<{ method: string; args: any }>,
     leadCalls: [] as Array<{ method: string; args: any }>,
-    countReturns: { threadContext: 0, lead: 0 },
+    countReturns: { threadContext: 0, lead: 0, sfInboundEvent: 0 },
+    sfInboundEventCalls: [] as Array<{ method: string; args: any }>,
     findManyReturns: { threadContext: [] as any[], lead: [] as any[] },
     groupByReturns: { threadContext: [] as any[], lead: [] as any[] },
   };
@@ -70,6 +71,12 @@ function buildPrismaMock() {
       groupBy: jest.fn(async (args: any) => {
         state.leadCalls.push({ method: 'groupBy', args });
         return state.groupByReturns.lead;
+      }),
+    },
+    sfInboundEvent: {
+      count: jest.fn(async (args: any) => {
+        state.sfInboundEventCalls.push({ method: 'count', args });
+        return state.countReturns.sfInboundEvent;
       }),
     },
   };
@@ -204,6 +211,36 @@ describe('ConversationRuntimeController', () => {
         'unknown',
       ] as const) {
         expect(m.failuresByCode[code]).toBe(0);
+      }
+    });
+
+    it('Phase 2B PR-B2: returns serviceEventCounts with all 4 service_* keys at zero on fresh tenant', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = buildController(prisma);
+      const result = await ctrl.summary(USER_A);
+      expect(result.serviceEventCounts).toEqual({
+        service_scheduled: 0,
+        service_rescheduled: 0,
+        service_cancelled: 0,
+        service_completed: 0,
+      });
+    });
+
+    it('Phase 2B PR-B2: serviceEventCounts queries scope to the calling user', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = buildController(prisma);
+      await ctrl.summary(USER_A);
+      const sfCalls = prisma._state.sfInboundEventCalls;
+      expect(sfCalls.length).toBe(4); // one per event type
+      for (const c of sfCalls) {
+        expect(c.args.where.userId).toBe(USER_A.id);
+        // Only the 4 service_* event types — no fishing for other event_types
+        expect([
+          'service_scheduled',
+          'service_rescheduled',
+          'service_cancelled',
+          'service_completed',
+        ]).toContain(c.args.where.eventType);
       }
     });
 

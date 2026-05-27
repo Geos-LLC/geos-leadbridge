@@ -31,6 +31,7 @@ import { TeamsModule } from './teams/teams.module';
 import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
 import { ServiceFlowModule } from './integrations/service-flow/service-flow.module';
 import { SfOrchestrationModule } from './sf-orchestration/sf-orchestration.module';
+import { BookingOrchestratorModule } from './booking-orchestrator/booking-orchestrator.module';
 import { HealthModule } from './health/health.module';
 import { IntegrationsHealthModule } from './integrations/health/integrations-health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
@@ -80,6 +81,7 @@ import { AuditModule } from './common/audit/audit.module';
     CrmWebhookModule,
     ServiceFlowModule,
     SfOrchestrationModule,
+    BookingOrchestratorModule,
     HealthModule,
     IntegrationsHealthModule,
     MonitoringModule,
