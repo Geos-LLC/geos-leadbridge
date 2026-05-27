@@ -82,12 +82,58 @@ describe('ConversationRuntimeController', () => {
       expect(result.totals.threadContexts).toBe(0);
       expect(result.byConversationState._null).toBe(0);
       expect(result.byAiStatus._null).toBe(0);
+      expect(result.byBookingState._null).toBe(0);
       expect(result.byLastClassifiedIntent).toEqual({});
       expect(result.sfJobOutcomeCounts).toEqual({});
       expect(result.sfOutcomeCoverage.ratio).toBeNull();
       expect(result.handoffOpen).toBe(0);
       expect(result.staleWaiting).toBe(0);
       expect(result.updatedLast24h.conversationState).toBe(0);
+    });
+
+    it('returns byBookingState with one entry per Phase 2A vocabulary state plus _null', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = new ConversationRuntimeController(prisma);
+      const result = await ctrl.summary(USER_A);
+
+      // Lock the expected keys. Add/remove only via a deliberate vocab
+      // change in src/conversation-context/booking-runtime.ts.
+      const expectedStates = [
+        'idle',
+        'gathering_preferences',
+        'awaiting_availability',
+        'offering_slots',
+        'awaiting_slot_selection',
+        'booking_requested',
+        'service_scheduled',
+        'service_rescheduled',
+        'service_cancelled',
+        'service_completed',
+        'booking_failed',
+      ];
+      for (const s of expectedStates) {
+        expect(result.byBookingState).toHaveProperty(s);
+        expect(typeof (result.byBookingState as any)[s]).toBe('number');
+      }
+      expect(result.byBookingState).toHaveProperty('_null');
+    });
+
+    it('scopes every bookingState count query to the calling user', async () => {
+      const prisma = buildPrismaMock();
+      const ctrl = new ConversationRuntimeController(prisma);
+      await ctrl.summary(USER_A);
+
+      const bookingCountCalls = prisma._state.threadContextCalls.filter(
+        (c: any) =>
+          c.method === 'count' &&
+          c.args?.where &&
+          // Either a known state OR the explicit null filter
+          ('bookingState' in c.args.where),
+      );
+      expect(bookingCountCalls.length).toBeGreaterThan(0);
+      for (const c of bookingCountCalls) {
+        expect(c.args.where.lead?.userId).toBe(USER_A.id);
+      }
     });
 
     it('aggregates byLastClassifiedIntent from groupBy rows', async () => {

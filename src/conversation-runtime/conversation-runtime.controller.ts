@@ -23,6 +23,7 @@ import {
   type AiStatus,
   type ConversationState,
 } from '../conversation-context/conversation-runtime';
+import { BOOKING_STATES } from '../conversation-context/booking-runtime';
 
 /**
  * Lead.status values considered "terminal" in the legacy CRM-pipeline sense.
@@ -100,6 +101,21 @@ export class ConversationRuntimeController {
     );
     const aiStatusNull = await this.prisma.threadContext.count({
       where: { lead: { userId }, aiStatus: null },
+    });
+
+    // by bookingState — Phase 2A. No writes ship in PR-A, so every count
+    // is expected to be zero on first deploy. Lights up automatically
+    // when PR-B starts writing.
+    const byBookingState: Record<string, number> = {};
+    await Promise.all(
+      BOOKING_STATES.map(async (s) => {
+        byBookingState[s] = await this.prisma.threadContext.count({
+          where: { lead: { userId }, bookingState: s },
+        });
+      }),
+    );
+    const bookingStateNull = await this.prisma.threadContext.count({
+      where: { lead: { userId }, bookingState: null },
     });
 
     // by lastClassifiedIntent — group dynamically rather than enumerate
@@ -203,6 +219,7 @@ export class ConversationRuntimeController {
       },
       byConversationState: { ...byConversationState, _null: conversationStateNull },
       byAiStatus: { ...byAiStatus, _null: aiStatusNull },
+      byBookingState: { ...byBookingState, _null: bookingStateNull },
       byLastClassifiedIntent,
       sfJobOutcomeCounts,
       sfOutcomeCoverage: {

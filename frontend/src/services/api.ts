@@ -733,6 +733,9 @@ export interface RuntimeSummaryResponse {
   totals: { threadContexts: number; leadsSfLinked: number };
   byConversationState: Record<string, number> & { _null: number };
   byAiStatus: Record<string, number> & { _null: number };
+  // Phase 2A — booking orchestration runtime. Counts will be zero on
+  // first deploy because PR-A doesn't write any of these fields.
+  byBookingState: Record<string, number> & { _null: number };
   byLastClassifiedIntent: Record<string, number>;
   sfJobOutcomeCounts: Record<string, number>;
   sfOutcomeCoverage: {

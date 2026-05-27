@@ -1242,6 +1242,30 @@ model ThreadContext {
   handoffRequestedReason   String?
   handoffResolvedAt        DateTime?
 
+  // ─── Phase 2A — Booking orchestration runtime (additive) ─────────────
+  // LB owns the booking *attempt*. SF owns the resulting job's operational
+  // lifecycle. `service_*` terminal states are mirrored from SF outcomes,
+  // not authored by LB. LB does NOT create jobs directly; it submits
+  // booking *requests* through SF's orchestration endpoints. Vocabulary
+  // lives in src/conversation-context/booking-runtime.ts.
+  //
+  // bookingState: see BOOKING_STATES — idle | gathering_preferences |
+  //   awaiting_availability | offering_slots | awaiting_slot_selection |
+  //   booking_requested | service_scheduled | service_rescheduled |
+  //   service_cancelled | service_completed | booking_failed
+  //
+  // proposedTimeSlotsJson: JSON array of {slotId, start, end, presentedAt}
+  // selectedTimeSlotJson:  JSON {slotId, start, end, selectedAt}
+  bookingState          String?
+  bookingStateAt        DateTime?
+  bookingStateReason    String?
+  bookingRequestedAt    DateTime?
+  proposedTimeSlotsJson String?   @db.Text
+  selectedTimeSlotJson  String?   @db.Text
+  bookingAttemptCount   Int       @default(0)
+  lastBookingAttemptAt  DateTime?
+  bookingFailureReason  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1254,6 +1278,9 @@ model ThreadContext {
   @@index([stage])
   @@index([awaitingCustomerReply])
   @@index([updatedAt])
+  // bookingState partial index — SQL-only (skip nulls). See
+  // prisma/migrations/20260527000000_phase2a_booking_runtime/migration.sql.
+  // Mirrors the Phase 1 pattern for aiStatus / conversationState indexes.
   @@map("thread_contexts")
 }
 
