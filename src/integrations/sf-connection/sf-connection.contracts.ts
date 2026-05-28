@@ -271,7 +271,7 @@ export interface OrchestrationWebhookOutcome {
   httpStatus: number;
   result:
     | 'accepted'
-    | 'duplicate'
+    | 'idempotent_replay'
     | 'unauthorized'
     | 'validation_failed'
     | 'replay_rejected'

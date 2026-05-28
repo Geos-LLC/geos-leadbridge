@@ -240,13 +240,48 @@ describe('SfConnectionWebhookService — body validation', () => {
 });
 
 describe('SfConnectionWebhookService — idempotency', () => {
-  it('returns 409 duplicate when X-SF-Event-Id already in sfInboundEvent', async () => {
-    const { svc, lifecycle } = buildDeps({ existingEvent: { id: 'row-1', eventId: 'evt-1' } });
+  it('returns 200 idempotent_replay when X-SF-Event-Id already in sfInboundEvent', async () => {
+    // Duplicate delivery must look like success to SF so the retry loop
+    // breaks. 4xx (including 409) would keep SF retrying and grow the DLQ.
+    const { svc, lifecycle } = buildDeps({
+      existingEvent: {
+        id: 'row-1',
+        eventId: 'evt-1',
+        eventType: 'connection.connected',
+        result: 'accepted',
+        status: 'applied',
+        receivedAt: new Date('2026-05-28T20:00:00Z'),
+      },
+    });
     const req = sign(envelope());
     const r = await svc.ingest(req.rawBody, req.headers);
-    expect(r.httpStatus).toBe(409);
-    expect(r.result).toBe('duplicate');
+    expect(r.httpStatus).toBe(200);
+    expect(r.result).toBe('idempotent_replay');
+    expect(r.eventId).toBe('evt-1');
+    expect(r.eventType).toBe('connection.connected');
+    expect(r.sfTenantId).toBe(99999);
+    // Critical safety: side effects NOT re-applied on duplicate.
     expect(lifecycle.applyConnectionConnected).not.toHaveBeenCalled();
+  });
+
+  it('duplicate response carries original event_type even if body claims different type', async () => {
+    // Defensive: SF should never send a different event_type for the same
+    // event_id, but if they did, our response reflects what was originally
+    // applied — that's the authoritative record.
+    const { svc } = buildDeps({
+      existingEvent: {
+        id: 'row-1',
+        eventId: 'evt-1',
+        eventType: 'connection.connected',
+        result: 'accepted',
+        status: 'applied',
+        receivedAt: new Date(),
+      },
+    });
+    const req = sign(envelope({ event_type: 'credential.rotated', payload: { new_credential: { token: 'x' } } }));
+    const r = await svc.ingest(req.rawBody, req.headers);
+    expect(r.httpStatus).toBe(200);
+    expect(r.eventType).toBe('connection.connected'); // from the stored row, not the new body
   });
 });
 

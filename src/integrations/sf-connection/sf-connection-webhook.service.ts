@@ -22,7 +22,11 @@
  * sfTenantId) → linked CrmWebhookSubscription → decrypted secret.
  *
  * Idempotency: X-SF-Event-Id stored in SfInboundEvent (unique). Re-delivery
- * returns 409 duplicate without re-applying.
+ * of an already-applied event returns 200 OK with result='idempotent_replay'
+ * — same shape as the original 'accepted' response so SF treats it as a
+ * successful ack and breaks the retry loop. Side effects are NOT re-applied.
+ * 200 (not 409) because 4xx classifies as failure for SF's retry policy and
+ * causes infinite retry escalation / DLQ growth on a legitimate duplicate.
  *
  * Cross-tenant safety:
  *   - SfConnection lookup is keyed on the wire's X-SF-Tenant-Id; an
@@ -281,13 +285,28 @@ export class SfConnectionWebhookService {
     const eventId = eventIdHeader;
 
     // ── 7. Idempotency ───────────────────────────────────────────────
-    const existing = await this.prisma.sfInboundEvent.findUnique({ where: { eventId } });
+    // Already-applied event: return 200 OK with result='idempotent_replay'.
+    // - 200 (not 4xx) so SF treats it as a successful ack and stops retrying.
+    // - Side effects NOT re-applied; we just acknowledge the original work.
+    // - No new audit row written (eventId is unique on SfInboundEvent; the
+    //   original row already captures the apply). Observability comes from
+    //   the log line below + the existing row's status/result.
+    const existing = await this.prisma.sfInboundEvent.findUnique({
+      where: { eventId },
+      select: { eventType: true, result: true, status: true, receivedAt: true },
+    });
     if (existing) {
+      this.logger.log(
+        `[SfConnectionWebhook] event_id=${eventId} result=idempotent_replay ` +
+          `user_id=${conn.userId} sf_tenant_id=${sfTenantIdStr} event_type=${existing.eventType} ` +
+          `original_result=${existing.result ?? 'null'} original_status=${existing.status} ` +
+          `original_received_at=${existing.receivedAt.toISOString()}`,
+      );
       return {
-        httpStatus: 409,
-        result: 'duplicate',
+        httpStatus: 200,
+        result: 'idempotent_replay',
         eventId,
-        eventType: envelope.event_type,
+        eventType: existing.eventType,
         sfTenantId: envelope.sf_tenant_id,
       };
     }
