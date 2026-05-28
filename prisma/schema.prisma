@@ -1526,6 +1526,10 @@ model SfConnection {
   sfTenantId                  String   // SF's internal tenant id (authoritative)
   sfTenantName                String?  // Display name (info only)
   baseUrl                     String   // SF orchestration endpoint base
+  // Phase 2C PR-C2: S4 provisioning payload additions
+  sourceInstance              String?  // SF deployment instance, e.g. "sf-staging-us"
+  apiRegion                   String?  // SF API region label, e.g. "us-east-1"
+  signatureKeyId              String?  // SF signing key id for inbound webhook HMAC
 
   // ─── Current SF-issued authority token (opaque to LB) ─────────────
   // Encrypted via EncryptionUtil (AES-256-GCM + ENCRYPTION_KEY). LB
