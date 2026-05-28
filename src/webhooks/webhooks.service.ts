@@ -19,6 +19,7 @@ import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { LeadStatusService } from '../leads/lead-status.service';
+import { TrialService } from '../trial/trial.service';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
@@ -49,6 +50,7 @@ export class WebhooksService {
     private crmWebhookService: CrmWebhookService,
     private leadCache: LeadCacheService,
     private leadStatusService: LeadStatusService,
+    private trialService: TrialService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -360,6 +362,15 @@ export class WebhooksService {
 
     this.logger.log(`[timing] lead upsert + savedAccount: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
 
+    // Trial meter — count this delivery toward the user's trial quota.
+    // Idempotent CAS on Lead.trialCounted; webhook retries and concurrent
+    // delivery are safe. Skipped silently for paid/no-trial/trial-ended users.
+    this.trialService.consumeLead(userId, lead.id).catch((err) => {
+      this.logger.warn(
+        `[trial] consumeLead failed for TT NEW_NEGOTIATION lead=${lead.id} user=${userId}: ${err?.message ?? err}`,
+      );
+    });
+
     // Persist the Partner API status through the canonical write path.
     // Partner API states (Open / Picked / Canceled) have no entry in
     // mapThumbtackToLbStatus, so canonical resolves to null and writeStatus
@@ -612,6 +623,15 @@ export class WebhooksService {
     });
 
     this.logger.log('Lead ensured via upsert', { negotiationId, leadId: lead.id });
+
+    // Trial meter — same CAS as the NEW_NEGOTIATION path. Fires only the
+    // first time a Lead row gets created for this thread, so a chatty
+    // customer doesn't multiply the count.
+    this.trialService.consumeLead(userId, lead.id).catch((err) => {
+      this.logger.warn(
+        `[trial] consumeLead failed for ${platform} MessageCreated lead=${lead.id} user=${userId}: ${err?.message ?? err}`,
+      );
+    });
 
     // Invalidate analytics cache (lead may have been created by this upsert)
     await this.analyticsService.invalidateCache(userId);
@@ -1935,6 +1955,15 @@ export class WebhooksService {
 
     // Emit SSE for real-time frontend update
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
+
+    // Trial meter — count this delivery. CAS on Lead.trialCounted keeps
+    // it idempotent across the Yelp NEW_EVENT retry storm (Yelp can re-
+    // deliver the same event after a 3xx). Skipped for paid users.
+    this.trialService.consumeLead(userId, lead.id).catch((err) => {
+      this.logger.warn(
+        `[trial] consumeLead failed for Yelp NEW_EVENT lead=${lead.id} user=${userId}: ${err?.message ?? err}`,
+      );
+    });
 
     // Emit CRM webhook (non-blocking)
     this.crmWebhookService.emit(userId, 'lead.created', {
