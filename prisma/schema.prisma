@@ -334,6 +334,12 @@ model Lead {
   // signal read by the follow-up scheduler self-heal to stop enrollments
   // even when a provider failed to persist a Message row.
   lastCustomerActivityAt DateTime?
+  // Trial meter idempotency flag. Set true when this Lead has been counted
+  // toward User.trialLeadsHandled via TrialService.consumeLead. Single-shot
+  // per Lead — webhook retries, late re-deliveries, and the daily Yelp
+  // reconciliation never double-count. Backfills/imports and synthetic test
+  // leads never set this flag and so don't burn trial quota.
+  trialCounted           Boolean   @default(false)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
