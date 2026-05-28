@@ -110,6 +110,45 @@ describe('SfConnectionWebhookService — headers / HMAC / replay', () => {
     const r = await svc.ingest(req.rawBody, req.headers);
     expect(r.httpStatus).toBe(401);
     expect(r.result).toBe('replay_rejected');
+    // Diagnostic surfacing — header-derived fields must propagate so SF
+    // can correlate the rejection with the in-flight event.
+    expect(r.eventType).toBe('connection.connected');
+    expect(r.sfTenantId).toBe(99999);
+  });
+
+  it('drift validation uses X-SF-Timestamp (not body occurred_at)', async () => {
+    // Header timestamp is fresh; body occurred_at is 1h stale. If LB ever
+    // mistakenly used body for the freshness check, drift would be 3600s
+    // and the request would 401. Correct behavior: accept past the drift
+    // gate and reach later validation (here: tenant_not_found because
+    // we override conn to null to keep the test minimal).
+    const { svc } = buildDeps({ conn: null });
+    const env = envelope({ occurred_at: new Date(Date.now() - 3600 * 1000).toISOString() });
+    const req = sign(env); // header ts defaults to now
+    const r = await svc.ingest(req.rawBody, req.headers);
+    expect(r.httpStatus).toBe(404);
+    expect(r.result).toBe('tenant_not_found'); // NOT replay_rejected
+  });
+
+  it('missing-headers rejection still surfaces any header that WAS provided', async () => {
+    const { svc } = buildDeps();
+    // No signature/timestamp/eventId/tenantId — but event_type IS present.
+    const r = await svc.ingest('{}', { eventType: 'connection.connected' });
+    expect(r.httpStatus).toBe(401);
+    expect(r.result).toBe('unauthorized');
+    expect(r.eventType).toBe('connection.connected');
+    expect(r.sfTenantId).toBeUndefined();
+  });
+
+  it('signature mismatch rejection surfaces event_type + sf_tenant_id', async () => {
+    const { svc } = buildDeps();
+    const req = sign(envelope(), { sigOverride: 'a'.repeat(64) });
+    const r = await svc.ingest(req.rawBody, req.headers);
+    expect(r.httpStatus).toBe(401);
+    expect(r.result).toBe('unauthorized');
+    expect(r.error).toBe('signature mismatch');
+    expect(r.eventType).toBe('connection.connected');
+    expect(r.sfTenantId).toBe(99999);
   });
 
   it('rejects when tenant not found', async () => {

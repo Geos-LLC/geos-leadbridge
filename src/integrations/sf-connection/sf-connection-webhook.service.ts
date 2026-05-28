@@ -94,26 +94,52 @@ export class SfConnectionWebhookService {
     const tenantIdHeader = this.pickHeader(headers.tenantId);
     const kidHeader = this.pickHeader(headers.kid);
 
+    // Pre-parse the tenant header as integer for response surfacing. Best-effort
+    // — used only in rejection diagnostics; tenant resolution still uses the
+    // string form below.
+    const tenantIdHeaderNum = tenantIdHeader != null ? parseInt(tenantIdHeader, 10) : NaN;
+    const headerSfTenantId = Number.isFinite(tenantIdHeaderNum) ? tenantIdHeaderNum : null;
+
     // ── 1. Required headers ─────────────────────────────────────────
     if (!sig || !ts || !eventIdHeader || !tenantIdHeader) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=null result=unauthorized error=missing_headers ` +
-          `sig=${!!sig} ts=${!!ts} eventid=${!!eventIdHeader} tenantid=${!!tenantIdHeader}`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader ?? 'null'} result=unauthorized error=missing_headers ` +
+          `sig=${!!sig} ts=${!!ts} eventid=${!!eventIdHeader} tenantid=${!!tenantIdHeader} ` +
+          `event_type=${eventTypeHeader ?? 'null'} sf_tenant_id=${tenantIdHeader ?? 'null'}`,
       );
-      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader ?? 'n/a', error: 'missing headers' };
+      return {
+        httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader ?? 'n/a',
+        eventType: eventTypeHeader ?? undefined,
+        sfTenantId: headerSfTenantId ?? undefined,
+        error: 'missing headers',
+      };
     }
 
     // ── 2. Timestamp skew (±300s) ────────────────────────────────────
+    // Source: X-SF-Timestamp header ONLY. Body `occurred_at` is informational
+    // (audit / lead correlation) and is never used for freshness validation.
     const tsNum = parseInt(ts, 10);
     if (!Number.isFinite(tsNum)) {
-      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'invalid timestamp' };
+      return {
+        httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader,
+        eventType: eventTypeHeader ?? undefined,
+        sfTenantId: headerSfTenantId ?? undefined,
+        error: 'invalid timestamp',
+      };
     }
     const drift = Math.floor(Date.now() / 1000) - tsNum;
     if (Math.abs(drift) > SIGNATURE_SKEW_SECONDS) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} result=replay_rejected error=timestamp_drift drift=${drift}`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=replay_rejected error=timestamp_drift ` +
+          `drift=${drift} drift_source=x-sf-timestamp ` +
+          `event_type=${eventTypeHeader ?? 'null'} sf_tenant_id=${tenantIdHeader ?? 'null'}`,
       );
-      return { httpStatus: 401, result: 'replay_rejected', eventId: eventIdHeader, error: 'timestamp drift' };
+      return {
+        httpStatus: 401, result: 'replay_rejected', eventId: eventIdHeader,
+        eventType: eventTypeHeader ?? undefined,
+        sfTenantId: headerSfTenantId ?? undefined,
+        error: 'timestamp drift',
+      };
     }
 
     // ── 3. Tenant resolution via X-SF-Tenant-Id ─────────────────────
@@ -127,12 +153,13 @@ export class SfConnectionWebhookService {
     if (!conn) {
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=tenant_not_found ` +
-          `sf_tenant_id=${sfTenantIdStr}`,
+          `sf_tenant_id=${sfTenantIdStr} event_type=${eventTypeHeader ?? 'null'}`,
       );
       return {
         httpStatus: 404,
         result: 'tenant_not_found',
         eventId: eventIdHeader,
+        eventType: eventTypeHeader ?? undefined,
         sfTenantId: Number.isFinite(sfTenantIdNum) ? sfTenantIdNum : null,
         error: 'tenant not found',
       };
@@ -177,18 +204,28 @@ export class SfConnectionWebhookService {
     if (!this.timingSafeHexEqual(expected, received)) {
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=signature_mismatch ` +
-          `user_id=${conn.userId} sf_tenant_id=${sfTenantIdStr}`,
+          `user_id=${conn.userId} sf_tenant_id=${sfTenantIdStr} event_type=${eventTypeHeader ?? 'null'}`,
       );
-      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'signature mismatch' };
+      return {
+        httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader,
+        eventType: eventTypeHeader ?? undefined,
+        sfTenantId: headerSfTenantId ?? undefined,
+        error: 'signature mismatch',
+      };
     }
 
     // ── 5. X-SF-Kid cross-check ─────────────────────────────────────
     if (conn.signatureKeyId && kidHeader && conn.signatureKeyId !== kidHeader) {
       this.logger.error(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=kid_mismatch ` +
-          `stored=${conn.signatureKeyId} received=${kidHeader}`,
+          `stored=${conn.signatureKeyId} received=${kidHeader} event_type=${eventTypeHeader ?? 'null'} sf_tenant_id=${sfTenantIdStr}`,
       );
-      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'kid mismatch' };
+      return {
+        httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader,
+        eventType: eventTypeHeader ?? undefined,
+        sfTenantId: headerSfTenantId ?? undefined,
+        error: 'kid mismatch',
+      };
     }
 
     // ── 6. Parse + validate envelope ────────────────────────────────
