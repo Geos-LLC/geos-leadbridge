@@ -1,47 +1,42 @@
 /**
- * SfConnectionLifecycleService — Phase 2C PR-C2.
+ * SfConnectionLifecycleService — Phase 2C PR-C2.1.
  *
- * Pure persistence layer for the SF connect lifecycle. Three public
- * entry points:
+ * Single writer of sf_connections + linked CrmWebhookSubscription rows.
+ * Three public entry points:
  *
- *   applyConnectionConnected   — initial provisioning (OAuth exchange OR
- *                                inbound connection.connected event).
- *                                Atomic transaction: encrypt creds +
- *                                upsert SfConnection + create/update
- *                                linked CrmWebhookSubscription.
+ *   applyConnectionConnected
+ *     Initial provisioning. Called from:
+ *       (a) OAuth callback after exchange success
+ *       (b) inbound connection.connected webhook (catch-up / re-delivery)
  *
- *   applyCredentialRotated     — SF pushed a new orchestration token.
- *                                Demotes the current token to
- *                                previousOrchestrationToken (5-min
- *                                grace window), stores the new token,
- *                                sets status='rotating'.
+ *     Canonical SF S4 flow inversion: the webhook signing secret is
+ *     **LB-generated** and passed in via `webhookSecretPlaintext`.
+ *     SF only echoes `secret_set: true` in the provisioning payload —
+ *     never echoes the secret itself. The caller (OAuth service for
+ *     fresh handshakes; webhook service for SF re-deliveries) is
+ *     responsible for sourcing the secret. The webhook re-delivery
+ *     path therefore CANNOT change the stored secret — it preserves
+ *     whatever is currently stored on the inbound subscription.
  *
- *   applyConnectionRevoked     — SF authority revoked the connection.
- *                                Sets status='revoked', wipes tokens,
- *                                deactivates webhook subscription.
- *                                Preserves audit trail.
+ *   applyCredentialRotated
+ *     Demotes the current token to previousOrchestrationToken (5-min
+ *     SF-guaranteed grace), stores the new token, sets status='rotating'.
+ *
+ *   applyConnectionRevoked
+ *     Terminal state. sf_authority → 'revoked'; lb_user/lb_admin →
+ *     'disconnected'. Wipes tokens. Deactivates subscription. Audit
+ *     preserved.
  *
  * Idempotency model:
- *   - applyConnectionConnected is called from two paths:
- *       (a) OAuth callback (status='pending' → 'active')
- *       (b) connection.connected webhook (re-delivery / catch-up)
- *     Both upsert by userId. If status is already 'active' with
- *     matching sfTenantId AND the same token_issued_at, it's a no-op
- *     (idempotent re-delivery). If the token_issued_at advanced, it's
- *     a refresh and we accept the new payload.
- *
- *   - applyCredentialRotated is idempotent on (userId, new token_issued_at):
- *     if our tokenIssuedAt >= new_token_issued_at the call no-ops.
- *
- *   - applyConnectionRevoked is idempotent: re-revoke is safe.
+ *   - applyConnectionConnected: re-delivery with identical sfTenantId +
+ *     credential.issued_at is a noop.
+ *   - applyCredentialRotated: stale issued_at → noop.
+ *   - applyConnectionRevoked: re-revoke is safe.
  *
  * Safety:
- *   - Plaintext orchestration_token + webhook_signing_secret are NEVER
- *     logged. Log lines reference token_kid and length only.
- *   - Encryption uses ENCRYPTION_KEY via EncryptionUtil — same as the
- *     existing Yelp/Thumbtack credentials.
- *   - All multi-row changes are wrapped in prisma.$transaction so a
- *     partial failure leaves the system in a consistent state.
+ *   - Plaintext token + plaintext webhook secret NEVER logged. Log lines
+ *     reference token_prefix + token_len + webhook_secret_len only.
+ *   - All multi-row changes wrapped in $transaction.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -50,7 +45,6 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import type {
-  SfConnectionConnectedPayload,
   SfConnectionRevokedPayload,
   SfCredentialRotatedPayload,
   SfProvisioningPayload,
@@ -60,16 +54,29 @@ const DEFAULT_GRACE_SECONDS = 5 * 60;
 
 export interface ApplyConnectionConnectedInput {
   userId: string;
+  /** The pending row id (OAuth path) or a fresh uuid (sf_push first-time path). */
   connectionId: string;
+  /** Canonical SF payload (nested envelope). */
   provisioning: SfProvisioningPayload;
-  /** Where the call came from — drives the rotation-source tag. */
+  /**
+   * LB-generated webhook signing secret (base64 32 bytes). Required on
+   * the oauth_exchange path because SF never echoes it. Optional on
+   * sf_push re-deliveries — if omitted, the lifecycle service preserves
+   * the secret already stored on the linked CrmWebhookSubscription.
+   */
+  webhookSecretPlaintext?: string | null;
+  /** LB-generated webhook URL (required on oauth_exchange path). */
+  webhookUrl?: string | null;
+  /** LB-generated subscription correlation id (echoed by SF). */
+  webhookSubscriptionId?: string | null;
+  /** LB-generated state ref (echoed by SF). */
+  webhookStateRef?: string | null;
   source: 'oauth_exchange' | 'sf_push';
 }
 
 export interface ApplyCredentialRotatedInput {
   userId: string;
   payload: SfCredentialRotatedPayload;
-  /** Optional event id for logging correlation. */
   eventId?: string | null;
 }
 
@@ -77,7 +84,6 @@ export interface ApplyConnectionRevokedInput {
   userId: string;
   payload: SfConnectionRevokedPayload;
   initiator: 'sf_authority' | 'lb_user' | 'lb_admin';
-  /** Optional event id for logging correlation. */
   eventId?: string | null;
 }
 
@@ -104,105 +110,138 @@ export class SfConnectionLifecycleService {
   async applyConnectionConnected(input: ApplyConnectionConnectedInput): Promise<ApplyResult> {
     const { userId, connectionId, provisioning, source } = input;
     const encryptionKey = this.getEncryptionKey();
-    const tokenIssuedAt = new Date(provisioning.token_issued_at);
+    const tokenIssuedAt = new Date(provisioning.credential.issued_at);
+    // sf_tenant_id arrives as integer on the wire; store as string for
+    // backward compat with the existing column type + cross-platform
+    // ergonomics (everything else in LB treats tenant ids as strings).
+    const sfTenantIdStr = String(provisioning.tenant.sf_tenant_id);
+    const sfWorkspaceIdStr = String(provisioning.tenant.sf_workspace_id);
 
     const existing = await this.prisma.sfConnection.findUnique({ where: { userId } });
 
-    // Idempotent re-delivery — same SF tenant + same issued_at = noop
+    // Idempotent re-delivery — same SF tenant + same issued_at = noop.
     if (
       existing &&
       existing.status === 'active' &&
-      existing.sfTenantId === provisioning.sf_tenant_id &&
+      existing.sfTenantId === sfTenantIdStr &&
       existing.tokenIssuedAt.getTime() === tokenIssuedAt.getTime()
     ) {
       this.logger.log(
-        `[SfConnectionLifecycle] event=connected_noop user_id=${userId} sf_tenant_id=${provisioning.sf_tenant_id}` +
+        `[SfConnectionLifecycle] event=connected_noop user_id=${userId} sf_tenant_id=${sfTenantIdStr}` +
           ` source=${source} reason=identical_issued_at`,
       );
       return { ok: true, noop: true, connectionId: existing.id };
     }
 
-    const encryptedToken = EncryptionUtil.encrypt(provisioning.orchestration_token, encryptionKey);
-    const encryptedWebhookSecret = EncryptionUtil.encrypt(
-      provisioning.webhook_signing_secret,
-      encryptionKey,
-    );
-    const events = Array.isArray(provisioning.webhook_events) ? provisioning.webhook_events : [];
-    const tokenExpiresAt = provisioning.token_expires_at
-      ? new Date(provisioning.token_expires_at)
+    // Webhook secret resolution:
+    //   - oauth_exchange path: caller MUST pass it (LB generated it for this handshake)
+    //   - sf_push re-delivery: caller MAY pass it; otherwise preserve existing
+    let encryptedWebhookSecret: string;
+    if (input.webhookSecretPlaintext) {
+      encryptedWebhookSecret = EncryptionUtil.encrypt(input.webhookSecretPlaintext, encryptionKey);
+    } else if (existing?.inboundSubscriptionId) {
+      const sub = await this.prisma.crmWebhookSubscription.findUnique({
+        where: { id: existing.inboundSubscriptionId },
+      });
+      if (!sub?.secret) {
+        // First-time sf_push without LB context to provide the secret —
+        // this can't happen on the canonical flow; reject loudly.
+        this.logger.error(
+          `[SfConnectionLifecycle] event=connected_rejected user_id=${userId} ` +
+            `reason=no_webhook_secret_available source=${source}`,
+        );
+        return { ok: false, reason: 'no_webhook_secret_available' };
+      }
+      encryptedWebhookSecret = sub.secret;
+    } else {
+      // No existing subscription + no secret in input — first-ever sf_push
+      // before any OAuth, which is not how SF S4 operates. Reject.
+      this.logger.error(
+        `[SfConnectionLifecycle] event=connected_rejected user_id=${userId} ` +
+          `reason=cold_sf_push_without_secret source=${source}`,
+      );
+      return { ok: false, reason: 'cold_sf_push_without_secret' };
+    }
+
+    const encryptedToken = EncryptionUtil.encrypt(provisioning.credential.token, encryptionKey);
+    const tokenExpiresAt = provisioning.credential.expires_at
+      ? new Date(provisioning.credential.expires_at)
       : null;
     const now = new Date();
+    const events = Array.isArray(provisioning.event_types) ? provisioning.event_types : [];
 
-    // Transaction: upsert subscription + upsert connection atomically.
-    // We use the provisioning.webhook_subscription_id as the SF-side id;
-    // LB needs its own row, so we either find one matching that
-    // sourceInstance OR create fresh.
+    // Webhook url resolution (mirror the secret logic):
+    //   - oauth_exchange path: required from input
+    //   - sf_push: prefer the URL SF echoed in the payload
+    const webhookUrl =
+      input.webhookUrl ??
+      provisioning.webhook.url ??
+      `sf://${provisioning.tenant.source_instance}/${userId}`;
+
     await this.prisma.$transaction(async (tx) => {
-      // Find or create the CrmWebhookSubscription. SF gives us its own
-      // subscription id; we store that in metadata + use it as the
-      // X-SF-Subscription-Id contract identifier.
-      const syntheticUrl = `sf://${provisioning.source_instance ?? 'sf-default'}/${userId}`;
+      const subName = `Service Flow (${provisioning.tenant.sf_tenant_name ?? sfTenantIdStr})`;
+      const subMetadata = {
+        sf_subscription_id: provisioning.webhook.subscription_id ?? input.webhookSubscriptionId ?? null,
+        signature_key_id: provisioning.credential.kid,
+        signature_algorithm: provisioning.signature_metadata.algorithm,
+      };
       const sub = await tx.crmWebhookSubscription.upsert({
         where: {
-          userId_direction_webhookUrl: {
-            userId,
-            direction: 'inbound',
-            webhookUrl: syntheticUrl,
-          },
+          userId_direction_webhookUrl: { userId, direction: 'inbound', webhookUrl },
         },
         create: {
           userId,
-          name: `Service Flow (${provisioning.sf_tenant_name ?? provisioning.sf_tenant_id})`,
-          webhookUrl: syntheticUrl,
+          name: subName,
+          webhookUrl,
           secret: encryptedWebhookSecret,
-          events: events,
+          events,
           direction: 'inbound',
           isActive: true,
-          metadata: {
-            sf_subscription_id: provisioning.webhook_subscription_id,
-            signature_key_id: provisioning.webhook_signature_key_id ?? null,
-          },
+          metadata: subMetadata,
         },
         update: {
-          name: `Service Flow (${provisioning.sf_tenant_name ?? provisioning.sf_tenant_id})`,
+          name: subName,
           secret: encryptedWebhookSecret,
-          events: events,
+          events,
           isActive: true,
-          metadata: {
-            sf_subscription_id: provisioning.webhook_subscription_id,
-            signature_key_id: provisioning.webhook_signature_key_id ?? null,
-          },
+          metadata: subMetadata,
         },
       });
 
       const rotationSource = source === 'oauth_exchange' ? 'handshake' : 'sf_push';
 
+      const sharedFields = {
+        sfTenantId: sfTenantIdStr,
+        sfTenantName: provisioning.tenant.sf_tenant_name ?? null,
+        baseUrl: provisioning.tenant.sf_base_url,
+        sourceInstance: provisioning.tenant.source_instance ?? null,
+        apiRegion: provisioning.tenant.api_region ?? null,
+        sfWorkspaceId: sfWorkspaceIdStr,
+        signatureKeyId: provisioning.credential.kid,
+        signatureAlgorithm: provisioning.signature_metadata.algorithm,
+        maxClockSkewSeconds: provisioning.signature_metadata.max_clock_skew_seconds,
+        endpointsJson: JSON.stringify(provisioning.endpoints),
+        orchestrationToken: encryptedToken,
+        orchestrationTokenKid: provisioning.credential.kid,
+        orchestrationTokenScope: provisioning.credential.scope,
+        tokenPrefix: provisioning.credential.token_prefix,
+        tokenIssuedAt,
+        tokenExpiresAt,
+        tokenLastReceivedAt: now,
+        tokenLastRotationSource: rotationSource,
+        previousOrchestrationToken: null,
+        previousTokenExpiresAt: null,
+        inboundSubscriptionId: sub.id,
+        events,
+        isActive: true,
+        status: 'active' as const,
+      };
+
       if (existing) {
-        // Reconnect or re-deliver: keep original connectedAt for
-        // audit; bump everything else.
         await tx.sfConnection.update({
           where: { userId },
           data: {
-            sfTenantId: provisioning.sf_tenant_id,
-            sfTenantName: provisioning.sf_tenant_name ?? null,
-            baseUrl: provisioning.sf_base_url,
-            sourceInstance: provisioning.source_instance ?? null,
-            apiRegion: provisioning.api_region ?? null,
-            signatureKeyId: provisioning.webhook_signature_key_id ?? null,
-            orchestrationToken: encryptedToken,
-            orchestrationTokenKid: provisioning.orchestration_token_kid ?? null,
-            orchestrationTokenScope: provisioning.orchestration_token_scope ?? null,
-            tokenIssuedAt,
-            tokenExpiresAt,
-            tokenLastReceivedAt: now,
-            tokenLastRotationSource: rotationSource,
-            // Reconnect clears any prior grace state
-            previousOrchestrationToken: null,
-            previousTokenExpiresAt: null,
-            inboundSubscriptionId: sub.id,
-            events: events,
-            isActive: true,
-            status: 'active',
+            ...sharedFields,
             disconnectInitiator: null,
             disconnectedAt: null,
             lastErrorAt: null,
@@ -211,40 +250,22 @@ export class SfConnectionLifecycleService {
           },
         });
       } else {
-        // No prior row — create fresh. This is the path from a
-        // first-time inbound connection.connected event (not the
-        // OAuth flow, which always pre-creates the pending row).
         await tx.sfConnection.create({
           data: {
             id: connectionId,
             userId,
-            sfTenantId: provisioning.sf_tenant_id,
-            sfTenantName: provisioning.sf_tenant_name ?? null,
-            baseUrl: provisioning.sf_base_url,
-            sourceInstance: provisioning.source_instance ?? null,
-            apiRegion: provisioning.api_region ?? null,
-            signatureKeyId: provisioning.webhook_signature_key_id ?? null,
-            orchestrationToken: encryptedToken,
-            orchestrationTokenKid: provisioning.orchestration_token_kid ?? null,
-            orchestrationTokenScope: provisioning.orchestration_token_scope ?? null,
-            tokenIssuedAt,
-            tokenExpiresAt,
-            tokenLastReceivedAt: now,
-            tokenLastRotationSource: rotationSource,
-            inboundSubscriptionId: sub.id,
-            events: events,
-            isActive: true,
-            status: 'active',
+            ...sharedFields,
           },
         });
       }
     });
 
     this.logger.log(
-      `[SfConnectionLifecycle] event=connected user_id=${userId} sf_tenant_id=${provisioning.sf_tenant_id}` +
-        ` source_instance=${provisioning.source_instance ?? 'null'} api_region=${provisioning.api_region ?? 'null'}` +
-        ` token_kid=${provisioning.orchestration_token_kid ?? 'null'} token_len=${provisioning.orchestration_token.length}` +
-        ` events=${events.length} source=${source}`,
+      `[SfConnectionLifecycle] event=connected user_id=${userId} sf_tenant_id=${sfTenantIdStr}` +
+        ` sf_workspace_id=${sfWorkspaceIdStr} source_instance=${provisioning.tenant.source_instance}` +
+        ` token_kid=${provisioning.credential.kid} token_prefix=${provisioning.credential.token_prefix}` +
+        ` token_len=${provisioning.credential.token.length} events=${events.length} source=${source}` +
+        ` webhook_secret_len=${input.webhookSecretPlaintext?.length ?? 'preserved'}`,
     );
 
     return { ok: true, connectionId };
@@ -257,7 +278,7 @@ export class SfConnectionLifecycleService {
   async applyCredentialRotated(input: ApplyCredentialRotatedInput): Promise<ApplyResult> {
     const { userId, payload, eventId } = input;
     const encryptionKey = this.getEncryptionKey();
-    const newIssuedAt = new Date(payload.new_token_issued_at);
+    const newIssuedAt = new Date(payload.new_credential.issued_at);
     const conn = await this.prisma.sfConnection.findUnique({ where: { userId } });
     if (!conn) {
       this.logger.warn(
@@ -280,8 +301,8 @@ export class SfConnectionLifecycleService {
 
     const grace = payload.grace_period_seconds > 0 ? payload.grace_period_seconds : DEFAULT_GRACE_SECONDS;
     const previousExpiresAt = new Date(Date.now() + grace * 1000);
-    const newEncrypted = EncryptionUtil.encrypt(payload.new_orchestration_token, encryptionKey);
-    const newExpiresAt = payload.new_token_expires_at ? new Date(payload.new_token_expires_at) : null;
+    const newEncrypted = EncryptionUtil.encrypt(payload.new_credential.token, encryptionKey);
+    const newExpiresAt = payload.new_credential.expires_at ? new Date(payload.new_credential.expires_at) : null;
 
     await this.prisma.sfConnection.update({
       where: { userId },
@@ -289,11 +310,13 @@ export class SfConnectionLifecycleService {
         previousOrchestrationToken: conn.orchestrationToken,
         previousTokenExpiresAt: previousExpiresAt,
         orchestrationToken: newEncrypted,
-        orchestrationTokenKid: payload.new_orchestration_token_kid ?? null,
+        orchestrationTokenKid: payload.new_credential.kid,
+        tokenPrefix: payload.new_credential.token_prefix,
         tokenIssuedAt: newIssuedAt,
         tokenExpiresAt: newExpiresAt,
         tokenLastReceivedAt: new Date(),
         tokenLastRotationSource: 'sf_push',
+        signatureKeyId: payload.new_credential.kid,
         status: 'rotating',
         updatedAt: new Date(),
       },
@@ -301,8 +324,8 @@ export class SfConnectionLifecycleService {
 
     this.logger.log(
       `[SfConnectionLifecycle] event=rotated user_id=${userId} event_id=${eventId ?? 'null'}` +
-        ` new_token_kid=${payload.new_orchestration_token_kid ?? 'null'}` +
-        ` new_token_len=${payload.new_orchestration_token.length} grace_seconds=${grace}`,
+        ` new_token_kid=${payload.new_credential.kid} new_token_prefix=${payload.new_credential.token_prefix}` +
+        ` new_token_len=${payload.new_credential.token.length} grace_seconds=${grace}`,
     );
 
     return { ok: true };
@@ -321,11 +344,7 @@ export class SfConnectionLifecycleService {
       );
       return { ok: false, reason: 'no_connection' };
     }
-
-    // Idempotent: re-revoke is fine.
-    const isAlreadyTerminal =
-      conn.status === 'revoked' || conn.status === 'disconnected';
-
+    const isAlreadyTerminal = conn.status === 'revoked' || conn.status === 'disconnected';
     const finalStatus = initiator === 'sf_authority' ? 'revoked' : 'disconnected';
 
     await this.prisma.$transaction(async (tx) => {

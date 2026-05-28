@@ -1530,6 +1530,22 @@ model SfConnection {
   sourceInstance              String?  // SF deployment instance, e.g. "sf-staging-us"
   apiRegion                   String?  // SF API region label, e.g. "us-east-1"
   signatureKeyId              String?  // SF signing key id for inbound webhook HMAC
+  // Phase 2C PR-C2.1: contract-alignment additions
+  // - tokenPrefix: 13-char safe-to-log prefix of the orchestration token
+  //   (e.g. "sfo_v1.eyJ2Ij"). NEVER include past this prefix in any log.
+  // - sfWorkspaceId: distinct from sfTenantId in SF's model; stored for
+  //   correlation / future per-workspace observability.
+  // - endpointsJson: SF-supplied paths for the 5 orchestration endpoints
+  //   (availability, booking_request, booking_cancel, handoff,
+  //   disconnect) — stored verbatim, used by SfOrchestrationClient.
+  // - signatureAlgorithm / maxClockSkewSeconds: SF-declared signature
+  //   metadata locked at handshake. LB validates inbound webhook against
+  //   these (today: 'hmac-sha256-hex' / 300).
+  tokenPrefix                 String?
+  sfWorkspaceId               String?
+  endpointsJson               String?  @db.Text
+  signatureAlgorithm          String?
+  maxClockSkewSeconds         Int?
 
   // ─── Current SF-issued authority token (opaque to LB) ─────────────
   // Encrypted via EncryptionUtil (AES-256-GCM + ENCRYPTION_KEY). LB

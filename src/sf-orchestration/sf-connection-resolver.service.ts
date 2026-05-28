@@ -40,6 +40,14 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 
 export type ResolutionSource = 'connection' | 'env_canary' | 'none';
 
+export interface ResolvedSfEndpoints {
+  availability: string;
+  booking_request: string;
+  booking_cancel: string;
+  handoff: string;
+  disconnect: string;
+}
+
 export interface ResolvedSfCredentials {
   enabled: boolean;
   source: ResolutionSource;
@@ -51,6 +59,13 @@ export interface ResolvedSfCredentials {
   sfTenantId?: string;
   /** True when the resolver used the previous (pre-rotation) token as fallback. */
   usedPreviousToken?: boolean;
+  /**
+   * SF-supplied endpoint paths (PR-C2.1). When source='connection',
+   * decoded from sf_connections.endpointsJson; when source='env_canary',
+   * undefined (client falls back to hardcoded). Paths are relative to
+   * baseUrl; client concatenates.
+   */
+  endpoints?: ResolvedSfEndpoints;
   /**
    * When the resolver returned `enabled=false`, this carries the reason
    * for log dashboards. One of: 'no_connection_or_canary' | 'connection_inactive'
@@ -117,6 +132,7 @@ export class SfConnectionResolver {
     orchestrationToken: string;
     previousOrchestrationToken: string | null;
     previousTokenExpiresAt: Date | null;
+    endpointsJson?: string | null;
   }): Promise<ResolvedSfCredentials | null> {
     if (!conn.isActive) return null;
     if (!(conn.status === 'active' || conn.status === 'rotating')) return null;
@@ -162,6 +178,8 @@ export class SfConnectionResolver {
       return null;
     }
 
+    const endpoints = this.parseEndpoints(conn.endpointsJson);
+
     // Try current token first.
     const current = this.tryDecrypt(conn.orchestrationToken, encryptionKey);
     if (current) {
@@ -172,6 +190,7 @@ export class SfConnectionResolver {
         orchestrationToken: current,
         sfTenantId: conn.sfTenantId,
         usedPreviousToken: false,
+        endpoints,
       };
     }
 
@@ -194,6 +213,7 @@ export class SfConnectionResolver {
             orchestrationToken: previous,
             sfTenantId: conn.sfTenantId,
             usedPreviousToken: true,
+            endpoints,
           };
         }
       }
@@ -238,6 +258,30 @@ export class SfConnectionResolver {
       orchestrationToken: apiKey,
       usedPreviousToken: false,
     };
+  }
+
+  /**
+   * Decode endpointsJson from the SfConnection row. Returns undefined on
+   * any parse / shape issue — the client will fall back to hardcoded paths.
+   */
+  private parseEndpoints(json: string | null | undefined): ResolvedSfEndpoints | undefined {
+    if (!json) return undefined;
+    try {
+      const o = JSON.parse(json);
+      if (
+        o &&
+        typeof o.availability === 'string' &&
+        typeof o.booking_request === 'string' &&
+        typeof o.booking_cancel === 'string' &&
+        typeof o.handoff === 'string' &&
+        typeof o.disconnect === 'string'
+      ) {
+        return o as ResolvedSfEndpoints;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private tryDecrypt(encrypted: string, key: string): string | null {

@@ -86,6 +86,18 @@ export class SfOrchestrationClient {
 
   // ─── Public API — one method per endpoint ──────────────────────────────
 
+  // ─── Endpoint paths ───────────────────────────────────────────────
+  // Fallback / hardcoded paths used when the resolver doesn't return an
+  // endpoints map (env_canary path, or older connection rows). When the
+  // connection row carries SF-supplied endpoints, those win — see
+  // doRequest where we read `resolved.endpoints?.[name]`.
+  private static readonly DEFAULT_PATHS = {
+    availability:    '/api/integrations/leadbridge/orchestration/availability',
+    booking_request: '/api/integrations/leadbridge/orchestration/booking-request',
+    booking_cancel:  '/api/integrations/leadbridge/orchestration/booking-cancel',
+    handoff:         '/api/integrations/leadbridge/orchestration/handoff',
+  } as const;
+
   async getAvailability(
     req: AvailabilityRequest,
     idempotencyKey: string,
@@ -93,7 +105,7 @@ export class SfOrchestrationClient {
     return this.doRequest<AvailabilityResponse>({
       endpoint: 'availability',
       method: 'GET',
-      path: '/api/integrations/leadbridge/orchestration/availability',
+      path: SfOrchestrationClient.DEFAULT_PATHS.availability,
       query: {
         sigcoreBusinessId: req.sigcoreBusinessId,
         leadId: req.leadId ?? undefined,
@@ -115,7 +127,7 @@ export class SfOrchestrationClient {
     return this.doRequest<BookingRequestResponse>({
       endpoint: 'booking_request',
       method: 'POST',
-      path: '/api/integrations/leadbridge/orchestration/booking-request',
+      path: SfOrchestrationClient.DEFAULT_PATHS.booking_request,
       body: {
         sigcoreBusinessId: req.sigcoreBusinessId,
         leadId: req.leadId,
@@ -139,7 +151,7 @@ export class SfOrchestrationClient {
     return this.doRequest<BookingCancelResponse>({
       endpoint: 'booking_cancel',
       method: 'POST',
-      path: '/api/integrations/leadbridge/orchestration/booking-cancel',
+      path: SfOrchestrationClient.DEFAULT_PATHS.booking_cancel,
       body: {
         sigcoreBusinessId: req.sigcoreBusinessId,
         sfJobId: req.sfJobId,
@@ -158,7 +170,7 @@ export class SfOrchestrationClient {
     return this.doRequest<HandoffResponse>({
       endpoint: 'handoff',
       method: 'POST',
-      path: '/api/integrations/leadbridge/orchestration/handoff',
+      path: SfOrchestrationClient.DEFAULT_PATHS.handoff,
       body: {
         sigcoreBusinessId: req.sigcoreBusinessId,
         leadId: req.leadId,
@@ -198,6 +210,10 @@ export class SfOrchestrationClient {
     }
     const baseUrl = resolved.baseUrl;
     const apiKey = resolved.orchestrationToken;
+    // Prefer SF-supplied endpoint path when the resolver returned one
+    // (connection-source). Falls back to the hardcoded default otherwise.
+    const path = resolved.endpoints?.[opts.endpoint] ?? opts.path;
+    opts.path = path;
 
     const timeoutMs = this.parseIntEnv('SF_ORCHESTRATION_TIMEOUT_MS', DEFAULT_TIMEOUT_MS);
     const maxAttempts = this.parseIntEnv(

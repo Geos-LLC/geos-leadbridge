@@ -151,7 +151,20 @@ export class SfDisconnectService {
       return false;
     }
 
-    const url = conn.baseUrl.replace(/\/$/, '') + '/api/integrations/leadbridge/orchestration/disconnect';
+    // Phase 2C PR-C2.1 — prefer SF-supplied disconnect path from
+    // sf_connections.endpointsJson when available; fall back to the
+    // canonical /api/integrations/leadbridge/disconnect path SF lists in
+    // the S4 sample (NOT the old /orchestration/disconnect).
+    let disconnectPath = '/api/integrations/leadbridge/disconnect';
+    if ((conn as any).endpointsJson) {
+      try {
+        const eps = JSON.parse((conn as any).endpointsJson);
+        if (eps && typeof eps.disconnect === 'string') disconnectPath = eps.disconnect;
+      } catch {
+        // ignore — fall back to default
+      }
+    }
+    const url = conn.baseUrl.replace(/\/$/, '') + disconnectPath;
     const timeoutMs = this.parseInt('SF_OAUTH_REVOKE_TIMEOUT_MS', DEFAULT_REVOKE_TIMEOUT_MS);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const axios = require('axios');
