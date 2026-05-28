@@ -1,6 +1,13 @@
 /**
  * Service Flow integration module.
- * Hosts the inbound SF → LB status sync endpoint + supporting services.
+ *
+ * Hosts the inbound SF → LB job-status sync endpoint + subscription
+ * registration. Lead-status mirroring path; pre-dates orchestration.
+ *
+ * Phase 2C PR-C2.1 — the SfOrchestrationEventService has been removed.
+ * All orchestration events (service_*, connection.*, credential.*) now
+ * flow through SfConnectionModule's single /v1/integrations/sf/
+ * orchestration-webhook endpoint per the canonical SF S4 contract.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
@@ -10,18 +17,15 @@ import { FollowUpEngineModule } from '../../follow-up-engine/follow-up-engine.mo
 import { LeadsModule } from '../../leads/leads.module';
 import { ServiceFlowInboundController } from './service-flow-inbound.controller';
 import { SfInboundStatusService } from './sf-inbound-status.service';
-import { SfOrchestrationEventService } from './sf-orchestration-event.service';
-import { BookingOrchestratorModule } from '../../booking-orchestrator/booking-orchestrator.module';
 
 @Module({
   imports: [
     ConfigModule,
     forwardRef(() => FollowUpEngineModule),
     forwardRef(() => LeadsModule),
-    forwardRef(() => BookingOrchestratorModule),
   ],
   controllers: [ServiceFlowInboundController],
-  providers: [PrismaService, SfInboundStatusService, SfOrchestrationEventService],
-  exports: [SfInboundStatusService, SfOrchestrationEventService],
+  providers: [PrismaService, SfInboundStatusService],
+  exports: [SfInboundStatusService],
 })
 export class ServiceFlowModule {}

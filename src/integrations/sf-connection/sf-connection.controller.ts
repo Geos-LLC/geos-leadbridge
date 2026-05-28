@@ -1,20 +1,18 @@
 /**
- * SfConnectionController — Phase 2C PR-C2.
+ * SfConnectionController — Phase 2C PR-C2.1.
  *
  * Endpoints (all rooted at /v1/integrations/sf/):
  *
- *   POST  /connect/start             JWT — start the OAuth handshake
- *   GET   /callback                  Public — SF redirects here with code+state
- *   POST  /disconnect                JWT — LB-initiated disconnect
- *   POST  /connection-webhook        Public — HMAC-signed; SF pushes
- *                                    connection.connected / credential.rotated /
- *                                    connection.revoked
+ *   POST  /connect/start          JWT — start OAuth handshake
+ *   GET   /callback               Public — SF redirects here with code+state
+ *   POST  /disconnect             JWT — LB-initiated disconnect
+ *   POST  /orchestration-webhook  Public — HMAC-signed; SF pushes ALL 7
+ *                                  event types here (service_*,
+ *                                  connection.*, credential.*)
  *
  * The public endpoints (callback + webhook) authenticate via:
  *   - callback: signed state token (anti-CSRF, single-use)
- *   - webhook: HMAC signature + timestamp window + subscription lookup
- *
- * No new state in the controller — everything is delegated to services.
+ *   - webhook:  HMAC + timestamp window + tenant resolution
  */
 
 import {
@@ -80,8 +78,6 @@ export class SfConnectionController {
     @Res() res: Response,
   ): Promise<Response> {
     const result = await this.oauth.handleCallback(query);
-    // Browser redirect on success or failure — the SPA renders the
-    // outcome page based on the `code` query param we include.
     if (result.redirectTo) {
       res.redirect(result.httpStatus < 400 ? 302 : 303, result.redirectTo);
       return res;
@@ -112,18 +108,23 @@ export class SfConnectionController {
     return result;
   }
 
-  // ─── POST /connection-webhook (Public — HMAC) ────────────────────
+  // ─── POST /orchestration-webhook (Public — HMAC) ─────────────────
+  //
+  // Single endpoint for all 7 SF-pushed event types. Header set per
+  // S4 contract: X-SF-Signature / X-SF-Timestamp / X-SF-Event-Id /
+  // X-SF-Event-Type / X-SF-Tenant-Id / X-SF-Kid.
 
   @Public()
-  @Post('connection-webhook')
+  @Post('orchestration-webhook')
   async receiveWebhook(
     @Req() req: Request,
     @Res() res: Response,
     @Headers('x-sf-signature') signature: string,
     @Headers('x-sf-timestamp') timestamp: string,
-    @Headers('x-sf-subscription-id') subscriptionId: string,
     @Headers('x-sf-event-id') eventId: string,
-    @Headers('x-sf-signature-kid') signatureKid: string,
+    @Headers('x-sf-event-type') eventType: string,
+    @Headers('x-sf-tenant-id') tenantId: string,
+    @Headers('x-sf-kid') kid: string,
   ): Promise<Response> {
     const rawBuf = (req as any).rawBody as Buffer | undefined;
     const rawBody: string =
@@ -135,14 +136,15 @@ export class SfConnectionController {
       outcome = await this.webhook.ingest(rawBody, {
         signature,
         timestamp,
-        subscriptionId,
         eventId,
-        signatureKid,
+        eventType,
+        tenantId,
+        kid,
       });
     } catch (err: any) {
       const msg = (err?.message ?? String(err)).slice(0, 300);
       this.logger.error(
-        `[SfConnectionWebhook] result=exception error=${msg} sub_id=${subscriptionId ?? 'null'}`,
+        `[SfConnectionWebhook] result=exception error=${msg} sf_tenant_id=${tenantId ?? 'null'}`,
       );
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         status: 'error',
@@ -152,6 +154,7 @@ export class SfConnectionController {
     return res.status(outcome.httpStatus).json({
       status: outcome.httpStatus < 300 ? 'accepted' : 'rejected',
       event_id: outcome.eventId,
+      event_type: outcome.eventType ?? null,
       result: outcome.result,
       sf_tenant_id: outcome.sfTenantId ?? null,
       error: outcome.error,

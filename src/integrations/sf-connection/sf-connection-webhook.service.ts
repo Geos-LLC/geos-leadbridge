@@ -1,65 +1,61 @@
 /**
- * SfConnectionWebhookService — Phase 2C PR-C2.
+ * SfConnectionWebhookService — Phase 2C PR-C2.1.
  *
- * Inbound endpoint for the three connection-lifecycle events SF pushes
- * to LB: connection.connected, credential.rotated, connection.revoked.
+ * Single LB inbound endpoint for ALL SF-pushed orchestration events:
+ *   - service_scheduled / service_rescheduled / service_cancelled / service_completed
+ *   - connection.connected
+ *   - credential.rotated
+ *   - connection.revoked
  *
- * Contract (must match the SF side):
- *   POST /v1/integrations/sf/connection-webhook
- *   Headers:
- *     X-SF-Event-Id        — dedup key; LB rejects re-deliveries
- *     X-SF-Signature       — sha256 HMAC of `${timestamp}.${rawBody}`
- *                            using the LB-stored webhook signing
- *                            secret (received at exchange time;
- *                            decrypted just-in-time, never logged)
- *     X-SF-Timestamp       — unix seconds, ±300s skew window
- *     X-SF-Subscription-Id — matches CrmWebhookSubscription.metadata
- *                            .sf_subscription_id
- *     X-SF-Signature-Kid   — (optional) signing key id; if present and
- *                            sf_connections.signatureKeyId is set, the
- *                            two must match
+ * Canonical SF S4 header set (locked):
+ *   X-SF-Signature   — sha256 HMAC hex over `${X-SF-Timestamp}.${rawBody}`
+ *                       using the LB-generated webhook signing secret
+ *                       (decrypted just-in-time from the subscription row)
+ *   X-SF-Timestamp   — unix seconds, ±300s skew window
+ *   X-SF-Event-Id    — dedup key (authoritative — header wins over body)
+ *   X-SF-Event-Type  — convenience copy of body event_type
+ *   X-SF-Tenant-Id   — sf_tenant_id (integer) — drives tenant resolution
+ *   X-SF-Kid         — SF signing key id — cross-checked vs stored
  *
- * Body envelope (validated):
- *   {
- *     event_id, event_type, occurred_at, sf_tenant_id,
- *     payload: { ...event-specific... }
- *   }
+ * Note: SF does NOT send X-SF-Subscription-Id in the canonical contract.
+ * Tenant resolution flows from X-SF-Tenant-Id → SfConnection (by
+ * sfTenantId) → linked CrmWebhookSubscription → decrypted secret.
  *
- * Idempotency:
- *   - X-SF-Event-Id is stored in SfInboundEvent (eventId unique).
- *   - Re-delivery returns 409 with the prior result, without re-applying.
- *   - When header and body event_id disagree, we treat the HEADER as
- *     authoritative (matches SF's docs); body mismatch is logged but
- *     does not fail the request.
+ * Idempotency: X-SF-Event-Id stored in SfInboundEvent (unique). Re-delivery
+ * returns 409 duplicate without re-applying.
  *
- * Tenant identity:
- *   - Look up CrmWebhookSubscription by X-SF-Subscription-Id (resolves
- *     to subscription.userId)
- *   - Look up SfConnection by that userId (must exist)
- *   - Cross-check the body's sf_tenant_id matches SfConnection.sfTenantId;
- *     mismatch → 403 (cross-tenant signal)
- *   - HMAC verification uses the LB-stored signing secret for that
- *     subscription; an attacker who got hold of one tenant's secret
- *     cannot spoof another tenant's events because the
- *     X-SF-Subscription-Id binds them.
+ * Cross-tenant safety:
+ *   - SfConnection lookup is keyed on the wire's X-SF-Tenant-Id; an
+ *     attacker who got hold of one tenant's secret can't sign events
+ *     for a different tenant (the HMAC check uses THAT tenant's secret,
+ *     so signature would fail).
+ *   - X-SF-Kid is cross-checked against stored signatureKeyId when set.
  *
- * No plaintext token logging — even in error paths.
+ * Event dispatch:
+ *   - service_* events  → BookingOrchestratorService.handleServiceOutcomeEvent
+ *   - connection.connected  → SfConnectionLifecycleService.applyConnectionConnected
+ *   - credential.rotated    → SfConnectionLifecycleService.applyCredentialRotated
+ *   - connection.revoked    → SfConnectionLifecycleService.applyConnectionRevoked
+ *
+ * No plaintext secret in logs anywhere — token_kid + token_prefix + length only.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import { SfConnectionLifecycleService } from './sf-connection-lifecycle.service';
+import { BookingOrchestratorService } from '../../booking-orchestrator/booking-orchestrator.service';
 import {
-  SF_CONNECTION_EVENT_TYPES,
-  type ConnectionWebhookOutcome,
+  SF_WEBHOOK_EVENT_TYPES,
+  type OrchestrationWebhookOutcome,
   type SfConnectionConnectedPayload,
-  type SfConnectionEventType,
   type SfConnectionRevokedPayload,
-  type SfConnectionWebhookEnvelope,
   type SfCredentialRotatedPayload,
+  type SfServiceEventPayload,
+  type SfWebhookEnvelope,
+  type SfWebhookEventType,
 } from './sf-connection.contracts';
 
 const SIGNATURE_SKEW_SECONDS = 300;
@@ -72,71 +68,99 @@ export class SfConnectionWebhookService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly lifecycle: SfConnectionLifecycleService,
+    @Inject(forwardRef(() => BookingOrchestratorService))
+    private readonly bookingOrchestrator: BookingOrchestratorService,
   ) {}
 
   /**
    * Master entry — never throws. Returns a typed outcome the controller
-   * passes back as the HTTP response.
+   * forwards as the HTTP response.
    */
   async ingest(
     rawBody: string,
     headers: {
       signature?: string | string[];
       timestamp?: string | string[];
-      subscriptionId?: string | string[];
       eventId?: string | string[];
-      signatureKid?: string | string[];
+      eventType?: string | string[];
+      tenantId?: string | string[];
+      kid?: string | string[];
     },
-  ): Promise<ConnectionWebhookOutcome> {
-    const sigKidHeader = this.pickHeader(headers.signatureKid);
-    const subId = this.pickHeader(headers.subscriptionId);
+  ): Promise<OrchestrationWebhookOutcome> {
     const sig = this.pickHeader(headers.signature);
     const ts = this.pickHeader(headers.timestamp);
     const eventIdHeader = this.pickHeader(headers.eventId);
+    const eventTypeHeader = this.pickHeader(headers.eventType);
+    const tenantIdHeader = this.pickHeader(headers.tenantId);
+    const kidHeader = this.pickHeader(headers.kid);
 
-    // ── 1. Headers must all be present ───────────────────────────
-    if (!subId || !sig || !ts || !eventIdHeader) {
+    // ── 1. Required headers ─────────────────────────────────────────
+    if (!sig || !ts || !eventIdHeader || !tenantIdHeader) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=null result=unauthorized error=missing_headers` +
-          ` sub_present=${!!subId} sig_present=${!!sig} ts_present=${!!ts} eventid_present=${!!eventIdHeader}`,
+        `[SfConnectionWebhook] event_id=null result=unauthorized error=missing_headers ` +
+          `sig=${!!sig} ts=${!!ts} eventid=${!!eventIdHeader} tenantid=${!!tenantIdHeader}`,
       );
-      return { httpStatus: 401, result: 'unauthorized', eventId: 'n/a', error: 'missing headers' };
+      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader ?? 'n/a', error: 'missing headers' };
     }
 
-    // ── 2. Timestamp skew (±300s) ────────────────────────────────
+    // ── 2. Timestamp skew (±300s) ────────────────────────────────────
     const tsNum = parseInt(ts, 10);
     if (!Number.isFinite(tsNum)) {
       return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'invalid timestamp' };
     }
-    const nowSec = Math.floor(Date.now() / 1000);
-    const drift = nowSec - tsNum;
+    const drift = Math.floor(Date.now() / 1000) - tsNum;
     if (Math.abs(drift) > SIGNATURE_SKEW_SECONDS) {
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=replay_rejected error=timestamp_drift drift=${drift}`,
       );
+      return { httpStatus: 401, result: 'replay_rejected', eventId: eventIdHeader, error: 'timestamp drift' };
+    }
+
+    // ── 3. Tenant resolution via X-SF-Tenant-Id ─────────────────────
+    // SF sends the integer tenant id; we store as string. Look up
+    // SfConnection by sfTenantId — that's the authoritative bridge.
+    const sfTenantIdStr = tenantIdHeader.trim();
+    const sfTenantIdNum = parseInt(sfTenantIdStr, 10);
+    const conn = await this.prisma.sfConnection.findFirst({
+      where: { sfTenantId: sfTenantIdStr },
+    });
+    if (!conn) {
+      this.logger.warn(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=tenant_not_found ` +
+          `sf_tenant_id=${sfTenantIdStr}`,
+      );
       return {
-        httpStatus: 401,
-        result: 'replay_rejected',
+        httpStatus: 404,
+        result: 'tenant_not_found',
         eventId: eventIdHeader,
-        error: 'timestamp drift',
+        sfTenantId: Number.isFinite(sfTenantIdNum) ? sfTenantIdNum : null,
+        error: 'tenant not found',
       };
     }
-
-    // ── 3. Subscription lookup ───────────────────────────────────
-    const subscription = await this.prisma.crmWebhookSubscription.findUnique({
-      where: { id: subId },
-    });
-    if (!subscription || !subscription.isActive || subscription.direction !== 'inbound') {
-      this.logger.warn(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} result=noop error=subscription_not_found sub_id=${subId}`,
+    if (!conn.inboundSubscriptionId) {
+      this.logger.error(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=noop ` +
+          `error=connection_missing_subscription user_id=${conn.userId}`,
       );
-      return { httpStatus: 404, result: 'noop', eventId: eventIdHeader, error: 'subscription not found' };
+      return { httpStatus: 500, result: 'noop', eventId: eventIdHeader, error: 'subscription unlinked' };
+    }
+    const subscription = await this.prisma.crmWebhookSubscription.findUnique({
+      where: { id: conn.inboundSubscriptionId },
+    });
+    if (!subscription || !subscription.isActive) {
+      this.logger.warn(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=noop ` +
+          `error=subscription_inactive user_id=${conn.userId}`,
+      );
+      return { httpStatus: 404, result: 'noop', eventId: eventIdHeader, error: 'subscription inactive' };
     }
 
-    // ── 4. HMAC verification ─────────────────────────────────────
+    // ── 4. HMAC verification ────────────────────────────────────────
     const encryptionKey = this.config.get<string>('encryption.key');
     if (!encryptionKey) {
-      this.logger.error(`[SfConnectionWebhook] event_id=${eventIdHeader} result=exception error=encryption_key_unset`);
+      this.logger.error(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=exception error=encryption_key_unset`,
+      );
       return { httpStatus: 500, result: 'exception', eventId: eventIdHeader, error: 'config error' };
     }
     let secret: string;
@@ -144,7 +168,7 @@ export class SfConnectionWebhookService {
       secret = EncryptionUtil.decrypt(subscription.secret, encryptionKey);
     } catch (e: any) {
       this.logger.error(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} result=exception error=secret_decrypt_failed err=${this.safe(e?.message)}`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=exception error=secret_decrypt_failed`,
       );
       return { httpStatus: 500, result: 'exception', eventId: eventIdHeader, error: 'secret decrypt' };
     }
@@ -152,13 +176,23 @@ export class SfConnectionWebhookService {
     const received = sig.startsWith('sha256=') ? sig.slice('sha256='.length) : sig;
     if (!this.timingSafeHexEqual(expected, received)) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=signature_mismatch sub_id=${subId}`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=signature_mismatch ` +
+          `user_id=${conn.userId} sf_tenant_id=${sfTenantIdStr}`,
       );
       return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'signature mismatch' };
     }
 
-    // ── 5. Parse + validate body ─────────────────────────────────
-    let envelope: SfConnectionWebhookEnvelope<unknown>;
+    // ── 5. X-SF-Kid cross-check ─────────────────────────────────────
+    if (conn.signatureKeyId && kidHeader && conn.signatureKeyId !== kidHeader) {
+      this.logger.error(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=kid_mismatch ` +
+          `stored=${conn.signatureKeyId} received=${kidHeader}`,
+      );
+      return { httpStatus: 401, result: 'unauthorized', eventId: eventIdHeader, error: 'kid mismatch' };
+    }
+
+    // ── 6. Parse + validate envelope ────────────────────────────────
+    let envelope: SfWebhookEnvelope<unknown>;
     try {
       envelope = JSON.parse(rawBody);
     } catch {
@@ -169,96 +203,143 @@ export class SfConnectionWebhookService {
     }
     if (
       typeof envelope.event_type !== 'string' ||
-      !(SF_CONNECTION_EVENT_TYPES as readonly string[]).includes(envelope.event_type)
+      !(SF_WEBHOOK_EVENT_TYPES as readonly string[]).includes(envelope.event_type)
     ) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} result=validation_failed error=unknown_event_type type=${this.safe(envelope.event_type)}`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=validation_failed error=unknown_event_type ` +
+          `type=${this.safe(envelope.event_type)}`,
       );
       return { httpStatus: 400, result: 'validation_failed', eventId: eventIdHeader, error: 'unknown event_type' };
     }
-    if (typeof envelope.sf_tenant_id !== 'string' || !envelope.sf_tenant_id) {
-      return { httpStatus: 400, result: 'validation_failed', eventId: eventIdHeader, error: 'missing sf_tenant_id' };
+    if (typeof envelope.sf_tenant_id !== 'number') {
+      return { httpStatus: 400, result: 'validation_failed', eventId: eventIdHeader, error: 'missing/invalid sf_tenant_id' };
     }
     if (typeof envelope.occurred_at !== 'string' || isNaN(new Date(envelope.occurred_at).getTime())) {
       return { httpStatus: 400, result: 'validation_failed', eventId: eventIdHeader, error: 'invalid occurred_at' };
     }
 
-    // Header-vs-body event_id mismatch is logged but doesn't fail —
-    // header is authoritative for dedup.
+    // Header-vs-body event_id mismatch: log but don't fail (header wins for dedup).
     if (envelope.event_id !== eventIdHeader) {
       this.logger.warn(
-        `[SfConnectionWebhook] event_id=${eventIdHeader} body_event_id=${this.safe(envelope.event_id)} result=note warn=body_id_mismatch`,
+        `[SfConnectionWebhook] event_id=${eventIdHeader} body_event_id=${this.safe(envelope.event_id)} ` +
+          `warn=body_id_mismatch result=note`,
       );
     }
+    // Header-vs-body event_type mismatch: same — log + use header for dispatch.
+    if (eventTypeHeader && envelope.event_type !== eventTypeHeader) {
+      this.logger.warn(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} body_event_type=${envelope.event_type} ` +
+          `header_event_type=${eventTypeHeader} warn=event_type_mismatch result=note`,
+      );
+    }
+    // Header-vs-body tenant_id mismatch: SECURITY-relevant. Reject.
+    if (String(envelope.sf_tenant_id) !== sfTenantIdStr) {
+      this.logger.error(
+        `[SfConnectionWebhook] event_id=${eventIdHeader} result=unauthorized error=body_tenant_mismatch ` +
+          `header=${sfTenantIdStr} body=${envelope.sf_tenant_id}`,
+      );
+      return { httpStatus: 403, result: 'unauthorized', eventId: eventIdHeader, error: 'tenant mismatch' };
+    }
+
     const eventId = eventIdHeader;
 
-    // ── 6. Signature key id cross-check ──────────────────────────
-    // If we already have an SfConnection for this subscription's user
-    // AND the connection records a signatureKeyId AND the header brings
-    // one, they must match. Mismatch → cross-tenant or key-rotation
-    // race; reject.
-    const conn = await this.prisma.sfConnection.findUnique({
-      where: { userId: subscription.userId },
-    });
-    if (conn && conn.signatureKeyId && sigKidHeader && conn.signatureKeyId !== sigKidHeader) {
-      this.logger.error(
-        `[SfConnectionWebhook] event_id=${eventId} result=unauthorized error=signature_kid_mismatch` +
-          ` stored=${conn.signatureKeyId} received=${sigKidHeader}`,
-      );
-      return { httpStatus: 401, result: 'unauthorized', eventId, error: 'signature kid mismatch' };
-    }
-
-    // ── 7. Cross-tenant safety: body's sf_tenant_id must match the
-    //       connection's recorded sf_tenant_id (when we have one)
-    // For connection.connected on a first-time provisioning, conn may
-    // be missing or have sf_tenant_id='pending'. Allow those cases.
-    if (
-      conn &&
-      conn.sfTenantId !== 'pending' &&
-      conn.sfTenantId !== envelope.sf_tenant_id
-    ) {
-      this.logger.error(
-        `[SfConnectionWebhook] event_id=${eventId} result=unauthorized error=tenant_mismatch` +
-          ` stored=${conn.sfTenantId} body=${envelope.sf_tenant_id}`,
-      );
-      return { httpStatus: 403, result: 'unauthorized', eventId, error: 'tenant mismatch' };
-    }
-
-    // ── 8. Idempotency check ─────────────────────────────────────
+    // ── 7. Idempotency ───────────────────────────────────────────────
     const existing = await this.prisma.sfInboundEvent.findUnique({ where: { eventId } });
     if (existing) {
       return {
         httpStatus: 409,
         result: 'duplicate',
         eventId,
+        eventType: envelope.event_type,
         sfTenantId: envelope.sf_tenant_id,
       };
     }
 
-    // ── 9. Dispatch to lifecycle handler ─────────────────────────
+    // ── 8. Dispatch by event_type ───────────────────────────────────
     const userId = subscription.userId;
     const occurredAt = new Date(envelope.occurred_at);
     let resultTag = 'applied';
     let errorMsg: string | null = null;
+
     try {
-      switch (envelope.event_type as SfConnectionEventType) {
+      switch (envelope.event_type as SfWebhookEventType) {
+        // ─── service lifecycle events (PR-B2 territory; routed here) ─
+        case 'service_scheduled':
+        case 'service_rescheduled':
+        case 'service_cancelled':
+        case 'service_completed': {
+          const payload = (envelope.payload as SfServiceEventPayload) ?? ({} as SfServiceEventPayload);
+          if (typeof payload.sf_job_id !== 'string') {
+            throw new Error('missing sf_job_id');
+          }
+          // Resolve lead from sf_job_id (PR-B2 pattern)
+          let lead = await this.prisma.lead.findFirst({
+            where: { sfJobId: payload.sf_job_id, userId },
+            select: { id: true, threadId: true, userId: true },
+          });
+          if (!lead && payload.external_request_id && payload.channel) {
+            lead = await this.prisma.lead.findFirst({
+              where: {
+                userId,
+                platform: payload.channel,
+                externalRequestId: payload.external_request_id,
+              },
+              select: { id: true, threadId: true, userId: true },
+            });
+          }
+          if (!lead) {
+            // Deferred — no lead but record the event. Don't fail the request.
+            this.logger.warn(
+              `[SfConnectionWebhook] event_id=${eventId} event_type=${envelope.event_type} ` +
+                `result=deferred error=lead_not_found sf_job_id=${payload.sf_job_id} user_id=${userId}`,
+            );
+            resultTag = 'deferred_lead_not_found';
+            break;
+          }
+          await this.bookingOrchestrator.handleServiceOutcomeEvent({
+            eventId,
+            eventType: envelope.event_type as
+              | 'service_scheduled' | 'service_rescheduled' | 'service_cancelled' | 'service_completed',
+            sfJobId: payload.sf_job_id,
+            userId,
+            leadId: lead.id,
+            conversationId: lead.threadId,
+            scheduledFor: payload.scheduled_for ?? null,
+            rescheduledSlot: payload.rescheduled_slot
+              ? {
+                  slotId: payload.rescheduled_slot.slotId,
+                  slotToken: payload.rescheduled_slot.slotToken ?? null,
+                  start: payload.rescheduled_slot.start,
+                  end: payload.rescheduled_slot.end,
+                  cleanerId: payload.rescheduled_slot.cleanerId ?? null,
+                  providerCost: null,
+                }
+              : null,
+            reason: payload.reason ?? null,
+          });
+          break;
+        }
+
+        // ─── connection lifecycle ────────────────────────────────────
         case 'connection.connected': {
           const payload = envelope.payload as SfConnectionConnectedPayload;
-          if (!payload?.provisioning || typeof payload.provisioning !== 'object') {
-            throw new Error('missing provisioning payload');
-          }
+          if (!payload?.provisioning) throw new Error('missing provisioning payload');
+          // Webhook re-delivery: we do NOT have the LB-generated secret
+          // here; lifecycle service preserves the stored one from the
+          // existing inbound subscription (the canonical sf_push path).
           await this.lifecycle.applyConnectionConnected({
             userId,
-            connectionId: conn?.id ?? crypto.randomUUID(),
+            connectionId: conn.id,
             provisioning: payload.provisioning,
+            webhookSecretPlaintext: null,
             source: 'sf_push',
           });
           break;
         }
         case 'credential.rotated': {
           const payload = envelope.payload as SfCredentialRotatedPayload;
-          if (typeof payload?.new_orchestration_token !== 'string') {
-            throw new Error('missing new_orchestration_token');
+          if (!payload?.new_credential || typeof payload.new_credential.token !== 'string') {
+            throw new Error('missing new_credential.token');
           }
           const r = await this.lifecycle.applyCredentialRotated({
             userId,
@@ -284,7 +365,7 @@ export class SfConnectionWebhookService {
       resultTag = 'exception';
     }
 
-    // ── 10. Record audit row (always — both success + failure) ───
+    // ── 9. Audit row (always — success + failure) ───────────────────
     await this.recordEvent({
       eventId,
       eventType: envelope.event_type,
@@ -303,21 +384,22 @@ export class SfConnectionWebhookService {
 
     if (errorMsg) {
       this.logger.error(
-        `[SfConnectionWebhook] event_id=${eventId} user_id=${userId} sf_tenant_id=${envelope.sf_tenant_id}` +
-          ` event_type=${envelope.event_type} result=exception error=${errorMsg}`,
+        `[SfConnectionWebhook] event_id=${eventId} user_id=${userId} sf_tenant_id=${sfTenantIdStr} ` +
+          `event_type=${envelope.event_type} result=exception error=${errorMsg}`,
       );
-      return { httpStatus: 500, result: 'exception', eventId, sfTenantId: envelope.sf_tenant_id, error: errorMsg };
+      return {
+        httpStatus: 500, result: 'exception', eventId, eventType: envelope.event_type,
+        sfTenantId: envelope.sf_tenant_id, error: errorMsg,
+      };
     }
 
     this.logger.log(
-      `[SfConnectionWebhook] event_id=${eventId} user_id=${userId} sf_tenant_id=${envelope.sf_tenant_id}` +
-        ` event_type=${envelope.event_type} result=${resultTag}`,
+      `[SfConnectionWebhook] event_id=${eventId} user_id=${userId} sf_tenant_id=${sfTenantIdStr} ` +
+        `event_type=${envelope.event_type} result=${resultTag}`,
     );
 
     return {
-      httpStatus: 200,
-      result: 'accepted',
-      eventId,
+      httpStatus: 200, result: 'accepted', eventId, eventType: envelope.event_type,
       sfTenantId: envelope.sf_tenant_id,
     };
   }
@@ -326,11 +408,10 @@ export class SfConnectionWebhookService {
 
   /**
    * Strip secrets from the payload before persisting to the audit row.
-   * orchestration_token / webhook_signing_secret / new_orchestration_token
-   * are sensitive — replace with metadata (length + kid only) so the
-   * audit row is queryable without ever surfacing the bearer text.
+   * orchestration_token / webhook_signing_secret / new_credential.token
+   * are sensitive — replace with *_len + *_prefix only.
    */
-  private scrubPayloadForAudit(envelope: SfConnectionWebhookEnvelope<unknown>): any {
+  private scrubPayloadForAudit(envelope: SfWebhookEnvelope<unknown>): any {
     try {
       const clone: any = JSON.parse(JSON.stringify(envelope));
       const scrub = (obj: any, k: string) => {
@@ -340,11 +421,12 @@ export class SfConnectionWebhookService {
         }
       };
       const p = clone.payload ?? {};
-      if (p.provisioning) {
-        scrub(p.provisioning, 'orchestration_token');
-        scrub(p.provisioning, 'webhook_signing_secret');
+      if (p.provisioning?.credential) {
+        scrub(p.provisioning.credential, 'token');
       }
-      scrub(p, 'new_orchestration_token');
+      if (p.new_credential) {
+        scrub(p.new_credential, 'token');
+      }
       return clone;
     } catch {
       return { event_type: envelope.event_type, event_id: envelope.event_id, scrub_failed: true };
@@ -357,6 +439,7 @@ export class SfConnectionWebhookService {
     occurredAt: Date;
     sfSubscriptionId?: string | null;
     userId?: string;
+    leadId?: string;
     status: 'applied' | 'noop' | 'deferred' | 'unauthorized';
     result: string;
     processingError?: string | null;
@@ -369,6 +452,7 @@ export class SfConnectionWebhookService {
         occurredAt: args.occurredAt,
         sfSubscriptionId: args.sfSubscriptionId ?? null,
         userId: args.userId,
+        leadId: args.leadId,
         status: args.status,
         result: args.result,
         processingError: args.processingError ?? null,
