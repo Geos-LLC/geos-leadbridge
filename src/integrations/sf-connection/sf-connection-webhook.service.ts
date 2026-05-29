@@ -433,17 +433,64 @@ export class SfConnectionWebhookService {
           break;
         }
         case 'credential.rotated': {
-          const payload = envBody as SfCredentialRotatedPayload;
-          if (!payload?.new_credential || typeof payload.new_credential.token !== 'string') {
-            throw new Error('missing new_credential.token');
+          // Two valid payload shapes for credential.rotated:
+          //
+          //  (a) Re-delivery (legacy / full): payload.new_credential.token
+          //      is a string → call applyCredentialRotated (re-encrypts +
+          //      stores + opens grace window). This is the original LB
+          //      contract; preserved for backward compat.
+          //
+          //  (b) Notification (R1, SF's actual wire format): no plaintext
+          //      token; just cred_id, kid?, token_prefix, expires_at,
+          //      previous_grace_expires_at. SF does NOT re-deliver secrets
+          //      over the webhook channel. LB records the pending rotation
+          //      + resolves the refresh out-of-band (re-handshake today;
+          //      service-to-service refresh once SF exposes one).
+          const payload = envBody as SfCredentialRotatedPayload & {
+            new_credential?: { cred_id?: number | string; kid?: string; token_prefix?: string; expires_at?: string; token?: string };
+            previous_grace_expires_at?: string;
+            previous_cred_id?: number | string;
+            reason?: string;
+          };
+
+          if (!payload?.new_credential) {
+            throw new Error('missing new_credential');
           }
-          const r = await this.lifecycle.applyCredentialRotated({
-            userId,
-            payload,
-            eventId,
-          });
-          if (r.noop) resultTag = 'applied_noop';
-          break;
+
+          const hasToken = typeof payload.new_credential.token === 'string' && payload.new_credential.token.length > 0;
+          const hasNotificationFields =
+            payload.new_credential.cred_id != null && typeof payload.previous_grace_expires_at === 'string';
+
+          if (hasToken) {
+            const r = await this.lifecycle.applyCredentialRotated({
+              userId,
+              payload: payload as SfCredentialRotatedPayload,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop';
+            break;
+          }
+
+          if (hasNotificationFields) {
+            const r = await this.lifecycle.applyCredentialRotationNotification({
+              userId,
+              newCredId: payload.new_credential.cred_id!,
+              newKid: payload.new_credential.kid ?? null,
+              newTokenPrefix: payload.new_credential.token_prefix ?? null,
+              newExpiresAt: payload.new_credential.expires_at ?? null,
+              previousGraceExpiresAt: payload.previous_grace_expires_at!,
+              previousCredId: payload.previous_cred_id ?? null,
+              reason: payload.reason ?? null,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop_rotation_notification';
+            else if (r.ok) resultTag = 'applied_rotation_notification';
+            else throw new Error(`rotation_notification_rejected:${r.reason ?? 'unknown'}`);
+            break;
+          }
+
+          // Neither shape — useless payload.
+          throw new Error('credential.rotated missing token AND notification fields');
         }
         case 'connection.revoked': {
           const payload = (envBody as SfConnectionRevokedPayload) ?? {};

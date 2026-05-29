@@ -80,6 +80,34 @@ export interface ApplyCredentialRotatedInput {
   eventId?: string | null;
 }
 
+/**
+ * R1 — input for the notification-shape rotation path. SF sends this
+ * when they've rotated the credential on their side but are NOT
+ * re-delivering the plaintext token over the webhook channel (correct
+ * security posture: secrets only flow via OAuth exchange). LB records
+ * what SF said happened + the grace window; an out-of-band refresh
+ * mechanism (re-handshake) materializes the new token before the grace
+ * elapses.
+ */
+export interface ApplyCredentialRotationNotificationInput {
+  userId: string;
+  /** SF's new cred_id (their internal credential id) — required. */
+  newCredId: string | number;
+  /** SF's new kid — optional (rotation may keep the same signing key). */
+  newKid?: string | null;
+  /** Token prefix from SF for log/UI correlation — optional. */
+  newTokenPrefix?: string | null;
+  /** New token expiry (SF-declared) — optional, informational. */
+  newExpiresAt?: string | null;
+  /** SF-declared grace window end (when the old token stops working). Required. */
+  previousGraceExpiresAt: string;
+  /** SF's prior cred_id for forensic correlation — optional. */
+  previousCredId?: string | number | null;
+  /** Why SF rotated — optional, audit only. */
+  reason?: string | null;
+  eventId?: string | null;
+}
+
 export interface ApplyConnectionRevokedInput {
   userId: string;
   payload: SfConnectionRevokedPayload;
@@ -231,6 +259,13 @@ export class SfConnectionLifecycleService {
         tokenLastRotationSource: rotationSource,
         previousOrchestrationToken: null,
         previousTokenExpiresAt: null,
+        // R1: a successful handshake materializes the new token, so any
+        // pending rotation notification we'd been holding is now satisfied.
+        rotationPending: false,
+        pendingRotationKid: null,
+        pendingRotationCredId: null,
+        pendingRotationGraceExpiresAt: null,
+        pendingRotationObservedAt: null,
         inboundSubscriptionId: sub.id,
         events,
         isActive: true,
@@ -326,6 +361,90 @@ export class SfConnectionLifecycleService {
       `[SfConnectionLifecycle] event=rotated user_id=${userId} event_id=${eventId ?? 'null'}` +
         ` new_token_kid=${payload.new_credential.kid} new_token_prefix=${payload.new_credential.token_prefix}` +
         ` new_token_len=${payload.new_credential.token.length} grace_seconds=${grace}`,
+    );
+
+    return { ok: true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // applyCredentialRotationNotification — R1
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Notification-shape rotation: SF tells LB "I rotated credentials on my
+  // side, the old token is valid until <grace>". No plaintext token is
+  // delivered over the webhook. LB:
+  //   1. Persists rotationPending=true + the metadata SF sent
+  //   2. Keeps using the current stored token until it's refreshed
+  //      out-of-band (re-handshake or, future, a service-to-service
+  //      refresh endpoint once SF exposes one)
+  //   3. The resolver surfaces rotation_pending so callers can decide
+  //      what to do; it also alerts loudly as grace approaches
+  //
+  // Idempotent on the same (eventId, newCredId) — re-delivery is a noop.
+
+  async applyCredentialRotationNotification(
+    input: ApplyCredentialRotationNotificationInput,
+  ): Promise<ApplyResult> {
+    const { userId, newCredId, newKid, previousGraceExpiresAt, eventId } = input;
+    const conn = await this.prisma.sfConnection.findUnique({ where: { userId } });
+    if (!conn) {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=rotation_notification_no_row user_id=${userId} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: 'no_connection' };
+    }
+    if (!conn.isActive || conn.status !== 'active') {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=rotation_notification_inactive_target user_id=${userId} ` +
+          `status=${conn.status} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: `status_${conn.status}` };
+    }
+    const graceExpiresAt = new Date(previousGraceExpiresAt);
+    if (isNaN(graceExpiresAt.getTime())) {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=rotation_notification_bad_grace user_id=${userId} ` +
+          `previous_grace_expires_at=${this.safe(previousGraceExpiresAt)}`,
+      );
+      return { ok: false, reason: 'invalid_grace' };
+    }
+
+    // Idempotent on same cred_id — re-delivery doesn't shift the grace clock.
+    const newCredIdStr = String(newCredId);
+    if (
+      conn.rotationPending &&
+      conn.pendingRotationCredId === newCredIdStr &&
+      conn.pendingRotationGraceExpiresAt &&
+      conn.pendingRotationGraceExpiresAt.getTime() === graceExpiresAt.getTime()
+    ) {
+      this.logger.log(
+        `[SfConnectionLifecycle] event=rotation_notification_noop user_id=${userId} ` +
+          `cred_id=${newCredIdStr} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: true, noop: true };
+    }
+
+    await this.prisma.sfConnection.update({
+      where: { userId },
+      data: {
+        rotationPending: true,
+        pendingRotationKid: newKid ?? null,
+        pendingRotationCredId: newCredIdStr,
+        pendingRotationGraceExpiresAt: graceExpiresAt,
+        pendingRotationObservedAt: new Date(),
+        updatedAt: new Date(),
+        // status stays 'active' — old token still valid; flag the pending
+        // state separately so consumers can see both signals independently.
+      },
+    });
+
+    const graceMs = graceExpiresAt.getTime() - Date.now();
+    this.logger.log(
+      `[SfConnectionLifecycle] event=rotation_notification_recorded user_id=${userId} ` +
+        `event_id=${eventId ?? 'null'} new_cred_id=${newCredIdStr} new_kid=${newKid ?? 'unchanged'} ` +
+        `grace_expires_at=${graceExpiresAt.toISOString()} grace_ms_remaining=${graceMs} ` +
+        `prev_cred_id=${input.previousCredId != null ? String(input.previousCredId) : 'null'} ` +
+        `reason=${this.safe(input.reason ?? '')}`,
     );
 
     return { ok: true };

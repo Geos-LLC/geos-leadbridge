@@ -72,6 +72,18 @@ export interface ResolvedSfCredentials {
    * | 'connection_decrypt_failed' | 'env_partial' | 'no_userid'.
    */
   disabledReason?: string;
+  /**
+   * R1 — true when SF has notified LB of a credential rotation but the
+   * new token has not yet been refreshed via re-handshake. The current
+   * (pre-rotation) token is still valid for outbound calls until
+   * `rotationGraceExpiresAt`. Callers can use this signal to schedule
+   * a refresh or display a status banner.
+   */
+  rotationPending?: boolean;
+  /** When the prior token stops working (per SF's grace declaration). */
+  rotationGraceExpiresAt?: Date;
+  /** SF's new credential id (informational; bearer is still the old one). */
+  pendingRotationCredId?: string;
 }
 
 @Injectable()
@@ -133,6 +145,9 @@ export class SfConnectionResolver {
     previousOrchestrationToken: string | null;
     previousTokenExpiresAt: Date | null;
     endpointsJson?: string | null;
+    rotationPending?: boolean;
+    pendingRotationCredId?: string | null;
+    pendingRotationGraceExpiresAt?: Date | null;
   }): Promise<ResolvedSfCredentials | null> {
     if (!conn.isActive) return null;
     if (!(conn.status === 'active' || conn.status === 'rotating')) return null;
@@ -180,6 +195,11 @@ export class SfConnectionResolver {
 
     const endpoints = this.parseEndpoints(conn.endpointsJson);
 
+    // R1: rotation-pending visibility + grace-expiry alerting.
+    // The current bearer is still valid; we just surface the pending state
+    // and yell loudly when grace is about to elapse so monitoring catches it.
+    const rotationSignal = this.checkRotationPending(conn);
+
     // Try current token first.
     const current = this.tryDecrypt(conn.orchestrationToken, encryptionKey);
     if (current) {
@@ -191,6 +211,9 @@ export class SfConnectionResolver {
         sfTenantId: conn.sfTenantId,
         usedPreviousToken: false,
         endpoints,
+        rotationPending: rotationSignal.pending,
+        rotationGraceExpiresAt: rotationSignal.graceExpiresAt,
+        pendingRotationCredId: rotationSignal.credId,
       };
     }
 
@@ -282,6 +305,42 @@ export class SfConnectionResolver {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * R1 — evaluate the pending rotation state at resolve time. Emits log
+   * alerts at three thresholds:
+   *   - grace_expiring_soon: < 60s remaining (WARN)
+   *   - grace_imminent:      < 10s remaining (ERROR)
+   *   - grace_elapsed:       past expiry      (ERROR — outbound calls
+   *                                            using the current token may
+   *                                            start failing on SF side)
+   * Returns the structured signal for the caller.
+   */
+  private checkRotationPending(conn: {
+    id: string;
+    userId: string;
+    rotationPending?: boolean;
+    pendingRotationCredId?: string | null;
+    pendingRotationGraceExpiresAt?: Date | null;
+  }): { pending: boolean; graceExpiresAt?: Date; credId?: string } {
+    if (!conn.rotationPending || !conn.pendingRotationGraceExpiresAt) {
+      return { pending: false };
+    }
+    const graceExpiresAt = conn.pendingRotationGraceExpiresAt;
+    const msRemaining = graceExpiresAt.getTime() - Date.now();
+    const credId = conn.pendingRotationCredId ?? undefined;
+    const baseFields =
+      `user_id=${conn.userId} conn_id=${conn.id} pending_cred_id=${credId ?? 'null'} ` +
+      `grace_expires_at=${graceExpiresAt.toISOString()} grace_ms_remaining=${msRemaining}`;
+    if (msRemaining <= 0) {
+      this.logger.error(`[SfConnectionResolver] rotation_grace_elapsed ${baseFields}`);
+    } else if (msRemaining < 10_000) {
+      this.logger.error(`[SfConnectionResolver] rotation_grace_imminent ${baseFields}`);
+    } else if (msRemaining < 60_000) {
+      this.logger.warn(`[SfConnectionResolver] rotation_grace_expiring_soon ${baseFields}`);
+    }
+    return { pending: true, graceExpiresAt, credId };
   }
 
   private tryDecrypt(encrypted: string, key: string): string | null {

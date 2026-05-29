@@ -44,6 +44,7 @@ function buildDeps(opts: {
   const lifecycle: any = {
     applyConnectionConnected: jest.fn(async () => { if (opts.lifecycleThrows) throw new Error('boom'); return { ok: true }; }),
     applyCredentialRotated: jest.fn(async () => ({ ok: true })),
+    applyCredentialRotationNotification: jest.fn(async () => ({ ok: true })),
     applyConnectionRevoked: jest.fn(async () => ({ ok: true })),
   };
   const orchestrator: any = {
@@ -361,6 +362,62 @@ describe('SfConnectionWebhookService — idempotency', () => {
     const arg = lifecycle.applyCredentialRotated.mock.calls[0][0];
     expect(arg.payload.new_credential.token).toBe('from_data');
     expect(arg.payload.new_credential.kid).toBe('k2');
+  });
+
+  it('credential.rotated NOTIFICATION shape (no token) → applyCredentialRotationNotification, NOT full rotation', async () => {
+    const { svc, lifecycle } = buildDeps();
+    // SF wire shape: no token, just cred_id + grace + metadata
+    const env = {
+      event_id: 'evt-rot-notif', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        new_credential: { cred_id: 12, kid: 'sf_orch_2026_05', token_prefix: 'sfo_v1.eyJ2Ij', expires_at: '2026-08-27T00:55:28.992Z' },
+        previous_cred_id: 11,
+        previous_grace_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        reason: 'lifecycle_verify_v2',
+      },
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(200);
+    expect(r.result).toBe('accepted');
+    // Critical: full-rotation handler MUST NOT be called for notification shape
+    expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotationNotification).toHaveBeenCalledTimes(1);
+    const arg = lifecycle.applyCredentialRotationNotification.mock.calls[0][0];
+    expect(arg.newCredId).toBe(12);
+    expect(arg.newKid).toBe('sf_orch_2026_05');
+    expect(arg.previousCredId).toBe(11);
+    expect(arg.reason).toBe('lifecycle_verify_v2');
+  });
+
+  it('credential.rotated payload with neither token NOR notification fields → exception', async () => {
+    const { svc, lifecycle } = buildDeps();
+    const env = {
+      event_id: 'evt-rot-empty', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: { new_credential: { kid: 'k1' } }, // no token, no cred_id, no grace
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(500);
+    expect(r.result).toBe('exception');
+    expect(r.error).toMatch(/missing token AND notification fields/);
+    expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
+  });
+
+  it('credential.rotated full-token shape (legacy) → applyCredentialRotated, NOT notification path', async () => {
+    const { svc, lifecycle } = buildDeps();
+    const env = {
+      event_id: 'evt-rot-full', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        new_credential: { token: 'sfo_v1_NEW', kid: 'k2', token_prefix: 'sfo_v1.aa', issued_at: 't', expires_at: 't' },
+        grace_period_seconds: 300,
+      },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(lifecycle.applyCredentialRotated).toHaveBeenCalledTimes(1);
+    expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
   });
 
   it('connection.revoked accepts envelope.data shape', async () => {
