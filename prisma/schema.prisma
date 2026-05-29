@@ -1625,6 +1625,24 @@ model SfConnection {
 }
 
 // ==========================================
+// SF Provisioning — server-to-server flow
+// One row per consumed link_token nonce. Enforces single-use semantics
+// for SF→LB provisioning calls. Inserts race the unique constraint;
+// whoever wins the insert is the unique consumer. Cleanup is lazy by
+// expiresAt (no cron required — small steady-state size).
+// ==========================================
+
+model SfProvisioningLinkConsumed {
+  nonce      String   @id
+  userId     String
+  consumedAt DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt])
+  @@map("sf_provisioning_link_consumed")
+}
+
+// ==========================================
 // Service Flow sync: inbound events + audit log
 // See plans/2026-04-17-job-sync-sf-lb.md
 // ==========================================
