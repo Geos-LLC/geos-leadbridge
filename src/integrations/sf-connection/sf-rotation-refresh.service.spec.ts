@@ -417,14 +417,14 @@ describe('SfRotationRefreshService.triggerImmediate (webhook fire-and-forget)', 
 });
 
 describe('SfRotationRefreshService.scanForPendingRefresh (worker safety net)', () => {
-  it('queries only rows in (now+60s, now+4min) grace window + calls refreshIfPending per row', async () => {
+  it('queries two eligible kinds: (a) approaching grace window OR (b) stuck R1B pending >2min', async () => {
     const row = activeRotationPendingRow();
     const tx: any = {
       $queryRaw: jest.fn(async () => [{ locked: true }]),
       sfConnection: { findUnique: jest.fn(async () => row), update: jest.fn() },
     };
     const prisma: any = {
-      sfConnection: { findMany: jest.fn(async () => [{ id: 'conn-1', userId: 'u1', pendingRotationCredId: '12' }]) },
+      sfConnection: { findMany: jest.fn(async () => [{ id: 'conn-1', userId: 'u1', pendingRotationCredId: '12', pendingRotationGraceExpiresAt: new Date() }]) },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     const cfg = { get: jest.fn(() => ENC_KEY) } as any as ConfigService;
@@ -435,15 +435,27 @@ describe('SfRotationRefreshService.scanForPendingRefresh (worker safety net)', (
     try {
       await svc.scanForPendingRefresh();
       const where = prisma.sfConnection.findMany.mock.calls[0][0].where;
-      expect(where.rotationPending).toBe(true);
-      expect(where.isActive).toBe(true);
-      expect(where.status).toBe('active');
-      expect(where.pendingRotationGraceExpiresAt).toBeDefined();
-      expect(where.pendingRotationGraceExpiresAt.gt).toBeInstanceOf(Date);
-      expect(where.pendingRotationGraceExpiresAt.lt).toBeInstanceOf(Date);
-      const upperBound = where.pendingRotationGraceExpiresAt.lt as Date;
-      const lowerBound = where.pendingRotationGraceExpiresAt.gt as Date;
+      expect(Array.isArray(where.OR)).toBe(true);
+      expect(where.OR).toHaveLength(2);
+      // (a) approaching grace window
+      const branchA = where.OR[0];
+      expect(branchA.rotationPending).toBe(true);
+      expect(branchA.isActive).toBe(true);
+      expect(branchA.status).toBe('active');
+      expect(branchA.pendingRotationGraceExpiresAt).toBeDefined();
+      expect(branchA.pendingRotationGraceExpiresAt.gt).toBeInstanceOf(Date);
+      expect(branchA.pendingRotationGraceExpiresAt.lt).toBeInstanceOf(Date);
+      const upperBound = branchA.pendingRotationGraceExpiresAt.lt as Date;
+      const lowerBound = branchA.pendingRotationGraceExpiresAt.gt as Date;
       expect(upperBound.getTime() - lowerBound.getTime()).toBe((4 * 60 - 60) * 1000); // 180s window
+      // (b) stuck R1B pending >2min, no grace
+      const branchB = where.OR[1];
+      expect(branchB.rotationPending).toBe(true);
+      expect(branchB.isActive).toBe(true);
+      expect(branchB.status).toBe('active');
+      expect(branchB.pendingRotationGraceExpiresAt).toBeNull();
+      expect(branchB.pendingRotationObservedAt).toBeDefined();
+      expect(branchB.pendingRotationObservedAt.lt).toBeInstanceOf(Date);
       // refreshIfPending invoked once per row
       expect(prisma.$transaction).toHaveBeenCalled();
     } finally {

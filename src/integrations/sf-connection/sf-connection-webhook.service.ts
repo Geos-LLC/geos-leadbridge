@@ -435,35 +435,64 @@ export class SfConnectionWebhookService {
           break;
         }
         case 'credential.rotated': {
-          // Two valid payload shapes for credential.rotated:
+          // THREE valid payload shapes for credential.rotated. Branch order
+          // matters — refresh_required is the canonical R1B signal and
+          // MUST be checked first, before any access to new_credential.*
           //
-          //  (a) Re-delivery (legacy / full): payload.new_credential.token
-          //      is a string → call applyCredentialRotated (re-encrypts +
-          //      stores + opens grace window). This is the original LB
-          //      contract; preserved for backward compat.
+          //  (a) R1B lean (preferred, SF's current wire format):
+          //      data.refresh_required === true
+          //      No new_credential block required. Optional info:
+          //      previous_cred_id, previous_grace_expires_at (may be null),
+          //      refresh_endpoint, reason. LB records rotationPending=true
+          //      and fires immediate refresh trigger. The refresh response
+          //      delivers the actual credential.
           //
-          //  (b) Notification (R1, SF's actual wire format): no plaintext
-          //      token; just cred_id, kid?, token_prefix, expires_at,
-          //      previous_grace_expires_at. SF does NOT re-deliver secrets
-          //      over the webhook channel. LB records the pending rotation
-          //      + resolves the refresh out-of-band (re-handshake today;
-          //      service-to-service refresh once SF exposes one).
+          //  (b) R1 full notification (kept for SF variant compat):
+          //      data.new_credential.{cred_id,kid?,token_prefix?,expires_at?}
+          //      + data.previous_grace_expires_at (string).
+          //      LB persists what SF said + waits for refresh / re-handshake.
+          //
+          //  (c) Legacy full re-delivery:
+          //      data.new_credential.token (string, plaintext).
+          //      LB applyCredentialRotated re-encrypts + stores + grace.
+          //      Discouraged design (token over webhook); preserved only
+          //      for backward compat with any SF deployment still on it.
           const payload = envBody as SfCredentialRotatedPayload & {
+            refresh_required?: boolean;
+            refresh_endpoint?: string;
             new_credential?: { cred_id?: number | string; kid?: string; token_prefix?: string; expires_at?: string; token?: string };
-            previous_grace_expires_at?: string;
+            previous_grace_expires_at?: string | null;
             previous_cred_id?: number | string;
             reason?: string;
           };
 
-          if (!payload?.new_credential) {
-            throw new Error('missing new_credential');
+          // ─── (a) R1B lean ────────────────────────────────────────────
+          if (payload?.refresh_required === true) {
+            const r = await this.lifecycle.applyCredentialRotationPending({
+              userId,
+              previousCredId: payload.previous_cred_id ?? null,
+              previousGraceExpiresAt:
+                typeof payload.previous_grace_expires_at === 'string'
+                  ? payload.previous_grace_expires_at
+                  : null,
+              reason: payload.reason ?? null,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop_rotation_pending';
+            else if (r.ok) resultTag = 'applied_rotation_pending';
+            else throw new Error(`rotation_pending_rejected:${r.reason ?? 'unknown'}`);
+            // Immediate refresh trigger (fire-and-forget). Worker scan is
+            // the safety net if this fails for any reason.
+            if (r.ok && !r.noop) {
+              this.rotationRefresh.triggerImmediate(conn.id);
+            }
+            break;
           }
 
-          const hasToken = typeof payload.new_credential.token === 'string' && payload.new_credential.token.length > 0;
-          const hasNotificationFields =
-            payload.new_credential.cred_id != null && typeof payload.previous_grace_expires_at === 'string';
-
-          if (hasToken) {
+          // ─── (c) Legacy full re-delivery (token present) ─────────────
+          // Checked before (b) so a SF emission with both shapes hits the
+          // richer path.
+          if (payload?.new_credential && typeof payload.new_credential.token === 'string' && payload.new_credential.token.length > 0) {
             const r = await this.lifecycle.applyCredentialRotated({
               userId,
               payload: payload as SfCredentialRotatedPayload,
@@ -473,7 +502,12 @@ export class SfConnectionWebhookService {
             break;
           }
 
-          if (hasNotificationFields) {
+          // ─── (b) R1 full notification ────────────────────────────────
+          if (
+            payload?.new_credential &&
+            payload.new_credential.cred_id != null &&
+            typeof payload.previous_grace_expires_at === 'string'
+          ) {
             const r = await this.lifecycle.applyCredentialRotationNotification({
               userId,
               newCredId: payload.new_credential.cred_id!,
@@ -488,20 +522,23 @@ export class SfConnectionWebhookService {
             if (r.noop) resultTag = 'applied_noop_rotation_notification';
             else if (r.ok) resultTag = 'applied_rotation_notification';
             else throw new Error(`rotation_notification_rejected:${r.reason ?? 'unknown'}`);
-
-            // R1B: immediate refresh trigger when SF flags the rotation as
-            // requiring proactive pickup. Fire-and-forget; the worker
-            // safety-net catches anything missed. The webhook ack must not
-            // block on the SF refresh round-trip.
-            const refreshRequired = (envBody as any)?.refresh_required === true;
-            if (refreshRequired && r.ok && !r.noop) {
-              this.rotationRefresh.triggerImmediate(conn.id);
-            }
             break;
           }
 
-          // Neither shape — useless payload.
-          throw new Error('credential.rotated missing token AND notification fields');
+          // Unsupported variant — log shape for diagnostics + fail loudly so
+          // SF sees a 500 they can correlate. Don't silently accept payloads
+          // we don't understand.
+          // We only reach this branch if refresh_required is not literally
+          // true, so logging that condition is constant — skip it. Log what
+          // the other branch predicates saw instead.
+          this.logger.warn(
+            `[SfConnectionWebhook] event_id=${eventId} event_type=credential.rotated ` +
+              `result=unsupported_variant has_new_credential=${!!payload?.new_credential} ` +
+              `has_token=${typeof payload?.new_credential?.token === 'string'} ` +
+              `has_grace=${typeof payload?.previous_grace_expires_at === 'string'} ` +
+              `refresh_required_value=${this.safe(String(payload?.refresh_required ?? 'absent'))}`,
+          );
+          throw new Error('credential.rotated unsupported_variant');
         }
         case 'connection.revoked': {
           const payload = (envBody as SfConnectionRevokedPayload) ?? {};

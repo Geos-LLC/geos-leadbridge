@@ -45,6 +45,7 @@ function buildDeps(opts: {
     applyConnectionConnected: jest.fn(async () => { if (opts.lifecycleThrows) throw new Error('boom'); return { ok: true }; }),
     applyCredentialRotated: jest.fn(async () => ({ ok: true })),
     applyCredentialRotationNotification: jest.fn(async () => ({ ok: true })),
+    applyCredentialRotationPending: jest.fn(async () => ({ ok: true })),
     applyConnectionRevoked: jest.fn(async () => ({ ok: true })),
   };
   const orchestrator: any = {
@@ -403,7 +404,7 @@ describe('SfConnectionWebhookService — idempotency', () => {
     const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
     expect(r.httpStatus).toBe(500);
     expect(r.result).toBe('exception');
-    expect(r.error).toMatch(/missing token AND notification fields/);
+    expect(r.error).toContain('unsupported_variant');
     expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
     expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
   });
@@ -423,44 +424,148 @@ describe('SfConnectionWebhookService — idempotency', () => {
     expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
   });
 
-  it('credential.rotated notification with refresh_required=true → fires SfRotationRefreshService.triggerImmediate', async () => {
+  // ── R1B refresh_required branch (regression tests per user spec) ─────
+
+  it('R1B: refresh_required=true with NO new_credential block → applyCredentialRotationPending + triggerImmediate', async () => {
+    // This is the canonical R1B wire format SF actually sends.
     const { svc, lifecycle, rotationRefresh } = buildDeps();
-    // Per the canonical SF S4 wire format, refresh_required lives INSIDE
-    // event.data (not at the envelope top level) — matches SF's actual
-    // payload shape and what the LB envelopePayload helper exposes.
     const env = {
-      event_id: 'evt-rot-notif-immediate', event_type: 'credential.rotated',
+      event_id: 'evt-r1b-bare', event_type: 'credential.rotated',
       occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
       data: {
-        new_credential: { cred_id: 12, kid: 'sf_orch_2026_05', token_prefix: 'sfo_v1.aa', expires_at: '2026-08-27T00:00:00Z' },
-        previous_cred_id: 11,
-        previous_grace_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        reason: 'r1b_lifecycle_verify',
+        previous_cred_id: 18,
+        refresh_endpoint: '/api/integrations/leadbridge/orchestration/credentials/refresh',
         refresh_required: true,
+        previous_grace_expires_at: null,
       },
     };
     const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
     expect(r.httpStatus).toBe(200);
-    // The notification is persisted, AND the immediate trigger is enqueued
-    expect(lifecycle.applyCredentialRotationNotification).toHaveBeenCalledTimes(1);
+    expect(r.result).toBe('accepted');
+    // R1B lean persist path engaged
+    expect(lifecycle.applyCredentialRotationPending).toHaveBeenCalledTimes(1);
+    const arg = lifecycle.applyCredentialRotationPending.mock.calls[0][0];
+    expect(arg.userId).toBe('u1');
+    expect(arg.previousCredId).toBe(18);
+    expect(arg.previousGraceExpiresAt).toBeNull(); // SF sent null; LB tolerates
+    expect(arg.reason).toBe('r1b_lifecycle_verify');
+    // NOT the full-info path (no new_credential block to require)
+    expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
+    // Immediate refresh trigger fires
     expect(rotationRefresh.triggerImmediate).toHaveBeenCalledTimes(1);
     expect(rotationRefresh.triggerImmediate).toHaveBeenCalledWith('c1');
   });
 
-  it('credential.rotated notification WITHOUT refresh_required → does NOT fire immediate trigger', async () => {
+  it('R1B: refresh_required=true AND refresh_endpoint present → still uses connection.endpoints (refresh_endpoint is hint only)', async () => {
+    // SF may include refresh_endpoint in the webhook data as a hint, but
+    // LB authoritatively uses the credentials_refresh URL stored on the
+    // connection (from OAuth exchange). Test that the webhook handler
+    // doesn't crash when refresh_endpoint is present and that the
+    // immediate trigger fires correctly regardless.
     const { svc, lifecycle, rotationRefresh } = buildDeps();
     const env = {
-      event_id: 'evt-rot-notif-deferred', event_type: 'credential.rotated',
+      event_id: 'evt-r1b-with-endpoint', event_type: 'credential.rotated',
       occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
-      // refresh_required absent / false
+      data: {
+        refresh_required: true,
+        refresh_endpoint: '/some/other/path/from/webhook',
+        previous_cred_id: 18,
+      },
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(200);
+    expect(lifecycle.applyCredentialRotationPending).toHaveBeenCalledTimes(1);
+    expect(rotationRefresh.triggerImmediate).toHaveBeenCalledTimes(1);
+  });
+
+  it('R1B: refresh_required=true and refresh_endpoint absent → still works (URL comes from connection)', async () => {
+    const { svc, lifecycle, rotationRefresh } = buildDeps();
+    const env = {
+      event_id: 'evt-r1b-no-endpoint', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        refresh_required: true,
+        previous_cred_id: 18,
+        // No refresh_endpoint field
+      },
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(200);
+    expect(lifecycle.applyCredentialRotationPending).toHaveBeenCalledTimes(1);
+    expect(rotationRefresh.triggerImmediate).toHaveBeenCalledTimes(1);
+  });
+
+  it('R1B: refresh_required=true with previous_grace_expires_at as real ISO → forwards to lifecycle', async () => {
+    const { svc, lifecycle } = buildDeps();
+    const graceIso = new Date(Date.now() + 5 * 60_000).toISOString();
+    const env = {
+      event_id: 'evt-r1b-with-grace', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        refresh_required: true,
+        previous_cred_id: 18,
+        previous_grace_expires_at: graceIso,
+      },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    const arg = lifecycle.applyCredentialRotationPending.mock.calls[0][0];
+    expect(arg.previousGraceExpiresAt).toBe(graceIso);
+  });
+
+  it('legacy force-rotate variant: new_credential.token present → applyCredentialRotated (NOT pending path)', async () => {
+    const { svc, lifecycle, rotationRefresh } = buildDeps();
+    const env = {
+      event_id: 'evt-legacy-rotate', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        // No refresh_required → legacy path
+        new_credential: { token: 'sfo_v1.PLAINTEXT_TOKEN', kid: 'k2', token_prefix: 'sfo_v1.PL', issued_at: 't', expires_at: 't' },
+        grace_period_seconds: 300,
+      },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(lifecycle.applyCredentialRotated).toHaveBeenCalledTimes(1);
+    expect(lifecycle.applyCredentialRotationPending).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
+    // Legacy path does NOT fire immediate trigger
+    expect(rotationRefresh.triggerImmediate).not.toHaveBeenCalled();
+  });
+
+  it('R1 full-info notification (no refresh_required): new_credential.cred_id + previous_grace_expires_at → applyCredentialRotationNotification', async () => {
+    const { svc, lifecycle, rotationRefresh } = buildDeps();
+    const env = {
+      event_id: 'evt-r1-fullinfo', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
       data: {
         new_credential: { cred_id: 12, kid: 'sf_orch_2026_05', token_prefix: 'sfo_v1.aa', expires_at: '2026-08-27T00:00:00Z' },
         previous_cred_id: 11,
-        previous_grace_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        previous_grace_expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+        // refresh_required absent
       },
     };
     await svc.ingest(JSON.stringify(env), sign(env).headers);
     expect(lifecycle.applyCredentialRotationNotification).toHaveBeenCalledTimes(1);
+    expect(lifecycle.applyCredentialRotationPending).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
     expect(rotationRefresh.triggerImmediate).not.toHaveBeenCalled();
+  });
+
+  it('unsupported variant: no refresh_required AND no new_credential → 500 exception result=unsupported_variant', async () => {
+    const { svc, lifecycle } = buildDeps();
+    const env = {
+      event_id: 'evt-unsupported', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: { reason: 'mystery_variant' },
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(500);
+    expect(r.result).toBe('exception');
+    expect(r.error).toContain('unsupported_variant');
+    expect(lifecycle.applyCredentialRotationPending).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
+    expect(lifecycle.applyCredentialRotated).not.toHaveBeenCalled();
   });
 
   it('connection.revoked accepts envelope.data shape', async () => {

@@ -120,6 +120,33 @@ export interface ApplyCredentialRefreshInput {
 }
 
 /**
+ * R1B — input for the lean rotation-pending persist. SF's R1B notification
+ * shape is minimal: just `refresh_required: true` + optional informational
+ * fields (previous_cred_id, refresh_endpoint, previous_grace_expires_at).
+ * LB doesn't yet know the new cred_id, new kid, token_prefix, or expiry —
+ * those arrive in the refresh response. This writer records only what we
+ * know now and flips `rotationPending=true` so the refresh worker /
+ * immediate trigger can pick up.
+ *
+ * Distinct from `applyCredentialRotationNotification` which is the
+ * full-info R1 variant (SF sends new_credential.cred_id + kid + grace).
+ */
+export interface ApplyCredentialRotationPendingInput {
+  userId: string;
+  /** SF's prior cred_id (purely informational; the one being rotated away from). */
+  previousCredId?: string | number | null;
+  /**
+   * SF's grace window end if provided. R1B emissions may legitimately
+   * send `null` here (LB will discover grace from the refresh response).
+   * If a real ISO timestamp is provided, populate the pending field so
+   * the resolver's grace alerts still fire as a safety net.
+   */
+  previousGraceExpiresAt?: string | null;
+  reason?: string | null;
+  eventId?: string | null;
+}
+
+/**
  * R1 — input for the notification-shape rotation path. SF sends this
  * when they've rotated the credential on their side but are NOT
  * re-delivering the plaintext token over the webhook channel (correct
@@ -403,6 +430,75 @@ export class SfConnectionLifecycleService {
     );
 
     return { ok: true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // applyCredentialRotationPending — R1B lean notification
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // SF R1B emits credential.rotated with `data.refresh_required=true` and
+  // typically no `new_credential` block. LB must just record "a rotation
+  // is pending" and let the refresh trigger / worker fetch the actual
+  // credential. We do NOT require previousGraceExpiresAt — SF may send
+  // null and let LB discover grace from the refresh response.
+
+  async applyCredentialRotationPending(input: ApplyCredentialRotationPendingInput): Promise<ApplyResult> {
+    const { userId, eventId } = input;
+    const conn = await this.prisma.sfConnection.findUnique({ where: { userId } });
+    if (!conn) {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=rotation_pending_no_row user_id=${userId} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: 'no_connection' };
+    }
+    if (!conn.isActive || conn.status !== 'active') {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=rotation_pending_inactive_target user_id=${userId} ` +
+          `status=${conn.status} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: `status_${conn.status}` };
+    }
+
+    // Already pending — idempotent noop. Don't reset observed_at; that's
+    // the original detection time and the worker scan uses it for the
+    // "stuck" filter.
+    if (conn.rotationPending) {
+      this.logger.log(
+        `[SfConnectionLifecycle] event=rotation_pending_noop user_id=${userId} ` +
+          `event_id=${eventId ?? 'null'} reason=already_pending observed_at=${conn.pendingRotationObservedAt?.toISOString() ?? 'null'}`,
+      );
+      return { ok: true, noop: true, connectionId: conn.id };
+    }
+
+    // Optional grace: if SF provided a real timestamp use it; null/undefined
+    // is the canonical R1B case (LB discovers grace from refresh response).
+    let graceExpiresAt: Date | null = null;
+    if (typeof input.previousGraceExpiresAt === 'string') {
+      const d = new Date(input.previousGraceExpiresAt);
+      if (!isNaN(d.getTime())) graceExpiresAt = d;
+    }
+
+    await this.prisma.sfConnection.update({
+      where: { userId },
+      data: {
+        rotationPending: true,
+        // Lean variant: we don't yet know new kid/cred_id. The refresh
+        // response will populate them via applyCredentialRefresh.
+        pendingRotationKid: null,
+        pendingRotationCredId: input.previousCredId != null ? String(input.previousCredId) : null,
+        pendingRotationGraceExpiresAt: graceExpiresAt,
+        pendingRotationObservedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `[SfConnectionLifecycle] event=rotation_pending_recorded user_id=${userId} ` +
+        `event_id=${eventId ?? 'null'} prev_cred_id=${input.previousCredId ?? 'null'} ` +
+        `grace_expires_at=${graceExpiresAt?.toISOString() ?? 'null'} ` +
+        `reason=${this.safe(input.reason ?? '')}`,
+    );
+    return { ok: true, connectionId: conn.id };
   }
 
   // ═══════════════════════════════════════════════════════════════════════

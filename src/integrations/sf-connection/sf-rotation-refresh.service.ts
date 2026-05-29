@@ -107,18 +107,38 @@ export class SfRotationRefreshService {
       const now = new Date();
       const upperBound = new Date(now.getTime() + REFRESH_SCAN_WINDOW_MS);
       const lowerBound = new Date(now.getTime() + REFRESH_MIN_GRACE_MS);
+      // Stuck threshold: R1B notifications that have been pending more than
+      // 2 min without resolution — the immediate trigger almost certainly
+      // failed (LB crash mid-flight, transient 5xx exhausted, etc.).
+      const stuckThreshold = new Date(now.getTime() - 2 * 60_000);
       const rows = await this.prisma.sfConnection.findMany({
         where: {
-          rotationPending: true,
-          isActive: true,
-          status: 'active',
-          pendingRotationGraceExpiresAt: { gt: lowerBound, lt: upperBound },
+          // Two eligible kinds — keep the OR explicit to make the
+          // intent obvious in logs and at the SQL level.
+          OR: [
+            // (a) R1 full-info: grace window approaching but not too close
+            {
+              rotationPending: true,
+              isActive: true,
+              status: 'active',
+              pendingRotationGraceExpiresAt: { gt: lowerBound, lt: upperBound },
+            },
+            // (b) R1B lean: no grace info; observed > 2 min ago
+            //     (immediate trigger likely failed)
+            {
+              rotationPending: true,
+              isActive: true,
+              status: 'active',
+              pendingRotationGraceExpiresAt: null,
+              pendingRotationObservedAt: { lt: stuckThreshold },
+            },
+          ],
         },
-        select: { id: true, userId: true, pendingRotationCredId: true },
+        select: { id: true, userId: true, pendingRotationCredId: true, pendingRotationGraceExpiresAt: true },
       });
       if (rows.length === 0) return;
       this.logger.log(
-        `[SfRefresh] event=scan_picked count=${rows.length} window_lower=${lowerBound.toISOString()} window_upper=${upperBound.toISOString()}`,
+        `[SfRefresh] event=scan_picked count=${rows.length} window_lower=${lowerBound.toISOString()} window_upper=${upperBound.toISOString()} stuck_threshold=${stuckThreshold.toISOString()}`,
       );
       // Sequential per row; each call has its own advisory lock. Safe
       // for the small expected fan-out (rotations are rare events).
