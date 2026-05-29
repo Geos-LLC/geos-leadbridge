@@ -20,6 +20,7 @@ import { SfOAuthService } from './sf-oauth.service';
 import { SfConnectionLifecycleService } from './sf-connection-lifecycle.service';
 import { SfConnectionWebhookService } from './sf-connection-webhook.service';
 import { SfDisconnectService } from './sf-disconnect.service';
+import { SfConnectionStatusService } from './sf-connection-status.service';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SfDisconnectService } from './sf-disconnect.service';
     SfConnectionLifecycleService,
     SfConnectionWebhookService,
     SfDisconnectService,
+    SfConnectionStatusService,
   ],
   exports: [SfConnectionLifecycleService],
 })

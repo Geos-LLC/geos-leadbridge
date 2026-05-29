@@ -2149,4 +2149,41 @@ export const onboardingApi = {
   },
 };
 
+// ─── ServiceFlow Connection (PR-C3) ──────────────────────────────────
+// Read + lifecycle for the per-tenant SF orchestration connection.
+// Mirrors src/integrations/sf-connection/sf-connection.controller.ts.
+
+export type SfConnectionStatus = {
+  connected: boolean;
+  status: 'none' | 'pending' | 'active' | 'rotating' | 'disconnected' | 'revoked' | 'error' | string;
+  sfTenantId: string | null;
+  sfTenantName: string | null;
+  sourceInstance: string | null;
+  signatureKeyId: string | null;
+  tokenPrefix: string | null;
+  tokenLastReceivedAt: string | null;
+  tokenExpiresAt: string | null;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
+  disconnectInitiator: 'lb_user' | 'sf_authority' | 'lb_admin' | null;
+  lastErrorMessage: string | null;
+  rotationPending: boolean;
+  pendingRotationGraceExpiresAt: string | null;
+};
+
+export const sfConnectionApi = {
+  getStatus: async (): Promise<SfConnectionStatus> => {
+    const { data } = await api.get('/v1/integrations/sf/connection');
+    return data;
+  },
+  startConnect: async (): Promise<{ success: boolean; redirectUrl?: string; connectionId?: string; error?: string }> => {
+    const { data } = await api.post('/v1/integrations/sf/connect/start', {});
+    return data;
+  },
+  disconnect: async (reason?: string): Promise<{ success: boolean; remote_revoked?: boolean; status?: string }> => {
+    const { data } = await api.post('/v1/integrations/sf/disconnect', { reason });
+    return data;
+  },
+};
+
 export default api;
