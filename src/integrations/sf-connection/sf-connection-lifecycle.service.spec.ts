@@ -265,6 +265,380 @@ describe('SfConnectionLifecycleService — applyCredentialRotated', () => {
   });
 });
 
+describe('SfConnectionLifecycleService — applyCredentialRotationNotification (R1)', () => {
+  function activeRow(over: any = {}) {
+    return {
+      id: 'c1', userId: 'u1', sfTenantId: '99999',
+      isActive: true, status: 'active',
+      rotationPending: false,
+      pendingRotationCredId: null,
+      pendingRotationGraceExpiresAt: null,
+      ...over,
+    };
+  }
+
+  it('persists rotationPending + pending* fields + does NOT touch token/kid', async () => {
+    const conn = activeRow();
+    const updates: any[] = [];
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(async (a: any) => { updates.push(a); return a.data; }),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+
+    const graceExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const r = await svc.applyCredentialRotationNotification({
+      userId: 'u1',
+      newCredId: 12,
+      newKid: 'sf_orch_2026_05',
+      newTokenPrefix: 'sfo_v1.eyJ2Ij',
+      newExpiresAt: '2026-08-27T00:55:28.992Z',
+      previousGraceExpiresAt: graceExp,
+      previousCredId: 11,
+      reason: 'lifecycle_verify_v2',
+      eventId: 'evt-1',
+    });
+    expect(r.ok).toBe(true);
+    expect(updates).toHaveLength(1);
+    const data = updates[0].data;
+    expect(data.rotationPending).toBe(true);
+    expect(data.pendingRotationKid).toBe('sf_orch_2026_05');
+    expect(data.pendingRotationCredId).toBe('12'); // coerced to string
+    expect(data.pendingRotationGraceExpiresAt).toEqual(new Date(graceExp));
+    expect(data.pendingRotationObservedAt).toBeInstanceOf(Date);
+    // Critical: notification path MUST NOT mutate token/kid/signature fields.
+    expect(data.orchestrationToken).toBeUndefined();
+    expect(data.orchestrationTokenKid).toBeUndefined();
+    expect(data.signatureKeyId).toBeUndefined();
+    expect(data.tokenPrefix).toBeUndefined();
+    expect(data.previousOrchestrationToken).toBeUndefined();
+    expect(data.status).toBeUndefined(); // status stays 'active'
+  });
+
+  it('idempotent on same cred_id + same grace expiry', async () => {
+    const graceExp = new Date(Date.now() + 5 * 60 * 1000);
+    const conn = activeRow({
+      rotationPending: true,
+      pendingRotationCredId: '12',
+      pendingRotationGraceExpiresAt: graceExp,
+    });
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+
+    const r = await svc.applyCredentialRotationNotification({
+      userId: 'u1',
+      newCredId: 12,
+      previousGraceExpiresAt: graceExp.toISOString(),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.noop).toBe(true);
+    expect(prisma.sfConnection.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects when connection missing', async () => {
+    const prisma: any = { sfConnection: { findUnique: jest.fn(async () => null), update: jest.fn() } };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationNotification({
+      userId: 'u-missing',
+      newCredId: 12,
+      previousGraceExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('no_connection');
+    expect(prisma.sfConnection.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects when connection inactive (revoked/disconnected)', async () => {
+    const conn = activeRow({ status: 'revoked', isActive: false });
+    const prisma: any = { sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() } };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationNotification({
+      userId: 'u1',
+      newCredId: 12,
+      previousGraceExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('status_revoked');
+  });
+
+  it('rejects when previousGraceExpiresAt is unparseable', async () => {
+    const conn = activeRow();
+    const prisma: any = { sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() } };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationNotification({
+      userId: 'u1', newCredId: 12, previousGraceExpiresAt: 'not-a-date',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('invalid_grace');
+  });
+});
+
+describe('SfConnectionLifecycleService — applyCredentialRotationPending (R1B lean)', () => {
+  function activeRow(over: any = {}) {
+    return {
+      id: 'c1', userId: 'u1', sfTenantId: '99999', isActive: true, status: 'active',
+      rotationPending: false,
+      pendingRotationKid: null,
+      pendingRotationCredId: null,
+      pendingRotationGraceExpiresAt: null,
+      pendingRotationObservedAt: null,
+      ...over,
+    };
+  }
+
+  it('sets rotationPending=true with no grace (R1B canonical case)', async () => {
+    const conn = activeRow();
+    const updates: any[] = [];
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(async (a: any) => { updates.push(a); return a.data; }),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationPending({
+      userId: 'u1',
+      previousCredId: 18,
+      previousGraceExpiresAt: null,
+      reason: 'r1b_lifecycle_verify',
+      eventId: 'evt-1',
+    });
+    expect(r.ok).toBe(true);
+    const d = updates[0].data;
+    expect(d.rotationPending).toBe(true);
+    expect(d.pendingRotationCredId).toBe('18'); // SF previous_cred_id stored (informational)
+    expect(d.pendingRotationKid).toBeNull();
+    expect(d.pendingRotationGraceExpiresAt).toBeNull();
+    expect(d.pendingRotationObservedAt).toBeInstanceOf(Date);
+    // Security: no token/kid/signature mutations
+    expect(d.orchestrationToken).toBeUndefined();
+    expect(d.orchestrationTokenKid).toBeUndefined();
+    expect(d.signatureKeyId).toBeUndefined();
+    expect(d.tokenPrefix).toBeUndefined();
+    expect(d.status).toBeUndefined();
+  });
+
+  it('persists previousGraceExpiresAt when SF provides a real ISO timestamp', async () => {
+    const conn = activeRow();
+    const updates: any[] = [];
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(async (a: any) => { updates.push(a); return a.data; }),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const grace = new Date(Date.now() + 4 * 60_000).toISOString();
+    await svc.applyCredentialRotationPending({ userId: 'u1', previousGraceExpiresAt: grace });
+    expect(updates[0].data.pendingRotationGraceExpiresAt).toEqual(new Date(grace));
+  });
+
+  it('tolerates omitted optional fields (only userId required)', async () => {
+    const conn = activeRow();
+    const prisma: any = {
+      sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn(async (a: any) => a.data) },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationPending({ userId: 'u1' });
+    expect(r.ok).toBe(true);
+  });
+
+  it('idempotent when rotationPending already true: noop, observed_at not reset', async () => {
+    const originalObservedAt = new Date(Date.now() - 30_000);
+    const conn = activeRow({ rotationPending: true, pendingRotationObservedAt: originalObservedAt });
+    const prisma: any = {
+      sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRotationPending({ userId: 'u1' });
+    expect(r.ok).toBe(true);
+    expect(r.noop).toBe(true);
+    expect(prisma.sfConnection.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects when row missing or inactive', async () => {
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    // Missing
+    {
+      const prisma: any = { sfConnection: { findUnique: jest.fn(async () => null), update: jest.fn() } };
+      const svc = new SfConnectionLifecycleService(prisma, cfg);
+      const r = await svc.applyCredentialRotationPending({ userId: 'gone' });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe('no_connection');
+    }
+    // Disconnected
+    {
+      const conn = activeRow({ status: 'disconnected', isActive: false });
+      const prisma: any = { sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() } };
+      const svc = new SfConnectionLifecycleService(prisma, cfg);
+      const r = await svc.applyCredentialRotationPending({ userId: 'u1' });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe('status_disconnected');
+    }
+  });
+});
+
+describe('SfConnectionLifecycleService — applyCredentialRefresh (R1B)', () => {
+  function pendingRefreshRow(over: any = {}) {
+    return {
+      id: 'c1', userId: 'u1', sfTenantId: '99999',
+      isActive: true, status: 'active',
+      orchestrationToken: EncryptionUtil.encrypt('OLD_BEARER_PLAIN', ENC_KEY),
+      orchestrationTokenKid: 'sf_orch_2026_05',
+      tokenPrefix: 'sfo_v1.OLD_PR',
+      tokenIssuedAt: new Date('2026-05-28T20:00:00Z'),
+      rotationPending: true,
+      pendingRotationKid: 'sf_orch_2026_05',
+      pendingRotationCredId: '12',
+      pendingRotationGraceExpiresAt: new Date(Date.now() + 4 * 60 * 1000),
+      pendingRotationObservedAt: new Date(),
+      ...over,
+    };
+  }
+
+  it('persists new credential, demotes current to previous, clears rotationPending', async () => {
+    const conn = pendingRefreshRow();
+    const updates: any[] = [];
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(async (a: any) => { updates.push(a); return a.data; }),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRefresh({
+      userId: 'u1',
+      newToken: 'NEW_BEARER_PLAIN',
+      newKid: 'sf_orch_2026_05',
+      newTokenPrefix: 'sfo_v1.NEW_PR',
+      newCredId: 12,
+      newIssuedAt: '2026-05-29T01:00:00Z',
+      newExpiresAt: '2026-08-27T01:00:00Z',
+      previousGraceRemainingSeconds: 280,
+    });
+    expect(r.ok).toBe(true);
+    expect(updates).toHaveLength(1);
+    const d = updates[0].data;
+    // New token encrypted + stored
+    expect(EncryptionUtil.decrypt(d.orchestrationToken, ENC_KEY)).toBe('NEW_BEARER_PLAIN');
+    expect(d.orchestrationTokenKid).toBe('sf_orch_2026_05');
+    expect(d.tokenPrefix).toBe('sfo_v1.NEW_PR');
+    expect(d.tokenLastRotationSource).toBe('sf_refresh');
+    // Previous preserved for grace
+    expect(d.previousOrchestrationToken).toBe(conn.orchestrationToken);
+    expect(d.previousTokenExpiresAt).toBeInstanceOf(Date);
+    const graceMs = (d.previousTokenExpiresAt as Date).getTime() - Date.now();
+    expect(graceMs).toBeGreaterThanOrEqual(270_000);
+    expect(graceMs).toBeLessThanOrEqual(285_000);
+    // Pending rotation cleared
+    expect(d.rotationPending).toBe(false);
+    expect(d.pendingRotationKid).toBeNull();
+    expect(d.pendingRotationCredId).toBeNull();
+    expect(d.pendingRotationGraceExpiresAt).toBeNull();
+    expect(d.pendingRotationObservedAt).toBeNull();
+    // Status stays 'active' (refresh is transparent in-place swap)
+    expect(d.status).toBe('active');
+  });
+
+  it('falls back to pendingRotationGraceExpiresAt when SF omits previous_grace_remaining_seconds', async () => {
+    const fixedGrace = new Date(Date.now() + 2 * 60 * 1000);
+    const conn = pendingRefreshRow({ pendingRotationGraceExpiresAt: fixedGrace });
+    const updates: any[] = [];
+    const prisma: any = {
+      sfConnection: {
+        findUnique: jest.fn(async () => conn),
+        update: jest.fn(async (a: any) => { updates.push(a); return a.data; }),
+      },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    await svc.applyCredentialRefresh({
+      userId: 'u1', newToken: 'NEW', newKid: 'k', newTokenPrefix: 'p', newCredId: 12,
+      newIssuedAt: new Date().toISOString(),
+    });
+    expect(updates[0].data.previousTokenExpiresAt).toEqual(fixedGrace);
+  });
+
+  it('idempotent: re-applying the same refresh is a noop', async () => {
+    const issuedAt = new Date('2026-05-29T01:00:00Z');
+    const conn = pendingRefreshRow({
+      orchestrationTokenKid: 'sf_orch_2026_06', // already moved to new kid
+      tokenIssuedAt: issuedAt,
+      rotationPending: false, // already cleared
+      pendingRotationCredId: '12',
+    });
+    const prisma: any = {
+      sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() },
+    };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRefresh({
+      userId: 'u1', newToken: 'NEW', newKid: 'sf_orch_2026_06', newTokenPrefix: 'p',
+      newCredId: 12, newIssuedAt: issuedAt.toISOString(),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.noop).toBe(true);
+    expect(prisma.sfConnection.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects when row missing', async () => {
+    const prisma: any = { sfConnection: { findUnique: jest.fn(async () => null), update: jest.fn() } };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRefresh({
+      userId: 'gone', newToken: 'N', newKid: 'k', newTokenPrefix: 'p', newCredId: 12,
+      newIssuedAt: new Date().toISOString(),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('no_connection');
+  });
+
+  it('rejects when connection revoked / disconnected', async () => {
+    for (const status of ['revoked', 'disconnected']) {
+      const conn = pendingRefreshRow({ status, isActive: false });
+      const prisma: any = { sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() } };
+      const cfg = { get: () => ENC_KEY } as any as ConfigService;
+      const svc = new SfConnectionLifecycleService(prisma, cfg);
+      const r = await svc.applyCredentialRefresh({
+        userId: 'u1', newToken: 'N', newKid: 'k', newTokenPrefix: 'p', newCredId: 12,
+        newIssuedAt: new Date().toISOString(),
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe(`status_${status}`);
+    }
+  });
+
+  it('rejects on invalid issued_at', async () => {
+    const conn = pendingRefreshRow();
+    const prisma: any = { sfConnection: { findUnique: jest.fn(async () => conn), update: jest.fn() } };
+    const cfg = { get: () => ENC_KEY } as any as ConfigService;
+    const svc = new SfConnectionLifecycleService(prisma, cfg);
+    const r = await svc.applyCredentialRefresh({
+      userId: 'u1', newToken: 'N', newKid: 'k', newTokenPrefix: 'p', newCredId: 12,
+      newIssuedAt: 'not-a-timestamp',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('invalid_issued_at');
+  });
+});
+
 describe('SfConnectionLifecycleService — applyConnectionRevoked', () => {
   function activeRow(over: any = {}) {
     return {

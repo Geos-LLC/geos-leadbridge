@@ -334,6 +334,12 @@ model Lead {
   // signal read by the follow-up scheduler self-heal to stop enrollments
   // even when a provider failed to persist a Message row.
   lastCustomerActivityAt DateTime?
+  // Trial meter idempotency flag. Set true when this Lead has been counted
+  // toward User.trialLeadsHandled via TrialService.consumeLead. Single-shot
+  // per Lead — webhook retries, late re-deliveries, and the daily Yelp
+  // reconciliation never double-count. Backfills/imports and synthetic test
+  // leads never set this flag and so don't burn trial quota.
+  trialCounted           Boolean   @default(false)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -1587,6 +1593,22 @@ model SfConnection {
   lastErrorAt                 DateTime?
   lastErrorMessage            String?
 
+  // ─── Rotation notification (R1) ───────────────────────────────────
+  // SF's credential.rotated webhook is a notification — it does NOT carry
+  // the plaintext token (correct security posture: secrets only flow over
+  // the OAuth exchange channel). When LB receives the notification, it
+  // records what SF said happened and the grace window, then resolves the
+  // refresh out-of-band (manual re-handshake today; auto-refresh once SF
+  // exposes a service-to-service refresh endpoint).
+  //
+  // Fields are nullable + default false so the migration is additive.
+  // Cleared on the next successful OAuth exchange (handshake source).
+  rotationPending             Boolean  @default(false)
+  pendingRotationKid          String?
+  pendingRotationCredId       String?   // SF sends as int; stored as string
+  pendingRotationGraceExpiresAt DateTime?
+  pendingRotationObservedAt   DateTime?
+
   // ─── Audit ─────────────────────────────────────────────────────────
   connectedAt                 DateTime @default(now())
   disconnectedAt              DateTime?
@@ -1596,6 +1618,7 @@ model SfConnection {
 
   @@index([status])
   @@index([isActive])
+  @@index([rotationPending, pendingRotationGraceExpiresAt])
   @@index([tokenExpiresAt])
   @@index([previousTokenExpiresAt])
   @@map("sf_connections")

@@ -1,11 +1,12 @@
 /**
- * SfConnectionController — Phase 2C PR-C2.1.
+ * SfConnectionController — Phase 2C + PR-C3.
  *
  * Endpoints (all rooted at /v1/integrations/sf/):
  *
  *   POST  /connect/start          JWT — start OAuth handshake
  *   GET   /callback               Public — SF redirects here with code+state
  *   POST  /disconnect             JWT — LB-initiated disconnect
+ *   GET   /connection             JWT — user-safe status view (PR-C3, no secrets)
  *   POST  /orchestration-webhook  Public — HMAC-signed; SF pushes ALL 7
  *                                  event types here (service_*,
  *                                  connection.*, credential.*)
@@ -35,6 +36,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SfOAuthService } from './sf-oauth.service';
 import { SfDisconnectService } from './sf-disconnect.service';
 import { SfConnectionWebhookService } from './sf-connection-webhook.service';
+import { SfConnectionStatusService } from './sf-connection-status.service';
 import type {
   OAuthCallbackQuery,
   SfDisconnectRequest,
@@ -48,6 +50,7 @@ export class SfConnectionController {
     private readonly oauth: SfOAuthService,
     private readonly disconnect: SfDisconnectService,
     private readonly webhook: SfConnectionWebhookService,
+    private readonly status: SfConnectionStatusService,
   ) {}
 
   // ─── POST /connect/start (JWT) ───────────────────────────────────
@@ -88,6 +91,14 @@ export class SfConnectionController {
       error: result.errorCode ?? null,
       detail: result.errorDetail ?? null,
     });
+  }
+
+  // ─── GET /connection (JWT) — PR-C3 user-safe status view ────────
+
+  @UseGuards(JwtAuthGuard)
+  @Get('connection')
+  async getConnectionStatus(@CurrentUser() user: any) {
+    return this.status.getStatusForUser(user.id);
   }
 
   // ─── POST /disconnect (JWT) ──────────────────────────────────────

@@ -9,6 +9,7 @@ import { useAppStore } from '../../store/appStore';
 import { SettingCard, ActionLink, FooterBanner } from '../../components/automation/ui';
 import type { SavedAccount } from '../../types';
 import ConnectionModal from '../../components/ConnectionModal';
+import { ServiceFlowConnectionCard } from '../../components/settings/ServiceFlowConnectionCard';
 import {
   thumbtackApi, leadsApi, integrationsApi, platformsApi, followUpApi,
 } from '../../services/api';
@@ -467,6 +468,13 @@ export function SettingsAccounts() {
           ))}
         </div>
       </SettingCard>
+
+      {/* ──────────────────────────────────────────────────────────────
+          ServiceFlow Connection (PR-C3) — orchestrated booking + lifecycle.
+          Independent from the lead-source platforms above; renders even
+          when no SF connection row exists yet (shows Connect button).
+         ────────────────────────────────────────────────────────────── */}
+      <ServiceFlowConnectionCard />
 
       {/* ──────────────────────────────────────────────────────────────
           Import & Sync — per-platform Chrome-extension import cards.

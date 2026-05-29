@@ -327,3 +327,86 @@ describe('SfConnectionResolver — isEnabledForUser convenience', () => {
     expect(await svc.isEnabledForUser('u1')).toBe(false);
   });
 });
+
+describe('SfConnectionResolver — rotation_pending surfacing (R1)', () => {
+  it('row with rotationPending=true → surfaces pending state + current token still served', async () => {
+    const graceExp = new Date(Date.now() + 4 * 60 * 1000); // 4 min remaining
+    const { svc } = buildSvc({
+      connectionRow: makeActiveConnection({
+        rotationPending: true,
+        pendingRotationCredId: '12',
+        pendingRotationGraceExpiresAt: graceExp,
+      }),
+    });
+    const r = await svc.resolveForUser('u1');
+    expect(r.enabled).toBe(true); // bearer still works
+    expect(r.orchestrationToken).toBe('LIVE-TOKEN-XYZ');
+    expect(r.rotationPending).toBe(true);
+    expect(r.rotationGraceExpiresAt).toEqual(graceExp);
+    expect(r.pendingRotationCredId).toBe('12');
+  });
+
+  it('row without rotationPending → pending=false, no grace fields', async () => {
+    const { svc } = buildSvc({ connectionRow: makeActiveConnection() });
+    const r = await svc.resolveForUser('u1');
+    expect(r.enabled).toBe(true);
+    expect(r.rotationPending).toBe(false);
+    expect(r.rotationGraceExpiresAt).toBeUndefined();
+    expect(r.pendingRotationCredId).toBeUndefined();
+  });
+
+  it('grace_expiring_soon: < 60s remaining → resolver emits WARN log', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const graceExp = new Date(Date.now() + 30_000); // 30s remaining
+    const { svc } = buildSvc({
+      connectionRow: makeActiveConnection({
+        rotationPending: true,
+        pendingRotationCredId: '12',
+        pendingRotationGraceExpiresAt: graceExp,
+      }),
+    });
+    // Patch Nest Logger to spy on warn
+    const loggerSpy = jest.spyOn((svc as any).logger, 'warn');
+    const r = await svc.resolveForUser('u1');
+    expect(r.enabled).toBe(true);
+    expect(loggerSpy).toHaveBeenCalledWith(expect.stringMatching(/rotation_grace_expiring_soon/));
+    loggerSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it('grace_imminent: < 10s remaining → resolver emits ERROR log', async () => {
+    const graceExp = new Date(Date.now() + 5_000); // 5s remaining
+    const { svc } = buildSvc({
+      connectionRow: makeActiveConnection({
+        rotationPending: true,
+        pendingRotationCredId: '12',
+        pendingRotationGraceExpiresAt: graceExp,
+      }),
+    });
+    const loggerSpy = jest.spyOn((svc as any).logger, 'error');
+    const r = await svc.resolveForUser('u1');
+    expect(r.enabled).toBe(true);
+    expect(loggerSpy).toHaveBeenCalledWith(expect.stringMatching(/rotation_grace_imminent/));
+    loggerSpy.mockRestore();
+  });
+
+  it('grace_elapsed: past expiry → resolver emits ERROR log + still returns current token', async () => {
+    const graceExp = new Date(Date.now() - 30_000); // 30s ago
+    const { svc } = buildSvc({
+      connectionRow: makeActiveConnection({
+        rotationPending: true,
+        pendingRotationCredId: '12',
+        pendingRotationGraceExpiresAt: graceExp,
+      }),
+    });
+    const loggerSpy = jest.spyOn((svc as any).logger, 'error');
+    const r = await svc.resolveForUser('u1');
+    // Resolver still serves the current token — only the connection.connected /
+    // disconnect / status fields drive enabled=false. The rotation alert is
+    // for monitoring; SF will start rejecting the stale token but LB doesn't
+    // pre-emptively shut down.
+    expect(r.enabled).toBe(true);
+    expect(loggerSpy).toHaveBeenCalledWith(expect.stringMatching(/rotation_grace_elapsed/));
+    loggerSpy.mockRestore();
+  });
+});
