@@ -264,6 +264,116 @@ describe('SfConnectionWebhookService — idempotency', () => {
     expect(lifecycle.applyConnectionConnected).not.toHaveBeenCalled();
   });
 
+  // ─── Envelope aliasing + confirmation-shape (Option A) ────────────
+  // SF S4 wire format uses `data` for the event body; the LB-original
+  // contract draft used `payload`. Both must work; `data` wins when both
+  // are present. The OAuth exchange remains the authoritative provisioning
+  // channel — webhooks are operational events / confirmations.
+
+  it('connection.connected envelope.data confirmation shape → applied_confirmation, no reprovisioning', async () => {
+    const activeConn = { ...CONN, signatureKeyId: 'k1', isActive: true, status: 'active' };
+    const { svc, lifecycle, calls } = buildDeps({ conn: activeConn });
+    const confirmation = {
+      event_id: 'evt-confirm-1',
+      event_type: 'connection.connected',
+      occurred_at: new Date().toISOString(),
+      sf_tenant_id: 99999,
+      data: {
+        credential: { kid: 'k1', cred_id: 10, token_prefix: 'sfo_v1.eyJ2Ij', expires_at: '2026-08-27T00:00:00.000Z' },
+        connected_at: '2026-05-29T00:19:30.990Z',
+        webhook_set_at: '2026-05-29T00:19:30.990Z',
+      },
+    };
+    const r = await svc.ingest(JSON.stringify(confirmation), sign(confirmation, { kid: 'k1' }).headers);
+    expect(r.httpStatus).toBe(200);
+    expect(r.result).toBe('accepted'); // top-level result; resultTag goes into the log + audit row
+    // Critical: the lifecycle was NOT called — confirmation must not
+    // re-encrypt tokens / rewrite subscription secret / mutate provisioning.
+    expect(lifecycle.applyConnectionConnected).not.toHaveBeenCalled();
+    // Audit row written so the heartbeat is observable.
+    expect(calls.event_create.length).toBe(1);
+    expect(calls.event_create[0].data.result).toBe('applied_confirmation');
+    expect(calls.event_create[0].data.status).toBe('applied');
+  });
+
+  it('connection.connected envelope.payload.provisioning re-establishment shape → calls lifecycle', async () => {
+    // Backward-compat: full provisioning still triggers the lifecycle path.
+    const { svc, lifecycle } = buildDeps();
+    const req = sign(envelope()); // default fixture has payload.provisioning
+    await svc.ingest(req.rawBody, req.headers);
+    expect(lifecycle.applyConnectionConnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirmation rejected when connection is not already active', async () => {
+    // No provisioning AND connection not active = cold sf_push, not supported.
+    const { svc, lifecycle, calls } = buildDeps({ conn: { ...CONN, signatureKeyId: 'k1' } });
+    // Override conn to mark it inactive via the buildDeps prisma mock —
+    // simpler approach: simulate by passing a conn override the service
+    // will read. Use the lifecycle service to keep the existing-conn check.
+    const confirmation = {
+      event_id: 'evt-confirm-cold',
+      event_type: 'connection.connected',
+      occurred_at: new Date().toISOString(),
+      sf_tenant_id: 99999,
+      data: { credential: { kid: 'k1' }, connected_at: 't', webhook_set_at: 't' },
+    };
+    // CONN fixture doesn't expose isActive/status — buildDeps's CONN sets
+    // signatureKeyId via opt, isActive/status are absent → falsy. So the
+    // handler's `if (!conn.isActive || conn.status !== 'active')` fires.
+    const r = await svc.ingest(JSON.stringify(confirmation), sign(confirmation, { kid: 'k1' }).headers);
+    expect(r.httpStatus).toBe(500);
+    expect(r.result).toBe('exception');
+    expect(r.error).toMatch(/confirmation without active connection/);
+    expect(lifecycle.applyConnectionConnected).not.toHaveBeenCalled();
+  });
+
+  it('credential.rotated reads envelope.data (SF wire) AND envelope.payload (legacy)', async () => {
+    const { svc, lifecycle } = buildDeps();
+    // SF wire shape (data)
+    const sfShape = {
+      event_id: 'evt-rot-data', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        new_credential: { token: 'newtok', kid: 'k2', token_prefix: 'sfo_v1.aa', issued_at: 't1', expires_at: 't2' },
+        grace_period_seconds: 300,
+      },
+    };
+    await svc.ingest(JSON.stringify(sfShape), sign(sfShape).headers);
+    expect(lifecycle.applyCredentialRotated).toHaveBeenCalledTimes(1);
+
+    // Legacy shape (payload) — both must work
+    const legacyShape = { ...sfShape, event_id: 'evt-rot-legacy', data: undefined, payload: sfShape.data };
+    delete (legacyShape as any).data;
+    await svc.ingest(JSON.stringify(legacyShape), sign(legacyShape).headers);
+    expect(lifecycle.applyCredentialRotated).toHaveBeenCalledTimes(2);
+  });
+
+  it('data wins over payload when both present (defensive)', async () => {
+    // If a buggy sender includes both, SF wire format (data) takes precedence.
+    const { svc, lifecycle } = buildDeps();
+    const env = {
+      event_id: 'evt-both', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: { new_credential: { token: 'from_data', kid: 'k2', token_prefix: 'sfo_v1.aa', issued_at: 't1', expires_at: 't2' } },
+      payload: { new_credential: { token: 'from_payload', kid: 'k3', token_prefix: 'sfo_v1.bb', issued_at: 't1', expires_at: 't2' } },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    const arg = lifecycle.applyCredentialRotated.mock.calls[0][0];
+    expect(arg.payload.new_credential.token).toBe('from_data');
+    expect(arg.payload.new_credential.kid).toBe('k2');
+  });
+
+  it('connection.revoked accepts envelope.data shape', async () => {
+    const { svc, lifecycle } = buildDeps();
+    const env = {
+      event_id: 'evt-rev-data', event_type: 'connection.revoked',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: { reason: 'user_requested' },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(lifecycle.applyConnectionRevoked).toHaveBeenCalledTimes(1);
+  });
+
   it('duplicate response carries original event_type even if body claims different type', async () => {
     // Defensive: SF should never send a different event_type for the same
     // event_id, but if they did, our response reflects what was originally
