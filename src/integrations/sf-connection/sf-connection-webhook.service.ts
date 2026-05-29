@@ -50,6 +50,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import { SfConnectionLifecycleService } from './sf-connection-lifecycle.service';
+import { SfRotationRefreshService } from './sf-rotation-refresh.service';
 import { BookingOrchestratorService } from '../../booking-orchestrator/booking-orchestrator.service';
 import {
   SF_WEBHOOK_EVENT_TYPES,
@@ -74,6 +75,7 @@ export class SfConnectionWebhookService {
     private readonly lifecycle: SfConnectionLifecycleService,
     @Inject(forwardRef(() => BookingOrchestratorService))
     private readonly bookingOrchestrator: BookingOrchestratorService,
+    private readonly rotationRefresh: SfRotationRefreshService,
   ) {}
 
   /**
@@ -486,6 +488,15 @@ export class SfConnectionWebhookService {
             if (r.noop) resultTag = 'applied_noop_rotation_notification';
             else if (r.ok) resultTag = 'applied_rotation_notification';
             else throw new Error(`rotation_notification_rejected:${r.reason ?? 'unknown'}`);
+
+            // R1B: immediate refresh trigger when SF flags the rotation as
+            // requiring proactive pickup. Fire-and-forget; the worker
+            // safety-net catches anything missed. The webhook ack must not
+            // block on the SF refresh round-trip.
+            const refreshRequired = (envBody as any)?.refresh_required === true;
+            if (refreshRequired && r.ok && !r.noop) {
+              this.rotationRefresh.triggerImmediate(conn.id);
+            }
             break;
           }
 

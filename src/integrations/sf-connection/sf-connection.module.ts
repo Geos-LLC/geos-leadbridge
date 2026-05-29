@@ -21,6 +21,7 @@ import { SfConnectionLifecycleService } from './sf-connection-lifecycle.service'
 import { SfConnectionWebhookService } from './sf-connection-webhook.service';
 import { SfDisconnectService } from './sf-disconnect.service';
 import { SfConnectionStatusService } from './sf-connection-status.service';
+import { SfRotationRefreshService } from './sf-rotation-refresh.service';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SfConnectionStatusService } from './sf-connection-status.service';
     SfConnectionWebhookService,
     SfDisconnectService,
     SfConnectionStatusService,
+    SfRotationRefreshService,
   ],
   exports: [SfConnectionLifecycleService],
 })

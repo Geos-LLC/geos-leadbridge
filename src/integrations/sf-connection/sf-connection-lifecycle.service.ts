@@ -81,6 +81,45 @@ export interface ApplyCredentialRotatedInput {
 }
 
 /**
+ * R1B — input for materializing a refreshed credential. SF delivered the
+ * plaintext token via the LB-initiated refresh HTTP response (NOT over
+ * the webhook channel). This writer:
+ *   - encrypts + stores the new bearer
+ *   - preserves the prior bearer for SF's declared grace window
+ *   - updates token metadata (kid, prefix, issued/expires, kid sig metadata)
+ *   - sets tokenLastRotationSource='sf_refresh'
+ *   - clears all rotationPending* fields (the refresh closed the loop)
+ *
+ * Idempotent on identical (userId, newCredId, tokenIssuedAt): re-applying
+ * the same refresh is a noop.
+ */
+export interface ApplyCredentialRefreshInput {
+  userId: string;
+  /** Plaintext token from the refresh response. */
+  newToken: string;
+  newKid: string;
+  newTokenPrefix: string;
+  /** SF's internal credential id (informational; stored as string). */
+  newCredId: string | number;
+  /** SF-declared issuance time of the new credential. */
+  newIssuedAt: string;
+  /** SF-declared expiry. Optional. */
+  newExpiresAt?: string | null;
+  /**
+   * How long SF will still accept the *previous* token from now, per SF's
+   * grace clock. LB uses this to set previousTokenExpiresAt so the existing
+   * resolver fallback path naturally retires the prior token in lockstep
+   * with SF. If absent, falls back to the connection's existing
+   * pendingRotationGraceExpiresAt.
+   */
+  previousGraceRemainingSeconds?: number | null;
+  /** Optional signature-metadata refresh (SF may rotate signing params too). */
+  signatureAlgorithm?: string | null;
+  maxClockSkewSeconds?: number | null;
+  eventId?: string | null;
+}
+
+/**
  * R1 — input for the notification-shape rotation path. SF sends this
  * when they've rotated the credential on their side but are NOT
  * re-delivering the plaintext token over the webhook channel (correct
@@ -448,6 +487,115 @@ export class SfConnectionLifecycleService {
     );
 
     return { ok: true };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // applyCredentialRefresh — R1B
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Called by SfRotationRefreshService after a successful POST to SF's
+  // /credentials/refresh endpoint. Materializes the new plaintext token
+  // SF returned over the (authenticated, TLS-only) HTTP response into
+  // encrypted storage, preserves the prior bearer for SF's declared
+  // grace, clears the R1 pending fields. Idempotent.
+
+  async applyCredentialRefresh(input: ApplyCredentialRefreshInput): Promise<ApplyResult> {
+    const { userId, newToken, newKid, newTokenPrefix, newCredId, newIssuedAt, eventId } = input;
+    const encryptionKey = this.getEncryptionKey();
+    const issuedAt = new Date(newIssuedAt);
+    if (isNaN(issuedAt.getTime())) {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=refresh_bad_issued_at user_id=${userId} ` +
+          `event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: 'invalid_issued_at' };
+    }
+
+    const conn = await this.prisma.sfConnection.findUnique({ where: { userId } });
+    if (!conn) {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=refresh_no_row user_id=${userId} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: 'no_connection' };
+    }
+    if (!conn.isActive || conn.status === 'revoked' || conn.status === 'disconnected') {
+      this.logger.warn(
+        `[SfConnectionLifecycle] event=refresh_inactive_target user_id=${userId} ` +
+          `status=${conn.status} event_id=${eventId ?? 'null'}`,
+      );
+      return { ok: false, reason: `status_${conn.status}` };
+    }
+
+    // Idempotent on (cred_id, issuedAt). Two LB instances ran the same
+    // refresh? The second's tx finds the row already advanced and noops.
+    const newCredIdStr = String(newCredId);
+    if (
+      conn.orchestrationTokenKid === newKid &&
+      conn.tokenIssuedAt.getTime() === issuedAt.getTime() &&
+      (conn.pendingRotationCredId == null || conn.pendingRotationCredId === newCredIdStr) &&
+      !conn.rotationPending
+    ) {
+      this.logger.log(
+        `[SfConnectionLifecycle] event=refresh_noop user_id=${userId} ` +
+          `cred_id=${newCredIdStr} event_id=${eventId ?? 'null'} reason=already_applied`,
+      );
+      return { ok: true, noop: true, connectionId: conn.id };
+    }
+
+    // Determine the grace expiry: prefer SF's response, fall back to the
+    // pending notification's grace, fall back to a sensible default.
+    let previousTokenExpiresAt: Date;
+    if (typeof input.previousGraceRemainingSeconds === 'number' && input.previousGraceRemainingSeconds > 0) {
+      previousTokenExpiresAt = new Date(Date.now() + input.previousGraceRemainingSeconds * 1000);
+    } else if (conn.pendingRotationGraceExpiresAt) {
+      previousTokenExpiresAt = conn.pendingRotationGraceExpiresAt;
+    } else {
+      previousTokenExpiresAt = new Date(Date.now() + DEFAULT_GRACE_SECONDS * 1000);
+    }
+
+    const newEncrypted = EncryptionUtil.encrypt(newToken, encryptionKey);
+    const newExpiresAt = input.newExpiresAt ? new Date(input.newExpiresAt) : null;
+
+    await this.prisma.sfConnection.update({
+      where: { userId },
+      data: {
+        // Demote current → previous for SF's grace window.
+        previousOrchestrationToken: conn.orchestrationToken,
+        previousTokenExpiresAt,
+        // Install new.
+        orchestrationToken: newEncrypted,
+        orchestrationTokenKid: newKid,
+        tokenPrefix: newTokenPrefix,
+        tokenIssuedAt: issuedAt,
+        tokenExpiresAt: newExpiresAt,
+        tokenLastReceivedAt: new Date(),
+        tokenLastRotationSource: 'sf_refresh',
+        // Signing metadata: only update if SF echoed them.
+        ...(input.signatureAlgorithm != null ? { signatureAlgorithm: input.signatureAlgorithm } : {}),
+        ...(input.maxClockSkewSeconds != null ? { maxClockSkewSeconds: input.maxClockSkewSeconds } : {}),
+        signatureKeyId: newKid,
+        // The refresh closes the R1 pending loop.
+        rotationPending: false,
+        pendingRotationKid: null,
+        pendingRotationCredId: null,
+        pendingRotationGraceExpiresAt: null,
+        pendingRotationObservedAt: null,
+        // Status stays 'active' — the new bearer is live; resolver picks it
+        // up on the next call. status='rotating' is reserved for the
+        // legacy full-rotation webhook path which actually opens a fresh
+        // grace; refresh is a transparent in-place swap.
+        status: 'active',
+        updatedAt: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `[SfConnectionLifecycle] event=refresh_applied user_id=${userId} event_id=${eventId ?? 'null'} ` +
+        `new_token_kid=${newKid} new_token_prefix=${newTokenPrefix} new_token_len=${newToken.length} ` +
+        `new_cred_id=${newCredIdStr} prev_grace_expires_at=${previousTokenExpiresAt.toISOString()}`,
+    );
+
+    return { ok: true, connectionId: conn.id };
   }
 
   // ═══════════════════════════════════════════════════════════════════════

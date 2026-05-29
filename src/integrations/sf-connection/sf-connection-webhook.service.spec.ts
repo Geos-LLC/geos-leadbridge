@@ -50,9 +50,12 @@ function buildDeps(opts: {
   const orchestrator: any = {
     handleServiceOutcomeEvent: jest.fn(async () => { if (opts.orchestratorThrows) throw new Error('boom'); }),
   };
+  const rotationRefresh: any = {
+    triggerImmediate: jest.fn(),
+  };
   return {
-    svc: new SfConnectionWebhookService(prisma, cfg, lifecycle, orchestrator),
-    prisma, calls, lifecycle, orchestrator,
+    svc: new SfConnectionWebhookService(prisma, cfg, lifecycle, orchestrator, rotationRefresh),
+    prisma, calls, lifecycle, orchestrator, rotationRefresh,
   };
 }
 
@@ -418,6 +421,46 @@ describe('SfConnectionWebhookService — idempotency', () => {
     await svc.ingest(JSON.stringify(env), sign(env).headers);
     expect(lifecycle.applyCredentialRotated).toHaveBeenCalledTimes(1);
     expect(lifecycle.applyCredentialRotationNotification).not.toHaveBeenCalled();
+  });
+
+  it('credential.rotated notification with refresh_required=true → fires SfRotationRefreshService.triggerImmediate', async () => {
+    const { svc, lifecycle, rotationRefresh } = buildDeps();
+    // Per the canonical SF S4 wire format, refresh_required lives INSIDE
+    // event.data (not at the envelope top level) — matches SF's actual
+    // payload shape and what the LB envelopePayload helper exposes.
+    const env = {
+      event_id: 'evt-rot-notif-immediate', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      data: {
+        new_credential: { cred_id: 12, kid: 'sf_orch_2026_05', token_prefix: 'sfo_v1.aa', expires_at: '2026-08-27T00:00:00Z' },
+        previous_cred_id: 11,
+        previous_grace_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        refresh_required: true,
+      },
+    };
+    const r = await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(r.httpStatus).toBe(200);
+    // The notification is persisted, AND the immediate trigger is enqueued
+    expect(lifecycle.applyCredentialRotationNotification).toHaveBeenCalledTimes(1);
+    expect(rotationRefresh.triggerImmediate).toHaveBeenCalledTimes(1);
+    expect(rotationRefresh.triggerImmediate).toHaveBeenCalledWith('c1');
+  });
+
+  it('credential.rotated notification WITHOUT refresh_required → does NOT fire immediate trigger', async () => {
+    const { svc, lifecycle, rotationRefresh } = buildDeps();
+    const env = {
+      event_id: 'evt-rot-notif-deferred', event_type: 'credential.rotated',
+      occurred_at: new Date().toISOString(), sf_tenant_id: 99999,
+      // refresh_required absent / false
+      data: {
+        new_credential: { cred_id: 12, kid: 'sf_orch_2026_05', token_prefix: 'sfo_v1.aa', expires_at: '2026-08-27T00:00:00Z' },
+        previous_cred_id: 11,
+        previous_grace_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      },
+    };
+    await svc.ingest(JSON.stringify(env), sign(env).headers);
+    expect(lifecycle.applyCredentialRotationNotification).toHaveBeenCalledTimes(1);
+    expect(rotationRefresh.triggerImmediate).not.toHaveBeenCalled();
   });
 
   it('connection.revoked accepts envelope.data shape', async () => {
