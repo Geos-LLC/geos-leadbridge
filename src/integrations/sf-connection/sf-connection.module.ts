@@ -12,7 +12,8 @@
  */
 
 import { Module, forwardRef } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../../common/utils/prisma.module';
 import { BookingOrchestratorModule } from '../../booking-orchestrator/booking-orchestrator.module';
 import { SfConnectionController } from './sf-connection.controller';
@@ -22,12 +23,25 @@ import { SfConnectionWebhookService } from './sf-connection-webhook.service';
 import { SfDisconnectService } from './sf-disconnect.service';
 import { SfConnectionStatusService } from './sf-connection-status.service';
 import { SfRotationRefreshService } from './sf-rotation-refresh.service';
+import { SfProvisioningService } from './sf-provisioning.service';
 
 @Module({
   imports: [
     ConfigModule,
     PrismaModule,
     forwardRef(() => BookingOrchestratorModule),
+    // Local JwtModule so SfProvisioningService can mint short-lived
+    // link_token JWTs without depending on AuthModule's JwtService
+    // configuration (which targets 7-day session tokens). Uses the
+    // same secret since link_tokens are verified by the same library
+    // and we want a single signing key on the machine.
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('jwt.secret') || 'default-secret',
+      }),
+      inject: [ConfigService],
+    }),
   ],
   controllers: [SfConnectionController],
   providers: [
@@ -37,6 +51,7 @@ import { SfRotationRefreshService } from './sf-rotation-refresh.service';
     SfDisconnectService,
     SfConnectionStatusService,
     SfRotationRefreshService,
+    SfProvisioningService,
   ],
   exports: [SfConnectionLifecycleService],
 })
