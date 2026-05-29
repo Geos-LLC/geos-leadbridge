@@ -131,18 +131,11 @@ export class SfConnectionWebhookService {
         error: 'invalid timestamp',
       };
     }
-    const nowSec = Math.floor(Date.now() / 1000);
-    const drift = nowSec - tsNum;
+    const drift = Math.floor(Date.now() / 1000) - tsNum;
     if (Math.abs(drift) > SIGNATURE_SKEW_SECONDS) {
-      // Diagnostic: include raw header value + raw body sha + secret-id
-      // fingerprint so SF can directly correlate what they sent vs what
-      // LB received without us logging anything sensitive.
-      const bodySha = crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 16);
-      const bodyLen = Buffer.byteLength(rawBody, 'utf8');
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=replay_rejected error=timestamp_drift ` +
-          `drift=${drift} drift_source=x-sf-timestamp ts_raw="${ts}" ts_parsed=${tsNum} now_sec=${nowSec} ` +
-          `body_sha256_12=${bodySha} body_bytes=${bodyLen} ` +
+          `drift=${drift} drift_source=x-sf-timestamp ` +
           `event_type=${eventTypeHeader ?? 'null'} sf_tenant_id=${tenantIdHeader ?? 'null'}`,
       );
       return {
