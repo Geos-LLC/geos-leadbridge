@@ -4,20 +4,31 @@ import { SettingCard } from '../automation/ui';
 import { sfConnectionApi, type SfConnectionStatus } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 
-// ServiceFlow Connection — PR-C3.
+// ServiceFlow Connection — PR-C3 (READ-ONLY mode, 2026-05-29 product correction)
 //
-// Renders one card on the Settings → Integrations page that shows the
-// current SF orchestration connection state for the logged-in user and
-// offers Connect / Disconnect actions.
+// Renders one card on Settings → Connected Sources that shows the current
+// SF orchestration connection state for the logged-in user.
 //
-// State surfaces (the seven the user asked for):
-//   - Not connected     (no row, or revoked / disconnected — show Connect)
-//   - Connecting        (status=pending; show spinner)
-//   - Active            (status=active; show success badge + Disconnect)
+// Product-architecture note: LB users do NOT initiate the SF connection
+// from LB. The connection is initiated from inside ServiceFlow ("Connect
+// LeadBridge" entry, to be implemented separately). LB is the OAuth
+// client + token store + webhook receiver but does NOT own the tenant-
+// facing initiation UX.
+//
+// This card therefore:
+//   - Renders ONLY when a sf_connection row already exists for the user
+//     (i.e. SF previously initiated and the OAuth handshake completed)
+//   - Shows read-only status + Disconnect (terminating an existing
+//     connection is allowed from LB — only initiation is gated)
+//   - Does NOT render a "Connect ServiceFlow" button anywhere
+//
+// State surfaces (for an existing connection):
+//   - Active            (status=active; success badge + Disconnect)
 //   - Active + rotation pending  (R1 signal — amber badge + grace countdown)
-//   - Error             (status=error + lastErrorMessage; show Reconnect)
-//   - Revoked           (status=revoked; show "SF revoked — Reconnect")
-//   - Disconnected      (status=disconnected by user; show Connect)
+//   - Pending           (handshake in flight; spinner; no actions)
+//   - Error             (status=error + lastErrorMessage; Disconnect to clean up)
+//   - Revoked           (status=revoked; instruct to re-initiate from SF)
+//   - Disconnected      (status=disconnected; instruct to re-initiate from SF)
 //
 // All secret material is excluded from this surface — the backend
 // GET /v1/integrations/sf/connection only returns safe metadata.
@@ -93,24 +104,10 @@ export function ServiceFlowConnectionCard() {
     return () => window.clearTimeout(t);
   }, []);
 
-  async function onConnect() {
-    setBusy('connect');
-    try {
-      const r = await sfConnectionApi.startConnect();
-      if (r.success && r.redirectUrl) {
-        // Send the user to SF authorize. SF will redirect them back to
-        // /api/v1/integrations/sf/callback which finishes the exchange
-        // and bounces to /settings/integrations?sf=connected.
-        window.location.assign(r.redirectUrl);
-        return;
-      }
-      notify.error('ServiceFlow', r.error ?? 'Could not start connection');
-    } catch (e: any) {
-      notify.error('ServiceFlow', e?.message ?? 'Connect failed');
-    } finally {
-      setBusy(null);
-    }
-  }
+  // Note: Connect handler intentionally removed. LB users do not initiate
+  // the SF connection from LB — initiation happens inside ServiceFlow.
+  // See `project_sf_connect_entrypoint_2026_05_29.md` for the SF-side
+  // entry-point design.
 
   async function onDisconnect() {
     if (!window.confirm('Disconnect ServiceFlow? This will stop orchestrated bookings.')) return;
@@ -130,10 +127,13 @@ export function ServiceFlowConnectionCard() {
     }
   }
 
-  const showConnect =
-    !loading && status &&
-    (status.status === 'none' || status.status === 'disconnected' ||
-     status.status === 'revoked' || status.status === 'error');
+  // LB UI does not expose a Connect action. The card is hidden entirely
+  // when there's no existing sf_connection row — there's nothing for the
+  // LB user to do on a fresh tenant. SF initiates; LB observes.
+  if (!loading && status && status.status === 'none') {
+    return null;
+  }
+
   const showDisconnect =
     !loading && status &&
     (status.status === 'active' || status.status === 'rotating' || status.status === 'pending');
@@ -240,44 +240,34 @@ export function ServiceFlowConnectionCard() {
             </div>
           )}
 
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
-            {showConnect && (
-              <button
-                type="button"
-                onClick={onConnect}
-                disabled={busy !== null}
-                style={{
-                  padding: '8px 14px', fontSize: 13, fontWeight: 600,
-                  background: 'var(--lb-accent)', color: 'white',
-                  border: 0, borderRadius: 8, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  opacity: busy ? 0.6 : 1,
-                }}
-              >
-                {busy === 'connect' && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
-                {status.status === 'revoked' || status.status === 'error' ? 'Reconnect' : 'Connect ServiceFlow'}
-              </button>
-            )}
-            {showDisconnect && (
-              <button
-                type="button"
-                onClick={onDisconnect}
-                disabled={busy !== null}
-                style={{
-                  padding: '8px 14px', fontSize: 13, fontWeight: 600,
-                  background: 'white', color: 'var(--lb-ink-1)',
-                  border: '1.5px solid var(--lb-line)', borderRadius: 8,
-                  cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  opacity: busy ? 0.6 : 1,
-                }}
-              >
-                {busy === 'disconnect' && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
-                Disconnect
-              </button>
-            )}
-          </div>
+          {/* Actions — Disconnect only. Initiation lives on ServiceFlow side. */}
+          {(showDisconnect || status.status === 'revoked' || status.status === 'disconnected' || status.status === 'error') && (
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
+              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                {showDisconnect
+                  ? 'To re-initiate, do so from inside ServiceFlow.'
+                  : 'Connection is not active. To re-initiate, do so from inside ServiceFlow.'}
+              </div>
+              {showDisconnect && (
+                <button
+                  type="button"
+                  onClick={onDisconnect}
+                  disabled={busy !== null}
+                  style={{
+                    padding: '8px 14px', fontSize: 13, fontWeight: 600,
+                    background: 'white', color: 'var(--lb-ink-1)',
+                    border: '1.5px solid var(--lb-line)', borderRadius: 8,
+                    cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  {busy === 'disconnect' && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
+                  Disconnect
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </SettingCard>
