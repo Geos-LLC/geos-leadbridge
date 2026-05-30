@@ -143,6 +143,52 @@ export class SfHistoricalSyncController {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // SF pull endpoint (HMAC-signed public route)
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // SF-driven reconciliation: when SF wants to match historical LB leads
+  // (either in response to a user clicking "Sync from ServiceFlow" in
+  // LB, or on SF's own schedule), SF POSTs here with `{user_id}` to pull
+  // the candidate match-key inventory. SF then runs matching on its own
+  // side and posts results back via /link-leads-bulk.
+  //
+  // Manual-link is reserved for support/debug only — this is the canonical
+  // production reconciliation path.
+  @Public()
+  @Post('v1/integrations/sf/historical-sync/candidates')
+  @HttpCode(HttpStatus.OK)
+  async sfCandidates(@Req() req: Request, @Body() body: { user_id?: string; sync_statuses?: string[]; limit?: number }) {
+    const rawBody = this.getRawBody(req);
+    const hmac = this.verifyProvisioningHmac(rawBody, req.headers);
+    if (!hmac.ok) {
+      this.logger.warn(`[SfHistoricalSync] event=candidates_hmac_rejected reason=${hmac.reason}`);
+      return { ok: false, error: hmac.reason, candidates: [] };
+    }
+    const userId = body?.user_id;
+    if (!userId || typeof userId !== 'string') {
+      return { ok: false, error: 'user_id_required', candidates: [] };
+    }
+    // Default subset: pending leads (the connection-time enumeration's
+    // output). SF can request other syncStatuses (e.g. needs_review, failed)
+    // by passing them explicitly.
+    const limit = Math.min(body?.limit ?? 500, 1000);
+    const rows: any[] = [];
+    const requestedStatuses = (body?.sync_statuses && body.sync_statuses.length > 0)
+      ? body.sync_statuses
+      : ['pending'];
+    for (const ss of requestedStatuses) {
+      const batch = await this.sync.candidates(userId, { syncStatus: ss as any, limit });
+      rows.push(...batch);
+      if (rows.length >= limit) break;
+    }
+    this.logger.log(
+      `[SfHistoricalSync] event=sf_pull_candidates user_id=${userId} ` +
+        `requested=${JSON.stringify(requestedStatuses)} returned=${rows.length}`,
+    );
+    return { ok: true, user_id: userId, count: rows.length, candidates: rows.slice(0, limit) };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // SF receiver (HMAC-signed public route)
   // ═══════════════════════════════════════════════════════════════════
   //

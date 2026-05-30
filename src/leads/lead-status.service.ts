@@ -77,6 +77,10 @@ export type WriteSkipReason =
   | 'invalid_status'
   | 'hard_terminal'
   | 'sf_protected'
+  // SF-connected mode: a normal-user manual write on an SF-linked lead is
+  // rejected because SF owns lifecycle. Admin/support paths bypass by
+  // passing WriteStatusInput.adminOverride=true.
+  | 'sf_managed'
   | 'automation_terminal'
   | 'pipeline_downgrade'
   | 'duplicate'
@@ -128,6 +132,14 @@ export interface WriteStatusInput {
   metadata?: Record<string, any> | null;
   /** Additional updates that should be written in the same transaction (e.g. sfJobId, sfLastEventAt). */
   extraLeadUpdates?: Record<string, any>;
+  /**
+   * Admin/support escape hatch. When true, the sf_managed guard (which
+   * normally blocks `source='manual'` writes on SF-linked leads under an
+   * active sf_connection) is bypassed. ONLY admin/support paths that have
+   * already cleared a RequiresSupportGrant decorator should set this true.
+   * Normal user-facing routes MUST leave this undefined/false.
+   */
+  adminOverride?: boolean;
 }
 
 export interface WriteStatusResult {
@@ -327,6 +339,34 @@ export class LeadStatusService {
       this.metrics?.recordSkip('sf_protected');
       this.logSkip(input, lead.id, oldStatus, newStatus, 'sf_protected', lead.platformStatus);
       return this.skipped(lead, 'sf_protected');
+    }
+
+    // ── Guard 4b: SF-managed lead (manual user writes blocked) ────────────
+    // Architecture: a tenant operates in one of two modes.
+    //   - Autonomous LB mode: no sf_connection. LB owns status. Manual
+    //     writes flow normally (this guard short-circuits).
+    //   - SF-connected mode: tenant has an active sf_connection AND the
+    //     specific lead is linked (sfJobId set). SF is the source of
+    //     truth; LB mirrors SF. A normal-user "mark done / mark lost"
+    //     from the LB UI on a linked lead is rejected — the operator
+    //     must drive the change in SF (which then flows back to LB via
+    //     job.status_changed).
+    // Admin/support paths that have already passed RequiresSupportGrant
+    // can bypass by setting WriteStatusInput.adminOverride=true.
+    if (
+      input.source === 'manual' &&
+      lead.sfJobId &&
+      !input.adminOverride
+    ) {
+      const conn = await this.prisma.sfConnection.findUnique({
+        where: { userId: lead.userId },
+        select: { isActive: true, status: true },
+      });
+      if (conn && conn.isActive && conn.status === 'active') {
+        this.metrics?.recordSkip('sf_managed');
+        this.logSkip(input, lead.id, oldStatus, newStatus, 'sf_managed', lead.platformStatus);
+        return this.skipped(lead, 'sf_managed');
+      }
     }
 
     // ── Guard 5: automation-terminal (lb_automation only) ─────────────────
