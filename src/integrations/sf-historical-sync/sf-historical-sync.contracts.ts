@@ -135,6 +135,8 @@ export interface BulkLinkRowResult {
 
 export interface BulkLinkResponse {
   ok: boolean;
+  /** Populated on top-level rejections (missing_headers, invalid_body, etc.) */
+  error?: string;
   summary: {
     total: number;
     linked: number;

@@ -531,7 +531,13 @@ export class LeadsController {
   }
 
   /**
-   * Update lead fields (e.g., customerPhone from message detection)
+   * Update lead fields (e.g., customerPhone from message detection).
+   *
+   * IMPORTANT: any status field on this route is routed through
+   * `LeadStatusService.writeStatus` so the full guard chain applies
+   * (sf_managed / pipeline_downgrade / hard_terminal / dedup / etc.).
+   * Previously this method did a direct prisma.lead.update that bypassed
+   * every guard — see SfHistoricalSync rollout (2026-05-30) for why.
    */
   @Patch(':id')
   async updateLead(
@@ -542,18 +548,32 @@ export class LeadsController {
     const lead = await this.prisma.lead.findFirst({ where: { id, userId: user.id } });
     if (!lead) return { success: false, error: 'Lead not found' };
 
+    // Status changes go through the guarded write path. We hand them off
+    // FIRST so a sf_managed / pipeline_downgrade rejection short-circuits
+    // before the non-status mutations land.
+    if (body.status && body.status !== lead.status) {
+      const statusResult = await this.leadStatusService.writeStatus({
+        leadId: id,
+        newStatus: body.status,
+        source: 'manual',
+        actorType: 'user',
+        actorId: user.id,
+      });
+      if (!statusResult.applied) {
+        return {
+          success: false,
+          error: 'status_write_rejected',
+          skipReason: statusResult.skipReason ?? null,
+          currentStatus: statusResult.status,
+        };
+      }
+    }
+
+    // Non-status fields write directly (no guards needed).
     const data: any = {};
     if (body.customerPhone) data.customerPhone = body.customerPhone;
-    if (body.status) data.status = body.status;
-
-    await this.prisma.lead.update({ where: { id }, data });
-
-    // Emit CRM webhook on status change
-    if (body.status && body.status !== lead.status) {
-      this.crmWebhookService.emit(user.id, 'lead.status_changed', {
-        userId: user.id, platform: lead.platform, businessId: lead.businessId,
-        leadId: id, previousStatus: lead.status,
-      }).catch(() => {});
+    if (Object.keys(data).length > 0) {
+      await this.prisma.lead.update({ where: { id }, data });
     }
 
     return { success: true };

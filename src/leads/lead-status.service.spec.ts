@@ -28,7 +28,7 @@ import { LeadStatusService } from './lead-status.service';
 const LEAD_ID = 'lead-1';
 const USER_ID = 'user-1';
 
-function buildPrismaMock(lead: Partial<any> = {}) {
+function buildPrismaMock(lead: Partial<any> = {}, opts: { sfConnection?: any } = {}) {
   const state: any = {
     lead: {
       id: LEAD_ID,
@@ -45,6 +45,7 @@ function buildPrismaMock(lead: Partial<any> = {}) {
       reengageAt: null,
       ...lead,
     },
+    sfConnection: opts.sfConnection ?? null, // null = no SF connection
     updates: [] as any[],
     audits: [] as any[],
   };
@@ -57,6 +58,9 @@ function buildPrismaMock(lead: Partial<any> = {}) {
         state.updates.push(data);
         return state.lead;
       }),
+    },
+    sfConnection: {
+      findUnique: jest.fn().mockImplementation(async () => state.sfConnection),
     },
     leadStatusAuditLog: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
@@ -535,6 +539,137 @@ describe('LeadStatusService', () => {
       });
 
       expect(res.applied).toBe(true);
+    });
+  });
+
+  // ─── Guard 4b: SF-managed (manual writes blocked on linked + connected) ──
+  // The user-facing UX rule: in SF-connected mode, a normal LB user must
+  // not "mark done / lost" on an SF-linked lead — SF owns lifecycle. Only
+  // admin paths that pass adminOverride=true bypass.
+  describe('guard 4b: SF-managed (manual writes blocked when sf_connection active)', () => {
+    const ACTIVE_CONN = { isActive: true, status: 'active' };
+
+    it('blocks source=manual on SF-linked lead when sf_connection is active', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfConnection: ACTIVE_CONN },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'completed',
+        actorType: 'user',
+        actorId: USER_ID,
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('sf_managed');
+      // Lead.status untouched.
+      expect(prisma._state.lead.status).toBe('scheduled');
+    });
+
+    it('does NOT block source=manual when there is no sf_connection (autonomous LB mode)', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'scheduled' },  // sfJobId set, but no connection
+        { sfConnection: null },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'completed',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('does NOT block source=manual when the lead has no sfJobId (unlinked)', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: null, status: 'scheduled' },
+        { sfConnection: ACTIVE_CONN },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'completed',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('does NOT block source=manual when sf_connection is inactive', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfConnection: { isActive: false, status: 'disconnected' } },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'completed',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('adminOverride=true bypasses the guard (support/admin path)', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfConnection: ACTIVE_CONN },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'completed',
+        adminOverride: true,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(prisma._state.lead.status).toBe('completed');
+    });
+
+    it('does NOT block service_flow source (SF itself drives status)', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfConnection: ACTIVE_CONN },
+      );
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'completed',
+        sourceEventId: 'evt-sf-1',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('does NOT block lb_automation (it has its own sf_protected guard above)', async () => {
+      const prisma = buildPrismaMock(
+        { sfJobId: 'sf_42', status: 'engaged' },
+        { sfConnection: ACTIVE_CONN },
+      );
+      // SF_STATUS_WINS=false so lb_automation isn't blocked by Guard 4.
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig({ SF_STATUS_WINS: 'false' }));
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'booked',
+      });
+
+      // lb_automation still flows in this config; sf_managed guard targets manual only.
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).not.toBe('sf_managed');
     });
   });
 
