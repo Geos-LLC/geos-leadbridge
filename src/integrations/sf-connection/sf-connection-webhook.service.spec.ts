@@ -210,6 +210,64 @@ describe('SfConnectionWebhookService — headers / HMAC / replay', () => {
     expect(r.httpStatus).toBe(403);
     expect(r.result).toBe('unauthorized');
   });
+
+  // Regression: an SF tenant id can legitimately map to multiple
+  // sf_connection rows over time (prior disconnected row + a freshly
+  // re-provisioned active row under a different LB user). A naive
+  // findFirst() with no orderBy lands non-deterministically on the
+  // disconnected row → spurious "subscription inactive" 404 even
+  // though a healthy row exists. The resolver must prefer the active
+  // row deterministically.
+  it('prefers active sf_connection row when an inactive duplicate exists for same tenant', async () => {
+    const inactiveConn = {
+      ...CONN, id: 'c-stale', userId: 'u-stale',
+      isActive: false, status: 'disconnected',
+      inboundSubscriptionId: 'sub-stale',
+    };
+    const activeConn = { ...CONN, id: 'c-live', userId: 'u-live', isActive: true, status: 'active' };
+    const calls: any = { findFirst: [] };
+    const prisma: any = {
+      sfConnection: {
+        findFirst: jest.fn(async (args: any) => {
+          calls.findFirst.push(args);
+          // Active-preferred query (where.isActive === true) returns active.
+          if (args?.where?.isActive === true) return activeConn;
+          // Fallback (no isActive filter) returns the stale row first
+          // (mimics the bug condition).
+          return inactiveConn;
+        }),
+      },
+      crmWebhookSubscription: { findUnique: jest.fn(async () => SUB) },
+      lead: { findFirst: jest.fn(async () => null) },
+      sfInboundEvent: {
+        findUnique: jest.fn(async () => null),
+        create: jest.fn(async (a: any) => a.data),
+      },
+    };
+    const cfg = { get: ((k: string) => (k === 'encryption.key' ? ENC_KEY : undefined)) as any } as ConfigService;
+    const lifecycle: any = {
+      applyConnectionConnected: jest.fn(async () => ({ ok: true })),
+      applyCredentialRotated: jest.fn(async () => ({ ok: true })),
+      applyCredentialRotationNotification: jest.fn(async () => ({ ok: true })),
+      applyCredentialRotationPending: jest.fn(async () => ({ ok: true })),
+      applyConnectionRevoked: jest.fn(async () => ({ ok: true })),
+    };
+    const orchestrator: any = { handleServiceOutcomeEvent: jest.fn(async () => {}) };
+    const rotationRefresh: any = { triggerImmediate: jest.fn() };
+    const svc = new SfConnectionWebhookService(prisma, cfg, lifecycle, orchestrator, rotationRefresh);
+
+    const req = sign(envelope());
+    const r = await svc.ingest(req.rawBody, req.headers);
+
+    // Active query returned a row → fallback should NOT have been issued.
+    expect(calls.findFirst.length).toBe(1);
+    expect(calls.findFirst[0].where.isActive).toBe(true);
+    expect(calls.findFirst[0].orderBy).toEqual({ updatedAt: 'desc' });
+
+    // Behavior assertion: accepted, NOT subscription inactive.
+    expect(r.httpStatus).toBe(200);
+    expect(r.result).not.toBe('noop');
+  });
 });
 
 describe('SfConnectionWebhookService — body validation', () => {
