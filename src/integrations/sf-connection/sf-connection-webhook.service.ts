@@ -151,11 +151,29 @@ export class SfConnectionWebhookService {
     // ── 3. Tenant resolution via X-SF-Tenant-Id ─────────────────────
     // SF sends the integer tenant id; we store as string. Look up
     // SfConnection by sfTenantId — that's the authoritative bridge.
+    //
+    // Multi-row safety: an SF tenant may legitimately have more than one
+    // sf_connection row over time — e.g. a prior LB user disconnected
+    // (`isActive=false`, `status='disconnected'`) and a different LB
+    // user later (re-)provisioned the same SF tenant. In that case a
+    // plain `findFirst({where: {sfTenantId}})` is non-deterministic and
+    // can pick the stale disconnected row, surfacing as a spurious
+    // `subscription inactive` 404 even though a healthy active row
+    // exists. Prefer the active row deterministically; fall back to ANY
+    // row only so the existing `subscription inactive` vs
+    // `tenant_not_found` diagnostics still distinguish "tenant never
+    // registered" from "tenant present but disconnected".
     const sfTenantIdStr = tenantIdHeader.trim();
     const sfTenantIdNum = parseInt(sfTenantIdStr, 10);
-    const conn = await this.prisma.sfConnection.findFirst({
-      where: { sfTenantId: sfTenantIdStr },
-    });
+    const conn =
+      (await this.prisma.sfConnection.findFirst({
+        where: { sfTenantId: sfTenantIdStr, isActive: true },
+        orderBy: { updatedAt: 'desc' },
+      })) ??
+      (await this.prisma.sfConnection.findFirst({
+        where: { sfTenantId: sfTenantIdStr },
+        orderBy: { updatedAt: 'desc' },
+      }));
     if (!conn) {
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=tenant_not_found ` +
