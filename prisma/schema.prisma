@@ -340,6 +340,27 @@ model Lead {
   // reconciliation never double-count. Backfills/imports and synthetic test
   // leads never set this flag and so don't burn trial quota.
   trialCounted           Boolean   @default(false)
+  // ─── SF historical sync metadata (additive) ─────────────────────────
+  // Tracks the LB→SF reconciliation lifecycle for each lead. Written by
+  // src/integrations/sf-historical-sync/. NOT used by the live SF inbound
+  // webhook path (which still keys on sfJobId / externalRequestId).
+  //
+  // sfCustomerId  — SF's customer record id (populated when link result
+  //                 carries one; null if SF only matched job-level).
+  // syncStatus    — 'pending' | 'linked' | 'no_match' | 'needs_review'
+  //                 | 'failed' | 'skipped' (terminal). null means the
+  //                 reconciliation lifecycle has never been considered
+  //                 for this lead (e.g. lead pre-dates the connection-
+  //                 time enumeration or the user has no sf_connection).
+  // syncAttemptedAt — last time a sync attempt touched this row.
+  // syncReason    — short human-readable note (e.g. 'enum_at_connect',
+  //                 'manual_link_by_admin', 'sf_match_high_confidence',
+  //                 'terminal_status_skipped', 'sf_no_match',
+  //                 'conflict_existing_sfJobId').
+  sfCustomerId           String?
+  syncStatus             String?
+  syncAttemptedAt        DateTime?
+  syncReason             String?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -365,6 +386,8 @@ model Lead {
   @@index([statusSource])
   @@index([lastCustomerActivityAt])
   @@index([reengageAt])
+  // Dashboard query: count leads by syncStatus per user.
+  @@index([userId, syncStatus])
   @@map("leads")
 }
 
