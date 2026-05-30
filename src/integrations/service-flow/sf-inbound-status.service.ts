@@ -310,6 +310,48 @@ export class SfInboundStatusService {
       };
     }
 
+    // ------------------------ Primary-job guard ------------------------
+    // LB represents the original lead / first conversion lifecycle. SF
+    // represents the full CRM with many jobs per customer over time.
+    // Lead.sfJobId is sticky first-write-wins (see line below in
+    // extraLeadUpdates: `sfJobId: lead.sfJobId || payload.sf_job_id`), so
+    // it already captures the original ("primary") SF job for this lead.
+    // If a later SF job for the same customer fires a status webhook —
+    // resolved here via the (platform, externalRequestId) fallback — its
+    // sfJobId will differ from the lead's stored primary, and we must NOT
+    // let it mutate Lead.status. Treat it as a successful noop (idempotent,
+    // not error / drift) under the same `lead_status_skip:<reason>` family
+    // as `no_change` and `pipeline_downgrade`.
+    if (
+      lead.sfJobId &&
+      payload.sf_job_id &&
+      lead.sfJobId !== payload.sf_job_id
+    ) {
+      await this.recordEvent({
+        eventId: payload.event_id,
+        eventType: payload.event_type,
+        occurredAt,
+        sfJobId: payload.sf_job_id,
+        leadId: lead.id,
+        userId: subscription.userId,
+        sfSubscriptionId: subscription.id,
+        status: 'noop',
+        result: 'lead_status_skip:non_primary_job',
+        payloadJson: payload,
+      });
+      this.logger.log(
+        `[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=noop error=lead_status_skip:non_primary_job ` +
+          `primary_sf_job_id=${lead.sfJobId} incoming_sf_job_id=${payload.sf_job_id}`,
+      );
+      return {
+        httpStatus: 200,
+        result: 'noop',
+        eventId: payload.event_id,
+        leadId: lead.id,
+        ...leadEnrichment(lead, payload, 'non_primary_job'),
+      };
+    }
+
     // ------------------------ Loop guard ------------------------
     // If this lead's last write was already from SF and this event is
     // older than what we've already recorded, skip.

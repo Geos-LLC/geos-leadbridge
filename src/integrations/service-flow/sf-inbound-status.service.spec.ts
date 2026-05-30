@@ -293,6 +293,136 @@ describe('SfInboundStatusService', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────────────
+  // Primary-job guard — LB status follows ONLY the first SF job per lead.
+  // Later SF jobs for the same customer (recurring/follow-up bookings)
+  // resolve to the same Lead via the (platform, externalRequestId)
+  // fallback. Without this guard their status writes would mutate
+  // Lead.status and create false drift (Casey Hill / Oriana / Erin /
+  // Derek incidents). The fix relies on Lead.sfJobId being first-write-
+  // wins sticky — already enforced at the writeStatus extraLeadUpdates
+  // site (`sfJobId: lead.sfJobId || payload.sf_job_id`).
+  // ──────────────────────────────────────────────────────────────────
+  describe('process — primary-job guard', () => {
+    const PRIMARY_JOB = 'sfjob-primary-1';
+    const FOLLOWUP_JOB = 'sfjob-followup-2';
+
+    it('primary job — status update flows through writeStatus', async () => {
+      // Lead has sfJobId === incoming payload.sf_job_id → guard does NOT trip.
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ sfJobId: PRIMARY_JOB, status: 'contacted' }),
+      );
+
+      const r = await service.process(
+        basePayload({ sf_job_id: PRIMARY_JOB, status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('applied');
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'completed' }),
+      );
+    });
+
+    it('follow-up job — ignored; LB status unchanged, noop logged with non_primary_job', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ sfJobId: PRIMARY_JOB, status: 'completed' }),
+      );
+
+      const r = await service.process(
+        basePayload({ sf_job_id: FOLLOWUP_JOB, status: { new: 'scheduled' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('non_primary_job');
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
+      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'noop',
+            result: 'lead_status_skip:non_primary_job',
+            sfJobId: FOLLOWUP_JOB,
+            leadId: LEAD_ID,
+          }),
+        }),
+      );
+    });
+
+    it('recurring customer with 5 jobs — only the primary mutates Lead.status', async () => {
+      // Simulate 5 sequential webhook arrivals: 1 primary + 4 follow-ups.
+      // - The primary iteration sends sf_job_id=PRIMARY with status 'completed',
+      //   which maps cleanly and differs from the seed Lead.status='contacted',
+      //   so it reaches writeStatus.
+      // - The 4 follow-ups send different sf_job_ids → the primary-job guard
+      //   trips before mapping (status string doesn't even need to be mappable).
+      const jobs = [PRIMARY_JOB, 'sfjob-r2', 'sfjob-r3', 'sfjob-r4', 'sfjob-r5'];
+      for (const jobId of jobs) {
+        prisma.lead.findFirst.mockResolvedValueOnce(
+          okLead({ sfJobId: PRIMARY_JOB, status: 'contacted' }),
+        );
+        const newStatus = jobId === PRIMARY_JOB ? 'completed' : 'confirmed';
+        await service.process(
+          basePayload({ sf_job_id: jobId, status: { new: newStatus } }),
+          { id: SUB_ID, userId: USER_ID },
+        );
+      }
+      // Only the primary should have reached the write path. The other 4
+      // tripped the guard.
+      expect(leadStatus.writeStatus).toHaveBeenCalledTimes(1);
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extraLeadUpdates: expect.objectContaining({ sfJobId: PRIMARY_JOB }),
+        }),
+      );
+      // The other 4 produced inbound-event noop rows with non_primary_job.
+      const noopRows = (prisma.sfInboundEvent.create as jest.Mock).mock.calls
+        .map((c) => c[0].data)
+        .filter((d: any) => d.result === 'lead_status_skip:non_primary_job');
+      expect(noopRows).toHaveLength(4);
+      expect(noopRows.map((d: any) => d.sfJobId).sort()).toEqual(
+        ['sfjob-r2', 'sfjob-r3', 'sfjob-r4', 'sfjob-r5'],
+      );
+    });
+
+    it('first completed, then a later job becomes scheduled — LB stays completed', async () => {
+      // The lead is already terminal from the primary job. The later
+      // job's "scheduled" event arrives — guard must suppress it.
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ sfJobId: PRIMARY_JOB, status: 'completed' }),
+      );
+
+      const r = await service.process(
+        basePayload({ sf_job_id: FOLLOWUP_JOB, status: { new: 'scheduled' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('non_primary_job');
+      expect(r.currentStatus).toBe('completed');
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
+    });
+
+    it('first cancelled, then a later job becomes completed — LB stays cancelled', async () => {
+      // Casey Hill–style case: the original conversion was cancelled and
+      // the customer rebooked later under a separate SF job. The later
+      // job's "completed" must not reopen / flip the LB lead.
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ sfJobId: PRIMARY_JOB, status: 'cancelled' }),
+      );
+
+      const r = await service.process(
+        basePayload({ sf_job_id: FOLLOWUP_JOB, status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('non_primary_job');
+      expect(r.currentStatus).toBe('cancelled');
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
+    });
+  });
+
   describe('process — status mapping', () => {
     it('returns 422 for unknown SF status', async () => {
       prisma.lead.findFirst.mockResolvedValue(okLead());
@@ -574,6 +704,8 @@ describe('SfInboundStatusService', () => {
     it('loop-guard stale (older than last SF event) returns skipReason=older_than_last_sf_event + lead context', async () => {
       const past = new Date('2026-05-25T18:00:00Z');
       const evt = new Date('2026-05-25T17:30:00Z');
+      // sfJobId on the lead matches payload.sf_job_id so the primary-job
+      // guard passes through to the loop guard (the situation under test).
       prisma.lead.findFirst.mockResolvedValue(
         okLead({
           status: 'scheduled',
@@ -585,7 +717,7 @@ describe('SfInboundStatusService', () => {
       );
 
       const r = await service.process(
-        basePayload({ occurred_at: evt.toISOString(), status: { new: 'completed' } }),
+        basePayload({ sf_job_id: '142288', occurred_at: evt.toISOString(), status: { new: 'completed' } }),
         { id: SUB_ID, userId: USER_ID },
       );
 
