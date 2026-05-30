@@ -19,7 +19,9 @@ const { PrismaClient } = require('../../generated/prisma');
 const HOST = 'https://thumbtack-bridge-staging.up.railway.app';
 const SHARED = process.env.SHARED_SECRET;
 const PWD = process.env.SYNTH_PWD;
-const EMAIL = 'sf-prov-smoke-test@staging.local';
+// Email defaults to the legacy smoke account; canary runs pass EMAIL=...
+// to point at the AWS-bag-sourced LB_STAGING_TEST_LB_EMAIL.
+const EMAIL = process.env.EMAIL || 'sf-prov-smoke-test@staging.local';
 
 if (!SHARED || !PWD) {
   console.error('SHARED_SECRET and SYNTH_PWD must be set');
