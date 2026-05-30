@@ -275,13 +275,20 @@ export class SfConnectionController {
 
   /**
    * Verify HMAC + timestamp for the SF→LB provisioning channel. Same
-   * canonical pattern as inbound webhooks (`${ts}.${rawBody}` HMAC-SHA256)
-   * but uses the SHARED `SF_LB_PROVISIONING_SHARED_SECRET` rather than
-   * a per-connection secret.
+   * canonical signing pattern as inbound webhooks (`${ts}.${rawBody}`
+   * HMAC-SHA256) but uses the SHARED `SF_LB_PROVISIONING_SHARED_SECRET`
+   * rather than a per-connection secret.
    *
-   * Required headers:
-   *   X-SF-Timestamp  unix epoch seconds (string)
-   *   X-SF-Signature  hex HMAC over `${ts}.${rawBody}` using shared secret
+   * Required headers (DELIBERATELY DIFFERENT from the inbound webhook
+   * channel — the two channels use different secrets, so distinct header
+   * names prevent any chance of cross-channel signature confusion):
+   *
+   *   X-SF-LB-Timestamp  unix epoch seconds (string)
+   *   X-SF-LB-Signature  hex HMAC over `${ts}.${rawBody}` using shared secret
+   *
+   * The inbound webhook channel (orchestration-webhook) continues to use
+   * the original `X-SF-Timestamp` / `X-SF-Signature` headers with the
+   * per-tenant webhook secret. That channel is unchanged.
    */
   private verifyProvisioningHmac(
     rawBody: string,
@@ -292,8 +299,8 @@ export class SfConnectionController {
       if (!v) return null;
       return Array.isArray(v) ? (v[0] ?? null) : String(v);
     };
-    const ts = pick('x-sf-timestamp');
-    const sig = pick('x-sf-signature');
+    const ts = pick('x-sf-lb-timestamp');
+    const sig = pick('x-sf-lb-signature');
     if (!ts || !sig) return { ok: false, reason: 'missing_headers' };
 
     const secret = this.config.get<string>('SF_LB_PROVISIONING_SHARED_SECRET', '') ?? '';

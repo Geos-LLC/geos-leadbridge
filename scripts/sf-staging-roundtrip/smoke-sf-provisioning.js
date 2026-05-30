@@ -30,8 +30,8 @@ function signedHeaders(rawBody) {
   const ts = Math.floor(Date.now() / 1000).toString();
   const sig = crypto.createHmac('sha256', SHARED).update(ts + '.' + rawBody).digest('hex');
   return {
-    'X-SF-Timestamp': ts,
-    'X-SF-Signature': sig,
+    'X-SF-LB-Timestamp': ts,
+    'X-SF-LB-Signature': sig,
     'Content-Type': 'application/json',
   };
 }
@@ -170,8 +170,8 @@ function signedHeaders(rawBody) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-SF-Timestamp': String(Math.floor(Date.now() / 1000)),
-      'X-SF-Signature': 'a'.repeat(64),
+      'X-SF-LB-Timestamp': String(Math.floor(Date.now() / 1000)),
+      'X-SF-LB-Signature': 'a'.repeat(64),
     },
     body: body1,
   });
