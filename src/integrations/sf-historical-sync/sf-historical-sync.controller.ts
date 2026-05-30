@@ -151,8 +151,10 @@ export class SfHistoricalSyncController {
   // confidence-driven needs_review / no_match, status updates routed
   // through the existing writeStatus guards).
 
+  // Path is relative to the global `/api` prefix set in main.ts, so the
+  // full route is /api/v1/integrations/sf/link-leads-bulk.
   @Public()
-  @Post('api/v1/integrations/sf/link-leads-bulk')
+  @Post('v1/integrations/sf/link-leads-bulk')
   @HttpCode(HttpStatus.OK)
   async bulkLink(@Req() req: Request, @Body() body: BulkLinkRequest) {
     const rawBody = this.getRawBody(req);
