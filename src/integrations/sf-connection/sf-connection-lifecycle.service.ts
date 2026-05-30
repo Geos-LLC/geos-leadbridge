@@ -39,11 +39,12 @@
  *   - All multi-row changes wrapped in $transaction.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
+import { SfHistoricalSyncService } from '../sf-historical-sync/sf-historical-sync.service';
 import type {
   SfConnectionRevokedPayload,
   SfCredentialRotatedPayload,
@@ -195,6 +196,13 @@ export class SfConnectionLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    // forwardRef + Optional: historical-sync depends on Leads → LeadStatus
+    // → Lead-related modules, so it sits "above" sf-connection in the DI
+    // graph. forwardRef breaks any circular hint Nest would otherwise
+    // flag. @Optional makes it explicit that we don't FAIL connect if
+    // the sync module is somehow missing — connect must always succeed.
+    @Optional() @Inject(forwardRef(() => SfHistoricalSyncService))
+    private readonly historicalSync: SfHistoricalSyncService | null = null,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -368,6 +376,25 @@ export class SfConnectionLifecycleService {
         ` token_len=${provisioning.credential.token.length} events=${events.length} source=${source}` +
         ` webhook_secret_len=${input.webhookSecretPlaintext?.length ?? 'preserved'}`,
     );
+
+    // Historical-sync enumeration: surface unsynced LB leads for SF
+    // reconciliation. Fire-and-noop on failure — must NOT block the
+    // connect from succeeding. The enumeration is idempotent (rows
+    // already pending / linked / skipped are left alone), so it's safe
+    // to invoke on every successful connect (fresh or re-handshake).
+    if (this.historicalSync) {
+      try {
+        const r = await this.historicalSync.enumerateOnConnect(userId);
+        this.logger.log(
+          `[SfConnectionLifecycle] event=connect_backfill_enum user_id=${userId} sf_tenant_id=${sfTenantIdStr}` +
+            ` scanned=${r.scanned} marked_pending=${r.markedPending} marked_skipped=${r.markedSkipped} already_linked=${r.alreadyLinked}`,
+        );
+      } catch (e: any) {
+        this.logger.warn(
+          `[SfConnectionLifecycle] event=connect_backfill_enum_failed user_id=${userId} err=${this.safe(e?.message ?? String(e))}`,
+        );
+      }
+    }
 
     return { ok: true, connectionId };
   }
