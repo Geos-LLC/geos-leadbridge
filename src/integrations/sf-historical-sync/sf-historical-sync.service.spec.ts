@@ -25,6 +25,22 @@ function buildPrisma(initial: any = {}) {
         if (args?.where?.syncStatus?.in) {
           rows = rows.filter((r) => args.where.syncStatus.in.includes(r.syncStatus));
         }
+        // OR clause support (used by candidates() to express
+        // "pending OR null" and the default-bucket query). Each branch
+        // is a sub-where; a row matches if it matches ANY branch.
+        if (Array.isArray(args?.where?.OR)) {
+          const branches: any[] = args.where.OR;
+          const matchBranch = (r: any, b: any): boolean => {
+            if (b.syncStatus === null || b.syncStatus === undefined && 'syncStatus' in b) {
+              return r.syncStatus === null;
+            }
+            if (b.syncStatus === null) return r.syncStatus === null;
+            if (b.syncStatus?.in) return b.syncStatus.in.includes(r.syncStatus);
+            if (b.syncStatus !== undefined) return r.syncStatus === b.syncStatus;
+            return true;
+          };
+          rows = rows.filter((r) => branches.some((b) => matchBranch(r, b)));
+        }
         return args?.select
           ? rows.map((r) => Object.keys(args.select).reduce((acc: any, k) => { acc[k] = r[k] ?? null; return acc; }, {}))
           : rows;
@@ -279,6 +295,87 @@ describe('SfHistoricalSyncService', () => {
       expect(r.summary.conflict).toBe(1);
       expect(r.summary.needs_review).toBe(1);
       expect(r.summary.not_found).toBe(1);
+    });
+  });
+
+  // Regression: an existing tenant connected before historical-sync deployed
+  // has every lead at syncStatus=null. The 'pending' filter must include
+  // those null rows so SF can pull candidates immediately, without waiting
+  // for the connection-time enumeration to be triggered manually.
+  describe('candidates filter — null is treated as pending; other filters stay exact', () => {
+    function corpus() {
+      return {
+        leads: {
+          'L_NULL_A':   { id: 'L_NULL_A',   userId: 'U1', platform: 'thumbtack', externalRequestId: 'r1', customerName: 'Erin',   status: 'scheduled', syncStatus: null,           sfJobId: null, createdAt: new Date() },
+          'L_NULL_B':   { id: 'L_NULL_B',   userId: 'U1', platform: 'thumbtack', externalRequestId: 'r2', customerName: 'Casey',  status: 'scheduled', syncStatus: null,           sfJobId: null, createdAt: new Date() },
+          'L_PENDING':  { id: 'L_PENDING',  userId: 'U1', platform: 'thumbtack', externalRequestId: 'r3', customerName: 'Oriana', status: 'contacted', syncStatus: 'pending',      sfJobId: null, createdAt: new Date() },
+          'L_LINKED':   { id: 'L_LINKED',   userId: 'U1', platform: 'thumbtack', externalRequestId: 'r4', customerName: 'Derek',  status: 'completed', syncStatus: 'linked',       sfJobId: 'SF-1', createdAt: new Date() },
+          'L_REVIEW':   { id: 'L_REVIEW',   userId: 'U1', platform: 'thumbtack', externalRequestId: 'r5', customerName: 'Allyssa', status: 'scheduled', syncStatus: 'needs_review', sfJobId: null, createdAt: new Date() },
+          'L_NOMATCH':  { id: 'L_NOMATCH',  userId: 'U1', platform: 'thumbtack', externalRequestId: 'r6', customerName: 'Smith',   status: 'new',       syncStatus: 'no_match',     sfJobId: null, createdAt: new Date() },
+          'L_FAILED':   { id: 'L_FAILED',   userId: 'U1', platform: 'thumbtack', externalRequestId: 'r7', customerName: 'Jones',   status: 'engaged',   syncStatus: 'failed',       sfJobId: null, createdAt: new Date() },
+          'L_SKIPPED':  { id: 'L_SKIPPED',  userId: 'U1', platform: 'thumbtack', externalRequestId: 'r8', customerName: 'Lost',    status: 'lost',      syncStatus: 'skipped',      sfJobId: null, createdAt: new Date() },
+        },
+      };
+    }
+
+    it("'pending' filter returns BOTH syncStatus='pending' AND syncStatus IS NULL", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'pending' as any });
+      const ids = rows.map((r) => r.leadId).sort();
+      expect(ids).toEqual(['L_NULL_A', 'L_NULL_B', 'L_PENDING'].sort());
+    });
+
+    it("'linked' filter is exact — only linked rows", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'linked' as any });
+      expect(rows.map((r) => r.leadId)).toEqual(['L_LINKED']);
+    });
+
+    it("'needs_review' filter is exact", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'needs_review' as any });
+      expect(rows.map((r) => r.leadId)).toEqual(['L_REVIEW']);
+    });
+
+    it("'no_match' filter is exact", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'no_match' as any });
+      expect(rows.map((r) => r.leadId)).toEqual(['L_NOMATCH']);
+    });
+
+    it("'failed' filter is exact", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'failed' as any });
+      expect(rows.map((r) => r.leadId)).toEqual(['L_FAILED']);
+    });
+
+    it("'skipped' filter is exact — does NOT leak null rows", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'skipped' as any });
+      expect(rows.map((r) => r.leadId)).toEqual(['L_SKIPPED']);
+    });
+
+    it("syncStatus=null filter returns only null rows", async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: null });
+      expect(rows.map((r) => r.leadId).sort()).toEqual(['L_NULL_A', 'L_NULL_B'].sort());
+    });
+
+    it('default (no filter) returns pending|needs_review|failed|no_match + null, excludes linked + skipped', async () => {
+      const { prisma } = buildPrisma(corpus());
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', {});
+      const ids = rows.map((r) => r.leadId).sort();
+      expect(ids).toEqual(['L_FAILED', 'L_NOMATCH', 'L_NULL_A', 'L_NULL_B', 'L_PENDING', 'L_REVIEW'].sort());
+      expect(ids).not.toContain('L_LINKED');
+      expect(ids).not.toContain('L_SKIPPED');
     });
   });
 

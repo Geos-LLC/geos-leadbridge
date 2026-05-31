@@ -220,12 +220,33 @@ export class SfHistoricalSyncService {
     userId: string,
     opts: { syncStatus?: SyncStatus | null; status?: string; limit?: number; offset?: number } = {},
   ): Promise<SyncCandidate[]> {
+    // Filter semantics:
+    //   opts.syncStatus === 'pending'  → matches BOTH syncStatus='pending'
+    //                                    AND syncStatus IS NULL. Null means
+    //                                    "never enumerated" (lead pre-dates
+    //                                    the connection-time hook, e.g.
+    //                                    Spotless leads created before the
+    //                                    historical-sync module shipped).
+    //                                    Semantically these are also waiting
+    //                                    to be matched, so SF should see
+    //                                    them on the first 'pending' poll.
+    //   opts.syncStatus === <any other> → exact match (linked / needs_review
+    //                                     / failed / no_match / skipped).
+    //   opts.syncStatus === null         → exact match (only null rows).
+    //   opts.syncStatus === undefined    → default admin/dashboard slice:
+    //                                     pending|needs_review|failed|no_match
+    //                                     PLUS null (same "not done yet"
+    //                                     rationale).
     const where: any = { userId };
-    if (opts.syncStatus !== undefined) {
+    if (opts.syncStatus === 'pending') {
+      where.OR = [{ syncStatus: 'pending' }, { syncStatus: null }];
+    } else if (opts.syncStatus !== undefined) {
       where.syncStatus = opts.syncStatus;
     } else {
-      // Default: rows with anything other than 'linked' and 'skipped'
-      where.syncStatus = { in: ['pending', 'needs_review', 'failed', 'no_match'] };
+      where.OR = [
+        { syncStatus: { in: ['pending', 'needs_review', 'failed', 'no_match'] } },
+        { syncStatus: null },
+      ];
     }
     if (opts.status) where.status = opts.status;
 
