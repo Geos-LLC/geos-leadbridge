@@ -250,6 +250,11 @@ export class SfHistoricalSyncService {
     }
     if (opts.status) where.status = opts.status;
 
+    // Ordering: prefer rows with the most recent activity first so the
+    // first page surfaces in-flight work over old archived/lost rows.
+    // Lead.updatedAt is auto-set via Prisma @updatedAt and is always
+    // present (vs statusUpdatedAt which is null until first status write).
+    // createdAt DESC is the tiebreaker for deterministic order across calls.
     const leads = await this.prisma.lead.findMany({
       where,
       select: {
@@ -258,7 +263,7 @@ export class SfHistoricalSyncService {
         syncStatus: true, sfJobId: true, sfCustomerId: true,
         syncAttemptedAt: true, syncReason: true, createdAt: true, statusUpdatedAt: true,
       },
-      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
       take: Math.min(opts.limit ?? 100, 500),
       skip: opts.offset ?? 0,
     });
