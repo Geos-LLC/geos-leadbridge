@@ -377,6 +377,24 @@ describe('SfHistoricalSyncService', () => {
       expect(ids).not.toContain('L_LINKED');
       expect(ids).not.toContain('L_SKIPPED');
     });
+
+    it("opts.status filter narrows to that LB canonical status only (Erin-shape: status='scheduled')", async () => {
+      const { prisma } = buildPrisma({
+        leads: {
+          'ERIN':       { id: 'ERIN',       userId: 'U1', status: 'scheduled', syncStatus: null,      sfJobId: null, customerName: 'Erin',   externalRequestId: 'ext-erin', platform: 'thumbtack', createdAt: new Date() },
+          'OTHER_NEW':  { id: 'OTHER_NEW',  userId: 'U1', status: 'new',       syncStatus: 'pending', sfJobId: null, customerName: 'Other',  externalRequestId: 'ext-2',    platform: 'thumbtack', createdAt: new Date() },
+          'OTHER_LOST': { id: 'OTHER_LOST', userId: 'U1', status: 'lost',      syncStatus: null,      sfJobId: null, customerName: 'Lost',   externalRequestId: 'ext-3',    platform: 'thumbtack', createdAt: new Date() },
+          'OTHER_SCHED':{ id: 'OTHER_SCHED',userId: 'U1', status: 'scheduled', syncStatus: 'pending', sfJobId: null, customerName: 'OtherSched', externalRequestId: 'ext-4', platform: 'thumbtack', createdAt: new Date() },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', { syncStatus: 'pending' as any, status: 'scheduled' });
+      const ids = rows.map((r) => r.leadId).sort();
+      // Only the 2 scheduled rows (one with syncStatus=null, one with 'pending').
+      expect(ids).toEqual(['ERIN', 'OTHER_SCHED']);
+      // The 'new' (other syncStatus=pending) and 'lost' (other null) rows are
+      // excluded by the status filter.
+    });
   });
 
   describe('dashboard', () => {

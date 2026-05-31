@@ -157,7 +157,16 @@ export class SfHistoricalSyncController {
   @Public()
   @Post('v1/integrations/sf/historical-sync/candidates')
   @HttpCode(HttpStatus.OK)
-  async sfCandidates(@Req() req: Request, @Body() body: { user_id?: string; sync_statuses?: string[]; limit?: number }) {
+  async sfCandidates(
+    @Req() req: Request,
+    @Body() body: {
+      user_id?: string;
+      sync_statuses?: string[];
+      /** Optional LB canonical status filter (e.g. "scheduled", "booked"). */
+      status?: string;
+      limit?: number;
+    },
+  ) {
     const rawBody = this.getRawBody(req);
     const hmac = this.verifyProvisioningHmac(rawBody, req.headers);
     if (!hmac.ok) {
@@ -169,21 +178,24 @@ export class SfHistoricalSyncController {
       return { ok: false, error: 'user_id_required', candidates: [] };
     }
     // Default subset: pending leads (the connection-time enumeration's
-    // output). SF can request other syncStatuses (e.g. needs_review, failed)
-    // by passing them explicitly.
+    // output, plus null-syncStatus rows that pre-date the module). SF
+    // can request other syncStatuses (e.g. needs_review, failed) by
+    // passing them explicitly, and can additionally narrow by LB canonical
+    // status (e.g. "scheduled") to surgically target a slice.
     const limit = Math.min(body?.limit ?? 500, 1000);
+    const status = typeof body?.status === 'string' && body.status.length > 0 ? body.status : undefined;
     const rows: any[] = [];
     const requestedStatuses = (body?.sync_statuses && body.sync_statuses.length > 0)
       ? body.sync_statuses
       : ['pending'];
     for (const ss of requestedStatuses) {
-      const batch = await this.sync.candidates(userId, { syncStatus: ss as any, limit });
+      const batch = await this.sync.candidates(userId, { syncStatus: ss as any, status, limit });
       rows.push(...batch);
       if (rows.length >= limit) break;
     }
     this.logger.log(
       `[SfHistoricalSync] event=sf_pull_candidates user_id=${userId} ` +
-        `requested=${JSON.stringify(requestedStatuses)} returned=${rows.length}`,
+        `requested=${JSON.stringify(requestedStatuses)} status=${status ?? 'any'} returned=${rows.length}`,
     );
     return { ok: true, user_id: userId, count: rows.length, candidates: rows.slice(0, limit) };
   }

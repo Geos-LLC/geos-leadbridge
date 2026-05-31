@@ -96,7 +96,7 @@ describe('SfHistoricalSyncController — sfCandidates (SF pull endpoint)', () =>
     expect(r.user_id).toBe('U1');
     expect(r.count).toBe(2);
     expect(r.candidates).toEqual(fakeRows);
-    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', limit: 500 });
+    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', status: undefined, limit: 500 });
   });
 
   it('supports explicit syncStatuses request', async () => {
@@ -112,8 +112,37 @@ describe('SfHistoricalSyncController — sfCandidates (SF pull endpoint)', () =>
     await controller.sfCandidates(req, { user_id: 'U1', sync_statuses: ['pending', 'needs_review'] });
     // Two calls — one per requested status.
     expect(sync.candidates).toHaveBeenCalledTimes(2);
-    expect(sync.candidates).toHaveBeenNthCalledWith(1, 'U1', { syncStatus: 'pending', limit: 500 });
-    expect(sync.candidates).toHaveBeenNthCalledWith(2, 'U1', { syncStatus: 'needs_review', limit: 500 });
+    expect(sync.candidates).toHaveBeenNthCalledWith(1, 'U1', { syncStatus: 'pending', status: undefined, limit: 500 });
+    expect(sync.candidates).toHaveBeenNthCalledWith(2, 'U1', { syncStatus: 'needs_review', status: undefined, limit: 500 });
+  });
+
+  it("forwards optional LB-status filter to service (e.g. status='scheduled' for surgical dry-run)", async () => {
+    const { controller, sync } = buildController({
+      candidates: jest.fn().mockResolvedValue([]),
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ user_id: 'U1', sync_statuses: ['pending'], status: 'scheduled', limit: 500 });
+    const req = buildReq(body, {
+      'x-sf-lb-timestamp': ts,
+      'x-sf-lb-signature': sign(ts, body),
+    });
+    await controller.sfCandidates(req, { user_id: 'U1', sync_statuses: ['pending'], status: 'scheduled', limit: 500 });
+    expect(sync.candidates).toHaveBeenCalledTimes(1);
+    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', status: 'scheduled', limit: 500 });
+  });
+
+  it('ignores empty-string status (treats as undefined)', async () => {
+    const { controller, sync } = buildController({
+      candidates: jest.fn().mockResolvedValue([]),
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ user_id: 'U1', status: '' });
+    const req = buildReq(body, {
+      'x-sf-lb-timestamp': ts,
+      'x-sf-lb-signature': sign(ts, body),
+    });
+    await controller.sfCandidates(req, { user_id: 'U1', status: '' });
+    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', status: undefined, limit: 500 });
   });
 
   it('respects custom limit (capped at 1000)', async () => {
@@ -127,7 +156,7 @@ describe('SfHistoricalSyncController — sfCandidates (SF pull endpoint)', () =>
       'x-sf-lb-signature': sign(ts, body),
     });
     await controller.sfCandidates(req, { user_id: 'U1', limit: 5000 });
-    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', limit: 1000 });
+    expect(sync.candidates).toHaveBeenCalledWith('U1', { syncStatus: 'pending', status: undefined, limit: 1000 });
   });
 });
 
