@@ -340,6 +340,27 @@ model Lead {
   // reconciliation never double-count. Backfills/imports and synthetic test
   // leads never set this flag and so don't burn trial quota.
   trialCounted           Boolean   @default(false)
+  // ─── SF historical sync metadata (additive) ─────────────────────────
+  // Tracks the LB→SF reconciliation lifecycle for each lead. Written by
+  // src/integrations/sf-historical-sync/. NOT used by the live SF inbound
+  // webhook path (which still keys on sfJobId / externalRequestId).
+  //
+  // sfCustomerId  — SF's customer record id (populated when link result
+  //                 carries one; null if SF only matched job-level).
+  // syncStatus    — 'pending' | 'linked' | 'no_match' | 'needs_review'
+  //                 | 'failed' | 'skipped' (terminal). null means the
+  //                 reconciliation lifecycle has never been considered
+  //                 for this lead (e.g. lead pre-dates the connection-
+  //                 time enumeration or the user has no sf_connection).
+  // syncAttemptedAt — last time a sync attempt touched this row.
+  // syncReason    — short human-readable note (e.g. 'enum_at_connect',
+  //                 'manual_link_by_admin', 'sf_match_high_confidence',
+  //                 'terminal_status_skipped', 'sf_no_match',
+  //                 'conflict_existing_sfJobId').
+  sfCustomerId           String?
+  syncStatus             String?
+  syncAttemptedAt        DateTime?
+  syncReason             String?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -365,6 +386,8 @@ model Lead {
   @@index([statusSource])
   @@index([lastCustomerActivityAt])
   @@index([reengageAt])
+  // Dashboard query: count leads by syncStatus per user.
+  @@index([userId, syncStatus])
   @@map("leads")
 }
 
@@ -1593,6 +1616,22 @@ model SfConnection {
   lastErrorAt                 DateTime?
   lastErrorMessage            String?
 
+  // ─── Rotation notification (R1) ───────────────────────────────────
+  // SF's credential.rotated webhook is a notification — it does NOT carry
+  // the plaintext token (correct security posture: secrets only flow over
+  // the OAuth exchange channel). When LB receives the notification, it
+  // records what SF said happened and the grace window, then resolves the
+  // refresh out-of-band (manual re-handshake today; auto-refresh once SF
+  // exposes a service-to-service refresh endpoint).
+  //
+  // Fields are nullable + default false so the migration is additive.
+  // Cleared on the next successful OAuth exchange (handshake source).
+  rotationPending             Boolean  @default(false)
+  pendingRotationKid          String?
+  pendingRotationCredId       String?   // SF sends as int; stored as string
+  pendingRotationGraceExpiresAt DateTime?
+  pendingRotationObservedAt   DateTime?
+
   // ─── Audit ─────────────────────────────────────────────────────────
   connectedAt                 DateTime @default(now())
   disconnectedAt              DateTime?
@@ -1602,9 +1641,28 @@ model SfConnection {
 
   @@index([status])
   @@index([isActive])
+  @@index([rotationPending, pendingRotationGraceExpiresAt])
   @@index([tokenExpiresAt])
   @@index([previousTokenExpiresAt])
   @@map("sf_connections")
+}
+
+// ==========================================
+// SF Provisioning — server-to-server flow
+// One row per consumed link_token nonce. Enforces single-use semantics
+// for SF→LB provisioning calls. Inserts race the unique constraint;
+// whoever wins the insert is the unique consumer. Cleanup is lazy by
+// expiresAt (no cron required — small steady-state size).
+// ==========================================
+
+model SfProvisioningLinkConsumed {
+  nonce      String   @id
+  userId     String
+  consumedAt DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt])
+  @@map("sf_provisioning_link_consumed")
 }
 
 // ==========================================

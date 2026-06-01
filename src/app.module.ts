@@ -33,6 +33,7 @@ import { ServiceFlowModule } from './integrations/service-flow/service-flow.modu
 import { SfOrchestrationModule } from './sf-orchestration/sf-orchestration.module';
 import { BookingOrchestratorModule } from './booking-orchestrator/booking-orchestrator.module';
 import { SfConnectionModule } from './integrations/sf-connection/sf-connection.module';
+import { SfHistoricalSyncModule } from './integrations/sf-historical-sync/sf-historical-sync.module';
 import { HealthModule } from './health/health.module';
 import { IntegrationsHealthModule } from './integrations/health/integrations-health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
@@ -84,6 +85,7 @@ import { AuditModule } from './common/audit/audit.module';
     SfOrchestrationModule,
     BookingOrchestratorModule,
     SfConnectionModule,
+    SfHistoricalSyncModule,
     HealthModule,
     IntegrationsHealthModule,
     MonitoringModule,

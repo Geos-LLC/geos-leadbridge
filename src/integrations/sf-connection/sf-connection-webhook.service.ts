@@ -50,6 +50,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import { SfConnectionLifecycleService } from './sf-connection-lifecycle.service';
+import { SfRotationRefreshService } from './sf-rotation-refresh.service';
 import { BookingOrchestratorService } from '../../booking-orchestrator/booking-orchestrator.service';
 import {
   SF_WEBHOOK_EVENT_TYPES,
@@ -74,6 +75,7 @@ export class SfConnectionWebhookService {
     private readonly lifecycle: SfConnectionLifecycleService,
     @Inject(forwardRef(() => BookingOrchestratorService))
     private readonly bookingOrchestrator: BookingOrchestratorService,
+    private readonly rotationRefresh: SfRotationRefreshService,
   ) {}
 
   /**
@@ -149,11 +151,29 @@ export class SfConnectionWebhookService {
     // ── 3. Tenant resolution via X-SF-Tenant-Id ─────────────────────
     // SF sends the integer tenant id; we store as string. Look up
     // SfConnection by sfTenantId — that's the authoritative bridge.
+    //
+    // Multi-row safety: an SF tenant may legitimately have more than one
+    // sf_connection row over time — e.g. a prior LB user disconnected
+    // (`isActive=false`, `status='disconnected'`) and a different LB
+    // user later (re-)provisioned the same SF tenant. In that case a
+    // plain `findFirst({where: {sfTenantId}})` is non-deterministic and
+    // can pick the stale disconnected row, surfacing as a spurious
+    // `subscription inactive` 404 even though a healthy active row
+    // exists. Prefer the active row deterministically; fall back to ANY
+    // row only so the existing `subscription inactive` vs
+    // `tenant_not_found` diagnostics still distinguish "tenant never
+    // registered" from "tenant present but disconnected".
     const sfTenantIdStr = tenantIdHeader.trim();
     const sfTenantIdNum = parseInt(sfTenantIdStr, 10);
-    const conn = await this.prisma.sfConnection.findFirst({
-      where: { sfTenantId: sfTenantIdStr },
-    });
+    const conn =
+      (await this.prisma.sfConnection.findFirst({
+        where: { sfTenantId: sfTenantIdStr, isActive: true },
+        orderBy: { updatedAt: 'desc' },
+      })) ??
+      (await this.prisma.sfConnection.findFirst({
+        where: { sfTenantId: sfTenantIdStr },
+        orderBy: { updatedAt: 'desc' },
+      }));
     if (!conn) {
       this.logger.warn(
         `[SfConnectionWebhook] event_id=${eventIdHeader} result=tenant_not_found ` +
@@ -317,6 +337,13 @@ export class SfConnectionWebhookService {
     let resultTag = 'applied';
     let errorMsg: string | null = null;
 
+    // Envelope payload aliasing. SF S4 wire format uses `data` for the
+    // event body; the original LB contract draft used `payload`. We accept
+    // either, with `data` winning on the rare case both are present.
+    // The OAuth exchange remains the authoritative provisioning channel —
+    // webhooks are operational events / confirmations only.
+    const envBody = this.envelopePayload(envelope);
+
     try {
       switch (envelope.event_type as SfWebhookEventType) {
         // ─── service lifecycle events (PR-B2 territory; routed here) ─
@@ -324,7 +351,7 @@ export class SfConnectionWebhookService {
         case 'service_rescheduled':
         case 'service_cancelled':
         case 'service_completed': {
-          const payload = (envelope.payload as SfServiceEventPayload) ?? ({} as SfServiceEventPayload);
+          const payload = envBody as SfServiceEventPayload;
           if (typeof payload.sf_job_id !== 'string') {
             throw new Error('missing sf_job_id');
           }
@@ -378,35 +405,161 @@ export class SfConnectionWebhookService {
 
         // ─── connection lifecycle ────────────────────────────────────
         case 'connection.connected': {
-          const payload = envelope.payload as SfConnectionConnectedPayload;
-          if (!payload?.provisioning) throw new Error('missing provisioning payload');
-          // Webhook re-delivery: we do NOT have the LB-generated secret
-          // here; lifecycle service preserves the stored one from the
-          // existing inbound subscription (the canonical sf_push path).
-          await this.lifecycle.applyConnectionConnected({
-            userId,
-            connectionId: conn.id,
-            provisioning: payload.provisioning,
-            webhookSecretPlaintext: null,
-            source: 'sf_push',
-          });
+          const payload = envBody as SfConnectionConnectedPayload & {
+            credential?: { kid?: string; cred_id?: number | string; token_prefix?: string; expires_at?: string };
+            connected_at?: string;
+            webhook_set_at?: string;
+          };
+
+          if (payload?.provisioning) {
+            // Re-establishment path — full provisioning was re-delivered
+            // (rare: SF restoring a lost connection from scratch).
+            await this.lifecycle.applyConnectionConnected({
+              userId,
+              connectionId: conn.id,
+              provisioning: payload.provisioning,
+              webhookSecretPlaintext: null,
+              source: 'sf_push',
+            });
+            break;
+          }
+
+          // Confirmation path — OAuth exchange already delivered provisioning
+          // authoritatively. This webhook is SF acknowledging the handshake
+          // completed on their side. No reprovisioning, no token rewrite,
+          // no secret change. Just record the heartbeat with a kid sanity
+          // check (the X-SF-Kid header check upstream already enforced this).
+          if (!conn.isActive || conn.status !== 'active') {
+            // No prior active connection AND no provisioning in payload:
+            // cold sf_push with confirmation shape. Not a supported flow —
+            // SF must do a real handshake first.
+            throw new Error('confirmation without active connection or provisioning');
+          }
+          const confirmedKid = payload?.credential?.kid;
+          if (confirmedKid && conn.signatureKeyId && confirmedKid !== conn.signatureKeyId) {
+            // Already caught by header kid check; redundant safety net for
+            // body-vs-header divergence. Doesn't mutate state on its own —
+            // surface as exception so SF sees the mismatch.
+            throw new Error(`body_kid_mismatch stored=${conn.signatureKeyId} body=${confirmedKid}`);
+          }
+          this.logger.log(
+            `[SfConnectionWebhook] event_id=${eventId} event_type=connection.connected ` +
+              `result=applied_confirmation user_id=${userId} sf_tenant_id=${sfTenantIdStr} ` +
+              `confirmed_kid=${confirmedKid ?? 'null'} cred_id=${payload?.credential?.cred_id ?? 'null'} ` +
+              `sf_connected_at=${payload?.connected_at ?? 'null'} ` +
+              `sf_webhook_set_at=${payload?.webhook_set_at ?? 'null'}`,
+          );
+          resultTag = 'applied_confirmation';
           break;
         }
         case 'credential.rotated': {
-          const payload = envelope.payload as SfCredentialRotatedPayload;
-          if (!payload?.new_credential || typeof payload.new_credential.token !== 'string') {
-            throw new Error('missing new_credential.token');
+          // THREE valid payload shapes for credential.rotated. Branch order
+          // matters — refresh_required is the canonical R1B signal and
+          // MUST be checked first, before any access to new_credential.*
+          //
+          //  (a) R1B lean (preferred, SF's current wire format):
+          //      data.refresh_required === true
+          //      No new_credential block required. Optional info:
+          //      previous_cred_id, previous_grace_expires_at (may be null),
+          //      refresh_endpoint, reason. LB records rotationPending=true
+          //      and fires immediate refresh trigger. The refresh response
+          //      delivers the actual credential.
+          //
+          //  (b) R1 full notification (kept for SF variant compat):
+          //      data.new_credential.{cred_id,kid?,token_prefix?,expires_at?}
+          //      + data.previous_grace_expires_at (string).
+          //      LB persists what SF said + waits for refresh / re-handshake.
+          //
+          //  (c) Legacy full re-delivery:
+          //      data.new_credential.token (string, plaintext).
+          //      LB applyCredentialRotated re-encrypts + stores + grace.
+          //      Discouraged design (token over webhook); preserved only
+          //      for backward compat with any SF deployment still on it.
+          const payload = envBody as SfCredentialRotatedPayload & {
+            refresh_required?: boolean;
+            refresh_endpoint?: string;
+            new_credential?: { cred_id?: number | string; kid?: string; token_prefix?: string; expires_at?: string; token?: string };
+            previous_grace_expires_at?: string | null;
+            previous_cred_id?: number | string;
+            reason?: string;
+          };
+
+          // ─── (a) R1B lean ────────────────────────────────────────────
+          if (payload?.refresh_required === true) {
+            const r = await this.lifecycle.applyCredentialRotationPending({
+              userId,
+              previousCredId: payload.previous_cred_id ?? null,
+              previousGraceExpiresAt:
+                typeof payload.previous_grace_expires_at === 'string'
+                  ? payload.previous_grace_expires_at
+                  : null,
+              reason: payload.reason ?? null,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop_rotation_pending';
+            else if (r.ok) resultTag = 'applied_rotation_pending';
+            else throw new Error(`rotation_pending_rejected:${r.reason ?? 'unknown'}`);
+            // Immediate refresh trigger (fire-and-forget). Worker scan is
+            // the safety net if this fails for any reason.
+            if (r.ok && !r.noop) {
+              this.rotationRefresh.triggerImmediate(conn.id);
+            }
+            break;
           }
-          const r = await this.lifecycle.applyCredentialRotated({
-            userId,
-            payload,
-            eventId,
-          });
-          if (r.noop) resultTag = 'applied_noop';
-          break;
+
+          // ─── (c) Legacy full re-delivery (token present) ─────────────
+          // Checked before (b) so a SF emission with both shapes hits the
+          // richer path.
+          if (payload?.new_credential && typeof payload.new_credential.token === 'string' && payload.new_credential.token.length > 0) {
+            const r = await this.lifecycle.applyCredentialRotated({
+              userId,
+              payload: payload as SfCredentialRotatedPayload,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop';
+            break;
+          }
+
+          // ─── (b) R1 full notification ────────────────────────────────
+          if (
+            payload?.new_credential &&
+            payload.new_credential.cred_id != null &&
+            typeof payload.previous_grace_expires_at === 'string'
+          ) {
+            const r = await this.lifecycle.applyCredentialRotationNotification({
+              userId,
+              newCredId: payload.new_credential.cred_id!,
+              newKid: payload.new_credential.kid ?? null,
+              newTokenPrefix: payload.new_credential.token_prefix ?? null,
+              newExpiresAt: payload.new_credential.expires_at ?? null,
+              previousGraceExpiresAt: payload.previous_grace_expires_at!,
+              previousCredId: payload.previous_cred_id ?? null,
+              reason: payload.reason ?? null,
+              eventId,
+            });
+            if (r.noop) resultTag = 'applied_noop_rotation_notification';
+            else if (r.ok) resultTag = 'applied_rotation_notification';
+            else throw new Error(`rotation_notification_rejected:${r.reason ?? 'unknown'}`);
+            break;
+          }
+
+          // Unsupported variant — log shape for diagnostics + fail loudly so
+          // SF sees a 500 they can correlate. Don't silently accept payloads
+          // we don't understand.
+          // We only reach this branch if refresh_required is not literally
+          // true, so logging that condition is constant — skip it. Log what
+          // the other branch predicates saw instead.
+          this.logger.warn(
+            `[SfConnectionWebhook] event_id=${eventId} event_type=credential.rotated ` +
+              `result=unsupported_variant has_new_credential=${!!payload?.new_credential} ` +
+              `has_token=${typeof payload?.new_credential?.token === 'string'} ` +
+              `has_grace=${typeof payload?.previous_grace_expires_at === 'string'} ` +
+              `refresh_required_value=${this.safe(String(payload?.refresh_required ?? 'absent'))}`,
+          );
+          throw new Error('credential.rotated unsupported_variant');
         }
         case 'connection.revoked': {
-          const payload = (envelope.payload as SfConnectionRevokedPayload) ?? {};
+          const payload = (envBody as SfConnectionRevokedPayload) ?? {};
           await this.lifecycle.applyConnectionRevoked({
             userId,
             payload,
@@ -463,9 +616,24 @@ export class SfConnectionWebhookService {
   // ─── helpers ──────────────────────────────────────────────────────
 
   /**
+   * Extract the event body from the canonical envelope. SF S4 wire format
+   * uses `data`; the LB-original contract draft used `payload`. We accept
+   * either, with `data` winning when both are present. Always returns a
+   * non-null object so callers can dereference safely.
+   */
+  private envelopePayload(envelope: any): Record<string, any> {
+    if (envelope && typeof envelope === 'object') {
+      if (envelope.data && typeof envelope.data === 'object') return envelope.data;
+      if (envelope.payload && typeof envelope.payload === 'object') return envelope.payload;
+    }
+    return {};
+  }
+
+  /**
    * Strip secrets from the payload before persisting to the audit row.
    * orchestration_token / webhook_signing_secret / new_credential.token
-   * are sensitive — replace with *_len + *_prefix only.
+   * are sensitive — replace with *_len + *_prefix only. Walks both
+   * `data` (SF wire) and `payload` (LB-original) branches.
    */
   private scrubPayloadForAudit(envelope: SfWebhookEnvelope<unknown>): any {
     try {
@@ -476,12 +644,11 @@ export class SfConnectionWebhookService {
           delete obj[k];
         }
       };
-      const p = clone.payload ?? {};
-      if (p.provisioning?.credential) {
-        scrub(p.provisioning.credential, 'token');
-      }
-      if (p.new_credential) {
-        scrub(p.new_credential, 'token');
+      for (const branch of [clone.data, clone.payload]) {
+        const p = branch ?? {};
+        if (p.provisioning?.credential) scrub(p.provisioning.credential, 'token');
+        if (p.new_credential) scrub(p.new_credential, 'token');
+        if (p.credential) scrub(p.credential, 'token'); // confirmation-shape safety
       }
       return clone;
     } catch {
