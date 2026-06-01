@@ -966,40 +966,12 @@ export class LeadsService {
         data: { lastMessageAt: new Date() },
       });
 
-      // Trial usage: only count first AI auto-response per lead. Manual sends do
-      // not consume trial leads — the spec scopes the meter to automation.
-      if (senderType === 'ai') {
-        const user = await this.prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            subscriptionTier: true,
-            trialType: true,
-            trialEndedAt: true,
-          },
-        });
+      // Trial meter lives at the inbound webhook layer now — see
+      // WebhooksService.handleNegotiationCreated / handleMessageCreated /
+      // handleYelpNewEventInner. The counter measures inbound lead delivery,
+      // not AI replies, so the simplest-plan tenants (alerts only, no AI)
+      // also consume quota correctly.
 
-        const onTrial = user && !user.subscriptionTier && user.trialType !== null && !user.trialEndedAt;
-        if (onTrial) {
-          const previousAiMessages = await this.prisma.message.count({
-            where: {
-              conversationId: conversation.id,
-              sender: 'pro',
-              senderType: 'ai',
-              userId,
-            },
-          });
-
-          // === 1 because we just created the AI message above
-          if (previousAiMessages === 1) {
-            const result = await this.trialService.consumeLead(userId);
-            this.logger.log(
-              `[LeadsService] Trial lead consumed for ${userId} (justExhausted=${result.justExhausted})`,
-            );
-            // Trial-end notifications are dispatched in a follow-up step; for now
-            // the transition is captured in user.trialEndedAt.
-          }
-        }
-      }
       // After sending a business message, ensure a follow-up enrollment exists.
       // If the customer doesn't reply, the scheduler will send follow-ups.
       if (conversation?.id && this.followUpEngine) {
