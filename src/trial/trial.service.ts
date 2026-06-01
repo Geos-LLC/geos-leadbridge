@@ -151,36 +151,87 @@ export class TrialService {
   }
 
   /**
-   * Atomically increment lead counter. Call this AFTER a successful first
-   * AI auto-response is recorded for a lead. Returns whether this call caused
-   * the trial to transition into the ended state.
+   * Count a freshly-delivered Lead toward the trial quota.
+   *
+   * Call once per Lead from the live inbound webhook handlers — the moment a
+   * Lead row is first created for a real, customer-originated delivery (TT
+   * NEW_NEGOTIATION, TT/Yelp MessageCreated, Yelp NEW_EVENT). Do NOT call
+   * from backfills, scrape imports, sync upserts, or synthetic test leads —
+   * those paths intentionally bypass the meter so a new tenant connecting
+   * Yelp/TT and pulling historical records doesn't burn its trial.
+   *
+   * Idempotency: a compare-and-swap on `Lead.trialCounted` (false → true)
+   * inside a transaction guarantees exactly-once counting per Lead even
+   * under webhook retries and concurrent processing. The atomic update is
+   * the source of truth; the user counter increment runs only when the CAS
+   * actually flipped the flag.
+   *
+   * Paid users and users without an active trial are skipped entirely
+   * (`counted: false`) — their Leads stay `trialCounted=false` so that if a
+   * trial is ever reset by an admin, future inbound leads still count.
    */
-  async consumeLead(userId: string): Promise<{ justExhausted: boolean; nowEnded: boolean }> {
-    const user = await this.prisma.user.update({
+  async consumeLead(
+    userId: string,
+    leadId: string,
+  ): Promise<{ justExhausted: boolean; nowEnded: boolean; counted: boolean }> {
+    const u0 = await this.prisma.user.findUnique({
       where: { id: userId },
-      data: { trialLeadsHandled: { increment: 1 } },
       select: {
+        subscriptionTier: true,
+        subscriptionStatus: true,
         trialType: true,
         trialEndedAt: true,
-        trialEndDate: true,
-        trialLeadsHandled: true,
-        trialLeadsLimit: true,
       },
     });
+    if (!u0) {
+      return { justExhausted: false, nowEnded: false, counted: false };
+    }
+    if (this.hasActivePaidSub(u0.subscriptionTier, u0.subscriptionStatus)) {
+      return { justExhausted: false, nowEnded: false, counted: false };
+    }
+    if (!u0.trialType || u0.trialEndedAt) {
+      return { justExhausted: false, nowEnded: !!u0.trialEndedAt, counted: false };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // CAS — only the first caller to find trialCounted=false succeeds.
+      const flip = await tx.lead.updateMany({
+        where: { id: leadId, userId, trialCounted: false },
+        data: { trialCounted: true },
+      });
+      if (flip.count === 0) {
+        return null;
+      }
+      return tx.user.update({
+        where: { id: userId },
+        data: { trialLeadsHandled: { increment: 1 } },
+        select: {
+          trialType: true,
+          trialEndedAt: true,
+          trialLeadsHandled: true,
+          trialLeadsLimit: true,
+        },
+      });
+    });
+
+    if (!updated) {
+      return { justExhausted: false, nowEnded: false, counted: false };
+    }
 
     const exhaustedByLeads =
-      (user.trialType === TrialType.LEAD_BASED || user.trialType === TrialType.HYBRID) &&
-      user.trialLeadsHandled >= user.trialLeadsLimit;
+      (updated.trialType === TrialType.LEAD_BASED || updated.trialType === TrialType.HYBRID) &&
+      updated.trialLeadsHandled >= updated.trialLeadsLimit;
 
-    if (!exhaustedByLeads) {
-      return { justExhausted: false, nowEnded: !!user.trialEndedAt };
+    if (!exhaustedByLeads || updated.trialEndedAt) {
+      return {
+        justExhausted: false,
+        nowEnded: !!updated.trialEndedAt,
+        counted: true,
+      };
     }
 
-    if (user.trialEndedAt) {
-      return { justExhausted: false, nowEnded: true };
-    }
-
-    return this.markEnded(userId);
+    const ended = await this.markEnded(userId);
+    return { justExhausted: ended.justExhausted, nowEnded: ended.nowEnded, counted: true };
   }
 
   /**
