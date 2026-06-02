@@ -2,17 +2,37 @@ import { useEffect, useRef, useState } from 'react';
 import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
-  Clipboard, Sparkles, Brain, User, ArrowRight, PhoneCall,
+  Clipboard, Sparkles, User, ArrowRight, PhoneCall,
+  Scale, CircleDollarSign, UserCheck, Calendar,
+  type LucideIcon,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
+  type IconTone,
 } from '../../components/automation/ui';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
-import { automationApi, callConnectApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
+import { automationApi, callConnectApi, followUpApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAppStore } from '../../store/appStore';
+import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
+
+// Strategy meta — mirrors the picker on AutomationConversation. Used to
+// render the "AI Strategy" tile below with the actual saved strategy for the
+// account instead of a hardcoded "Auto" label. Keep these keys/labels in
+// sync with [Conversation.tsx](Conversation.tsx).
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
+  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
+  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
+  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
+  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
+  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
+  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
+};
+const isStrategyKey = (v: unknown): v is StrategyKey =>
+  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
 // Module-level cache: persists across mounts and tab switches so flipping
 // between account tabs feels instant (the new tab's last-known values render
@@ -25,6 +45,10 @@ type CachedAccount = {
   connMode: 'agent-first' | 'parallel';
   textBizHours: boolean;
   callBizHours: boolean;
+  // Actual `followUpStrategy` from the account's followUpSettingsJson. Drives
+  // the AI Strategy tile under Instant Reply; the tile used to be hardcoded
+  // to "Auto" regardless of what the account had saved.
+  followUpStrategy: StrategyKey;
   newLeadRuleId: string | null;
   customerTextRuleId: string | null;
   hasCallSettings: boolean;
@@ -45,6 +69,14 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [textBizHours, setTextBizHours] = useState(true);
   const [callBizHours, setCallBizHours] = useState(true);
   const [connMode, setConnMode] = useState<'agent-first' | 'parallel'>('agent-first');
+  // Read-only here — the actual strategy editor lives in AutomationConversation.
+  // We only display it so the tile reflects what AI will actually do when a
+  // lead arrives.
+  const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
+  // Business hours summary — fetched once from the user-level endpoint. The
+  // per-account checkboxes ("Only send during business hours") read this so
+  // their sublabel shows the user's actual schedule, not a placeholder.
+  const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
 
   // Loaded source-of-truth records (only when a specific account is picked)
   const [newLeadRule, setNewLeadRule] = useState<AutomationRule | null>(null);
@@ -106,6 +138,22 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     return () => { alive = false; };
   }, []);
 
+  // Business hours load once for the whole user. The Instant Text / Instant
+  // Call cards show "Only send during business hours" with a sublabel that
+  // used to be the hardcoded string "Mon–Fri, 9:00 AM – 6:00 PM (America/
+  // New_York)" — now it's the real saved schedule.
+  useEffect(() => {
+    let alive = true;
+    usersApi.getBusinessHours()
+      .then(bh => {
+        if (!alive) return;
+        const summary = formatBusinessHoursSummary(bh.schedule as BusinessHoursSchedule, bh.timezone);
+        setBizHoursSummary(summary);
+      })
+      .catch(() => { if (alive) setBizHoursSummary('See Settings → Hours'); });
+    return () => { alive = false; };
+  }, []);
+
   // Hydrate displayed values INSTANTLY from the module-level cache on every
   // scope change. This is what makes tab switching feel smooth: the previous
   // visit's last-known values render immediately without waiting for the API.
@@ -124,6 +172,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setConnMode(first.connMode);
         setTextBizHours(first.textBizHours);
         setCallBizHours(first.callBizHours);
+        setFollowUpStrategy(first.followUpStrategy);
       }
     } else {
       const cached = accountCache.get(accountId);
@@ -135,6 +184,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setConnMode(cached.connMode);
         setTextBizHours(cached.textBizHours);
         setCallBizHours(cached.callBizHours);
+        setFollowUpStrategy(cached.followUpStrategy);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,13 +201,15 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         try {
           const allRules = await automationApi.getRules().catch(() => ({ rules: [] as AutomationRule[] }));
           const results = await Promise.all(accounts.map(async (a) => {
-            const [notifRes, ccRes, hoursRes] = await Promise.all([
+            const [notifRes, ccRes, hoursRes, fuRes] = await Promise.all([
               notificationsApi.getRules(a.id).catch(() => ({ rules: [] as NotificationRule[] })),
               callConnectApi.getSettings(a.id).catch(() => ({ settings: null as CallConnectSettings | null })),
               usersApi.getAccountHours(a.id).catch(() => null),
+              followUpApi.getSettings(a.id).catch(() => ({ success: false, settings: undefined })),
             ]);
             const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
             const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
+            const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
             const cached: CachedAccount = {
               instantReplyOn: !!nl?.enabled,
               instantTextOn: !!ct?.enabled,
@@ -166,6 +218,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,
+              followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
               newLeadRuleId: nl?.id || null,
               customerTextRuleId: ct?.id || null,
               hasCallSettings: !!ccRes.settings,
@@ -193,6 +246,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             setConnMode(first.connMode);
             setTextBizHours(first.textBizHours);
             setCallBizHours(first.callBizHours);
+            setFollowUpStrategy(first.followUpStrategy);
           }
           setNewLeadRule(null); setCustomerTextRule(null); setCallSettings(null);
         } finally {
@@ -206,10 +260,12 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null as CallConnectSettings | null })),
         usersApi.getAccountHours(accountId).catch(() => null),
-      ]).then(([autoRes, notifRes, ccRes, hoursRes]) => {
+        followUpApi.getSettings(accountId).catch(() => ({ success: false, settings: undefined })),
+      ]).then(([autoRes, notifRes, ccRes, hoursRes, fuRes]) => {
         if (!alive) return;
         const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
+        const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
         const cached: CachedAccount = {
           instantReplyOn: !!nl?.enabled,
           instantTextOn: !!ct?.enabled,
@@ -218,6 +274,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
           textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
           callBizHours: hoursRes?.callDuringBusinessHours ?? true,
+          followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
           newLeadRuleId: nl?.id || null,
           customerTextRuleId: ct?.id || null,
           hasCallSettings: !!ccRes.settings,
@@ -235,6 +292,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setConnMode(cached.connMode);
           setTextBizHours(cached.textBizHours);
           setCallBizHours(cached.callBizHours);
+          setFollowUpStrategy(cached.followUpStrategy);
         }
         setPerAccount([]);
       }).finally(() => { if (alive) setLoading(false); });
@@ -284,6 +342,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       connMode:       fields.has('connMode')       ? connMode       : (prev?.connMode       ?? connMode),
       textBizHours:   fields.has('textBizHours')   ? textBizHours   : (prev?.textBizHours   ?? textBizHours),
       callBizHours:   fields.has('callBizHours')   ? callBizHours   : (prev?.callBizHours   ?? callBizHours),
+      // followUpStrategy is read-only on this page — preserve prev or fall
+      // back to current displayed value (which itself came from a prior fetch).
+      followUpStrategy:   prev?.followUpStrategy   ?? followUpStrategy,
       newLeadRuleId:      prev?.newLeadRuleId      ?? null,
       customerTextRuleId: prev?.customerTextRuleId ?? null,
       hasCallSettings:    prev?.hasCallSettings    ?? true,
@@ -411,6 +472,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
   const _textBizMix   = getMixed('textBizHours', v => v ? 'Only during business hours' : 'Anytime');
   const _callBizMix   = getMixed('callBizHours', v => v ? 'Only during business hours' : 'Anytime');
+  const _strategyMix  = getMixed('followUpStrategy', v => STRATEGY_META[v as StrategyKey]?.title || String(v));
+  const mixedStrategy = _strategyMix.mixed;
+  const tipStrategy   = _strategyMix.tooltip;
   const mixedTextBizHours = _textBizMix.mixed;
   const mixedCallBizHours = _callBizMix.mixed;
   const tipTextBizHours   = _textBizMix.tooltip;
@@ -540,15 +604,28 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow label="AI Strategy">
-          <InfoTile
-            icon={Brain}
-            iconTone="violet"
-            title="Auto"
-            body="AI picks the best strategy based on conversation context."
-            actionLabel="Edit AI Settings"
-            onAction={goAiSettings}
-          />
+        <FieldRow
+          label={
+            mixedStrategy ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                AI Strategy <MixedBadge tooltip={tipStrategy} />
+              </span>
+            ) : 'AI Strategy'
+          }
+        >
+          {(() => {
+            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
+            return (
+              <InfoTile
+                icon={meta.icon}
+                iconTone={meta.iconTone}
+                title={meta.title}
+                body={meta.body}
+                actionLabel="Edit AI Settings"
+                onAction={goAiSettings}
+              />
+            );
+          })()}
         </FieldRow>
 
         <FieldRow label="First Reply Instructions" noBorder>
@@ -609,7 +686,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               checked={textBizHours}
               onChange={onTextBizHours}
               label="Only send during business hours"
-              sublabel="Mon–Fri, 9:00 AM – 6:00 PM (America/New_York)"
+              sublabel={bizHoursSummary}
             />
             <div style={{ marginTop: 10 }}>
               <ActionLink onClick={goEditHours}>Edit Hours</ActionLink>
@@ -658,7 +735,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               checked={callBizHours}
               onChange={onCallBizHours}
               label="Only call during business hours"
-              sublabel="Mon–Fri, 9:00 AM – 6:00 PM (America/New_York)"
+              sublabel={bizHoursSummary}
             />
             <div style={{ marginTop: 10 }}>
               <ActionLink onClick={goEditHours}>Edit Hours</ActionLink>
