@@ -12,8 +12,9 @@ import {
   Radio, IconTile, ActionLink, AutoBadge, StatusPill,
   type IconTone,
 } from '../../components/automation/ui';
-import { followUpApi } from '../../services/api';
+import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
 
 // Module-level cache that survives mount/unmount AND tab switches, so toggling
 // account tabs feels instant and so the mixed-state detection has data to read
@@ -59,6 +60,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // User-level business hours, shown in the "Outside of business hours"
+  // option body. Replaces a hardcoded "Mon–Fri, 9:00 AM – 6:00 PM" string.
+  const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
   // Dirty flag set only by user-facing setters below. Load callbacks DON'T
   // touch this, so the auto-save effect never fires on tab switch or load.
   const dirtyRef = useRef(false);
@@ -80,6 +84,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
   // Reset dirty on scope change so the next user action starts fresh.
   useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
+
+  // One-time fetch of user-level business hours for the option body below.
+  useEffect(() => {
+    let alive = true;
+    usersApi.getBusinessHours()
+      .then(bh => {
+        if (!alive) return;
+        setBizHoursSummary(formatBusinessHoursSummary(bh.schedule as BusinessHoursSchedule, bh.timezone));
+      })
+      .catch(() => { if (alive) setBizHoursSummary('See Settings → Hours'); });
+    return () => { alive = false; };
+  }, []);
 
   // Helper: parse a settings payload into our local shape.
   const parseSettings = (s: any): CachedConvSettings => ({
@@ -438,7 +454,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               selected={availability === 'hours'}
               onClick={() => onAvailability('hours')}
               title="Outside of business hours"
-              body={<>AI replies only outside your business hours window.<br /><span style={{ color: 'var(--lb-ink-3)' }}>Business Hours: Mon–Fri, 9:00 AM – 6:00 PM (New York)</span></>}
+              body={<>AI replies only outside your business hours window.<br /><span style={{ color: 'var(--lb-ink-3)' }}>Business Hours: {bizHoursSummary}</span></>}
               mixed={mixedAvailability.mixed && availability === 'hours'}
               mixedTooltip={mixedAvailability.tooltip}
             />
