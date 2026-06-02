@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
-  RefreshCw, Clock, UserX, Brain, Info,
+  RefreshCw, Clock, UserX, Info,
+  Scale, CircleDollarSign, UserCheck, Calendar, Phone,
 } from 'lucide-react';
 import {
   SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
@@ -12,6 +13,23 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { formatQuietHoursSummary } from '../../lib/businessHours';
+
+// Strategy meta — mirrors the picker on AutomationConversation. Used to
+// render the AI Strategy tile below with the actual saved strategy for the
+// account instead of a hardcoded "Auto" label. Keep in sync with
+// [Conversation.tsx](Conversation.tsx) and [Respond.tsx](Respond.tsx).
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
+  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
+  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
+  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
+  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
+  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
+  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
+};
+const isStrategyKey = (v: unknown): v is StrategyKey =>
+  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
 // Module-level cache for instant tab switching + delay-free mixed detection.
 type CachedFollowups = {
@@ -24,6 +42,9 @@ type CachedFollowups = {
   resumeDelay: string;
   deferralDelay: string;
   hiredDelay: string;
+  // Read-only on this page (edited in AutomationConversation). Cached so
+  // the AI Strategy tile under Follow-up mode reflects the saved value.
+  followUpStrategy: StrategyKey;
 };
 const followupsCache = new Map<string, CachedFollowups>();
 
@@ -62,6 +83,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [resumeDelay, setResumeDelay] = useState('12 hours');
   const [deferralDelay, setDeferralDelay] = useState('3 days');
   const [hiredDelay, setHiredDelay] = useState('3 weeks');
+  // Read-only AI Strategy + Quiet Hours summary. AI Strategy is per-account
+  // (lives in followUpSettingsJson.followUpStrategy); Quiet Hours times are
+  // user-level (User.quietHours*) and fetched once below.
+  const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
+  const [quietSummary, setQuietSummary] = useState<string>('Loading…');
+  const [quietTzLabel, setQuietTzLabel] = useState<string>('');
 
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
@@ -110,7 +137,22 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     resumeDelay: s?.fuReEnrollDelay || '12 hours',
     deferralDelay: s?.aiDeferralDelay || '3 days',
     hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
+    followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
   });
+
+  // User-level quiet hours — independent of selected account. The Quiet
+  // hours card under Follow-ups shows the saved start/end/timezone.
+  useEffect(() => {
+    let alive = true;
+    usersApi.getQuietHours()
+      .then(qh => {
+        if (!alive) return;
+        setQuietSummary(formatQuietHoursSummary(qh.start, qh.end, qh.timezone));
+        setQuietTzLabel(qh.timezone || '');
+      })
+      .catch(() => { if (alive) { setQuietSummary('See Settings → Hours'); setQuietTzLabel(''); } });
+    return () => { alive = false; };
+  }, []);
 
   // Hydrate displayed values from cache on scope change (instant).
   useEffect(() => {
@@ -127,6 +169,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(first.resumeDelay);
         setDeferralDelay(first.deferralDelay);
         setHiredDelay(first.hiredDelay);
+        setFollowUpStrategy(first.followUpStrategy);
       }
     } else {
       const cached = followupsCache.get(accountId);
@@ -140,6 +183,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(cached.resumeDelay);
         setDeferralDelay(cached.deferralDelay);
         setHiredDelay(cached.hiredDelay);
+        setFollowUpStrategy(cached.followUpStrategy);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,6 +217,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             setResumeDelay(first.resumeDelay);
             setDeferralDelay(first.deferralDelay);
             setHiredDelay(first.hiredDelay);
+            setFollowUpStrategy(first.followUpStrategy);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
@@ -195,6 +240,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           setResumeDelay(parsed.resumeDelay);
           setDeferralDelay(parsed.deferralDelay);
           setHiredDelay(parsed.hiredDelay);
+          setFollowUpStrategy(parsed.followUpStrategy);
         }
       })
       .catch(() => { /* non-fatal */ })
@@ -234,7 +280,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       if (!prev) {
         followupsCache.set(a.id, {
           quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-          resumeDelay, deferralDelay, hiredDelay,
+          resumeDelay, deferralDelay, hiredDelay, followUpStrategy,
         });
         return;
       }
@@ -248,6 +294,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         resumeDelay:      fields.has('resumeDelay')      ? resumeDelay      : prev.resumeDelay,
         deferralDelay:    fields.has('deferralDelay')    ? deferralDelay    : prev.deferralDelay,
         hiredDelay:       fields.has('hiredDelay')       ? hiredDelay       : prev.hiredDelay,
+        // followUpStrategy is read-only on this page — preserve prev or
+        // fall back to the displayed value (loaded from getSettings).
+        followUpStrategy: prev.followUpStrategy ?? followUpStrategy,
       });
     });
 
@@ -356,10 +405,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
               <span style={{ fontWeight: 500 }}>Quiet hours: </span>
-              <span style={{ fontWeight: 700 }}>10:00 PM – 8:00 AM</span>
+              <span style={{ fontWeight: 700 }}>{quietSummary}</span>
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>
-              {timezone} (daily)
+              {quietTzLabel ? `${quietTzLabel} (daily)` : 'daily'}
             </div>
           </div>
           <ActionLink external onClick={goQuietSettings}>Edit in Settings</ActionLink>
@@ -420,14 +469,19 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         </FieldRow>
 
         <FieldRow label="AI Strategy" sublabel="Used when AI is composing messages." noBorder>
-          <InfoTile
-            icon={Brain}
-            iconTone="violet"
-            title="Auto"
-            body="AI picks the best strategy based on conversation context."
-            actionLabel="Edit AI Settings"
-            onAction={goAiSettings}
-          />
+          {(() => {
+            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
+            return (
+              <InfoTile
+                icon={meta.icon}
+                iconTone={meta.iconTone}
+                title={meta.title}
+                body={meta.body}
+                actionLabel="Edit AI Settings"
+                onAction={goAiSettings}
+              />
+            );
+          })()}
         </FieldRow>
       </SectionCard>
 
