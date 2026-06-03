@@ -728,11 +728,13 @@ export class AutomationService implements OnModuleInit {
     const pending = await this.prisma.pendingAutomatedMessage.findFirst({
       where: { id: pendingId },
       include: {
-        automationRule: true,
+        automationRule: { select: { userId: true } },
+        savedAccount: { select: { userId: true } },
       },
     });
 
-    if (!pending || pending.automationRule.userId !== userId) {
+    const ownerUserId = pending?.automationRule?.userId ?? pending?.savedAccount?.userId;
+    if (!pending || ownerUserId !== userId) {
       throw new NotFoundException('Pending message not found');
     }
 
@@ -1063,18 +1065,20 @@ export class AutomationService implements OnModuleInit {
       //                                   (human handles during business hours)
       // Falls back to the legacy `followUpAvailability` / `followUpActiveHours*`
       // settings if `aiConversationMode` is null (pre-migration accounts).
+      // Deferral target — when set, the synthetic rule below carries this
+      // through to scheduleAutomatedMessage, which writes a kind='ai_conversation'
+      // PendingAutomatedMessage row + scheduleTimer instead of sending now.
+      // The deferred fire path re-loads the full thread so the AI replies to
+      // whatever the customer has said by then, and cancels if the dispatcher
+      // (business/manual) has replied in the meantime.
+      let aiDeferredSendAt: Date | null = null;
+
       const aiMode = (savedAccount as any).aiConversationMode as string | null | undefined;
       if (aiMode === 'when_dispatcher_unavailable') {
         const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
         if (inHours) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — dispatcher available (inside business hours)`);
-          if (lead?.threadId) {
-            await this.conversationRuntime.setAiStatus(lead.threadId, {
-              status: 'unavailable',
-              reason: AI_STATUS_REASONS.OUTSIDE_BUSINESS_HOURS,
-            });
-          }
-          return;
+          aiDeferredSendAt = await this.businessHours.nextDeferredAiSendAt(context.userId, savedAccount.id);
+          this.logger.log(`[AUTOMATION] AI Conversation deferred — dispatcher available; queued for ${aiDeferredSendAt.toISOString()}`);
         }
       } else if (aiMode == null) {
         // Legacy path — preserve until UI migrates everyone to aiConversationMode.
@@ -1352,7 +1356,15 @@ export class AutomationService implements OnModuleInit {
       // A separate reply-count cap was unused (no UI), redundant, and
       // surfaced no clear use case the existing stop paths don't cover.
 
-      // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage
+      // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage.
+      // When `aiDeferredSendAt` was set by the OBH gate above, translate it
+      // to `delayMinutes` so scheduleAutomatedMessage writes a persistent
+      // kind='ai_conversation' row + timer instead of firing immediately.
+      // every_reply semantics so a new inbound from the customer naturally
+      // supersedes an older deferred enqueue via the existing dedup path.
+      const aiDelayMinutes = aiDeferredSendAt
+        ? Math.max(0, Math.ceil((aiDeferredSendAt.getTime() - Date.now()) / 60_000))
+        : 0;
       const syntheticRule = {
         id: `ai-conversation-${savedAccount.id}`,
         name: 'AI Conversation',
@@ -1362,13 +1374,14 @@ export class AutomationService implements OnModuleInit {
         template: null,
         promptTemplateId: null,
         promptTemplate: null,
-        delayMinutes: 0,
+        delayMinutes: aiDelayMinutes,
         enabled: true,
         savedAccountId: savedAccount.id,
         activeHoursStart: savedAccount.followUpActiveHoursStart,
         activeHoursEnd: savedAccount.followUpActiveHoursEnd,
         activeHoursTimezone: savedAccount.followUpTimezone,
         stopOnCustomerReply: true,
+        replyTriggerMode: 'every_reply' as const,
       };
 
       await this.scheduleAutomatedMessage(syntheticRule, enrichedContext);
@@ -1563,13 +1576,62 @@ export class AutomationService implements OnModuleInit {
     }
 
     // Synthetic AI Conversation rules (id `ai-conversation-<accountId>`) have no
-    // matching AutomationRule row, so we can't create a PendingAutomatedMessage
-    // (FK violation) or bump triggerCount. Execute in-memory with a synthetic
-    // pendingId — executePendingMessage detects the prefix and skips DB writes.
+    // matching AutomationRule row, so the persisted row keys on `savedAccountId`
+    // + kind='ai_conversation' instead. Two paths:
+    //   - delayMinutes === 0 → fire in-memory with a synthetic pendingId
+    //     (legacy fast path; no DB row needed for immediate sends).
+    //   - delayMinutes > 0   → write a real row so the deferred timer survives
+    //     restarts (restorePendingMessages) and dedups against newer customer
+    //     replies on the same negotiation.
     if (typeof rule.id === 'string' && rule.id.startsWith('ai-conversation-')) {
-      const syntheticId = `synthetic-${rule.id}-${context.negotiationId}`;
-      this.logger.log(`[AI Conversation] executing synthetic rule ${rule.id} for ${context.negotiationId}`);
-      await this.executePendingMessage(syntheticId, rule, context);
+      const savedAccountId = (rule as any).savedAccountId as string | undefined;
+      if (!rule.delayMinutes || rule.delayMinutes === 0) {
+        const syntheticId = `synthetic-${rule.id}-${context.negotiationId}`;
+        this.logger.log(`[AI Conversation] executing synthetic rule ${rule.id} for ${context.negotiationId}`);
+        await this.executePendingMessage(syntheticId, rule, context);
+        return;
+      }
+
+      if (!savedAccountId) {
+        this.logger.warn(`[AI Conversation] synthetic rule ${rule.id} missing savedAccountId — cannot persist deferred row, falling back to immediate execute`);
+        const syntheticId = `synthetic-${rule.id}-${context.negotiationId}`;
+        await this.executePendingMessage(syntheticId, rule, context);
+        return;
+      }
+
+      // Dedup against existing pending row for this account+negotiation.
+      // every_reply semantics: drop the stale pending and re-enqueue with
+      // a fresh scheduledFor so the deferral always reflects the latest
+      // inbound customer activity.
+      const existing = await this.prisma.pendingAutomatedMessage.findFirst({
+        where: { savedAccountId, negotiationId: context.negotiationId, kind: 'ai_conversation' },
+      });
+      if (existing) {
+        if (existing.status === 'pending') {
+          this.logger.log(`[AI Conversation] dropping superseded pending row ${existing.id} for ${context.negotiationId}`);
+          await this.prisma.pendingAutomatedMessage.delete({ where: { id: existing.id } }).catch(() => undefined);
+          const t = this.pendingTimers.get(existing.id);
+          if (t) { clearTimeout(t); this.pendingTimers.delete(existing.id); }
+        } else if (existing.status === 'sent' || existing.status === 'cancelled' || existing.status === 'failed') {
+          // Free up the slot — a new customer reply earns a new deferral.
+          await this.prisma.pendingAutomatedMessage.delete({ where: { id: existing.id } }).catch(() => undefined);
+        }
+      }
+
+      const scheduledFor = new Date(Date.now() + rule.delayMinutes * 60 * 1000);
+      const pending = await this.prisma.pendingAutomatedMessage.create({
+        data: {
+          automationRuleId: null,
+          kind: 'ai_conversation',
+          savedAccountId,
+          leadId: context.leadId,
+          negotiationId: context.negotiationId,
+          scheduledFor,
+          status: 'pending',
+        },
+      });
+      this.logger.log(`[AI Conversation] queued deferred row ${pending.id} for ${context.negotiationId} (scheduledFor=${scheduledFor.toISOString()})`);
+      this.scheduleTimer(pending.id, rule.delayMinutes * 60 * 1000, rule, context);
       return;
     }
 
@@ -1695,6 +1757,48 @@ export class AutomationService implements OnModuleInit {
               data: { status: 'cancelled', failureReason: 'Customer replied' },
             });
             return;
+          }
+        }
+      }
+
+      // AI Conversation deferred-send: back off if the dispatcher (business
+      // owner / manual operator) replied on this thread after the row was
+      // queued. The whole reason the row exists is "when_dispatcher_unavailable"
+      // mode — if the human did jump in, the AI must not pile on at close.
+      if (!pendingId.startsWith('synthetic-')) {
+        const pendingRow = await this.prisma.pendingAutomatedMessage.findUnique({
+          where: { id: pendingId },
+          select: { kind: true, createdAt: true, leadId: true },
+        });
+        if (pendingRow?.kind === 'ai_conversation') {
+          const leadForThread = await this.prisma.lead.findUnique({
+            where: { id: pendingRow.leadId },
+            select: { threadId: true },
+          });
+          if (leadForThread?.threadId) {
+            // Dispatcher = any pro-side message that isn't AI. senderType
+            // can be 'user' | 'manual' | 'business' | null for human sends
+            // (see webhooks.service, leads.service, automation.service
+            // recordMessage calls). We treat the complement of 'ai' as the
+            // human-handled signal.
+            const dispatcherReplySince = await this.prisma.message.findFirst({
+              where: {
+                conversationId: leadForThread.threadId,
+                sender: 'pro',
+                NOT: { senderType: 'ai' },
+                sentAt: { gt: pendingRow.createdAt },
+              },
+              orderBy: { sentAt: 'desc' },
+              select: { id: true },
+            });
+            if (dispatcherReplySince) {
+              this.logger.log(`[AI Conversation] cancelled ${pendingId} — dispatcher replied since queue`);
+              await this.prisma.pendingAutomatedMessage.update({
+                where: { id: pendingId },
+                data: { status: 'cancelled', failureReason: 'Dispatcher replied' },
+              });
+              return;
+            }
           }
         }
       }
@@ -2141,6 +2245,17 @@ export class AutomationService implements OnModuleInit {
             promptTemplate: true,
           },
         },
+        savedAccount: {
+          select: {
+            id: true,
+            userId: true,
+            businessId: true,
+            businessName: true,
+            followUpActiveHoursStart: true,
+            followUpActiveHoursEnd: true,
+            followUpTimezone: true,
+          },
+        },
         lead: true,
       },
     });
@@ -2153,33 +2268,82 @@ export class AutomationService implements OnModuleInit {
       const scheduledTime = pending.scheduledFor.getTime();
       const delayMs = Math.max(0, scheduledTime - now);
 
-      const savedAccount = pending.lead.businessId
-        ? await this.prisma.savedAccount.findFirst({
-            where: { businessId: pending.lead.businessId },
-            select: { businessName: true },
-          })
-        : null;
+      // kind='ai_conversation' rows have no AutomationRule — synthesize the
+      // rule object from savedAccount instead so executePendingMessage can
+      // drive the AI generator unchanged.
+      let rule: any;
+      let userId: string;
+      if (pending.kind === 'ai_conversation') {
+        if (!pending.savedAccount) {
+          this.logger.warn(`[restorePendingMessages] AI Conversation row ${pending.id} missing savedAccount — cancelling`);
+          await this.prisma.pendingAutomatedMessage.update({
+            where: { id: pending.id },
+            data: { status: 'cancelled', failureReason: 'savedAccount missing on restore' },
+          }).catch(() => undefined);
+          continue;
+        }
+        rule = {
+          id: `ai-conversation-${pending.savedAccount.id}`,
+          name: 'AI Conversation',
+          triggerType: 'customer_reply',
+          useAi: true,
+          templateId: null,
+          template: null,
+          promptTemplateId: null,
+          promptTemplate: null,
+          delayMinutes: 0,
+          enabled: true,
+          savedAccountId: pending.savedAccount.id,
+          activeHoursStart: pending.savedAccount.followUpActiveHoursStart,
+          activeHoursEnd: pending.savedAccount.followUpActiveHoursEnd,
+          activeHoursTimezone: pending.savedAccount.followUpTimezone,
+          stopOnCustomerReply: true,
+          replyTriggerMode: 'every_reply',
+        };
+        userId = pending.savedAccount.userId;
+      } else {
+        if (!pending.automationRule) {
+          this.logger.warn(`[restorePendingMessages] rule-kind row ${pending.id} missing automationRule — cancelling`);
+          await this.prisma.pendingAutomatedMessage.update({
+            where: { id: pending.id },
+            data: { status: 'cancelled', failureReason: 'automationRule missing on restore' },
+          }).catch(() => undefined);
+          continue;
+        }
+        rule = pending.automationRule;
+        userId = pending.automationRule.userId;
+      }
+
+      const accountName = pending.savedAccount?.businessName
+        ?? (pending.lead.businessId
+          ? (await this.prisma.savedAccount.findFirst({
+              where: { businessId: pending.lead.businessId },
+              select: { businessName: true },
+            }))?.businessName
+          : undefined)
+        ?? undefined;
 
       const context: AutomationTriggerContext = {
-        userId: pending.automationRule.userId,
+        userId,
         businessId: pending.lead.businessId || '',
         negotiationId: pending.negotiationId,
         leadId: pending.leadId,
         customerName: pending.lead.customerName,
         customerMessage: pending.lead.message || undefined,
-        accountName: savedAccount?.businessName || undefined,
+        accountName,
         category: pending.lead.category || undefined,
         city: pending.lead.city || undefined,
         state: pending.lead.state || undefined,
+        savedAccountId: pending.savedAccountId ?? undefined,
       };
 
       if (delayMs === 0) {
         // Should have already been sent - execute now
-        this.logger.log(`Executing overdue message: ${pending.id}`);
-        await this.executePendingMessage(pending.id, pending.automationRule, context);
+        this.logger.log(`Executing overdue message: ${pending.id} (kind=${pending.kind})`);
+        await this.executePendingMessage(pending.id, rule, context);
       } else {
         // Reschedule for remaining time
-        this.scheduleTimer(pending.id, delayMs, pending.automationRule, context);
+        this.scheduleTimer(pending.id, delayMs, rule, context);
       }
     }
   }

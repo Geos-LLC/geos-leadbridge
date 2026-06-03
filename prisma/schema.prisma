@@ -583,6 +583,7 @@ model SavedAccount {
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
   healthStatuses       AccountHealthStatus[]
+  pendingMessages      PendingAutomatedMessage[]
 
   @@unique([userId, platform, businessId])
   @@index([userId])
@@ -658,7 +659,20 @@ model AutomationRule {
 
 model PendingAutomatedMessage {
   id               String    @id @default(uuid())
-  automationRuleId String
+  // Nullable: synthetic AI Conversation deferrals (kind='ai_conversation')
+  // have no backing AutomationRule row — they are reconstructed at fire
+  // time from savedAccountId. Classic rule-driven pending rows keep this
+  // populated (kind='rule', default).
+  automationRuleId String?
+  // Discriminates the row's origin so executePendingMessage /
+  // restorePendingMessages know how to reconstruct the rule object:
+  //   "rule"            — classic AutomationRule-backed (default)
+  //   "ai_conversation" — AI Conversation deferred-send (synthetic rule)
+  kind             String    @default("rule")
+  // Set when kind='ai_conversation' — used to rebuild the synthetic rule
+  // and resolve the OpenAI context (pricing, FAQ, strategy, tz) at fire
+  // time. Null for classic rule rows.
+  savedAccountId   String?
   leadId           String
   negotiationId    String // External negotiation ID (for dedup)
   scheduledFor     DateTime // When to send
@@ -668,12 +682,15 @@ model PendingAutomatedMessage {
   createdAt        DateTime  @default(now())
 
   // Relationships
-  automationRule AutomationRule @relation(fields: [automationRuleId], references: [id], onDelete: Cascade)
-  lead           Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  automationRule AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: Cascade)
+  savedAccount   SavedAccount?   @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  lead           Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
-  @@unique([automationRuleId, negotiationId])
+  @@index([automationRuleId, negotiationId])
+  @@index([savedAccountId, negotiationId])
   @@index([status])
   @@index([scheduledFor])
+  @@index([kind, status])
   @@map("pending_automated_messages")
 }
 
