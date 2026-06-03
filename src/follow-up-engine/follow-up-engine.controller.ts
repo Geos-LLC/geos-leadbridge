@@ -587,7 +587,7 @@ export class FollowUpEngineController {
       `mode=${body.mode === undefined ? '(omitted)' : body.mode} ` +
       `followUpStrategy=${body.followUpStrategy === undefined ? '(omitted)' : body.followUpStrategy} ` +
       `followUpStrategyPrompt=${body.followUpStrategyPrompt === undefined ? '(omitted)' : (body.followUpStrategyPrompt === null ? 'null' : (body.followUpStrategyPrompt + '').length + ' chars')} ` +
-      `availability=${body.availability ?? '(omitted)'} ` +
+      `availability=${(body.followUpAvailability ?? body.availability) ?? '(omitted)'} ` +
       `keys=[${Object.keys(body).join(',')}]`
     );
 
@@ -609,7 +609,13 @@ export class FollowUpEngineController {
     if (timing !== undefined) extendedSettings.followUpTiming = timing;
     if (customSteps !== undefined) extendedSettings.followUpCustomSteps = customSteps;
     if (smartSteps !== undefined) extendedSettings.followUpSmartSteps = smartSteps;
+    // Two callers use two different keys for the same setting:
+    //   - Services.tsx (legacy) sends `availability` (destructured above)
+    //   - automation/Conversation.tsx (AI Conversation page) sends the
+    //     canonical `followUpAvailability` directly
+    // Accept both so the new page's writes don't silently no-op.
     if (availability !== undefined) extendedSettings.followUpAvailability = availability;
+    if (body.followUpAvailability !== undefined) extendedSettings.followUpAvailability = body.followUpAvailability;
     // Removed 2026-05-22: stopOnReply / stopOnOptOut / stopOnBooked were
     // write-only JSON keys (no UI input, no backend read at runtime).
     // Real behavior is governed by fuReEnrollOnSilence (resume after
