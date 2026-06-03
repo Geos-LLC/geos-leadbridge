@@ -767,6 +767,11 @@ export class CallConnectService {
             // fromNumberHint tells Sigcore which per-account settings row to use
             fromNumberHint: settings.botNumberE164 || undefined,
             source: 'leadbridge',
+            // Temporary: capture audio of the manager's whisper leg so the next
+            // FAILED CC session can be played back. Open Yelp/JAX CC investigation
+            // — bucket=TWILIO_PATH per Sigcore diagnostic logs (commit 4381cf32).
+            // Revert once root cause confirmed.
+            recordAgentLeg: true,
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
         ),
