@@ -155,6 +155,109 @@ export class BusinessHoursService {
   // + normalizeSchedule / currentWeekday / isInTimeRange.
 
   /**
+   * Returns the next UTC instant the AI Conversation engine is allowed to
+   * fire a deferred reply under `aiConversationMode='when_dispatcher_unavailable'`:
+   *   - First moment after today's business-hours close (per-day schedule, account tz)
+   *   - Snapped past quiet hours if close falls inside the quiet window
+   *
+   * Caller must already have confirmed we're currently INSIDE business hours
+   * (that's what makes the deferral necessary). If today is closed or we're
+   * already past close, returns `now` — caller can fire immediately.
+   */
+  async nextDeferredAiSendAt(userId: string, savedAccountId?: string | null): Promise<Date> {
+    const now = new Date();
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        timezone: true,
+        businessHoursTimezone: true,
+        quietHoursTimezone: true,
+        businessHoursDays: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
+      },
+    });
+    if (!user) return now;
+
+    let override: any = null;
+    let accountForTz: { timezoneOverride?: string | null; followUpTimezone?: string | null } | null = null;
+    if (savedAccountId) {
+      const acct = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: {
+          businessHoursOverride: true,
+          timezoneOverride: true,
+          followUpTimezone: true,
+        },
+      });
+      override = acct?.businessHoursOverride ?? null;
+      accountForTz = acct ?? null;
+    }
+
+    const schedule = BusinessHoursService.normalizeSchedule(override?.schedule ?? user.businessHoursDays);
+    const overrideJsonTz = typeof override?.timezone === 'string' && override.timezone.trim()
+      ? override.timezone
+      : null;
+    const tz = resolveTimezone(
+      {
+        timezoneOverride: accountForTz?.timezoneOverride,
+        followUpTimezone: accountForTz?.followUpTimezone ?? overrideJsonTz,
+      },
+      user,
+    );
+
+    const today = BusinessHoursService.currentWeekday(now, tz);
+    const day = schedule[today];
+    if (!day) return now; // closed today — already OBH
+
+    // Next occurrence of business close (HH:MM in tz) — handles "past close"
+    // by returning tomorrow's close, but we should only be called while
+    // inside hours so closeAt lands today.
+    let candidate = BusinessHoursService.nextOccurrenceOfLocalTime(now, day.end, tz);
+
+    // Snap past quiet hours
+    const qStart = user.quietHoursStart || DEFAULT_QH_START;
+    const qEnd = user.quietHoursEnd || DEFAULT_QH_END;
+    if (BusinessHoursService.isInTimeRange(candidate, qStart, qEnd, tz)) {
+      candidate = BusinessHoursService.nextOccurrenceOfLocalTime(candidate, qEnd, tz);
+    }
+    return candidate;
+  }
+
+  /**
+   * Next UTC instant whose wall-clock time in `timezone` equals HH:MM.
+   * DST-safe: nudges the candidate when the formatted local time differs
+   * from the target due to a DST transition.
+   */
+  static nextOccurrenceOfLocalTime(from: Date, hhmm: string, timezone: string): Date {
+    const [sh, sm] = hhmm.split(':').map(Number);
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(from);
+    const curH = Number(parts.find(p => p.type === 'hour')?.value || '0');
+    const curM = Number(parts.find(p => p.type === 'minute')?.value || '0');
+    const currentMin = curH * 60 + curM;
+    const targetMin = sh * 60 + sm;
+    let diffMin = targetMin - currentMin;
+    if (diffMin <= 0) diffMin += 24 * 60;
+    let candidate = new Date(from.getTime() + diffMin * 60_000);
+    // DST safety pass — if local wall clock doesn't match HH:MM, nudge.
+    for (let i = 0; i < 3; i++) {
+      const cParts = fmt.formatToParts(candidate);
+      const cH = Number(cParts.find(p => p.type === 'hour')?.value || '0');
+      const cM = Number(cParts.find(p => p.type === 'minute')?.value || '0');
+      if (cH === sh && cM === sm) return candidate;
+      const offMin = (sh * 60 + sm) - (cH * 60 + cM);
+      candidate = new Date(candidate.getTime() + offMin * 60_000);
+    }
+    return candidate;
+  }
+
+  /**
    * Returns true if right now falls inside the user's quiet-hours window.
    * Quiet hours is a daily window (no weekday filter) and is treated as
    * always-defined — defaults (22:00–08:00 NY) apply when fields are null.
