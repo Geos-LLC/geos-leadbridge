@@ -27,7 +27,7 @@ import {
   Sparkles,
   AlertTriangle,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment, type StatusConflict } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -164,6 +164,66 @@ function mergeTimeline(
 
   events.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   return events;
+}
+
+/**
+ * Build the inline "needs-dispatcher" banner copy from the conversation
+ * runtime state. Returns null when the AI is actively engaging (no banner).
+ *
+ * Mapping mirrors AI_STATUS_REASONS in src/conversation-context/conversation-runtime.ts
+ * — keep the two in sync when new reasons are added on the backend.
+ */
+function getDispatcherBannerCopy(
+  rt: RuntimeStateResponse | null,
+  lastEventInbound: boolean,
+): { title: string; reason: string | null } | null {
+  if (!rt?.threadContext) return null;
+  const tc = rt.threadContext;
+  const handoffOpen = !!tc.handoffRequestedAt && !tc.handoffResolvedAt;
+  const aiStatus = tc.aiStatus;
+  const reasonTag = tc.aiStatusReason;
+
+  // Only suggest the dispatcher act when the customer is the latest speaker.
+  if (!lastEventInbound && !handoffOpen) return null;
+
+  if (handoffOpen) {
+    const reasonMap: Record<string, string> = {
+      agreed: 'Customer is ready to book.',
+      wants_live_contact: 'Customer asked to speak with a person.',
+      provided_phone_number: 'Customer shared a phone number.',
+      provided_square_footage: 'Customer shared square footage.',
+      qualification_complete: 'Qualification questions are answered.',
+    };
+    const why = tc.handoffRequestedReason
+      ? reasonMap[tc.handoffRequestedReason] || `Handoff: ${tc.handoffRequestedReason}.`
+      : null;
+    return { title: 'Handoff requested — please reply', reason: why };
+  }
+
+  if (!aiStatus || aiStatus === 'active' || aiStatus === 'ai_engaging') return null;
+
+  const reasonCopy: Record<string, string> = {
+    user_ai_conversation_disabled: 'AI Conversation is turned off in your settings.',
+    outside_business_hours: 'AI is set to reply only when the dispatcher is unavailable, and we are inside business hours.',
+    manual_reply_recency_window: 'A manual reply was sent recently — AI is paused while you handle this thread.',
+    classifier_opt_out: 'Customer opted out — AI stopped.',
+    classifier_hired_elsewhere: 'Customer hired someone else — AI stopped.',
+    classifier_agreed: 'Customer agreed to book — AI handed off to you.',
+    classifier_wants_live_contact: 'Customer asked for a live person — AI handed off.',
+    classifier_deferring: 'Customer is deferring — AI paused, follow-up scheduled.',
+    crm_terminal_status_legacy: 'Lead status is terminal — AI stopped.',
+  };
+
+  const reason = reasonTag ? reasonCopy[reasonTag] || null : null;
+
+  if (aiStatus === 'disabled') return { title: 'AI Conversation is off — please reply', reason };
+  if (aiStatus === 'unavailable') return { title: 'AI is off duty — please reply', reason };
+  if (aiStatus === 'paused_human') return { title: 'AI is paused — please reply', reason };
+  if (aiStatus === 'paused_deferral') return { title: 'AI paused on deferral — please reply', reason };
+  if (aiStatus === 'stopped_terminal' || aiStatus === 'stopped_booked') {
+    return { title: 'AI stopped — please reply', reason };
+  }
+  return null;
 }
 
 /**
@@ -396,6 +456,21 @@ export function Messages() {
     mode: string;
     lastStoppedReason?: string | null;
   } | null>(null);
+
+  // Per-lead AI runtime state — drives the "needs-dispatcher" inline banner.
+  // Re-fetched whenever the timeline grows so the banner appears/disappears
+  // in response to new customer replies and dispatcher responses.
+  const [runtimeState, setRuntimeState] = useState<RuntimeStateResponse | null>(null);
+  useEffect(() => {
+    setRuntimeState(null);
+    if (!selectedLead?.id) return;
+    let cancelled = false;
+    conversationRuntimeApi
+      .getLeadRuntimeState(selectedLead.id)
+      .then((res) => { if (!cancelled) setRuntimeState(res); })
+      .catch(() => { if (!cancelled) setRuntimeState(null); });
+    return () => { cancelled = true; };
+  }, [selectedLead?.id, timelineEvents.length]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [editingPreview, setEditingPreview] = useState(false);
   const [editedMessage, setEditedMessage] = useState('');
@@ -413,6 +488,31 @@ export function Messages() {
   const filteredTimeline = channelFilter === 'all'
     ? timelineEvents
     : timelineEvents.filter(e => e.channel === channelFilter);
+
+  // Inline "needs-dispatcher" banner — derived from runtime state + timeline.
+  // Visible when the AI declined/skipped this thread and the customer is the
+  // latest speaker. Slides + fades out via CSS transition once the dispatcher
+  // replies (the manual reply becomes the new latest event, flipping derived
+  // state to false). `bannerMounted` keeps the element in the DOM during the
+  // exit animation.
+  const lastEvent = filteredTimeline.length > 0 ? filteredTimeline[filteredTimeline.length - 1] : null;
+  const lastInbound = lastEvent?.direction === 'inbound';
+  const bannerCopy = getDispatcherBannerCopy(runtimeState, lastInbound);
+  const needsDispatcher = bannerCopy !== null;
+  const [bannerMounted, setBannerMounted] = useState(false);
+  const [bannerVisible, setBannerVisible] = useState(false);
+  useEffect(() => {
+    if (needsDispatcher) {
+      setBannerMounted(true);
+      const raf = requestAnimationFrame(() => setBannerVisible(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    if (!needsDispatcher && bannerMounted) {
+      setBannerVisible(false);
+      const t = setTimeout(() => setBannerMounted(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [needsDispatcher, bannerMounted]);
 
   // Update account filter in URL
   const setAccountFilter = (value: string) => {
@@ -2318,6 +2418,36 @@ export function Messages() {
                   </div>
                   );
                 })
+              )}
+              {bannerMounted && bannerCopy && (
+                <div
+                  className="flex justify-center"
+                  style={{
+                    opacity: bannerVisible ? 1 : 0,
+                    maxHeight: bannerVisible ? 200 : 0,
+                    transform: bannerVisible ? 'translateY(0)' : 'translateY(-6px)',
+                    transition: 'opacity 450ms ease, max-height 450ms ease, transform 450ms ease, margin 450ms ease',
+                    overflow: 'hidden',
+                    marginTop: bannerVisible ? undefined : 0,
+                  }}
+                >
+                  <div
+                    className="flex items-start gap-2 px-3 py-2 rounded-xl border max-w-md"
+                    style={{
+                      background: 'oklch(0.97 0.04 80)',
+                      borderColor: 'oklch(0.85 0.1 80)',
+                      color: 'oklch(0.35 0.1 60)',
+                    }}
+                  >
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <div className="text-xs leading-snug">
+                      <div className="font-semibold">{bannerCopy.title}</div>
+                      {bannerCopy.reason && (
+                        <div className="mt-0.5 opacity-80">{bannerCopy.reason}</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
               <div ref={messagesEndRef} />
             </div>
