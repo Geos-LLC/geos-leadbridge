@@ -2047,6 +2047,21 @@ export class WebhooksService {
       }
 
       if (classification.outcome === 'echo') {
+        // Bump Conversation.lastMessageAt for dispatcher-side replies too
+        // (BIZ messages typed on biz.yelp.com). Without this, the Messages list
+        // sorts by lastMessageAt and the thread stays pinned to the previous
+        // customer reply's timestamp — making the dispatcher's reply look
+        // "missing" in the UI even though the Message row is persisted above.
+        // Mirrors the customer-reply update at the bottom of this branch.
+        const echoSentAt = classification.rawEvent?.time_created
+          ? new Date(classification.rawEvent.time_created)
+          : null;
+        if (conversation && echoSentAt) {
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { lastMessageAt: echoSentAt },
+          }).catch(() => {});
+        }
         this.logger.log(`[echo_confirmed] yelp lead=${leadId} eventId=${eventId ?? 'n/a'}`);
         return;
       }
