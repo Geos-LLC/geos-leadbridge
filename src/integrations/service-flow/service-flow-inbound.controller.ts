@@ -143,12 +143,36 @@ export class ServiceFlowInboundController {
    * Returns the shared secret SF should use to sign subsequent events.
    *
    * JWT-protected: called by SF's connect flow using the LB user's JWT.
+   *
+   * NOTE on the canonical reconnect flow:
+   *   The CANONICAL path for SF to (re)establish a tenant on LB is
+   *   POST /v1/integrations/sf/provision (Communication Hub server-to-
+   *   server) which creates a full sf_connection row with orchestration
+   *   credentials. This /subscribe endpoint is a LEGACY path that
+   *   creates only the webhook subscription.
+   *
+   *   Defensive sf_connection upsert (added 2026-06-03 after the Spotless
+   *   reconnect incident — sf_connection row was missing, sf_managed
+   *   guard inactive, manual status writes were not blocked):
+   *   if the caller supplies sfTenantId in the body, OR an existing
+   *   (possibly disconnected) sf_connection row exists for this user,
+   *   we (re)activate it and link the new subscription id. This ensures
+   *   the sf_managed guard fires even when SF's reconnect uses this
+   *   legacy endpoint instead of /provision.
    */
   @UseGuards(JwtAuthGuard)
   @Post('subscribe')
   async subscribe(
     @CurrentUser() user: any,
-    @Body() body: { name?: string; sourceInstance?: string; events?: string[] },
+    @Body() body: { name?: string; sourceInstance?: string; events?: string[];
+      /** Optional. When provided (or already present on an existing row), the
+       *  endpoint also (re)activates the sf_connection row so sf_managed
+       *  guard fires for manual status writes. */
+      sfTenantId?: string;
+      /** Optional. Persisted on first create only — used by future
+       *  orchestration client calls. */
+      baseUrl?: string;
+    },
   ) {
     const secret = crypto.randomBytes(32).toString('hex');
     const syntheticUrl = `sf://${body.sourceInstance || 'sf-default'}/${user.id}`;
@@ -177,6 +201,16 @@ export class ServiceFlowInboundController {
       },
     });
 
+    // ─── Defensive sf_connection upsert ─────────────────────────────
+    // Three cases:
+    //   (A) Existing row (any status) → reactivate; preserve credentials.
+    //   (B) No row, body.sfTenantId provided → create minimal row.
+    //   (C) No row, no sfTenantId → log warning, skip. The subscription
+    //       is created; sf_managed guard cannot fire for this user
+    //       until /provision is called or /subscribe is re-called with
+    //       sfTenantId.
+    await this.ensureSfConnectionForSubscribe(user.id, sub.id, body.sfTenantId, body.baseUrl);
+
     return {
       success: true,
       subscription: {
@@ -186,6 +220,71 @@ export class ServiceFlowInboundController {
         secret, // returned once on registration for SF to store
       },
     };
+  }
+
+  private async ensureSfConnectionForSubscribe(
+    userId: string,
+    subscriptionId: string,
+    sfTenantIdFromBody: string | undefined,
+    baseUrlFromBody: string | undefined,
+  ): Promise<void> {
+    const existing = await this.prisma.sfConnection.findUnique({ where: { userId } });
+    if (existing) {
+      // Reactivate. Preserve sfTenantId / baseUrl / credentials. Only
+      // overwrite sfTenantId if the body explicitly contradicts the
+      // existing row (operator changed tenants).
+      await this.prisma.sfConnection.update({
+        where: { userId },
+        data: {
+          status: 'active',
+          isActive: true,
+          inboundSubscriptionId: subscriptionId,
+          disconnectInitiator: null,
+          disconnectedAt: null,
+          ...(sfTenantIdFromBody && existing.sfTenantId !== sfTenantIdFromBody
+            ? { sfTenantId: sfTenantIdFromBody } : {}),
+          ...(baseUrlFromBody && !existing.baseUrl
+            ? { baseUrl: baseUrlFromBody } : {}),
+          updatedAt: new Date(),
+        },
+      });
+      this.logger.log(
+        `[ServiceFlowInbound] event=subscribe_sf_connection_reactivated user_id=${userId} ` +
+          `sf_tenant_id=${existing.sfTenantId} sub_id=${subscriptionId}`,
+      );
+      return;
+    }
+    if (!sfTenantIdFromBody) {
+      this.logger.warn(
+        `[ServiceFlowInbound] event=subscribe_sf_connection_skipped user_id=${userId} ` +
+          `reason=no_existing_row_no_tenant_id sf_managed_inactive=true sub_id=${subscriptionId}`,
+      );
+      return;
+    }
+    // Minimal-mode create. No orchestration credentials — these come from
+    // /provision later if SF wants the full orchestration API. The sf_managed
+    // guard only checks (userId, isActive, status); these three fields are
+    // enough to make it fire.
+    const now = new Date();
+    await this.prisma.sfConnection.create({
+      data: {
+        userId,
+        sfTenantId: sfTenantIdFromBody,
+        baseUrl: baseUrlFromBody || '',
+        orchestrationToken: '', // sentinel: subscription-only mode, no orchestration credentials
+        tokenIssuedAt: now,
+        tokenLastReceivedAt: now,
+        tokenLastRotationSource: 'subscribe_endpoint',
+        inboundSubscriptionId: subscriptionId,
+        events: [],
+        isActive: true,
+        status: 'active',
+      },
+    });
+    this.logger.log(
+      `[ServiceFlowInbound] event=subscribe_sf_connection_created user_id=${userId} ` +
+        `sf_tenant_id=${sfTenantIdFromBody} mode=subscription_only sub_id=${subscriptionId}`,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
