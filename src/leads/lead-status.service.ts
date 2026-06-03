@@ -81,6 +81,12 @@ export type WriteSkipReason =
   // rejected because SF owns lifecycle. Admin/support paths bypass by
   // passing WriteStatusInput.adminOverride=true.
   | 'sf_managed'
+  // Platform_sync attempted to mark a lead `lost`/`archived` while the lead
+  // is already linked to SF (sfJobId set, sfCustomerId set, or
+  // syncStatus='linked'). SF owns lifecycle for linked leads — a
+  // marketplace archive event must not downgrade them. The platformStatus
+  // column still flows through; only the canonical Lead.status is held back.
+  | 'sf_link_protected'
   | 'automation_terminal'
   | 'pipeline_downgrade'
   | 'duplicate'
@@ -271,6 +277,12 @@ export class LeadStatusService {
         statusUpdatedAt: true,
         statusSource: true,
         sfJobId: true,
+        // sfCustomerId + syncStatus power the SF-link guard inside
+        // applyPlatformSync. A linked lead (any of: sfJobId, sfCustomerId,
+        // syncStatus='linked') is operationally owned by SF; a marketplace
+        // archive sweep must not drag it back to `lost`/`archived`.
+        sfCustomerId: true,
+        syncStatus: true,
         thumbtackStatus: true,
         lostReason: true,
         reengageAt: true,
@@ -569,6 +581,8 @@ export class LeadStatusService {
       platformStatus: string | null;
       thumbtackStatus: string | null;
       sfJobId: string | null;
+      sfCustomerId: string | null;
+      syncStatus: string | null;
       statusUpdatedAt: Date | null;
     },
     input: WriteStatusInput,
@@ -616,14 +630,37 @@ export class LeadStatusService {
     }
 
     // Lead.status write: gated by canonical validation, downgrade guard,
-    // hard-terminal, completed-lock, and SF protection.
+    // hard-terminal, completed-lock, SF protection (env-flag + link-based),
+    // and fulfillment-state protection.
     let lbStatusBlocked: WriteSkipReason | null = null;
     if (input.newStatus && input.newStatus !== oldLbStatus) {
       const sfActive = lead.sfJobId ? this.isSfAuthorityActive(lead.userId) : false;
+      // SF-link guard: marketplace-archive events ("Archived" / "Closed" /
+      // "Not hired" / "Cancelled" — anything that lands LB in `lost` or
+      // `archived`) must NOT downgrade a lead that SF has already linked.
+      // The link comes from any of: sfJobId set, sfCustomerId set, or
+      // syncStatus='linked' (historical sync). Independent of
+      // SF_STATUS_WINS — this rule fires regardless of the env flag because
+      // the link itself is the authority signal. platformStatus still
+      // flows so analytics keeps the marketplace breadcrumb.
+      const sfLinked = !!(
+        lead.sfJobId || lead.sfCustomerId || lead.syncStatus === 'linked'
+      );
+      const newIsArchiveTerminal =
+        input.newStatus === 'lost' || input.newStatus === 'archived';
       if (!isCanonicalStatus(input.newStatus)) {
         lbStatusBlocked = 'invalid_status';
       } else if (HARD_TERMINAL.has(oldLbStatus)) {
         lbStatusBlocked = 'hard_terminal';
+      } else if (sfLinked && newIsArchiveTerminal) {
+        // Explicit "skipped_archived_due_to_sf_link" marker for Loki —
+        // operators triaging "why didn't Yelp archive flow through" can
+        // grep this exact phrase. The structured skip_reason on the
+        // standard log line below carries `sf_link_protected`.
+        lbStatusBlocked = 'sf_link_protected';
+        this.logger.log(
+          `[LeadStatus] skipped_archived_due_to_sf_link lead_id=${lead.id} attempted=${input.newStatus} platform_status=${input.platformStatus ?? oldPlatform ?? 'null'} sf_job_id=${lead.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'}`,
+        );
       } else if (sfActive) {
         // SF owns the canonical status when integrated; platformStatus still flows.
         lbStatusBlocked = 'sf_protected';
@@ -633,12 +670,36 @@ export class LeadStatusService {
         // higher rank, backward to active pipeline, or sideways into terminals
         // like `lost`/`cancelled`). Manual + SF override paths are unaffected.
         lbStatusBlocked = 'pipeline_downgrade';
+      } else if (
+        input.newStatus === 'lost' &&
+        (oldLbStatus === 'scheduled' ||
+          oldLbStatus === 'booked' ||
+          oldLbStatus === 'in_progress')
+      ) {
+        // Fulfillment-state protection: once a lead reaches a post-acquisition
+        // lifecycle state in LB, a marketplace archive sweep cannot drag it
+        // back to `lost`. The marketplace's view is stale — the work moved
+        // off-platform. Manual + service_flow can still override these.
+        lbStatusBlocked = 'pipeline_downgrade';
       } else if (isPipelineDowngrade(oldLbStatus, input.newStatus)) {
         lbStatusBlocked = 'pipeline_downgrade';
       } else {
         data.status = input.newStatus;
         data.statusSource = 'platform_sync';
         data.statusUpdatedAt = occurredAt;
+        // Project lostReason / reengageAt the same way the manual-source
+        // path does: caller-supplied on entering `lost`, cleared on exit.
+        // Yelp-archive callers pass lostReason='hired_someone'; other
+        // platform_sync writes that land in `lost` may pass null.
+        if (input.newStatus === 'lost') {
+          data.lostReason = input.lostReason ?? null;
+          if (input.reengageAt !== undefined) {
+            data.reengageAt = input.reengageAt;
+          }
+        } else if (oldLbStatus === 'lost') {
+          data.lostReason = null;
+          data.reengageAt = null;
+        }
       }
     }
 
@@ -661,7 +722,10 @@ export class LeadStatusService {
         actorType: input.actorType ?? null,
         actorId: input.actorId ?? null,
         actorName: input.actorName ?? null,
-        reason: input.reason ?? null,
+        // Fall back to lostReason when caller didn't supply an explicit
+        // reason — keeps Yelp-archive audit rows greppable as
+        // reason=hired_someone without forcing every caller to set both.
+        reason: input.reason ?? input.lostReason ?? null,
         metadata: input.metadata ?? Prisma.JsonNull,
         conflict: false,
         conflictNote: null,
@@ -673,6 +737,7 @@ export class LeadStatusService {
       // Partial-skip: platformStatus was written but canonical Lead.status
       // was held back by a guard. Counter feeds /v1/integrations/health.
       if (lbStatusBlocked === 'sf_protected') this.metrics?.recordSkip('sf_protected');
+      if (lbStatusBlocked === 'sf_link_protected') this.metrics?.recordSkip('sf_protected');
       if (lbStatusBlocked === 'pipeline_downgrade') this.metrics?.recordSkip('pipeline_downgrade');
       this.logger.log(
         `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=platform_sync result=partial_skip skip_reason=${lbStatusBlocked} status=${oldLbStatus} platform_status=${input.platformStatus ?? oldPlatform ?? 'null'} attempted=${input.newStatus ?? 'null'} platform=${lead.platform}`,

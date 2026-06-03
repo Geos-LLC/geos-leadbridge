@@ -16,7 +16,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { ConfigService } from '@nestjs/config';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { LeadStatusService, WriteStatusResult } from '../leads/lead-status.service';
-import { mapYelpToLbStatus } from './yelp-status-map';
+import { mapYelpToLbStatus, getYelpLostReason } from './yelp-status-map';
 
 // Parses relative timestamps the extension scrapes from biz.yelp.com card
 // labels ("22 hours ago", "3 days ago", "2 weeks ago", "1 month ago"). Used
@@ -188,11 +188,22 @@ export class YelpIntegrationsController {
           // log it greppably.
           let writeResult: WriteStatusResult | null = null;
           if (platformStatusChanged || statusChanged) {
+            // Carry lostReason on archive-derived `lost` transitions so the
+            // UI's "No hire" pill shows the right granular reason and the
+            // audit row records `reason=hired_someone` instead of a bare
+            // platform_sync. getYelpLostReason returns null for any raw
+            // that doesn't map to `lost`, so non-archive transitions are
+            // unaffected. The SF-link guard inside applyPlatformSync still
+            // blocks this write when sfJobId / sfCustomerId / linked.
+            const lostReason = newStatus === 'lost'
+              ? getYelpLostReason(newStatusRaw)
+              : undefined;
             writeResult = await this.leadStatusService.writeStatus({
               leadId: existing.id,
               source: 'platform_sync',
               platformStatus: platformStatusChanged ? newStatusRaw : undefined,
               newStatus: statusChanged ? newStatus : undefined,
+              lostReason: lostReason ?? undefined,
               actorType: 'extension',
               sourceEventId: `yelp_scrape_${Date.now()}`,
             });
@@ -428,6 +439,7 @@ export class YelpIntegrationsController {
     const trimmed = rawStatus.trim();
     if (!trimmed) return;
     const canonical = mapYelpToLbStatus(trimmed);
+    const lostReason = canonical === 'lost' ? getYelpLostReason(trimmed) : null;
     const sourceEventId = `yelp_scrape_create_${yelpLeadId}_${trimmed.toLowerCase().replace(/\s+/g, '_')}`;
     try {
       await this.leadStatusService.writeStatus({
@@ -435,6 +447,7 @@ export class YelpIntegrationsController {
         source: 'platform_sync',
         newStatus: canonical ?? undefined,
         platformStatus: trimmed,
+        lostReason: lostReason ?? undefined,
         actorType: 'extension',
         sourceEventId,
       });

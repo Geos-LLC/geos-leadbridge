@@ -214,7 +214,11 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       );
     });
 
-    it('Yelp Archived → newStatus=archived', async () => {
+    it('Yelp Archived → newStatus=lost + lostReason=hired_someone (UI shows "No hire")', async () => {
+      // Yelp's "Archived" inbox status means the lead didn't convert.
+      // Per spec it lands in LB as `lost` (not `archived` — that bucket is
+      // reserved for explicit LB-side archives) with lostReason=hired_someone
+      // so the frontend pill renders "No hire" via the lost→no_hire group map.
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -225,7 +229,49 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       });
 
       expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ newStatus: 'archived', platformStatus: 'Archived' }),
+        expect.objectContaining({
+          newStatus: 'lost',
+          platformStatus: 'Archived',
+          lostReason: 'hired_someone',
+        }),
+      );
+    });
+
+    it('Yelp Not hired carries lostReason=hired_someone', async () => {
+      const { controller, leadStatusService } = buildController({
+        existingLead: leadFixture(),
+      });
+
+      await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Not hired' },
+      });
+
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          newStatus: 'lost',
+          platformStatus: 'Not hired',
+          lostReason: 'hired_someone',
+        }),
+      );
+    });
+
+    it('Yelp Closed carries lostReason=hired_someone', async () => {
+      const { controller, leadStatusService } = buildController({
+        existingLead: leadFixture(),
+      });
+
+      await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Closed' },
+      });
+
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          newStatus: 'lost',
+          platformStatus: 'Closed',
+          lostReason: 'hired_someone',
+        }),
       );
     });
   });

@@ -40,6 +40,10 @@ function buildPrismaMock(lead: Partial<any> = {}, opts: { sfConnection?: any } =
       statusUpdatedAt: null,
       statusSource: null,
       sfJobId: null,
+      // SF-link guard inputs — default to null so a stock fixture is
+      // treated as "no SF link"; tests opt in by setting them explicitly.
+      sfCustomerId: null,
+      syncStatus: null,
       thumbtackStatus: null,
       lostReason: null,
       reengageAt: null,
@@ -1305,6 +1309,352 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(true);
       expect(res.skipReason).toBeUndefined();
       expect(prisma._state.lead.status).toBe('lost');
+    });
+  });
+
+  // ─── Guard: SF-link protection (archive/lost on linked lead) ────────────
+  // Spec: When Yelp archives a lead (raw "Archived" / "Closed" / "Not hired"
+  // → canonical `lost`), LB must NOT downgrade to "No hire" if SF has
+  // already linked the lead — either via the live webhook path (sfJobId),
+  // the historical reconciliation (sfCustomerId), or an explicit
+  // syncStatus='linked'. Independent of SF_STATUS_WINS. platformStatus
+  // still flows so analytics keeps the marketplace breadcrumb; only the
+  // canonical Lead.status is held back. A later service_flow write (SF
+  // scheduling/completing the job) overrides freely because `lost` is not
+  // a hard terminal.
+  describe('guard: SF-link protection (archive/lost on linked lead)', () => {
+    const ARCHIVED_EVENT_ID = 'yelp_scrape_archive_evt_1';
+
+    it('1. Yelp archived + no SF link → lost / no hire (lostReason=hired_someone)', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'contacted',
+        platformStatus: 'Active',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: ARCHIVED_EVENT_ID,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBeUndefined();
+      expect(prisma._state.lead.status).toBe('lost');
+      expect(prisma._state.lead.platformStatus).toBe('Archived');
+      expect(prisma._state.lead.lostReason).toBe('hired_someone');
+      expect(prisma._state.lead.statusSource).toBe('platform_sync');
+      // Audit row carries the reason for greppability.
+      expect(prisma._state.audits[0].reason).toBe('hired_someone');
+      expect(prisma._state.audits[0].source).toBe('platform_sync');
+      expect(prisma._state.audits[0].newStatus).toBe('lost');
+    });
+
+    it('2. Yelp archived + sfJobId set → SF-link guard blocks canonical, platformStatus still flows', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'scheduled',
+        platformStatus: 'Hired',
+        sfJobId: 'sfjob-99',
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: ARCHIVED_EVENT_ID,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('sf_link_protected');
+      // Canonical preserved — SF still owns lifecycle.
+      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.lostReason).toBeNull();
+      // platformStatus still updated so the breadcrumb survives.
+      expect(prisma._state.lead.platformStatus).toBe('Archived');
+    });
+
+    it('3. Yelp archived + sfCustomerId set → SF-link guard blocks canonical', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'in_progress',
+        platformStatus: 'Active',
+        sfJobId: null,
+        sfCustomerId: 'sfcust-77',
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: ARCHIVED_EVENT_ID,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('sf_link_protected');
+      expect(prisma._state.lead.status).toBe('in_progress');
+      expect(prisma._state.lead.platformStatus).toBe('Archived');
+    });
+
+    it('4. Yelp archived + syncStatus=linked → SF-link guard blocks canonical', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'booked',
+        platformStatus: 'Hired',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: 'linked',
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: ARCHIVED_EVENT_ID,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('sf_link_protected');
+      expect(prisma._state.lead.status).toBe('booked');
+      expect(prisma._state.lead.platformStatus).toBe('Archived');
+    });
+
+    it('5. Yelp archived then SF completed later → SF wins (lost is not a hard terminal)', async () => {
+      // Sequence: a non-SF-linked Yelp archive lands LB on `lost`. Later
+      // SF sends a job.status_changed with newStatus='completed'. SF
+      // bypasses automation_terminal (manual+service_flow exempt), lost
+      // is off-pipeline so no downgrade block, and hard_terminal only
+      // covers `archived`. SF should win.
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'contacted',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      // Step 1: Yelp archives.
+      const r1 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: 'yelp_archived_step1',
+        occurredAt: new Date('2026-06-01T10:00:00Z'),
+      });
+      expect(r1.applied).toBe(true);
+      expect(prisma._state.lead.status).toBe('lost');
+
+      // Step 2: SF later marks the lead completed (job finished).
+      const r2 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'completed',
+        sourceEventId: 'sf_evt_completed_step2',
+        reason: 'job_142288_completed',
+        occurredAt: new Date('2026-06-02T15:00:00Z'),
+      });
+
+      expect(r2.applied).toBe(true);
+      expect(prisma._state.lead.status).toBe('completed');
+      expect(prisma._state.lead.statusSource).toBe('service_flow');
+      // lostReason cleared on exit from `lost`.
+      expect(prisma._state.lead.lostReason).toBeNull();
+    });
+
+    it('6. Yelp archived then SF scheduled later → SF wins (sideways out of lost)', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'contacted',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const r1 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: 'yelp_archived_step1_b',
+        occurredAt: new Date('2026-06-01T10:00:00Z'),
+      });
+      expect(r1.applied).toBe(true);
+
+      const r2 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'scheduled',
+        sourceEventId: 'sf_evt_scheduled_step2_b',
+        occurredAt: new Date('2026-06-02T15:00:00Z'),
+      });
+
+      expect(r2.applied).toBe(true);
+      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.statusSource).toBe('service_flow');
+      expect(prisma._state.lead.lostReason).toBeNull();
+    });
+
+    it('7. duplicate Yelp archived event → idempotent, no duplicate audit spam', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'contacted',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const DUP_EVENT_ID = 'yelp_scrape_archived_duplicate';
+
+      // First delivery applies.
+      const r1 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: DUP_EVENT_ID,
+        occurredAt: new Date('2026-06-01T10:00:00Z'),
+      });
+      expect(r1.applied).toBe(true);
+      expect(prisma._state.audits.length).toBe(1);
+
+      // Second delivery (same sourceEventId) hits the dedup guard.
+      prisma.leadStatusAuditLog.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce({ id: prisma._state.audits[0].id });
+
+      const r2 = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: DUP_EVENT_ID,
+        occurredAt: new Date('2026-06-01T10:01:00Z'),
+      });
+
+      expect(r2.applied).toBe(false);
+      expect(r2.skipReason).toBe('duplicate');
+      // No additional audit row created — count stays at 1.
+      expect(prisma._state.audits.length).toBe(1);
+    });
+
+    // Additional coverage: archive/lost is the only newStatus the SF-link
+    // guard targets. Forward progressions still flow when SF is linked
+    // (subject to existing SF_STATUS_WINS gate elsewhere).
+    it('forward progression to booked on SF-linked lead is NOT blocked by sf_link_protected', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'contacted',
+        sfJobId: 'sfjob-99',
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      // SF_STATUS_WINS=false so the env-based sf_protected guard doesn't fire.
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig({ SF_STATUS_WINS: 'false' }));
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'booked',
+        platformStatus: 'Hired',
+        sourceEventId: 'yelp_hired_progress',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBeUndefined();
+      expect(prisma._state.lead.status).toBe('booked');
+    });
+
+    it('lifecycle protection: platform_sync `lost` from booked/scheduled/in_progress is blocked even without SF link', async () => {
+      // Yelp sometimes archives a lead the operator has already booked
+      // off-platform. The marketplace view is stale; LB must hold the
+      // fulfillment state. Independent of SF — pure marketplace-vs-LB
+      // semantics. Cancellation/lost from `engaged` still flows freely.
+      const states: Array<'booked' | 'scheduled' | 'in_progress'> = [
+        'booked',
+        'scheduled',
+        'in_progress',
+      ];
+      for (const fromState of states) {
+        const prisma = buildPrismaMock({
+          platform: 'yelp',
+          status: fromState,
+          platformStatus: 'Hired',
+          sfJobId: null,
+          sfCustomerId: null,
+          syncStatus: null,
+        });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'platform_sync',
+          newStatus: 'lost',
+          platformStatus: 'Archived',
+          lostReason: 'hired_someone',
+          sourceEventId: `yelp_archived_from_${fromState}`,
+        });
+
+        expect(res.applied).toBe(true);
+        expect(res.skipReason).toBe('pipeline_downgrade');
+        expect(prisma._state.lead.status).toBe(fromState);
+        // platformStatus still flowed.
+        expect(prisma._state.lead.platformStatus).toBe('Archived');
+      }
+    });
+
+    it('emits a greppable "skipped_archived_due_to_sf_link" log marker when blocked', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'scheduled',
+        sfJobId: 'sfjob-99',
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const logSpy = jest.spyOn((svc as any).logger, 'log');
+
+      await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'lost',
+        platformStatus: 'Archived',
+        lostReason: 'hired_someone',
+        sourceEventId: 'yelp_arc_log_check',
+      });
+
+      const markerLine = logSpy.mock.calls
+        .map((c) => String(c[0]))
+        .find((line) => line.includes('skipped_archived_due_to_sf_link'));
+      expect(markerLine).toBeDefined();
+      expect(markerLine).toMatch(/sf_job_id=sfjob-99/);
+      expect(markerLine).toMatch(/attempted=lost/);
     });
   });
 

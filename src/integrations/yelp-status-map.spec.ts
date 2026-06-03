@@ -1,4 +1,4 @@
-import { mapYelpToLbStatus } from './yelp-status-map';
+import { mapYelpToLbStatus, getYelpLostReason } from './yelp-status-map';
 
 describe('yelp-status-map', () => {
   describe('mapYelpToLbStatus', () => {
@@ -40,8 +40,11 @@ describe('yelp-status-map', () => {
       expect(mapYelpToLbStatus('Canceled')).toBe('cancelled');
     });
 
-    it('maps Yelp Archived → archived', () => {
-      expect(mapYelpToLbStatus('Archived')).toBe('archived');
+    it('maps Yelp Archived → lost (Yelp archive = "No hire" in LB, not "Archived")', () => {
+      // Spec: Yelp-archived means the lead didn't convert (customer hired
+      // someone else / stopped engaging). Surfaces as "No hire" in the UI.
+      // The Archived UI bucket is reserved for explicit LB-side archives.
+      expect(mapYelpToLbStatus('Archived')).toBe('lost');
     });
 
     it('handles case + whitespace variations', () => {
@@ -58,6 +61,38 @@ describe('yelp-status-map', () => {
       expect(mapYelpToLbStatus('')).toBeNull();
       expect(mapYelpToLbStatus(null)).toBeNull();
       expect(mapYelpToLbStatus(undefined)).toBeNull();
+    });
+  });
+
+  describe('getYelpLostReason', () => {
+    it.each([
+      ['Archived'],
+      ['archived'],
+      ['Not hired'],
+      ['NOT HIRED'],
+      ['Closed'],
+      ['  closed  '],
+    ])('returns hired_someone for %s', (raw) => {
+      expect(getYelpLostReason(raw)).toBe('hired_someone');
+    });
+
+    it.each([
+      ['Active'],
+      ['Hired'],
+      ['Booked'],
+      ['Done'],
+      ['Quoted'],
+      ['Cancelled'],
+      ['Canceled'],
+      ['In progress'],
+    ])('returns null for non-lost raw value %s', (raw) => {
+      expect(getYelpLostReason(raw)).toBeNull();
+    });
+
+    it('returns null for nullish / empty', () => {
+      expect(getYelpLostReason(null)).toBeNull();
+      expect(getYelpLostReason(undefined)).toBeNull();
+      expect(getYelpLostReason('')).toBeNull();
     });
   });
 });
