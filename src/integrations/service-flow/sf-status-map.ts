@@ -12,7 +12,9 @@
 export const LB_PIPELINE_STATUSES = [
   'new',
   'contacted',
+  'engaged',
   'quoted',
+  'booked',
   'scheduled',
   'in_progress',
   'completed',
@@ -28,10 +30,14 @@ export type LbPipelineStatus = (typeof LB_PIPELINE_STATUSES)[number];
  * Statuses that are terminal for the follow-up engine — enrollment should stop
  * when the canonical status lands on one of these.
  *
+ * `booked` is included: once the deal is won, lead-nurturing follow-ups must
+ * stop even if a calendar slot hasn't been set yet.
+ *
  * Note: no_show is handled separately; it triggers a switch to long-term mode
  * rather than a hard stop.
  */
 export const SF_TERMINAL_STATUSES: ReadonlyArray<LbPipelineStatus> = [
+  'booked',
   'scheduled',
   'in_progress',
   'completed',
@@ -49,10 +55,17 @@ export function mapSfStatus(raw: string | null | undefined): LbPipelineStatus | 
   const lower = raw.toLowerCase().trim();
 
   switch (lower) {
+    // SF in connected mode emits literal lifecycle strings (Wave 1B/1C).
+    // pending/confirmed/rescheduled are kept for back-compat with older SF
+    // payloads that haven't been migrated to the canonical vocabulary yet.
     case 'pending':
     case 'confirmed':
     case 'rescheduled':
+    case 'scheduled':
       return 'scheduled';
+
+    case 'booked':
+      return 'booked';
 
     case 'in-progress':
     case 'in_progress':
@@ -86,6 +99,8 @@ export function mapSfStatus(raw: string | null | undefined): LbPipelineStatus | 
       return 'new';
     case 'contacted':
       return 'contacted';
+    case 'engaged':
+      return 'engaged';
     case 'quoted':
       return 'quoted';
 
