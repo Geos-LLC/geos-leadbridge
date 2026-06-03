@@ -760,6 +760,52 @@ export class LeadStatusService {
   }
 
   /**
+   * Phase 1 SF operational lifecycle mirror.
+   *
+   * Writes `Lead.sfJobOutcome` + `Lead.sfJobOutcomeAt` independently of the
+   * canonical Lead.status write path. This is the "SF said this last" column
+   * that the conversation-centric UI reads — it must reflect SF's view even
+   * when the canonical writeStatus is blocked (carve-out, dedup, downgrade,
+   * pipeline_downgrade, etc.).
+   *
+   * Stale-protected by the same `sfJobOutcomeAt < occurredAt` clause the live
+   * webhook uses. Callers: sf-inbound-status (live), sf-historical-sync
+   * (manual link + bulk link). Keep all three in sync — if a fourth SF write
+   * path is added, route it through here.
+   *
+   * Returns whether the write actually changed a row (false when stale).
+   * Never throws; persistence failures are swallowed with a warn log because
+   * the mirror is informational, not load-bearing for behavior.
+   */
+  async writeSfJobOutcomeMirror(
+    leadId: string,
+    outcome: string,
+    occurredAt: Date,
+    context: { sfJobId?: string | null; sourceEventId?: string | null; userId?: string | null } = {},
+  ): Promise<{ written: boolean }> {
+    try {
+      const result = await this.prisma.lead.updateMany({
+        where: {
+          id: leadId,
+          OR: [{ sfJobOutcomeAt: null }, { sfJobOutcomeAt: { lt: occurredAt } }],
+        },
+        data: { sfJobOutcome: outcome, sfJobOutcomeAt: occurredAt },
+      });
+      if (result.count > 0) {
+        this.logger.log(
+          `[ConversationRuntime] event=sf_job_outcome_write lead_id=${leadId} new_outcome=${outcome} sf_job_id=${context.sfJobId ?? 'null'} source_event_id=${context.sourceEventId ?? 'null'} user_id=${context.userId ?? 'null'}`,
+        );
+      }
+      return { written: result.count > 0 };
+    } catch (e: any) {
+      this.logger.warn(
+        `[LeadStatus] sfJobOutcome write failed lead_id=${leadId} err=${e?.message ?? e}`,
+      );
+      return { written: false };
+    }
+  }
+
+  /**
    * List unresolved conflicts (conflict=true and not yet resolved) for a lead.
    * The modal on the lead page polls this.
    */

@@ -29,7 +29,12 @@ function buildPrismaMock() {
     },
     sfInboundEvent: {
       findUnique: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: 'evt-row', ...data })),
+      // Switched create→upsert (Issue: failed-event idempotency trap fix).
+      // Mock returns the merged shape so any assertion that inspects the
+      // call args via `expect(...upsert).toHaveBeenCalledWith(...)` works.
+      upsert: jest.fn().mockImplementation((args: any) =>
+        Promise.resolve({ id: 'evt-row', eventId: args.where.eventId, ...args.create }),
+      ),
     },
     lead: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -78,6 +83,11 @@ function buildLeadStatus() {
       conflict: null,
       auditLogId: 'audit-' + crypto.randomUUID(),
     })),
+    // Phase 1 SF lifecycle mirror — shared helper. Live SF webhook calls
+    // this before writeStatus, independent of canonical write guards.
+    // Default returns written=true; tests asserting stale-protection
+    // override via mockResolvedValueOnce({ written: false }).
+    writeSfJobOutcomeMirror: jest.fn().mockResolvedValue({ written: true }),
   } as any;
 }
 
@@ -219,7 +229,7 @@ describe('SfInboundStatusService', () => {
       expect(r.httpStatus).toBe(400);
     });
 
-    it('returns 409 on duplicate event_id (idempotency)', async () => {
+    it('returns 409 on duplicate event_id with prior status=applied (idempotency)', async () => {
       const payload = basePayload();
       prisma.sfInboundEvent.findUnique.mockResolvedValue({
         id: 'existing', eventId: payload.event_id, leadId: LEAD_ID, status: 'applied',
@@ -234,6 +244,112 @@ describe('SfInboundStatusService', () => {
       expect(r.httpStatus).toBe(409);
       expect(r.result).toBe('applied');
       expect(r.leadId).toBe(LEAD_ID);
+    });
+
+    // ── Failed-event idempotency trap fix ──────────────────────────────
+    // Prior outcome was NOT successful (unmapped_status / unauthorized /
+    // deferred). SF replay must flow through to process() and apply the
+    // new outcome — failure rows are intentionally replayable. writeStatus
+    // is still the final safety net against double application.
+    it.each([['noop'], ['stale'], ['dry_run']])(
+      'returns 409 on duplicate event_id with prior status=%s (still successful)',
+      async (priorStatus) => {
+        const payload = basePayload();
+        prisma.sfInboundEvent.findUnique.mockResolvedValue({
+          id: 'existing', eventId: payload.event_id, leadId: LEAD_ID, status: priorStatus,
+        });
+        const body = JSON.stringify(payload);
+        const ts = String(Math.floor(Date.now() / 1000));
+        const r = await service.ingest(body, {
+          signature: sign(ts, body, SECRET),
+          timestamp: ts,
+          subscriptionId: SUB_ID,
+        });
+        expect(r.httpStatus).toBe(409);
+        expect(r.result).toBe(priorStatus);
+      },
+    );
+
+    it.each([['unmapped_status'], ['unauthorized'], ['deferred']])(
+      'does NOT dedupe when prior status=%s — failure rows are replayable',
+      async (priorStatus) => {
+        const payload = basePayload({ status: { new: 'scheduled' } });
+        // Prior failure row exists in dedup storage for this event_id.
+        prisma.sfInboundEvent.findUnique.mockResolvedValue({
+          id: 'existing', eventId: payload.event_id, leadId: LEAD_ID, status: priorStatus,
+        });
+        // Lead now exists + status now mappable → replay should succeed.
+        prisma.lead.findFirst.mockResolvedValue(
+          okLead({ status: 'new', sfJobId: JOB_ID }),
+        );
+        const body = JSON.stringify(payload);
+        const ts = String(Math.floor(Date.now() / 1000));
+        const r = await service.ingest(body, {
+          signature: sign(ts, body, SECRET),
+          timestamp: ts,
+          subscriptionId: SUB_ID,
+        });
+        // Replay flowed through — applied via writeStatus, NOT 409 duplicate.
+        expect(r.httpStatus).toBe(200);
+        expect(r.result).toBe('applied');
+        expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+          expect.objectContaining({ newStatus: 'scheduled', source: 'service_flow' }),
+        );
+      },
+    );
+
+    it('writeStatus dedup catches a replayed event that leaks through (final safety net)', async () => {
+      // Pathological scenario: a successful-outcome row somehow has its
+      // status spoofed to a failure value, bypassing the outer dedup. The
+      // (leadId, source, sourceEventId) audit-log dedup inside writeStatus
+      // still prevents double-application. Receiver surfaces it as `stale`.
+      const payload = basePayload({ status: { new: 'scheduled' } });
+      prisma.sfInboundEvent.findUnique.mockResolvedValue({
+        id: 'existing', eventId: payload.event_id, leadId: LEAD_ID, status: 'unmapped_status',
+      });
+      prisma.lead.findFirst.mockResolvedValue(okLead({ sfJobId: JOB_ID, status: 'new' }));
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'scheduled',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'duplicate',
+      });
+      const body = JSON.stringify(payload);
+      const ts = String(Math.floor(Date.now() / 1000));
+      const r = await service.ingest(body, {
+        signature: sign(ts, body, SECRET),
+        timestamp: ts,
+        subscriptionId: SUB_ID,
+      });
+      expect(r.httpStatus).toBe(200);
+      expect(r.result).toBe('stale');
+      expect(r.skipReason).toBe('duplicate');
+    });
+
+    it('replay UPSERTs the dedup row, preserving eventId and overwriting failure outcome', async () => {
+      const payload = basePayload({ status: { new: 'scheduled' } });
+      prisma.sfInboundEvent.findUnique.mockResolvedValue({
+        id: 'existing', eventId: payload.event_id, leadId: LEAD_ID, status: 'unmapped_status',
+      });
+      prisma.lead.findFirst.mockResolvedValue(okLead({ sfJobId: JOB_ID, status: 'new' }));
+      const body = JSON.stringify(payload);
+      const ts = String(Math.floor(Date.now() / 1000));
+      await service.ingest(body, {
+        signature: sign(ts, body, SECRET),
+        timestamp: ts,
+        subscriptionId: SUB_ID,
+      });
+      // Upsert by unique eventId — Create-on-miss / Update-on-hit semantics.
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { eventId: payload.event_id },
+          create: expect.objectContaining({ status: 'applied' }),
+          update: expect.objectContaining({ status: 'applied' }),
+        }),
+      );
     });
   });
 
@@ -271,7 +387,7 @@ describe('SfInboundStatusService', () => {
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
       expect(r.httpStatus).toBe(200);
       expect(r.result).toBe('deferred');
-      expect(prisma.sfInboundEvent.create).toHaveBeenCalled();
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalled();
     });
   });
 
@@ -337,9 +453,9 @@ describe('SfInboundStatusService', () => {
       expect(r.result).toBe('noop');
       expect(r.skipReason).toBe('non_primary_job');
       expect(leadStatus.writeStatus).not.toHaveBeenCalled();
-      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          create: expect.objectContaining({
             status: 'noop',
             result: 'lead_status_skip:non_primary_job',
             sfJobId: FOLLOWUP_JOB,
@@ -376,8 +492,8 @@ describe('SfInboundStatusService', () => {
         }),
       );
       // The other 4 produced inbound-event noop rows with non_primary_job.
-      const noopRows = (prisma.sfInboundEvent.create as jest.Mock).mock.calls
-        .map((c) => c[0].data)
+      const noopRows = (prisma.sfInboundEvent.upsert as jest.Mock).mock.calls
+        .map((c) => c[0].create)
         .filter((d: any) => d.result === 'lead_status_skip:non_primary_job');
       expect(noopRows).toHaveLength(4);
       expect(noopRows.map((d: any) => d.sfJobId).sort()).toEqual(
@@ -569,9 +685,9 @@ describe('SfInboundStatusService', () => {
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
       expect(r.result).toBe('dry_run');
       expect(leadStatus.writeStatus).not.toHaveBeenCalled();
-      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'dry_run' }),
+          create: expect.objectContaining({ status: 'dry_run' }),
         }),
       );
     });
@@ -601,9 +717,9 @@ describe('SfInboundStatusService', () => {
           }),
         }),
       );
-      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'applied' }),
+          create: expect.objectContaining({ status: 'applied' }),
         }),
       );
     });
@@ -623,9 +739,9 @@ describe('SfInboundStatusService', () => {
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
 
       expect(r.result).toBe('stale');
-      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+      expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          create: expect.objectContaining({
             status: 'stale',
             result: 'lead_status_skip:stale_event',
           }),
@@ -895,7 +1011,10 @@ describe('SfInboundStatusService', () => {
     it('writes Lead.sfJobOutcome on every successful path (Phase 1 mirror)', async () => {
       // Tests the Phase 1 SF operational lifecycle mirror. sfJobOutcome
       // is written regardless of whether the canonical Lead.status write
-      // succeeds (carve-out, dedup, downgrade may all block that).
+      // succeeds (carve-out, dedup, downgrade may all block that). The
+      // mirror SQL lives inside LeadStatusService.writeSfJobOutcomeMirror;
+      // here we just verify the receiver delegates to it with the right
+      // args. The stale-protection clause is exercised in lead-status.service.spec.ts.
       prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted' }));
 
       const occurredAt = new Date('2026-05-25T17:30:19Z');
@@ -907,27 +1026,15 @@ describe('SfInboundStatusService', () => {
         { id: SUB_ID, userId: USER_ID },
       );
 
-      // Find the updateMany call that wrote sfJobOutcome
-      const updateManyCalls = prisma.lead.updateMany.mock.calls;
-      const sfJobOutcomeCall = updateManyCalls.find((c: any[]) =>
-        c[0]?.data?.sfJobOutcome !== undefined,
+      expect(leadStatus.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
+        LEAD_ID, 'completed', occurredAt,
+        expect.objectContaining({ sfJobId: JOB_ID, userId: USER_ID }),
       );
-      expect(sfJobOutcomeCall).toBeDefined();
-      expect(sfJobOutcomeCall[0].data).toEqual({
-        sfJobOutcome: 'completed',
-        sfJobOutcomeAt: occurredAt,
-      });
-      // Stale-protection clause must be present
-      expect(sfJobOutcomeCall[0].where.OR).toEqual([
-        { sfJobOutcomeAt: null },
-        { sfJobOutcomeAt: { lt: occurredAt } },
-      ]);
     });
 
     it('writes Lead.sfJobOutcome even when LB canonical status is unchanged (no-op branch)', async () => {
-      // SF resends the same status as LB has. LB returns noop, but
-      // sfJobOutcomeAt should still bump to reflect "SF saying the same
-      // thing again."
+      // SF resends the same status as LB has. LB returns noop, but the
+      // mirror still fires to reflect "SF saying the same thing again."
       prisma.lead.findFirst.mockResolvedValue(
         okLead({ status: 'completed', sfJobId: JOB_ID }),
       );
@@ -937,12 +1044,9 @@ describe('SfInboundStatusService', () => {
         { id: SUB_ID, userId: USER_ID },
       );
 
-      const updateManyCalls = prisma.lead.updateMany.mock.calls;
-      const sfJobOutcomeCall = updateManyCalls.find((c: any[]) =>
-        c[0]?.data?.sfJobOutcome !== undefined,
+      expect(leadStatus.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
+        LEAD_ID, 'completed', expect.any(Date), expect.any(Object),
       );
-      expect(sfJobOutcomeCall).toBeDefined();
-      expect(sfJobOutcomeCall[0].data.sfJobOutcome).toBe('completed');
     });
 
     it('does NOT write sfJobOutcome on unmapped status (canonical=null)', async () => {
@@ -951,10 +1055,7 @@ describe('SfInboundStatusService', () => {
         basePayload({ status: { new: 'on_hold' } }),
         { id: SUB_ID, userId: USER_ID },
       );
-      const sfJobOutcomeCalls = prisma.lead.updateMany.mock.calls.filter(
-        (c: any[]) => c[0]?.data?.sfJobOutcome !== undefined,
-      );
-      expect(sfJobOutcomeCalls).toHaveLength(0);
+      expect(leadStatus.writeSfJobOutcomeMirror).not.toHaveBeenCalled();
     });
 
     it('falls back currentPlatformStatus to legacy thumbtackStatus when platformStatus is null', async () => {

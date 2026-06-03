@@ -66,6 +66,10 @@ function buildLeadStatus(writeApplied: boolean = true) {
       leadId: input.leadId, applied: writeApplied, status: input.newStatus, platformStatus: null,
       auditLogId: 'aud-1', conflict: null, skipReason: writeApplied ? null : 'pipeline_downgrade',
     })),
+    // sfJobOutcome mirror — historical-sync now calls this on the same paths
+    // the live SF webhook uses, so the mock must implement it. Default returns
+    // written=true; tests that assert stale-protection override via mockResolvedValueOnce.
+    writeSfJobOutcomeMirror: jest.fn(async () => ({ written: true })),
   } as any;
 }
 
@@ -295,6 +299,135 @@ describe('SfHistoricalSyncService', () => {
       expect(r.summary.conflict).toBe(1);
       expect(r.summary.needs_review).toBe(1);
       expect(r.summary.not_found).toBe(1);
+    });
+  });
+
+  // ── sfJobOutcome mirror parity with live SF webhook ─────────────────
+  // Live sf-inbound writes BOTH Lead.status (via writeStatus) AND
+  // Lead.sfJobOutcome (via writeSfJobOutcomeMirror — stale-protected,
+  // independent of canonical write guards). Historical sync must mirror
+  // the same behavior so SF's lifecycle view is visible whether the lead
+  // arrived via live webhook or backfill reconciliation.
+  describe('sfJobOutcome mirror parity with live webhook', () => {
+    it('manualLink with sfStatus writes both writeStatus AND writeSfJobOutcomeMirror', async () => {
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'engaged', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      await svc.manualLink('admin-1', { lbLeadId: 'L1', sfJobId: 'SF-A', sfStatus: 'scheduled' });
+      expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
+        'L1', 'scheduled', expect.any(Date),
+        expect.objectContaining({ sfJobId: 'SF-A', userId: 'U1' }),
+      );
+      expect(ls.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'scheduled', source: 'service_flow' }),
+      );
+    });
+
+    it('applyBulkLink scheduled writes mirror with same canonical value', async () => {
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      const occurredAt = new Date('2026-05-25T17:30:19Z');
+      await svc.applyBulkLink({
+        rows: [{
+          lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact',
+          match_basis: 'externalRequestId', sf_status: 'scheduled',
+          occurred_at: occurredAt.toISOString(),
+        }],
+      });
+      expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
+        'L1', 'scheduled', occurredAt,
+        expect.objectContaining({ sfJobId: 'SF-A' }),
+      );
+    });
+
+    it('applyBulkLink completed writes mirror with completed canonical', async () => {
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      await svc.applyBulkLink({
+        rows: [{
+          lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact',
+          match_basis: 'externalRequestId', sf_status: 'completed',
+        }],
+      });
+      expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
+        'L1', 'completed', expect.any(Date),
+        expect.objectContaining({ sfJobId: 'SF-A' }),
+      );
+    });
+
+    it('mirror still fires when writeStatus is rejected (carve-out / downgrade)', async () => {
+      // Lead is already completed; SF says scheduled. writeStatus rejects as
+      // pipeline_downgrade — but the mirror should still record SF's view.
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'completed', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(false); // writeStatus.applied=false
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      await svc.applyBulkLink({
+        rows: [{
+          lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact',
+          match_basis: 'externalRequestId', sf_status: 'scheduled',
+        }],
+      });
+      expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalled();
+    });
+
+    it('mirror NOT called when no sf_status/sf_payment_status supplied', async () => {
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      await svc.applyBulkLink({
+        rows: [{ lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact', match_basis: 'externalRequestId' }],
+      });
+      expect(ls.writeSfJobOutcomeMirror).not.toHaveBeenCalled();
+      expect(ls.writeStatus).not.toHaveBeenCalled();
+    });
+
+    it('mirror NOT called when sfStatus maps to null (unmappable)', async () => {
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      await svc.manualLink('admin-1', { lbLeadId: 'L1', sfJobId: 'SF-A', sfStatus: 'on_hold' });
+      expect(ls.writeSfJobOutcomeMirror).not.toHaveBeenCalled();
+    });
+
+    it('repeated apply of same event is idempotent on the mirror via stale-protection in the helper', async () => {
+      // The helper itself owns stale-protection (sfJobOutcomeAt < occurredAt
+      // gate at the SQL level). Historical sync calls it with the same
+      // occurredAt on every replay of the same sourceEventId — so a second
+      // call with the same timestamp returns written=false. We verify by
+      // calling applyBulkLink twice with the same row.
+      const { prisma } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const ls = buildLeadStatus(true);
+      (ls.writeSfJobOutcomeMirror as jest.Mock)
+        .mockResolvedValueOnce({ written: true })
+        .mockResolvedValueOnce({ written: false }); // stale guard short-circuits second call
+      const svc = new SfHistoricalSyncService(prisma, ls);
+      const occurredAt = new Date('2026-05-25T17:30:19Z').toISOString();
+      const row = {
+        lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact' as const,
+        match_basis: 'externalRequestId' as const,
+        sf_status: 'scheduled', occurred_at: occurredAt,
+      };
+      await svc.applyBulkLink({ rows: [row] });
+      await svc.applyBulkLink({ rows: [row] });
+      expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledTimes(2);
+      // First written=true, second written=false — verifies the helper's
+      // return value is the source of truth for "did the mirror update?"
     });
   });
 

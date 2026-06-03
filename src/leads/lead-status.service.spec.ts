@@ -62,6 +62,20 @@ function buildPrismaMock(lead: Partial<any> = {}, opts: { sfConnection?: any } =
         state.updates.push(data);
         return state.lead;
       }),
+      // updateMany powers writeSfJobOutcomeMirror's stale-protected write.
+      // Default impl mimics Postgres semantics: returns count=1 when the
+      // OR-conditioned where clause matches (sfJobOutcomeAt null or older
+      // than the incoming occurredAt), else 0.
+      updateMany: jest.fn().mockImplementation(async ({ where, data }: any) => {
+        if (where.id !== state.lead.id) return { count: 0 };
+        const cur = state.lead.sfJobOutcomeAt;
+        const incoming = (data.sfJobOutcomeAt as Date) ?? null;
+        const matchesOr = !cur || (incoming && cur instanceof Date && cur.getTime() < incoming.getTime());
+        if (!matchesOr) return { count: 0 };
+        Object.assign(state.lead, data);
+        state.updates.push(data);
+        return { count: 1 };
+      }),
     },
     sfConnection: {
       findUnique: jest.fn().mockImplementation(async () => state.sfConnection),
@@ -1669,6 +1683,53 @@ describe('LeadStatusService', () => {
         where: { id: 'audit-1', conflict: true },
         data: { conflict: false, conflictNote: 'pushed_to_sf' },
       });
+    });
+  });
+
+  // ── writeSfJobOutcomeMirror — Phase 1 SF operational lifecycle ─────
+  // Shared helper called by sf-inbound AND sf-historical-sync. Stale-
+  // protected at the SQL level by the OR(sfJobOutcomeAt < occurredAt)
+  // clause. Always returns; never throws.
+  describe('writeSfJobOutcomeMirror', () => {
+    it('writes outcome + occurredAt when sfJobOutcomeAt is null', async () => {
+      const prisma = buildPrismaMock({ sfJobOutcomeAt: null, sfJobOutcome: null });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const occurredAt = new Date('2026-06-03T17:30:00Z');
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', occurredAt, {
+        sfJobId: 'SF-A', sourceEventId: 'evt-1', userId: USER_ID,
+      });
+      expect(r.written).toBe(true);
+      expect(prisma._state.lead.sfJobOutcome).toBe('scheduled');
+      expect(prisma._state.lead.sfJobOutcomeAt).toEqual(occurredAt);
+    });
+
+    it('overwrites when incoming occurredAt is newer', async () => {
+      const earlier = new Date('2026-06-01T00:00:00Z');
+      const later = new Date('2026-06-03T17:30:00Z');
+      const prisma = buildPrismaMock({ sfJobOutcomeAt: earlier, sfJobOutcome: 'in_progress' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'completed', later);
+      expect(r.written).toBe(true);
+      expect(prisma._state.lead.sfJobOutcome).toBe('completed');
+    });
+
+    it('does NOT overwrite when incoming occurredAt is stale (older than stored)', async () => {
+      const newer = new Date('2026-06-03T17:30:00Z');
+      const older = new Date('2026-06-01T00:00:00Z');
+      const prisma = buildPrismaMock({ sfJobOutcomeAt: newer, sfJobOutcome: 'completed' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', older);
+      expect(r.written).toBe(false);
+      expect(prisma._state.lead.sfJobOutcome).toBe('completed');
+      expect(prisma._state.lead.sfJobOutcomeAt).toEqual(newer);
+    });
+
+    it('returns written=false silently when prisma.updateMany throws (never propagates)', async () => {
+      const prisma = buildPrismaMock();
+      prisma.lead.updateMany.mockRejectedValueOnce(new Error('connection lost'));
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', new Date());
+      expect(r.written).toBe(false);
     });
   });
 });

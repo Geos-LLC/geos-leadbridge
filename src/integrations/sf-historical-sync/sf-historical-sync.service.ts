@@ -348,6 +348,14 @@ export class SfHistoricalSyncService {
       const rawSf = req.sfPaymentStatus === 'paid' ? 'paid' : (req.sfStatus ?? '');
       const canonical = mapSfStatus(rawSf);
       if (canonical) {
+        // sfJobOutcome mirror: same independent stale-protected write the live
+        // webhook does. Runs BEFORE writeStatus so SF's operational view is
+        // recorded even when the canonical write is rejected by a guard.
+        await this.leadStatus.writeSfJobOutcomeMirror(lead.id, canonical, occurredAt, {
+          sfJobId: req.sfJobId,
+          sourceEventId: `manual_link:${actorUserId.slice(0, 8)}:${lead.id.slice(0, 8)}:${occurredAt.getTime()}`,
+          userId: lead.userId,
+        });
         const r = await this.leadStatus.writeStatus({
           leadId: lead.id,
           newStatus: canonical,
@@ -448,6 +456,15 @@ export class SfHistoricalSyncService {
           const rawSf = row.sf_payment_status === 'paid' ? 'paid' : (row.sf_status ?? '');
           const canonical = mapSfStatus(rawSf);
           if (canonical) {
+            // sfJobOutcome mirror: matches live webhook semantics so the
+            // conversation-centric UI shows SF's lifecycle view even when
+            // the canonical writeStatus is rejected (downgrade, hard_terminal,
+            // sf_link_protected, dedup). Stale-protected by occurredAt.
+            await this.leadStatus.writeSfJobOutcomeMirror(lead.id, canonical, occurredAt, {
+              sfJobId: row.sf_job_id,
+              sourceEventId: `bulk_link:${row.sf_job_id}:${occurredAt.getTime()}`,
+              userId: lead.userId,
+            });
             const r = await this.leadStatus.writeStatus({
               leadId: lead.id,
               newStatus: canonical,

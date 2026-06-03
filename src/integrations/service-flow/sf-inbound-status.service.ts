@@ -87,6 +87,30 @@ export interface ProcessOutcome {
 const SIGNATURE_SKEW_SECONDS = 300;
 
 /**
+ * Outcomes that should permanently consume an event_id for idempotency.
+ *
+ *   - `applied`  — Lead.status / sfJobOutcome side effects committed.
+ *   - `noop`     — same canonical status / status_unchanged etc.; nothing to do.
+ *   - `stale`    — out-of-order replay rejected by loop guard or writeStatus's
+ *                  stale_event/duplicate guard. The newer event already won.
+ *   - `dry_run`  — feature-flag off; treat as processed so SF doesn't loop.
+ *
+ * Anything else (`unmapped_status`, `unauthorized`, `deferred`) represents an
+ * outcome where no side effect committed AND the underlying cause may be
+ * fixable (mapper update, lead created later, auth resync). Those must be
+ * replayable — they are recorded for observability but are NOT treated as
+ * processed by the dedup gate. `writeStatus`'s own `(leadId, source,
+ * sourceEventId)` dedup remains the final safety net against accidental
+ * double-application if a successful outcome somehow leaks through.
+ */
+const SUCCESSFUL_OUTCOMES: ReadonlySet<string> = new Set([
+  'applied',
+  'noop',
+  'stale',
+  'dry_run',
+]);
+
+/**
  * Build the lead-context enrichment object for a ProcessOutcome. Pulled out so
  * every return statement that has a lead row produces the same shape — SF's
  * lifecycle_drift classifier reads `skipReason` + `currentStatus` directly
@@ -240,10 +264,14 @@ export class SfInboundStatusService {
     }
 
     // ------------------------ Idempotency ------------------------
+    // Filter by SUCCESSFUL_OUTCOMES: failed outcomes (unmapped_status,
+    // unauthorized, deferred) are intentionally replayable. The recordEvent
+    // helper below uses upsert on the unique eventId, so a replay overwrites
+    // the failure row with the new outcome (Issue: failed-event replay trap).
     const existing = await this.prisma.sfInboundEvent.findUnique({
       where: { eventId: payload.event_id },
     });
-    if (existing) {
+    if (existing && SUCCESSFUL_OUTCOMES.has(existing.status)) {
       return {
         httpStatus: 409,
         result: existing.status as ProcessResult,
@@ -410,36 +438,14 @@ export class SfInboundStatusService {
     }
 
     // ─── Phase 1: SF operational lifecycle mirror ──────────────────────
-    // Always tracks SF's most recent view, independent of whether the LB
-    // canonical status write succeeds (carve-out, dedup, downgrade guards
-    // may all block that). Stale-protected by occurredAt comparison so an
-    // out-of-order replay won't overwrite a newer value.
-    //
-    // This is intentionally a SEPARATE write from the canonical Lead.status
-    // path. SF owns operational lifecycle; LB's acquisition pipeline is a
-    // distinct domain. Phase 5 will stop writing Lead.status from this path
-    // entirely; sfJobOutcome is the migration target.
-    try {
-      const sfWriteResult = await this.prisma.lead.updateMany({
-        where: {
-          id: lead.id,
-          OR: [
-            { sfJobOutcomeAt: null },
-            { sfJobOutcomeAt: { lt: occurredAt } },
-          ],
-        },
-        data: { sfJobOutcome: canonical, sfJobOutcomeAt: occurredAt },
-      });
-      if (sfWriteResult.count > 0) {
-        this.logger.log(
-          `[ConversationRuntime] event=sf_job_outcome_write lead_id=${lead.id} new_outcome=${canonical} sf_job_id=${payload.sf_job_id} source_event_id=${payload.event_id} user_id=${subscription.userId}`,
-        );
-      }
-    } catch (e: any) {
-      this.logger.warn(
-        `[SfInbound] sfJobOutcome write failed lead_id=${lead.id} err=${e?.message ?? e}`,
-      );
-    }
+    // Delegates to LeadStatusService.writeSfJobOutcomeMirror so the live
+    // webhook + historical-sync paths share one write surface. Same
+    // stale-protection semantics either way.
+    await this.leadStatus.writeSfJobOutcomeMirror(lead.id, canonical, occurredAt, {
+      sfJobId: payload.sf_job_id,
+      sourceEventId: payload.event_id,
+      userId: subscription.userId,
+    });
 
     // ------------------------ No-op detection ------------------------
     if (canonical === lead.status && lead.sfJobId === payload.sf_job_id) {
@@ -651,20 +657,26 @@ export class SfInboundStatusService {
     sfSubscriptionId?: string | null;
   }): Promise<void> {
     try {
-      await this.prisma.sfInboundEvent.create({
-        data: {
-          eventId: args.eventId,
-          eventType: args.eventType,
-          occurredAt: args.occurredAt,
-          status: args.status,
-          result: args.result ?? null,
-          processingError: args.processingError ?? null,
-          payloadJson: args.payloadJson ?? {},
-          userId: args.userId ?? null,
-          leadId: args.leadId ?? null,
-          sfJobId: args.sfJobId ?? null,
-          sfSubscriptionId: args.sfSubscriptionId ?? null,
-        },
+      // Upsert by the unique eventId so failure-row replays (unmapped_status,
+      // deferred, unauthorized) overwrite the prior outcome with the new one
+      // instead of tripping the unique constraint. receivedAt is intentionally
+      // not in the update set — it preserves the original first-arrival time.
+      const writeData = {
+        eventType: args.eventType,
+        occurredAt: args.occurredAt,
+        status: args.status,
+        result: args.result ?? null,
+        processingError: args.processingError ?? null,
+        payloadJson: args.payloadJson ?? {},
+        userId: args.userId ?? null,
+        leadId: args.leadId ?? null,
+        sfJobId: args.sfJobId ?? null,
+        sfSubscriptionId: args.sfSubscriptionId ?? null,
+      };
+      await this.prisma.sfInboundEvent.upsert({
+        where: { eventId: args.eventId },
+        create: { eventId: args.eventId, ...writeData },
+        update: writeData,
       });
     } catch (err: any) {
       this.logger.warn(
