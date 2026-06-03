@@ -443,6 +443,115 @@ describe('SfInboundStatusService', () => {
       expect(r.result).toBe('noop');
       expect(leadStatus.writeStatus).not.toHaveBeenCalled();
     });
+
+    // ─── Issue #47 — SF lifecycle literals are no longer ignored ─────
+    // Before this fix, SF outbox events with status.new='scheduled' /
+    // 'booked' were dropped as unmapped_status (HTTP 422). Linked leads
+    // stayed at Lead.status='new' even though SF had moved them through
+    // the lifecycle. The three tests below pin the contract that SF
+    // lifecycle status overrides LB lead-nurturing status when linked.
+
+    it('SF scheduled payload on linked new lead → writeStatus(scheduled), applied', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'new', sfJobId: JOB_ID, platform: 'thumbtack' }),
+      );
+
+      const r = await service.process(
+        basePayload({ status: { new: 'scheduled' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.httpStatus).toBe(200);
+      expect(r.result).toBe('applied');
+      expect(r.result).not.toBe('unmapped_status');
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          leadId: LEAD_ID,
+          newStatus: 'scheduled',
+          source: 'service_flow',
+        }),
+      );
+      // Terminal → enrollment stop fired
+      expect(engine.stopEnrollment).not.toHaveBeenCalled(); // no active enrollments mocked
+    });
+
+    it('SF booked payload on linked new lead → writeStatus(booked), applied', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'new', sfJobId: JOB_ID, platform: 'yelp' }),
+      );
+
+      const r = await service.process(
+        basePayload({ status: { new: 'booked' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.httpStatus).toBe(200);
+      expect(r.result).toBe('applied');
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'booked', source: 'service_flow' }),
+      );
+    });
+
+    it('SF in_progress payload on linked contacted lead → writeStatus(in_progress)', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'contacted', sfJobId: JOB_ID }),
+      );
+
+      const r = await service.process(
+        basePayload({ status: { new: 'in_progress' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('applied');
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'in_progress' }),
+      );
+    });
+
+    it('SF completed payload on linked scheduled lead → writeStatus(completed) + stops follow-ups', async () => {
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'scheduled', sfJobId: JOB_ID }),
+      );
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-Z' }]);
+
+      const r = await service.process(
+        basePayload({ status: { new: 'completed' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('applied');
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'completed' }),
+      );
+      expect(engine.stopEnrollment).toHaveBeenCalledWith('enroll-Z', 'sf_status_completed');
+    });
+
+    it('SF scheduled → writeStatus rejection with pipeline_downgrade still produces noop (downgrade guard preserved)', async () => {
+      // Lead is already completed; SF event says scheduled. LeadStatusService
+      // would reject this as a pipeline downgrade. The receiver must surface
+      // that as noop (200), not flip the lead backwards.
+      prisma.lead.findFirst.mockResolvedValue(
+        okLead({ status: 'completed', sfJobId: JOB_ID, platformStatus: 'Done' }),
+      );
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'completed',
+        platformStatus: 'Done',
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'pipeline_downgrade',
+      });
+
+      const r = await service.process(
+        basePayload({ status: { new: 'scheduled' } }),
+        { id: SUB_ID, userId: USER_ID },
+      );
+
+      expect(r.result).toBe('noop');
+      expect(r.skipReason).toBe('pipeline_downgrade');
+      expect(r.currentStatus).toBe('completed');
+    });
   });
 
   describe('process — dry run', () => {
