@@ -820,6 +820,39 @@ export class LeadsService {
     } catch (err: any) {
       // Per-lead terminal state (e.g. customer archived) — not an auth failure. Don't try to refresh.
       if (err.message?.includes('archived')) {
+        // Yelp's response on send-to-archived: HTTP 403 NOT_AUTHORIZED
+        // `{description:"This customer has archived this project."}`. The
+        // adapter normalizes this into an error message containing "archived".
+        // That 403 is decisive ground truth — until now LB only learned about
+        // Yelp archives via the Chrome extension scrape, leaving stale rows
+        // (e.g. Allison C.: `engaged` in LB while archived on Yelp because
+        // the extension hadn't run since 2026-05-06).
+        //
+        // Fire a platform_sync write so the next render shows "No hire" and
+        // automation (follow-ups, AI replies, instant text) immediately
+        // respects the terminal state. SF-link guard inside applyPlatformSync
+        // still protects SF-managed leads; the deterministic sourceEventId
+        // makes retries idempotent.
+        if (lead.platform === 'yelp') {
+          try {
+            await this.leadStatusService.writeStatus({
+              leadId,
+              source: 'platform_sync',
+              newStatus: 'lost',
+              platformStatus: 'Archived',
+              lostReason: 'hired_someone',
+              actorType: 'system',
+              actorName: 'yelp-send-403-archived',
+              sourceEventId: `yelp_send_403_archived_${lead.externalRequestId}`,
+              reason: 'yelp_send_403_archived',
+            });
+          } catch (statusErr: any) {
+            // Never let a status-write failure mask the original send error.
+            this.logger.warn(
+              `[sendMessage] yelp archived-detected status write failed lead=${leadId} msg=${statusErr?.message ?? statusErr}`,
+            );
+          }
+        }
         throw new BadRequestException(`Cannot send to ${lead.platform} lead: ${err.message}`);
       }
       const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access') || err.message?.includes('NOT_AUTHORIZED');
