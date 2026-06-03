@@ -136,7 +136,11 @@ Rules:
    - A clear unbounded deflection ("maybe later", "we'll see", "going to think about it for a while" with NO return window) IS terminal_defer — keeping the conversation alive against an indefinite punt is the same anti-pattern, just slower-burning.
 2. **Bounded vs unbounded** — the deferring/terminal_defer split is the single most important call you make. If the message names a duration ("2 weeks"), a decision ("when I check with my partner"), or a concrete future event ("after my move"), it's deferring. If it gives vague time ("maybe", "someday", "soon-ish", "later") or no time at all ("we'll see", "thanks for the info"), it's terminal_defer. When unsure, prefer terminal_defer — over-pausing engaged customers is reversible (they reply); under-pausing politely-declining customers is creepy follow-up.
 2. Confidence ≥ 0.85 only when the message is unambiguous. Borderline → 0.5–0.7.
-3. Bare "thanks" / "thank you" / "ok" / "got it" by itself, especially after the AI's last message was a farewell or holding statement, is 'completed' (the conversation is naturally winding down). When it follows an AI question like "what day works?", it's 'engaged'.
+3. Bare "thanks" / "thank you" / "ok" / "got it" — context-sensitive:
+   - After a FAREWELL message ("have a great day", "best of luck", "feel free to reach out if you change your mind") → 'completed' (conversation winding down).
+   - After a HOLDING message where WE owe the customer follow-up ("I'll check and confirm shortly", "let me confirm timing", "I'll get back to you", "checking with the team", "waiting for confirmation") → 'engaged'. The customer is acknowledging that they're waiting on US; they have not closed out or hired anyone. NEVER 'completed' / 'hired_elsewhere' in this case.
+   - After a QUESTION ("what day works?") → 'engaged'.
+   - Standalone with no preceding context → 'engaged'.
 4. Cancellation phrases ("cancel that", "we can cancel") with context that a job exists → 'completed'. Cancellation as a question ("can I cancel my morning slot to switch to afternoon?") → 'engaged' — they want to reschedule, not stop.
 5. Lead status context matters. If status = 'booked', "it's done" likely means the booked job ran successfully (still 'completed' — no further action needed). If status = 'engaged' or 'contacted', "it's done" means they got service elsewhere ('completed').
 6. "Please lose my information" / "delete my info" / "remove my info" — opt_out, high confidence. The customer is explicitly invoking data-removal language.
@@ -259,11 +263,49 @@ export class IntentClassifierService {
         }
       }
 
-      const daysBit = suggestedReengageInDays != null ? ` reengage_in=${suggestedReengageInDays}d` : '';
-      const handoffBit = handoff ? ` handoff=${handoff.reason}` : '';
-      this.logger.log(`[classifier] intent=${intent} conf=${confidence.toFixed(2)}${daysBit}${handoffBit} reason="${reason}" msg="${this.truncate(ctx.message, 80)}"`);
+      // ─── Deterministic safety override ─────────────────────────────────
+      // The Elda Wells incident (lead 23e6827b-…): customer said bare "Ok."
+      // after the AI said "I'll check timing and confirm shortly". The LLM
+      // classified it as 'completed', which the automation layer then maps
+      // to hired_someone → 'lost'. That's wrong — the customer was just
+      // acknowledging that they were waiting on US.
+      //
+      // The system prompt now distinguishes holding vs farewell, but we also
+      // hardcode a belt-and-suspenders guard so prompt drift can't silently
+      // re-introduce the bug. If the LLM returned 'completed' OR
+      // 'hired_elsewhere' AND the customer's message is a bare ack AND the
+      // last AI message was holding-shaped AND the lead is not already in
+      // a terminal state — override to 'engaged'.
+      let finalIntent: CustomerIntent = intent;
+      let finalConfidence = confidence;
+      let finalReason = reason;
+      let finalReengage = suggestedReengageInDays;
+      if (
+        (intent === 'completed' || intent === 'hired_elsewhere') &&
+        IntentClassifierService.isBareAcknowledgement(ctx.message)
+      ) {
+        const lastAi = IntentClassifierService.lastAiMessage(ctx.recentHistory);
+        if (
+          lastAi &&
+          IntentClassifierService.isHoldingMessage(lastAi) &&
+          !IntentClassifierService.isLeadTerminal(ctx.leadStatus)
+        ) {
+          this.logger.warn(
+            `[classifier] override=bare_ack_after_holding was=${intent} -> engaged ` +
+              `msg="${this.truncate(ctx.message, 60)}" prev_ai="${this.truncate(lastAi, 80)}"`,
+          );
+          finalIntent = 'engaged';
+          finalConfidence = 0.95;
+          finalReason = 'override:bare_ack_after_holding';
+          finalReengage = undefined;
+        }
+      }
 
-      return { intent, confidence, reason, fromLlm: true, suggestedReengageInDays, handoff };
+      const daysBit = finalReengage != null ? ` reengage_in=${finalReengage}d` : '';
+      const handoffBit = handoff ? ` handoff=${handoff.reason}` : '';
+      this.logger.log(`[classifier] intent=${finalIntent} conf=${finalConfidence.toFixed(2)}${daysBit}${handoffBit} reason="${finalReason}" msg="${this.truncate(ctx.message, 80)}"`);
+
+      return { intent: finalIntent, confidence: finalConfidence, reason: finalReason, fromLlm: true, suggestedReengageInDays: finalReengage, handoff };
     } catch (err: any) {
       this.logger.warn(`[classifier] failed (${err.message}) — falling back to engaged for msg="${this.truncate(ctx.message, 80)}"`);
       return { intent: 'engaged', confidence: 0, reason: `classifier_failed: ${err.message}`, fromLlm: false };
@@ -306,6 +348,84 @@ export class IntentClassifierService {
   private truncate(s: string, n: number): string {
     if (!s) return '';
     return s.length <= n ? s : s.slice(0, n - 1) + '…';
+  }
+
+  // ─── Bare-ack / holding-message detection (static so tests can call directly) ──
+
+  /**
+   * Match bare acknowledgements that carry no semantic content beyond "I see /
+   * heard / got it". Strips whitespace + trailing punctuation + lowercases.
+   *
+   * INTENTIONALLY NARROW: only single-token-ish messages. "Ok thanks I'll
+   * wait" is NOT a bare ack (it adds info). "Thanks but I'm going to think
+   * about it" is NOT a bare ack (it adds a deflection).
+   */
+  static isBareAcknowledgement(message: string): boolean {
+    if (!message) return false;
+    const cleaned = message
+      .toLowerCase()
+      .replace(/[.!?,;:\s]+/g, ' ')
+      .trim();
+    const BARE_ACK = new Set([
+      'ok', 'okay', 'k', 'kk', 'okk',
+      'got it', 'gotit',
+      'thanks', 'thank you', 'thankyou', 'thx', 'ty',
+      'cool', 'sounds good', 'great', 'awesome',
+      'sure', 'alright', 'all right',
+      'understood', 'noted', 'copy', 'copy that',
+      // Combined ack tokens — also bare semantically.
+      'ok thanks', 'okay thanks', 'thanks ok',
+      'ok thank you', 'okay thank you',
+      'got it thanks', 'thanks got it',
+    ]);
+    return BARE_ACK.has(cleaned);
+  }
+
+  /**
+   * Detect AI/business messages where WE owe the customer follow-up:
+   * "I'll check", "let me confirm", "waiting for confirmation", etc.
+   * If the customer then says "ok" in response, they're acknowledging that
+   * they're waiting on US — not closing the conversation, not hiring elsewhere.
+   */
+  static isHoldingMessage(message: string): boolean {
+    if (!message) return false;
+    const m = message.toLowerCase();
+    const HOLDING_PHRASES = [
+      "i'll check", "ill check", 'i will check',
+      "let me check", "lemme check",
+      "i'll confirm", "ill confirm", 'i will confirm',
+      "let me confirm", "lemme confirm",
+      'confirm shortly', 'confirm with', 'confirm timing',
+      'checking availability', 'checking the calendar', 'checking with the team', 'checking with my team',
+      "i'll get back to you", 'ill get back to you', 'get back to you shortly', 'will get back to you',
+      'waiting for confirmation', 'waiting on confirmation', 'pending confirmation',
+      "i'll be in touch", 'ill be in touch',
+      "i'll let you know", 'ill let you know',
+      'looking into', 'looking at',
+      "i'll follow up", 'ill follow up',
+    ];
+    return HOLDING_PHRASES.some((p) => m.includes(p));
+  }
+
+  /**
+   * Lead statuses where we deliberately do NOT override — if the lead is
+   * already closed, the LLM's `completed` is informational and shouldn't be
+   * "rescued" back into the funnel.
+   */
+  static isLeadTerminal(status?: string): boolean {
+    if (!status) return false;
+    return ['lost', 'cancelled', 'no_show', 'archived'].includes(status);
+  }
+
+  /** Most-recent business/AI message from the recent-history slice. */
+  static lastAiMessage(history?: { role: 'customer' | 'pro'; content: string }[]): string | null {
+    if (!history || history.length === 0) return null;
+    // History order may vary (oldest-first vs newest-first depending on caller);
+    // search from the end backward for the most recent 'pro' message.
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === 'pro') return history[i].content;
+    }
+    return null;
   }
 
   private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
