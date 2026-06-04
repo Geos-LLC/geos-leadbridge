@@ -259,6 +259,22 @@ const STATUS_GROUP_TONE: Record<string, string> = {
   neutral:     'bg-slate-100 text-slate-600',
 };
 
+// Mirrors SF_JOB_OUTCOME_LABELS in src/conversation-context/conversation-runtime-display.ts.
+// Inlined here because the backend module isn't bundled for the frontend; if the
+// runtime-state endpoint's display-label list is extended, mirror it below.
+const SF_JOB_OUTCOME_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  scheduled: 'Scheduled',
+  rescheduled: 'Rescheduled',
+  in_progress: 'In progress',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  no_show: 'No-show',
+  archived: 'Archived',
+  lost: 'Lost',
+};
+
 function computeSummary(
   platformMessages: LocalMessage[],
   smsLogs: NotificationLog[],
@@ -1899,6 +1915,27 @@ export function Messages() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       <StatusPill status={statusKind} label={statusLabel} />
+                      {/* SF-linked tag — keeps the inbox scannable for which
+                          leads are SF customers without forcing the operator
+                          to open each one. Tiny by design — sidebar real
+                          estate is tight. */}
+                      {lead.isSfLinked && (
+                        <span
+                          title="SF Customer"
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#4f46e5',
+                            color: '#fff',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          SF
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1942,6 +1979,18 @@ export function Messages() {
                       <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
                         {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
                       </span>
+                      {/* SF Customer badge — visible whenever the lead is linked
+                          to an SF customer/job (isSfLinked driven server-side by
+                          isSfLinkedLead predicate). Static for v1 — no deep link
+                          to SF yet. */}
+                      {selectedLead.isSfLinked && (
+                        <span
+                          className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-600 text-white"
+                          title="Customer is managed in Service Flow"
+                        >
+                          SF Customer
+                        </span>
+                      )}
                       {/* Editable lead status pill — click to open dropdown of LB
                           canonical statuses. Manual writes may surface a conflict
                           modal if SF is integrated or platform status disagrees.
@@ -1949,16 +1998,30 @@ export function Messages() {
                           raw values (Open / Picked / Canceled / Yelp 'active', etc.)
                           fold into their group instead of falling through to
                           thumbtackStatus — which would render the platform-native
-                          string twice next to the TT/Yelp pill below. */}
+                          string twice next to the TT/Yelp pill below.
+
+                          In SF-connected mode the pill renders disabled with a
+                          tooltip — SF owns the lifecycle, so a manual write would
+                          be rejected by LeadStatusService (sf_managed skipReason)
+                          and produce a confusing toast. Pill stays visible so the
+                          LB-side funnel value (engaged/quoted from classifier) is
+                          still legible for support context. */}
                       <div className="relative">
                         <button
                           type="button"
-                          disabled={savingStatus}
-                          onClick={() => setStatusEditorOpen(o => !o)}
-                          className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 transition ${
+                          disabled={savingStatus || !!selectedLead.isSfLinked}
+                          onClick={() => {
+                            if (selectedLead.isSfLinked) return;
+                            setStatusEditorOpen(o => !o);
+                          }}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase transition ${
                             STATUS_GROUP_TONE[displayPillKind(selectedLead.status)] || 'bg-slate-100 text-slate-600'
+                          } ${
+                            selectedLead.isSfLinked
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'hover:ring-2 hover:ring-offset-1 hover:ring-blue-400'
                           }`}
-                          title="Click to change status"
+                          title={selectedLead.isSfLinked ? 'Managed by ServiceFlow' : 'Click to change status'}
                         >
                           {displayLabel(selectedLead.status)}
                           {savingStatus && '…'}
@@ -1996,6 +2059,18 @@ export function Messages() {
                           title={`Platform-native status from ${selectedLead.platform}`}
                         >
                           {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}: {selectedLead.thumbtackStatus}
+                        </span>
+                      )}
+                      {/* SF job outcome — secondary pill rendered only when the
+                          lead is SF-linked AND SF has reported an outcome. The
+                          authoritative status for the customer-side lifecycle
+                          lives here once SF takes over. */}
+                      {selectedLead.isSfLinked && selectedLead.sfJobOutcome && (
+                        <span
+                          className="px-2 py-0.5 text-[10px] font-semibold rounded uppercase bg-indigo-50 border border-indigo-200 text-indigo-700"
+                          title="Service Flow job outcome"
+                        >
+                          SF: {SF_JOB_OUTCOME_LABEL[selectedLead.sfJobOutcome] ?? selectedLead.sfJobOutcome}
                         </span>
                       )}
                     </div>
