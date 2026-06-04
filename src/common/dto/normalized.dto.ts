@@ -114,6 +114,17 @@ export class NormalizedLead {
   // human attention (new leads, customer-responded leads, human-touched leads).
   isAutoHandled?: boolean;
 
+  // SF-connected mode signals. Derived (`isSfLinked`) computed via
+  // `isSfLinkedLead` so the API contract uses the same predicate as the
+  // status-write guards in LeadStatusService — single source of truth, no
+  // chance for the UI to diverge from server-side rules.
+  isSfLinked?: boolean;
+  sfJobId?: string | null;
+  sfCustomerId?: string | null;
+  syncStatus?: string | null;
+  sfJobOutcome?: string | null;
+  sfJobOutcomeAt?: Date | null;
+
   raw?: any; // Original platform payload for debugging
 }
 

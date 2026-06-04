@@ -97,12 +97,12 @@ describe('FollowUpGateService', () => {
   describe('evaluate() — confidence threshold', () => {
     it('passes through when confidence < 0.7 even on terminal intent', async () => {
       const prisma = buildPrisma({ customerMessage: 'maybe' });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.5, reason: 'unclear', fromLlm: true });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.5, reason: 'unclear', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
       expect(decision.action).toBe('pass_low_confidence');
       expect(decision.shouldBlock).toBe(false);
-      expect(decision.intent).toBe('completed');
+      expect(decision.intent).toBe('hired_elsewhere');
     });
 
     it('blocks at exactly threshold and above for terminal intents', async () => {
@@ -158,9 +158,13 @@ describe('FollowUpGateService', () => {
       expect(decision.sideEffect).toBe('stop_and_lost');
     });
 
-    it('completed → block_terminal + stop_and_lost', async () => {
+    it("hired_elsewhere on 'already done' phrasing → block_terminal + stop_and_lost", async () => {
+      // Pre-2026-06-03 this case classified as 'completed'; merged into
+      // 'hired_elsewhere' since both produced lost + stop_and_lost. Renamed
+      // so the canonical Lead.status 'completed' has one meaning (SF/platform
+      // pipeline 'job done'), not two.
       const prisma = buildPrisma({ customerMessage: "it's already done" });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.88, reason: 'work finished', fromLlm: true });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.88, reason: 'work finished', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
       expect(decision.sideEffect).toBe('stop_and_lost');
@@ -202,12 +206,16 @@ describe('FollowUpGateService', () => {
       expect(decision.shouldBlock).toBe(false);
     });
 
-    it('BLOCKS completed on customer_hired_competitor re-engagement (Savanna 2026-05-12 regression)', async () => {
-      // Customer confirms "Thank you!" after a booking confirmation — the
-      // classifier returns completed @ 0.90. Pre-fix this bypassed the gate and
-      // 3 follow-ups fired anyway. Post-fix: stop_and_lost, no follow-up.
+    it('BLOCKS hired_elsewhere on customer_hired_competitor re-engagement (Savanna 2026-05-12 regression)', async () => {
+      // Customer confirms "Thank you!" after a booking confirmation — pre-
+      // 2026-06-03 the classifier returned 'completed' @ 0.90, which bypassed
+      // the gate and let 3 follow-ups fire. Post-fix: stop_and_lost, no
+      // follow-up. After 2026-06-03 the same phrasing classifies as
+      // 'hired_elsewhere' (intents merged), but the gate behavior is
+      // unchanged — the safety property the test locks down is "do not
+      // re-engage a customer who is winding down the conversation".
       const prisma = buildPrisma({ customerMessage: 'Thank you!' });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.9, reason: 'job confirmed', fromLlm: true });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.9, reason: 'job confirmed', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
       expect(decision.action).toBe('block_terminal');
@@ -215,9 +223,9 @@ describe('FollowUpGateService', () => {
       expect(decision.sideEffect).toBe('stop_and_lost');
     });
 
-    it('BLOCKS completed on customer_deferred re-engagement', async () => {
+    it("BLOCKS hired_elsewhere on customer_deferred re-engagement ('we're done with it')", async () => {
       const prisma = buildPrisma({ customerMessage: "we're done with it" });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.9, reason: 'job done', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_deferred' });
       expect(decision.action).toBe('block_terminal');
@@ -314,7 +322,7 @@ describe('FollowUpGateService', () => {
         leadStatus: 'engaged',
         leadCategory: 'House cleaning',
       });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.85, reason: 'done', fromLlm: true });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.85, reason: 'done', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       await service.evaluate({ conversationId: CONV, leadId: LEAD });
       expect(classifier.classify).toHaveBeenCalledWith(expect.objectContaining({
@@ -352,6 +360,101 @@ describe('FollowUpGateService', () => {
           }
         }
       }
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // SF-connected mode short-circuit
+  //
+  // When the lead is linked to an SF customer/job, the gate blocks
+  // BEFORE the classifier runs — LB does not chase converted customers.
+  // sideEffect=stop_only so the caller stops the enrollment but does
+  // NOT mark the lead lost (the customer is an active SF customer).
+  // ──────────────────────────────────────────────────────────────────
+  describe('evaluate() — SF-connected mode short-circuit', () => {
+    function buildPrismaWithSfLink(linkFields: {
+      sfJobId?: string | null;
+      sfCustomerId?: string | null;
+      syncStatus?: string | null;
+    }) {
+      return {
+        message: {
+          findFirst: jest.fn().mockResolvedValue({
+            content: 'are you available?',
+            createdAt: new Date(),
+          }),
+          findMany: jest.fn().mockResolvedValue([
+            { sender: 'customer', content: 'are you available?' },
+          ]),
+        },
+        lead: {
+          findUnique: jest.fn().mockResolvedValue({
+            status: 'engaged',
+            category: 'Deep cleaning',
+            sfJobId: linkFields.sfJobId ?? null,
+            sfCustomerId: linkFields.sfCustomerId ?? null,
+            syncStatus: linkFields.syncStatus ?? null,
+          }),
+        },
+      } as any;
+    }
+
+    it('SF-linked via sfJobId → block_sf_linked + stop_only, classifier NOT called', async () => {
+      const prisma = buildPrismaWithSfLink({ sfJobId: 'sfjob-99' });
+      const classifier = buildClassifier({ intent: 'asking', confidence: 0.9, reason: '...', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+
+      expect(decision.action).toBe('block_sf_linked');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_only');
+      expect(decision.reason).toBe('sf_linked_customer');
+      expect(decision.intent).toBeNull();
+      // Classifier was bypassed — saves an LLM call.
+      expect(classifier.classify).not.toHaveBeenCalled();
+    });
+
+    it('SF-linked via sfCustomerId → block_sf_linked', async () => {
+      const prisma = buildPrismaWithSfLink({ sfCustomerId: 'sfcust-99' });
+      const classifier = buildClassifier({ intent: 'asking', confidence: 0.9, reason: '...', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+      expect(decision.action).toBe('block_sf_linked');
+      expect(classifier.classify).not.toHaveBeenCalled();
+    });
+
+    it("SF-linked via syncStatus='linked' → block_sf_linked", async () => {
+      const prisma = buildPrismaWithSfLink({ syncStatus: 'linked' });
+      const classifier = buildClassifier({ intent: 'asking', confidence: 0.9, reason: '...', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+      expect(decision.action).toBe('block_sf_linked');
+    });
+
+    it('autonomous (no SF link) → proceeds to classifier as before', async () => {
+      const prisma = buildPrismaWithSfLink({}); // all null
+      const classifier = buildClassifier({ intent: 'asking', confidence: 0.9, reason: '...', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+      expect(decision.action).toBe('proceed');
+      expect(classifier.classify).toHaveBeenCalled();
+    });
+
+    it('omitted leadId → no SF check possible, proceeds as before', async () => {
+      // Without a leadId the gate cannot read the SF-link fields. Behavior
+      // falls back to classifier-driven (existing). This protects callers
+      // that intentionally skip lead loading (e.g. controller previews).
+      const prisma = buildPrismaWithSfLink({ sfJobId: 'sfjob-99' }); // ignored
+      const classifier = buildClassifier({ intent: 'asking', confidence: 0.9, reason: '...', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+
+      const decision = await service.evaluate({ conversationId: CONV /* no leadId */ });
+      expect(decision.action).toBe('proceed');
+      expect(prisma.lead.findUnique).not.toHaveBeenCalled();
     });
   });
 });

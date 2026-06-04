@@ -355,6 +355,72 @@ describe('FollowUpEngineService', () => {
       // Exactly one row survives in our simulated store.
       expect(persisted).not.toBeNull();
     });
+
+    // ─── SF-connected mode: refuse new enrollment ──────────────────
+    // Once a lead is linked to an SF customer/job, LB stops chasing.
+    // enrollInSequence returns an empty-string sentinel (no enrollment
+    // created) so upstream callers (automation.service customer-reply
+    // re-engagement sequences) become no-ops on SF-linked leads.
+
+    it('refuses enrollment when lead has sfJobId', async () => {
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        sfJobId: 'sfjob-99',
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+      expect(id).toBe('');
+      expect(prisma.followUpEnrollment.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses enrollment when lead has sfCustomerId (no sfJobId)', async () => {
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        sfJobId: null,
+        sfCustomerId: 'sfcust-99',
+        syncStatus: null,
+      });
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+      expect(id).toBe('');
+      expect(prisma.followUpEnrollment.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses enrollment when lead has syncStatus='linked' only", async () => {
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: 'linked',
+      });
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+      expect(id).toBe('');
+      expect(prisma.followUpEnrollment.create).not.toHaveBeenCalled();
+    });
+
+    it('autonomous lead (null link fields) → enrollment proceeds as before', async () => {
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        threadId: CONVERSATION_ID,
+        userId: USER_ID,
+        businessId: 'biz-1',
+        sfJobId: null,
+        sfCustomerId: null,
+        syncStatus: null,
+      });
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+      expect(id).toBe('enroll-new');
+      expect(prisma.followUpEnrollment.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('omitted leadId → skips the SF check (back-compat with callers that pass no leadId)', async () => {
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp');
+      // Without a leadId we cannot SF-link-check; behavior matches the
+      // pre-PR path. The first findUnique call is the SF check; since
+      // we didn't pass leadId, that call is skipped entirely.
+      expect(id).toBe('enroll-new');
+      expect(prisma.followUpEnrollment.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('evaluateThread', () => {
