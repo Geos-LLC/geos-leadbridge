@@ -102,7 +102,11 @@ export class SfOrchestrationClient {
     req: AvailabilityRequest,
     idempotencyKey: string,
   ): Promise<OrchestrationResult<AvailabilityResponse>> {
-    return this.doRequest<AvailabilityResponse>({
+    // Wire shape uses snake_case (`requested_at`, `duration_minutes`); SF rejects
+    // the camelCase aliases we used pre-fix with `400 "requested_at is required"`.
+    // Response normalization happens after doRequest — SF returns `candidate_slots[]`
+    // with snake_case per-slot keys, which we translate to LB's TimeSlot shape.
+    const raw = await this.doRequest<any>({
       endpoint: 'availability',
       method: 'GET',
       path: SfOrchestrationClient.DEFAULT_PATHS.availability,
@@ -110,14 +114,56 @@ export class SfOrchestrationClient {
         sigcoreBusinessId: req.sigcoreBusinessId,
         leadId: req.leadId ?? undefined,
         serviceType: req.serviceType,
-        durationMinutes: req.durationMinutes ?? undefined,
-        preferredStart: req.preferredStart ?? undefined,
-        preferredEnd: req.preferredEnd ?? undefined,
+        requested_at: req.requestedAt,
+        duration_minutes: req.durationMinutes ?? undefined,
         postcode: req.postcode ?? undefined,
       },
       userId: req.userId,
       idempotencyKey,
     });
+    if (!raw.ok) return raw as OrchestrationResult<AvailabilityResponse>;
+    return {
+      ...raw,
+      data: SfOrchestrationClient.normalizeAvailabilityWire(raw.data),
+    };
+  }
+
+  /**
+   * Map SF's wire response (`candidate_slots[]` with snake_case slot keys) to
+   * LB's AvailabilityResponse contract. Tolerant of missing optional fields;
+   * caller treats `candidateSlots.length === 0` as no_availability.
+   *
+   * SF currently does NOT return a per-slot `slot_id` — the `slot_token` is
+   * the only stable handle. We mirror `slot_token` into `slotId` so the rest
+   * of the orchestrator (idempotency-key derivation, offer-set persistence)
+   * has a non-null identifier. Until SF adds a real `slot_id`, the token IS
+   * the id.
+   */
+  private static normalizeAvailabilityWire(wire: any): AvailabilityResponse {
+    const rawSlots = Array.isArray(wire?.candidate_slots) ? wire.candidate_slots : [];
+    const candidateSlots = rawSlots
+      .filter((s: any) => s && typeof s.start === 'string' && typeof s.end === 'string')
+      .map((s: any) => ({
+        slotId: s.slot_id ?? s.slot_token ?? `${s.start}|${s.end}`,
+        slotToken: s.slot_token ?? null,
+        start: s.start,
+        end: s.end,
+        cleanerId: s.cleaner_id ?? null,
+        providerCost: typeof s.provider_cost === 'number' ? s.provider_cost : null,
+      }));
+    const sw = wire?.search_window;
+    const searchWindow =
+      sw && typeof sw.start === 'string' && typeof sw.end === 'string'
+        ? { start: sw.start, end: sw.end }
+        : null;
+    return {
+      candidateSlots,
+      searchWindow,
+      durationMinutes:
+        typeof wire?.duration_minutes === 'number' ? wire.duration_minutes : null,
+      cachedForSeconds:
+        typeof wire?.cached_for_seconds === 'number' ? wire.cached_for_seconds : 0,
+    };
   }
 
   async submitBookingRequest(

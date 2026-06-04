@@ -185,7 +185,7 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
       const { svc, bookingRuntime } = buildDeps({
         flagEnabled: true,
         threadCtx: { bookingState: 'gathering_preferences', bookingAttemptCount: 0, proposedTimeSlotsJson: null, bookingStateAt: new Date() },
-        availabilityResult: { ok: true, data: { slots: [], cachedForSeconds: 0 } },
+        availabilityResult: { ok: true, data: { candidateSlots: [], searchWindow: null, durationMinutes: null, cachedForSeconds: 0 } },
       });
       const out = await svc.handleClassifiedIntent(ENTRY);
       expect(out.decision).toBe('no_availability');
@@ -197,7 +197,7 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
       const { svc, bookingRuntime, slotPhrasing } = buildDeps({
         flagEnabled: true,
         threadCtx: { bookingState: 'gathering_preferences', bookingAttemptCount: 0, proposedTimeSlotsJson: null, bookingStateAt: new Date() },
-        availabilityResult: { ok: true, data: { slots: [{ slotId: 's1', start: '2026-06-02T13:00:00Z', end: '2026-06-02T15:00:00Z' }], cachedForSeconds: 30 } },
+        availabilityResult: { ok: true, data: { candidateSlots: [{ slotId: 's1', slotToken: 's1', start: '2026-06-02T13:00:00Z', end: '2026-06-02T15:00:00Z' }], cachedForSeconds: 30 } },
       });
       const out = await svc.handleClassifiedIntent(ENTRY);
       expect(out.decision).toBe('offering_slots');
@@ -219,6 +219,40 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
       const out = await svc.handleClassifiedIntent(ENTRY);
       expect(out.decision).toBe('orchestration_disabled');
       expect(conversationRuntime.setHandoffRequested).toHaveBeenCalled();
+    });
+
+    it('passes requestedAt to SF client AND does NOT return no_availability when candidateSlots is non-empty', async () => {
+      // Regression guard for the post-2026-06-04 contract fix:
+      //   (a) SF requires `requestedAt` in the request (it 400s without it),
+      //   (b) the response field renamed slots → candidateSlots — reading the
+      //       old key returned undefined, which silently routed every probe
+      //       through the no_availability branch.
+      const { svc, sf } = buildDeps({
+        flagEnabled: true,
+        threadCtx: { bookingState: 'gathering_preferences', bookingAttemptCount: 0, proposedTimeSlotsJson: null, bookingStateAt: new Date() },
+        availabilityResult: {
+          ok: true,
+          data: {
+            candidateSlots: [
+              { slotId: 's1', slotToken: 's1', start: '2026-06-07T13:00:00Z', end: '2026-06-07T15:00:00Z' },
+              { slotId: 's2', slotToken: 's2', start: '2026-06-07T15:00:00Z', end: '2026-06-07T17:00:00Z' },
+            ],
+            searchWindow: { start: '2026-06-07T13:00:00Z', end: '2026-06-07T17:00:00Z' },
+            durationMinutes: 120,
+            cachedForSeconds: 0,
+          },
+        },
+      });
+      const out = await svc.handleClassifiedIntent(ENTRY);
+      // (a) requestedAt landed on the SF call as ISO-8601 — not undefined, not omitted.
+      expect(sf.getAvailability).toHaveBeenCalledTimes(1);
+      const sfReq = sf.getAvailability.mock.calls[0][0];
+      expect(typeof sfReq.requestedAt).toBe('string');
+      expect(sfReq.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      // (b) two slots in → offering_slots, NOT no_availability. Re-asserts that the
+      // orchestrator reads .candidateSlots (post-fix) and not .slots (pre-fix).
+      expect(out.decision).toBe('offering_slots');
+      expect(out.decision).not.toBe('no_availability');
     });
 
     it('bails to handoff when sigcoreBusinessId is missing', async () => {
@@ -302,7 +336,7 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
           proposedTimeSlotsJson: offeredSlots,
           bookingStateAt: stale,
         },
-        availabilityResult: { ok: true, data: { slots: [{ slotId: 's-new', start: '2026-06-05T13:00:00Z', end: '2026-06-05T15:00:00Z' }], cachedForSeconds: 30 } },
+        availabilityResult: { ok: true, data: { candidateSlots: [{ slotId: 's-new', slotToken: 's-new', start: '2026-06-05T13:00:00Z', end: '2026-06-05T15:00:00Z' }], cachedForSeconds: 30 } },
       });
       const out = await svc.handleClassifiedIntent({ ...ENTRY, customerMessage: '1' });
       expect(out.decision).toBe('offering_slots');
@@ -320,7 +354,7 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
           bookingStateAt: new Date(),
         },
         bookingResult: { ok: false, code: 'slot_taken', message: 'taken' },
-        availabilityResult: { ok: true, data: { slots: [{ slotId: 's3', start: '2026-06-05T13:00:00Z', end: '2026-06-05T15:00:00Z' }], cachedForSeconds: 30 } },
+        availabilityResult: { ok: true, data: { candidateSlots: [{ slotId: 's3', slotToken: 's3', start: '2026-06-05T13:00:00Z', end: '2026-06-05T15:00:00Z' }], cachedForSeconds: 30 } },
       });
       const out = await svc.handleClassifiedIntent({ ...ENTRY, customerMessage: '1' });
       expect(out.decision).toBe('offering_slots');
@@ -338,7 +372,7 @@ describe('BookingOrchestratorService — handleClassifiedIntent', () => {
           bookingStateAt: new Date(),
         },
         bookingResult: { ok: false, code: 'slot_token_expired', message: 'expired' },
-        availabilityResult: { ok: true, data: { slots: [], cachedForSeconds: 0 } },
+        availabilityResult: { ok: true, data: { candidateSlots: [], searchWindow: null, durationMinutes: null, cachedForSeconds: 0 } },
       });
       const out = await svc.handleClassifiedIntent({ ...ENTRY, customerMessage: '1' });
       // slot_token_expired → re-query → no slots → no_availability

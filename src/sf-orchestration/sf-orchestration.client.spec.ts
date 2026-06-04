@@ -63,10 +63,18 @@ describe('SfOrchestrationClient', () => {
   });
 
   describe('getAvailability — happy path', () => {
-    it('returns ok=true with slots + bumps metrics + emits Bearer auth + Idempotency-Key + Correlation-Id', async () => {
+    it('returns ok=true with candidateSlots + bumps metrics + emits Bearer auth + Idempotency-Key + Correlation-Id', async () => {
+      // SF returns the wire shape: candidate_slots[] with snake_case slot keys.
       axios.request.mockResolvedValue({
         status: 200,
-        data: { slots: [{ slotId: 's1', start: 't1', end: 't2' }], cachedForSeconds: 30 },
+        data: {
+          tenant_id: 2,
+          candidate_slots: [
+            { start: '2026-06-07T14:00:00.000Z', end: '2026-06-07T17:00:00.000Z', slot_token: 'slot_v1.aaa' },
+          ],
+          search_window: { start: '2026-06-07T14:00:00.000Z', end: '2026-06-07T18:00:00.000Z' },
+          duration_minutes: 180,
+        },
       });
 
       const result = await client.getAvailability(
@@ -74,6 +82,7 @@ describe('SfOrchestrationClient', () => {
           userId: 'user-A',
           sigcoreBusinessId: 'biz-1',
           serviceType: 'standard',
+          requestedAt: '2026-06-07T14:00:00.000Z',
         },
         'idem-key-001',
       );
@@ -81,13 +90,18 @@ describe('SfOrchestrationClient', () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.status).toBe(200);
-      expect(result.data.slots.length).toBe(1);
+      expect(result.data.candidateSlots.length).toBe(1);
+      expect(result.data.candidateSlots[0].slotToken).toBe('slot_v1.aaa');
+      // SF doesn't return slot_id today — token mirrors as the stable id.
+      expect(result.data.candidateSlots[0].slotId).toBe('slot_v1.aaa');
+      expect(result.data.searchWindow?.end).toBe('2026-06-07T18:00:00.000Z');
+      expect(result.data.durationMinutes).toBe(180);
       expect(result.idempotencyKey).toBe('idem-key-001');
       expect(result.correlationId).toMatch(/^[0-9a-f-]{36}$/i);
       expect(result.attemptCount).toBe(1);
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
 
-      // Headers assertion
+      // Headers assertion (auth + idempotency unchanged by this fix)
       const call = axios.request.mock.calls[0][0];
       expect(call.method).toBe('GET');
       expect(call.url).toBe(
@@ -98,8 +112,12 @@ describe('SfOrchestrationClient', () => {
       expect(call.headers['X-Correlation-Id']).toMatch(/^[0-9a-f-]{36}$/i);
       expect(call.headers['X-LB-User-Id']).toBe('user-A');
       expect(call.timeout).toBe(5000);
-      // Query — undefined/null filtered
-      expect(call.params).toEqual({ sigcoreBusinessId: 'biz-1', serviceType: 'standard' });
+      // Query — requested_at (snake) must be present; no preferredStart/preferredEnd.
+      expect(call.params).toEqual({
+        sigcoreBusinessId: 'biz-1',
+        serviceType: 'standard',
+        requested_at: '2026-06-07T14:00:00.000Z',
+      });
 
       // Metrics
       const snap = metrics.getCountersForUser('user-A');
@@ -108,6 +126,75 @@ describe('SfOrchestrationClient', () => {
       expect(snap.failures.availability).toBe(0);
       expect(snap.retries.availability).toBe(0);
       expect(snap.lastLatencyMs.availability).toBeGreaterThanOrEqual(0);
+    });
+
+    it('sends duration_minutes (snake_case) when provided; omits when null', async () => {
+      axios.request.mockResolvedValue({
+        status: 200,
+        data: { candidate_slots: [] },
+      });
+      await client.getAvailability(
+        {
+          userId: 'user-A',
+          sigcoreBusinessId: 'biz-1',
+          serviceType: 'standard',
+          requestedAt: '2026-06-07T14:00:00.000Z',
+          durationMinutes: 120,
+          postcode: '33708',
+        },
+        'idem-dur',
+      );
+      const call = axios.request.mock.calls[0][0];
+      expect(call.params).toEqual({
+        sigcoreBusinessId: 'biz-1',
+        serviceType: 'standard',
+        requested_at: '2026-06-07T14:00:00.000Z',
+        duration_minutes: 120,
+        postcode: '33708',
+      });
+    });
+
+    it('normalizes candidate_slots → candidateSlots; non-empty slots do NOT collapse to empty', async () => {
+      axios.request.mockResolvedValue({
+        status: 200,
+        data: {
+          candidate_slots: [
+            { start: '2026-06-07T14:00:00Z', end: '2026-06-07T17:00:00Z', slot_token: 't1' },
+            { start: '2026-06-07T14:30:00Z', end: '2026-06-07T17:30:00Z', slot_token: 't2' },
+            { start: '2026-06-07T15:00:00Z', end: '2026-06-07T18:00:00Z', slot_token: 't3' },
+          ],
+        },
+      });
+      const result = await client.getAvailability(
+        {
+          userId: 'user-A',
+          sigcoreBusinessId: 'biz-1',
+          serviceType: 'standard',
+          requestedAt: '2026-06-07T14:00:00.000Z',
+        },
+        'idem-multi',
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // Three slots in → three slots out. No collapse to empty.
+      expect(result.data.candidateSlots).toHaveLength(3);
+      expect(result.data.candidateSlots.map((s) => s.slotToken)).toEqual(['t1', 't2', 't3']);
+    });
+
+    it('returns empty candidateSlots when SF body has no candidate_slots key', async () => {
+      axios.request.mockResolvedValue({ status: 200, data: { tenant_id: 2 } });
+      const result = await client.getAvailability(
+        {
+          userId: 'user-A',
+          sigcoreBusinessId: 'biz-1',
+          serviceType: 'standard',
+          requestedAt: '2026-06-07T14:00:00.000Z',
+        },
+        'idem-empty',
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.candidateSlots).toEqual([]);
     });
   });
 
@@ -212,6 +299,7 @@ describe('SfOrchestrationClient', () => {
           userId: 'user-A',
           sigcoreBusinessId: 'biz-1',
           serviceType: 'standard',
+          requestedAt: '2026-06-07T14:00:00.000Z',
         },
         'idem',
       );
@@ -225,7 +313,7 @@ describe('SfOrchestrationClient', () => {
     it('generic 403 (no body.error) ALSO maps to orchestration_disabled (safe default)', async () => {
       axios.request.mockResolvedValue({ status: 403, data: { error: 'forbidden' } });
       const result = await client.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
       expect(result.ok).toBe(false);
@@ -241,11 +329,11 @@ describe('SfOrchestrationClient', () => {
         .mockResolvedValueOnce({ status: 503, data: { error: 'unavailable' } })
         .mockResolvedValueOnce({
           status: 200,
-          data: { slots: [], cachedForSeconds: 0 },
+          data: { candidate_slots: [] },
         });
 
       const result = await client.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem-same-key',
       );
 
@@ -274,7 +362,7 @@ describe('SfOrchestrationClient', () => {
       axios.request.mockResolvedValue({ status: 500, data: 'oops' });
 
       const result = await client.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
 
@@ -300,7 +388,7 @@ describe('SfOrchestrationClient', () => {
         .mockResolvedValueOnce({ status: 200, data: { slots: [], cachedForSeconds: 0 } });
 
       const result = await client.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
 
@@ -312,7 +400,7 @@ describe('SfOrchestrationClient', () => {
       axios.request.mockRejectedValue(new Error('socket hang up'));
 
       const result = await client.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
 
@@ -334,7 +422,7 @@ describe('SfOrchestrationClient', () => {
         buildResolver({ enabled: false }),
       );
       const result = await c.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
       expect(axios.request).not.toHaveBeenCalled();
@@ -355,7 +443,7 @@ describe('SfOrchestrationClient', () => {
       );
       axios.request.mockResolvedValue({ status: 200, data: { slots: [], cachedForSeconds: 0 } });
       await c.getAvailability(
-        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard' },
+        { userId: 'user-A', sigcoreBusinessId: 'biz-1', serviceType: 'standard', requestedAt: '2026-06-07T14:00:00.000Z' },
         'idem',
       );
       const call = axios.request.mock.calls[0][0];

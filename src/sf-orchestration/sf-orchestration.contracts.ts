@@ -67,24 +67,37 @@ export interface AvailabilityRequest {
   leadId?: string | null;
   /** Service type label (e.g. "standard_cleaning", "deep_cleaning"). */
   serviceType: string;
-  /** Estimated duration in minutes — drives slot length search. */
+  /**
+   * REQUIRED. Customer-preferred start time (ISO-8601 UTC). Sent on the wire
+   * as `requested_at` — SF rejects the call with HTTP 400 if absent. SF uses
+   * this to derive its own `search_window` (start..start+offset).
+   */
+  requestedAt: string;
+  /** Estimated duration in minutes — drives slot length search. Wire: `duration_minutes`. */
   durationMinutes?: number | null;
-  /** Customer-preferred start of search window (ISO-8601). */
-  preferredStart?: string | null;
-  /** Customer-preferred end of search window (ISO-8601). */
-  preferredEnd?: string | null;
   /** Optional postcode for area-based slot filtering. */
   postcode?: string | null;
 }
 
 export interface AvailabilityResponse {
-  /** Up to N candidate slots. Empty array means no availability. */
-  slots: TimeSlot[];
   /**
-   * Seconds the caller may cache this response. Zero means "do not cache" —
+   * Up to N candidate slots. SF returns these on the wire as `candidate_slots[]`;
+   * the client normalizes both the field name and the per-slot snake_case keys
+   * (`slot_token` → `slotToken`). Empty array means no availability.
+   */
+  candidateSlots: TimeSlot[];
+  /**
+   * Echo of the actual window SF searched (may differ from requestedAt — SF
+   * picks a window length internally). Informational, useful in logs.
+   */
+  searchWindow?: { start: string; end: string } | null;
+  /** Duration SF settled on. May differ from request when SF has a min/max policy. */
+  durationMinutes?: number | null;
+  /**
+   * Optional cache hint (seconds). Zero or missing means "do not cache" —
    * call again before next offering.
    */
-  cachedForSeconds: number;
+  cachedForSeconds?: number;
 }
 
 // ─── POST /booking-request ──────────────────────────────────────────────

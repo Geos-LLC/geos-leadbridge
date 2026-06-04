@@ -349,12 +349,17 @@ export class BookingOrchestratorService {
     );
 
     const idem = `availability:${input.conversationId}:${Math.floor(Date.now() / 60_000)}`;
+    // `requestedAt` is REQUIRED by SF (400 otherwise). Until preference
+    // parsing lands, default to "now" — SF treats it as "earliest available"
+    // and derives its own search_window from there. Future PR can pass a
+    // customer-stated preferred time pulled out of the conversation.
     const res = await this.sf.getAvailability(
       {
         userId: input.userId,
         sigcoreBusinessId: input.sigcoreBusinessId,
         leadId: input.leadId,
         serviceType: input.serviceType ?? 'standard',
+        requestedAt: new Date().toISOString(),
       },
       idem,
     );
@@ -375,7 +380,10 @@ export class BookingOrchestratorService {
       return { decision: 'booking_failed_terminal', reason: res.code };
     }
 
-    const slots = res.data.slots ?? [];
+    // SF wire field is `candidate_slots[]`; the client normalizes to `candidateSlots`.
+    // Reading `.slots` (pre-fix field name) would always be undefined → every probe
+    // would terminate as no_availability even when SF returned real slots.
+    const slots = res.data.candidateSlots ?? [];
     if (slots.length === 0) {
       await this.bookingRuntime.recordBookingFailure(
         input.conversationId,
