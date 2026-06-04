@@ -31,6 +31,7 @@ import {
   isCanonicalStatus,
   isPipelineDowngrade,
 } from './canonical-status';
+import { isSfLinkedLead } from './sf-link';
 
 /**
  * Canonical statuses SF may transition a lead INTO via the archived-reactivation
@@ -87,6 +88,19 @@ export type WriteSkipReason =
   // marketplace archive event must not downgrade them. The platformStatus
   // column still flows through; only the canonical Lead.status is held back.
   | 'sf_link_protected'
+  // SF-connected mode (PR finalizing SF↔LB integration): the lead is
+  // SF-linked, so SF owns the customer/job lifecycle. Any service_flow
+  // status write is held back — the canonical Lead.status stays at what
+  // LB had at conversion time. The mirror fields (sfJobOutcome /
+  // sfJobOutcomeAt / sfLastEventAt) still carry SF's view. extraLeadUpdates
+  // (sfJobId / sfLastEventAt / sfJobMappedAt) ARE still written so the
+  // link metadata stays current.
+  | 'sf_lifecycle_managed'
+  // SF-connected mode: lb_automation tried to mutate Lead.status to a
+  // terminal (lost / booked) on an SF-linked lead. Recorded for audit; the
+  // intent is still tracked in conversation runtime + the audit log, but
+  // the canonical status stays put because SF owns lifecycle.
+  | 'sf_linked_customer'
   | 'automation_terminal'
   | 'pipeline_downgrade'
   | 'duplicate'
@@ -317,6 +331,70 @@ export class LeadStatusService {
       throw new BadRequestException(
         `Invalid status "${newStatus}". Must be one of the canonical set; see canonical-status.ts.`,
       );
+    }
+
+    // ── Guard 2a: SF-connected mode — service_flow lifecycle mirror-only ──
+    // When the lead is SF-linked (sfJobId / sfCustomerId / syncStatus='linked',
+    // or about to be via extraLeadUpdates on this very write), SF owns the
+    // customer/job lifecycle. The canonical Lead.status must NOT be mutated
+    // from a service_flow source — SF's lifecycle view goes to the mirror
+    // fields (sfJobOutcome / sfJobOutcomeAt) which are written outside this
+    // method by the Phase 1 mirror call.
+    //
+    // We still apply input.extraLeadUpdates here so the link metadata
+    // (sfJobId / sfLastEventAt / sfJobMappedAt) stays current — those are
+    // SF identifiers, not canonical status.
+    //
+    // Live-webhook callers: the lead may be found via the externalRequestId
+    // fallback when sfJobId is null. extraLeadUpdates carries the
+    // about-to-be-linked sfJobId; isSfLinkedLead's pendingUpdates arg picks
+    // that up so the first event that establishes the link is ALSO treated
+    // as mirror-only.
+    //
+    // Historical-sync callers (manual link, bulk link): write sfJobId
+    // BEFORE this method, so `lead.sfJobId` is already truthy at this point.
+    if (
+      input.source === 'service_flow' &&
+      isSfLinkedLead(lead, input.extraLeadUpdates)
+    ) {
+      if (
+        input.extraLeadUpdates &&
+        Object.keys(input.extraLeadUpdates).length > 0
+      ) {
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: input.extraLeadUpdates,
+        });
+      }
+      this.metrics?.recordSkip('sf_lifecycle_managed');
+      this.logger.log(
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=service_flow result=skipped skip_reason=sf_lifecycle_managed status=${oldStatus} attempted=${newStatus} sf_job_id=${lead.sfJobId ?? input.extraLeadUpdates?.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'} note=mirror_only`,
+      );
+      return this.skipped(lead, 'sf_lifecycle_managed');
+    }
+
+    // ── Guard 2b: SF-connected mode — lb_automation lost/booked suppression ──
+    // In SF-connected mode the AI classifier's terminal intents (opt_out,
+    // hired_elsewhere, agreed) still record runtime/audit state but must NOT
+    // mark the SF-linked lead `lost` or `booked` in Lead.status. SF owns the
+    // outcome — a customer who already booked via SF cannot be auto-marked
+    // lost by LB because the customer said "thanks, we're done" (Donna-class
+    // false positive); a customer mid-SF-booking cannot be marked booked by
+    // LB because SF's own webhook will deliver the booked event when the
+    // calendar slot is confirmed.
+    //
+    // Non-terminal lb_automation writes (`engaged`, etc.) still flow — they
+    // are funnel/observability signals, not lifecycle commitments.
+    if (
+      input.source === 'lb_automation' &&
+      isSfLinkedLead(lead) &&
+      (newStatus === 'lost' || newStatus === 'booked')
+    ) {
+      this.metrics?.recordSkip('sf_linked_customer');
+      this.logger.log(
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=lb_automation result=skipped skip_reason=sf_linked_customer status=${oldStatus} attempted=${newStatus} sf_job_id=${lead.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'} note=sf_owns_lifecycle`,
+      );
+      return this.skipped(lead, 'sf_linked_customer');
     }
 
     // ── Guard 3: hard-terminal blocks all sources, with one carve-out ─────

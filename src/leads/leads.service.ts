@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { LeadStatusService } from './lead-status.service';
+import { isSfLinkedLead } from './sf-link';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { mapYelpToLbStatus } from '../integrations/yelp-status-map';
 import { TrialService } from '../trial/trial.service';
@@ -1880,6 +1881,20 @@ export class LeadsService {
       updatedAt: lead.updatedAt,
       lastMessageAt: lastMessageAt, // Include lastMessageAt for sorting and display
       lastMessage,
+      // SF-connected mode signals. `isSfLinked` uses the same predicate as the
+      // status-write guards in LeadStatusService so the UI can't drift from
+      // server-side rules. The raw link/outcome fields are exposed so the UI
+      // can render badges (SF Customer, SF outcome) without a second round-trip.
+      isSfLinked: isSfLinkedLead({
+        sfJobId: lead.sfJobId,
+        sfCustomerId: lead.sfCustomerId,
+        syncStatus: lead.syncStatus,
+      }),
+      sfJobId: lead.sfJobId ?? null,
+      sfCustomerId: lead.sfCustomerId ?? null,
+      syncStatus: lead.syncStatus ?? null,
+      sfJobOutcome: lead.sfJobOutcome ?? null,
+      sfJobOutcomeAt: lead.sfJobOutcomeAt ?? null,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }

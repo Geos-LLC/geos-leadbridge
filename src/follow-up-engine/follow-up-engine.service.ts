@@ -18,6 +18,7 @@ import {
   CONVERSATION_STATE_REASONS,
 } from '../conversation-context/conversation-runtime';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
+import { isSfLinkedLead } from '../leads/sf-link';
 
 /**
  * Map a free-form stopEnrollment `reason` string to the canonical
@@ -48,6 +49,10 @@ export function mapStopReasonToRuntime(reason: string): {
       conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_OPT_OUT,
     };
   }
+  // 'classifier_completed' is the legacy reason string written by the scheduler
+  // when the classifier returned the now-removed 'completed' intent (merged into
+  // 'hired_elsewhere' on 2026-06-03). Kept as an alias so old enrollment audit
+  // log rows still map to the right state.
   if (r === 'classifier_hired_elsewhere' || r === 'classifier_completed') {
     return {
       aiStatus: 'stopped_terminal',
@@ -342,6 +347,26 @@ export class FollowUpEngineService {
     });
 
     if (!template) throw new Error(`Sequence template ${templateId} not found`);
+
+    // SF-connected mode: refuse new enrollment when the lead is already
+    // linked to an SF customer/job. LB does not chase converted customers.
+    // This catches both the regular follow-up enroll path AND the
+    // customer-reply re-engagement sequences (customer_deferred,
+    // customer_hired_competitor) triggered from automation.service. Returns
+    // empty string as a no-op sentinel — all callers `await` without using
+    // the return value.
+    if (leadId) {
+      const leadForSfCheck = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { sfJobId: true, sfCustomerId: true, syncStatus: true },
+      });
+      if (leadForSfCheck && isSfLinkedLead(leadForSfCheck)) {
+        this.logger.log(
+          `[FollowUpEngine] enrollInSequence skipped — sf_linked_customer lead=${leadId} template=${templateId} sf_job_id=${leadForSfCheck.sfJobId ?? 'null'} sf_customer_id=${leadForSfCheck.sfCustomerId ?? 'null'} sync_status=${leadForSfCheck.syncStatus ?? 'null'}`,
+        );
+        return '';
+      }
+    }
 
     // Prevent duplicate enrollments — only one active enrollment per conversation
     const existing = await this.prisma.followUpEnrollment.findFirst({

@@ -14,6 +14,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { FollowUpEngineService } from '../../follow-up-engine/follow-up-engine.service';
 import { LeadStatusService } from '../../leads/lead-status.service';
+import { isSfLinkedLead } from '../../leads/sf-link';
 import {
   LbPipelineStatus,
   mapSfStatus,
@@ -472,7 +473,18 @@ export class SfInboundStatusService {
     }
 
     // ------------------------ Dry-run check ------------------------
+    // SF-connected mode: predict the same mirror-only outcome that
+    // writeStatus would produce when dry-run is off. Logging
+    // `would_apply:completed` here when in fact the canonical write would
+    // be held back is misleading for the SF-side lifecycle_drift classifier
+    // and for anyone triaging from `sfInboundEvent.result` rows.
     if (dryRun) {
+      const sfLinked = isSfLinkedLead(lead, {
+        sfJobId: lead.sfJobId || payload.sf_job_id,
+      });
+      const dryRunResult = sfLinked
+        ? `would_mirror_only:${canonical}`
+        : `would_apply:${canonical}`;
       await this.recordEvent({
         eventId: payload.event_id,
         eventType: payload.event_type,
@@ -482,10 +494,10 @@ export class SfInboundStatusService {
         userId: subscription.userId,
         sfSubscriptionId: subscription.id,
         status: 'dry_run',
-        result: `would_apply:${canonical}`,
+        result: dryRunResult,
         payloadJson: payload,
       });
-      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=dry_run error=null would_apply=${canonical}`);
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=dry_run error=null ${dryRunResult.replace(':', '=')} sf_linked=${sfLinked}`);
       return {
         httpStatus: 200,
         result: 'dry_run',
@@ -522,10 +534,35 @@ export class SfInboundStatusService {
     if (!writeResult.applied) {
       // The guard chain rejected the write. Map the skip reason to our
       // outbound contract: stale_event/duplicate → 'stale' (200, idempotent);
-      // anything else → 'noop'.
+      // sf_lifecycle_managed → 'applied' (SF-connected mode is the
+      // happy-path success outcome — the mirror was written, link metadata
+      // was written, follow-ups are stopped; from SF's perspective the
+      // event was fully processed even though canonical Lead.status didn't
+      // move); anything else → 'noop'.
       const skip = writeResult.skipReason;
       const result: ProcessResult =
-        skip === 'stale_event' || skip === 'duplicate' ? 'stale' : 'noop';
+        skip === 'stale_event' || skip === 'duplicate'
+          ? 'stale'
+          : skip === 'sf_lifecycle_managed'
+            ? 'applied'
+            : 'noop';
+
+      // SF-connected mode: even though canonical Lead.status didn't move,
+      // the SF event still implies "SF owns this lead now → LB stops
+      // chasing". Fire the same follow-up stop the legacy terminal path
+      // fires so existing enrollments wind down. The next scheduler tick
+      // would catch this via the gate anyway, but eager-stop produces a
+      // cleaner audit trail ("stopped by SF webhook" vs "stopped on next
+      // tick"). no_show on an SF-linked lead also winds down rather than
+      // switching to long-term — once SF owns the lead, LB's long-term
+      // sequence is no longer the right next action.
+      if (skip === 'sf_lifecycle_managed' && lead.threadId) {
+        await this.stopEnrollmentsForConversation(
+          lead.threadId,
+          `sf_linked_customer:${canonical}`,
+        );
+      }
+
       await this.recordEvent({
         eventId: payload.event_id,
         eventType: payload.event_type,
@@ -535,10 +572,18 @@ export class SfInboundStatusService {
         userId: subscription.userId,
         sfSubscriptionId: subscription.id,
         status: result,
-        result: `lead_status_skip:${skip ?? 'unknown'}`,
+        result:
+          skip === 'sf_lifecycle_managed'
+            ? `sf_linked_mirror_only:${canonical}`
+            : `lead_status_skip:${skip ?? 'unknown'}`,
         payloadJson: payload,
       });
-      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=${result} error=lead_status_skip:${skip ?? 'unknown'}`);
+      this.logger.log(
+        `[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=${result} ` +
+          (skip === 'sf_lifecycle_managed'
+            ? `note=sf_linked_mirror_only canonical=${canonical}`
+            : `error=lead_status_skip:${skip ?? 'unknown'}`),
+      );
       // Use writeResult.{status,platformStatus} for currentStatus/currentPlatformStatus —
       // those are the freshly-read values from inside writeStatus's transaction
       // (writeStatus.skipped() returns the lead snapshot it read). lead.* could
@@ -555,7 +600,10 @@ export class SfInboundStatusService {
             platformStatus: writeResult.platformStatus,
           },
           payload,
-          skip ?? 'unknown',
+          // sf_lifecycle_managed isn't a "skip" from SF's perspective — it
+          // IS the happy path in connected mode. Surface null so the SF
+          // lifecycle_drift classifier doesn't treat it as a problem.
+          skip === 'sf_lifecycle_managed' ? null : (skip ?? 'unknown'),
         ),
       };
     }

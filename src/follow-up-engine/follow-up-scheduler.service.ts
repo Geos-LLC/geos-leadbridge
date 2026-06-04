@@ -524,8 +524,19 @@ export class FollowUpSchedulerService implements OnModuleInit {
     const conf = decision.confidence;
 
     // Stop the enrollment. Idempotent — only flips active enrollments.
-    await this.engineService.stopEnrollment(enrollment.id, `classifier_${intent}`);
-    this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via classifier intent=${intent} conf=${conf.toFixed(2)} reason="${decision.classifierReason ?? ''}"`);
+    // SF-link block (intent=null) gets a dedicated reason so audit/Loki
+    // doesn't read "classifier_null"; classifier-driven blocks keep
+    // their original "classifier_<intent>" reason for back-compat with
+    // existing dashboards.
+    const stopReason = decision.action === 'block_sf_linked'
+      ? 'sf_linked_customer'
+      : `classifier_${intent}`;
+    await this.engineService.stopEnrollment(enrollment.id, stopReason);
+    if (decision.action === 'block_sf_linked') {
+      this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via sf_linked_customer (lead is converted to SF customer/job)`);
+    } else {
+      this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via classifier intent=${intent} conf=${conf.toFixed(2)} reason="${decision.classifierReason ?? ''}"`);
+    }
 
     // Flip lead status where appropriate. Skipped for 'deferring' (pause, not lost)
     // and for cases where the lead has no id (defensive).

@@ -108,6 +108,15 @@ export interface Lead {
     sentAt: string;
   };
   isAutoHandled?: boolean; // Drives the "Hide auto-handled" sidebar filter.
+  // SF-connected mode signals. `isSfLinked` is derived server-side via the
+  // same `isSfLinkedLead` predicate the status-write guards use — UI mirrors
+  // server rules without re-deriving the OR-chain.
+  isSfLinked?: boolean;
+  sfJobId?: string | null;
+  sfCustomerId?: string | null;
+  syncStatus?: string | null;
+  sfJobOutcome?: string | null;
+  sfJobOutcomeAt?: string | null;
   raw?: any;
 }
 

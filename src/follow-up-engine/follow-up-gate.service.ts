@@ -29,6 +29,7 @@ import {
   IntentClassification,
   CustomerIntent,
 } from '../ai/intent-classifier.service';
+import { isSfLinkedLead } from '../leads/sf-link';
 
 /**
  * Confidence below which we pass through to generation. False-positive on a
@@ -40,7 +41,8 @@ export const GATE_CONFIDENCE_THRESHOLD = 0.7;
 
 export type GateAction =
   | 'proceed'              // gate passed; caller may generate + send
-  | 'block_terminal'       // classifier surfaced terminal intent (opt_out / hired_elsewhere / completed / agreed / deferring)
+  | 'block_terminal'       // classifier surfaced terminal intent (opt_out / hired_elsewhere / agreed / deferring / terminal_defer)
+  | 'block_sf_linked'      // lead is SF-linked (customer/job linked to ServiceFlow); LB stops chasing — no Lead.status flip
   | 'pass_no_message'      // no customer message yet → nothing to classify (initial outreach)
   | 'pass_low_confidence'  // classifier returned but below threshold
   | 'pass_classifier_failed' // classifier threw or LLM unavailable → fail open
@@ -57,7 +59,7 @@ export interface GateInput {
   /** Re-engagement sequences (`customer_deferred`, `customer_hired_competitor`)
    *  bypass the gate ONLY on `deferring` intent — a bounded pause is the
    *  exact case the sequence is designed for. All other terminal intents
-   *  (completed/agreed/hired_elsewhere/opt_out/terminal_defer) stop the
+   *  (hired_elsewhere/agreed/opt_out/terminal_defer) stop the
    *  re-engagement just like a regular sequence. */
   triggerState?: string | null;
 }
@@ -130,10 +132,35 @@ export class FollowUpGateService {
     if (input.leadId) {
       const lead = await this.prisma.lead.findUnique({
         where: { id: input.leadId },
-        select: { status: true, category: true },
+        // SF-link signals must be loaded here so the short-circuit below
+        // can fire BEFORE the classifier call — avoids an LLM round-trip
+        // and keeps the SF-connected-mode contract clean ("no LB chase
+        // on linked leads").
+        select: { status: true, category: true, sfJobId: true, sfCustomerId: true, syncStatus: true },
       });
       leadStatus = lead?.status ?? undefined;
       leadCategory = lead?.category ?? undefined;
+
+      // SF-connected mode: lead is linked to an SF customer/job. SF owns
+      // the customer/job lifecycle. Stop the follow-up — LB does not chase
+      // leads that have already converted to SF customers. Side effect is
+      // `stop_only` (not stop_and_lost) because the customer is NOT lost;
+      // they are an active SF customer. No Lead.status mutation.
+      if (lead && isSfLinkedLead(lead)) {
+        this.logger.log(
+          `[FollowUpGate] BLOCK sf_linked_customer conversation=${input.conversationId} lead=${input.leadId} sf_job_id=${lead.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'}`,
+        );
+        return {
+          action: 'block_sf_linked',
+          shouldBlock: true,
+          sideEffect: 'stop_only',
+          intent: null,
+          confidence: 0,
+          reason: 'sf_linked_customer',
+          classifierReason: null,
+          classifierRan: false,
+        };
+      }
     }
 
     let classification: IntentClassification;
@@ -215,17 +242,15 @@ export class FollowUpGateService {
     //   - opt_out: explicit unsubscribe, never recoverable.
     //   - terminal_defer: unbounded "maybe later"; sending another attempt is
     //     the creepy-follow-up anti-pattern this gate exists to prevent.
-    //   - completed: customer is signaling we're done (booking ran, job done,
-    //     "thanks!"). Continuing to re-engage them after they've confirmed
-    //     completion is the Savanna-class bug (2026-05-12): customer's
-    //     dispatcher-confirmed booking + "Thank you!" reply got 3 AI follow-ups
-    //     in succession because the gate let `completed` pass through.
+    //   - hired_elsewhere: covers both "hired a competitor" AND "we're done
+    //     with it" (Savanna 2026-05-12 case where customer said "Thank you!"
+    //     after a dispatcher booking confirmation — previously classified as
+    //     'completed', merged into hired_elsewhere 2026-06-03). Whether the
+    //     close-out is from a competitor or just job-already-done, sending
+    //     more re-engagements is the same anti-pattern. Stop.
     //   - agreed: customer accepted a booking. They are NOT a re-engagement
     //     target anymore — they converted. Handoff to the operator, don't
     //     keep messaging.
-    //   - hired_elsewhere: a customer in a `customer_hired_competitor`
-    //     sequence saying "still hired someone" is a stronger no than what
-    //     enrolled them, not a recovery. Stop.
     const isReEngagementSequence = input.triggerState === 'customer_deferred'
       || input.triggerState === 'customer_hired_competitor';
     const bypassableInReEngagement = intent === 'deferring';
@@ -248,7 +273,7 @@ export class FollowUpGateService {
     //   agreed         → stop_and_booked  (handoff)
     //   deferring      → stop_only        (bounded pause; will re-engage later)
     //   terminal_defer → stop_and_lost    (unbounded deflection ≈ soft no)
-    //   opt_out / hired_elsewhere / completed → stop_and_lost
+    //   opt_out / hired_elsewhere → stop_and_lost
     const sideEffect: GateSideEffect = intent === 'agreed'
       ? 'stop_and_booked'
       : intent === 'deferring'
