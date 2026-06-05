@@ -36,8 +36,18 @@
 //   'needs_review'  — ambiguous match (medium/low confidence); operator
 //                     must resolve via manual-link
 //   'failed'        — sync attempt errored; retry-eligible
-//   'skipped'       — terminal LB status (lost/archived/cancelled) — no
-//                     SF reconciliation needed
+//   'skipped'       — true hard exclusion: customer must not be contacted
+//                     by SF or by LB re-engagement. Set by enumeration when:
+//                       (a) platform='test'                            (noise)
+//                       (b) status='lost' AND lostReason='opt_out'     (explicit unsubscribe)
+//                       (c) status IN {cancelled, no_show, archived}    (operator-explicit terminals)
+//                     Other terminal-LB rows (Thumbtack "No hire", Yelp
+//                     Archived → lost+hired_someone, lost with null
+//                     lostReason) enumerate as 'pending' — they ARE
+//                     candidates for SF identity matching. The 2026-06-05
+//                     rule refactor narrowed this from the prior
+//                     status-only check that conflated platform-algorithmic
+//                     lost with customer-initiated stop.
 export const SYNC_STATUSES = [
   'pending', 'lead_linked', 'linked', 'no_match', 'needs_review', 'failed', 'skipped',
 ] as const;

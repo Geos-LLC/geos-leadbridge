@@ -75,11 +75,17 @@ function buildLeadStatus(writeApplied: boolean = true) {
 
 describe('SfHistoricalSyncService', () => {
   describe('enumeration (connection-time + trigger)', () => {
-    it('marks actionable leads as pending, terminal as skipped, leaves linked alone', async () => {
+    // 2026-06-05 rule refactor: the "terminal as skipped" assumption no
+    // longer applies for `status='lost'` with non-opt_out lostReason. L2
+    // changed to carry lostReason='opt_out' so it still represents a real
+    // hard-skip case; the platform-algorithmic lost rows (No hire, archived
+    // remap) are covered in the new "hard-skip rule narrowing" describe
+    // block below.
+    it('marks actionable leads as pending, hard-skips terminal/opt_out, leaves linked alone', async () => {
       const { prisma, leads, updates } = buildPrisma({
         leads: {
           'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: null },
-          'L2': { id: 'L2', userId: 'U1', status: 'lost', sfJobId: null, syncStatus: null },
+          'L2': { id: 'L2', userId: 'U1', status: 'lost', lostReason: 'opt_out', sfJobId: null, syncStatus: null },
           'L3': { id: 'L3', userId: 'U1', status: 'completed', sfJobId: 'SF-111', syncStatus: null },
           'L4': { id: 'L4', userId: 'U1', status: 'cancelled', sfJobId: null, syncStatus: null },
           'L5': { id: 'L5', userId: 'U1', status: 'contacted', sfJobId: null, syncStatus: null },
@@ -89,12 +95,14 @@ describe('SfHistoricalSyncService', () => {
       const r = await svc.enumerateOnConnect('U1');
       expect(r.scanned).toBe(5);
       expect(r.markedPending).toBe(2);   // L1 scheduled, L5 contacted
-      expect(r.markedSkipped).toBe(2);   // L2 lost, L4 cancelled
+      expect(r.markedSkipped).toBe(2);   // L2 lost+opt_out, L4 cancelled
       expect(r.alreadyLinked).toBe(1);   // L3 (had sfJobId)
       expect(leads.get('L1').syncStatus).toBe('pending');
       expect(leads.get('L2').syncStatus).toBe('skipped');
+      expect(leads.get('L2').syncReason).toBe('terminal_lost_opt_out');
       expect(leads.get('L3').syncStatus).toBe('linked');  // backfilled from sfJobId
       expect(leads.get('L4').syncStatus).toBe('skipped');
+      expect(leads.get('L4').syncReason).toBe('terminal_cancelled');
       expect(leads.get('L5').syncStatus).toBe('pending');
     });
 
@@ -102,14 +110,18 @@ describe('SfHistoricalSyncService', () => {
       const { prisma } = buildPrisma({
         leads: {
           'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' },
-          'L2': { id: 'L2', userId: 'U1', status: 'lost', sfJobId: null, syncStatus: 'skipped' },
+          // L2 carries opt_out so the row is correctly hard-skipped under the
+          // new rule (a status='lost' with no lostReason would re-enumerate
+          // to 'pending' on a fresh run, which would be a churn — not the
+          // case this test wants to assert).
+          'L2': { id: 'L2', userId: 'U1', status: 'lost', lostReason: 'opt_out', sfJobId: null, syncStatus: 'skipped' },
           'L3': { id: 'L3', userId: 'U1', status: 'completed', sfJobId: 'SF-A', syncStatus: 'linked' },
         },
       });
       const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
       const r = await svc.enumerateOnConnect('U1');
       expect(r.markedPending).toBe(0);   // L1 already pending
-      expect(r.markedSkipped).toBe(0);   // L2 already skipped
+      expect(r.markedSkipped).toBe(0);   // L2 already skipped + still hard-skippable
       expect(r.alreadyLinked).toBe(1);   // L3
     });
 
@@ -135,6 +147,188 @@ describe('SfHistoricalSyncService', () => {
       const r = await svc.enumerateOnConnect('U1');
       expect(r.markedPending).toBe(1);
       expect(leads.get('L1').syncStatus).toBe('pending');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Hard-skip rule narrowing (2026-06-05 Phase 1 refactor)
+  //
+  // `syncStatus='skipped'` now means TRUE hard exclusion only. Three sources:
+  //   (a) platform='test'                              — admin probe leads
+  //   (b) status='lost' AND lostReason='opt_out'       — explicit unsubscribe
+  //   (c) status IN {cancelled, no_show, archived}      — operator-explicit
+  //
+  // Previously the rule was `status IN {lost, cancelled, no_show, archived}`
+  // which incorrectly hard-skipped platform-algorithmic lost (Thumbtack
+  // No hire with null lostReason, Yelp Archived remapped to lost+
+  // hired_someone). Those now enumerate as 'pending' so SF can match them
+  // to SF Lead records.
+  //
+  // Tests below lock in each branch of the new rule + assert non-behavior-
+  // change on adjacent fields (status, lostReason, sfJobId, isSfLinkedLead-
+  // relevant rows).
+  // ═══════════════════════════════════════════════════════════════════════
+  describe('enumeration — hard-skip rule narrowing (2026-06-05)', () => {
+    it("status='lost' + lostReason='opt_out' → skipped with reason 'terminal_lost_opt_out'", async () => {
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_OPTOUT': { id: 'L_OPTOUT', userId: 'U1', status: 'lost', lostReason: 'opt_out', platform: 'yelp', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedSkipped).toBe(1);
+      expect(r.markedPending).toBe(0);
+      expect(leads.get('L_OPTOUT').syncStatus).toBe('skipped');
+      expect(leads.get('L_OPTOUT').syncReason).toBe('terminal_lost_opt_out');
+    });
+
+    it("platform='test' → skipped with reason 'test_noise' regardless of status/lostReason", async () => {
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_TEST1': { id: 'L_TEST1', userId: 'U1', status: 'new', platform: 'test', sfJobId: null, syncStatus: null },
+          'L_TEST2': { id: 'L_TEST2', userId: 'U1', status: 'lost', lostReason: 'hired_someone', platform: 'test', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedSkipped).toBe(2);
+      expect(leads.get('L_TEST1').syncStatus).toBe('skipped');
+      expect(leads.get('L_TEST1').syncReason).toBe('test_noise');
+      expect(leads.get('L_TEST2').syncStatus).toBe('skipped');
+      expect(leads.get('L_TEST2').syncReason).toBe('test_noise');
+    });
+
+    it("status IN {cancelled, no_show, archived} → skipped (operator-explicit terminals)", async () => {
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_CAN': { id: 'L_CAN', userId: 'U1', status: 'cancelled', platform: 'thumbtack', sfJobId: null, syncStatus: null },
+          'L_NS':  { id: 'L_NS',  userId: 'U1', status: 'no_show',   platform: 'thumbtack', sfJobId: null, syncStatus: null },
+          'L_ARC': { id: 'L_ARC', userId: 'U1', status: 'archived',  platform: 'yelp',      sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedSkipped).toBe(3);
+      expect(r.markedPending).toBe(0);
+      expect(leads.get('L_CAN').syncStatus).toBe('skipped');
+      expect(leads.get('L_CAN').syncReason).toBe('terminal_cancelled');
+      expect(leads.get('L_NS').syncStatus).toBe('skipped');
+      expect(leads.get('L_NS').syncReason).toBe('terminal_no_show');
+      expect(leads.get('L_ARC').syncStatus).toBe('skipped');
+      expect(leads.get('L_ARC').syncReason).toBe('terminal_archived');
+    });
+
+    it("status='lost' + lostReason='hired_someone' → pending (re-engageable, SF candidate)", async () => {
+      // This is the LB-classifier-driven hired_someone path AND the Yelp
+      // Archived→lost+hired_someone remap path — both end up status='lost'
+      // with lostReason='hired_someone' and must NOT hard-skip.
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_HIRED_TT': { id: 'L_HIRED_TT', userId: 'U1', status: 'lost', lostReason: 'hired_someone', platform: 'thumbtack', sfJobId: null, syncStatus: null },
+          'L_HIRED_YELP': { id: 'L_HIRED_YELP', userId: 'U1', status: 'lost', lostReason: 'hired_someone', platform: 'yelp', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedPending).toBe(2);
+      expect(r.markedSkipped).toBe(0);
+      expect(leads.get('L_HIRED_TT').syncStatus).toBe('pending');
+      expect(leads.get('L_HIRED_TT').syncReason).toBe('connection_time');
+      expect(leads.get('L_HIRED_YELP').syncStatus).toBe('pending');
+      // Adjacent fields untouched — only syncStatus/syncReason/syncAttemptedAt are written.
+      expect(leads.get('L_HIRED_TT').status).toBe('lost');
+      expect(leads.get('L_HIRED_TT').lostReason).toBe('hired_someone');
+    });
+
+    it("status='lost' + lostReason=null → pending (Thumbtack platform-sync 'No hire' case)", async () => {
+      // Thumbtack 'Not hired' / 'Closed' / 'No hire' maps to status='lost'
+      // with NULL lostReason (no specific reason carried by TT). Must enumerate
+      // as pending so SF matcher can take a swing.
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_NOHIRE': { id: 'L_NOHIRE', userId: 'U1', status: 'lost', lostReason: null, platform: 'thumbtack', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedPending).toBe(1);
+      expect(r.markedSkipped).toBe(0);
+      expect(leads.get('L_NOHIRE').syncStatus).toBe('pending');
+      expect(leads.get('L_NOHIRE').status).toBe('lost'); // unchanged
+    });
+
+    it("status='lost' + lostReason='canceled' → pending (edge case, not opt_out)", async () => {
+      // 'canceled' lostReason (1 Spotless row) is ambiguous — could be a
+      // booking cancellation that LB classified as lost. NOT an opt_out
+      // signal. Must enumerate as pending so SF decides; operator can
+      // manually re-skip if needed.
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_CXL': { id: 'L_CXL', userId: 'U1', status: 'lost', lostReason: 'canceled', platform: 'thumbtack', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      expect(r.markedPending).toBe(1);
+      expect(r.markedSkipped).toBe(0);
+      expect(leads.get('L_CXL').syncStatus).toBe('pending');
+    });
+
+    it('linked / lead_linked rows are NOT touched by re-enumeration (no idempotency churn)', async () => {
+      // The actionable branch's idempotency check skips already-classified
+      // rows. linked rows route through the sfJobId branch (preserves
+      // syncStatus='linked'). lead_linked rows hit the actionable-branch
+      // idempotency guard and are left alone.
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L_LINKED':      { id: 'L_LINKED',      userId: 'U1', status: 'completed', sfJobId: 'SF-1', syncStatus: 'linked',      lostReason: null, platform: 'thumbtack' },
+          'L_LEADLINKED':  { id: 'L_LEADLINKED',  userId: 'U1', status: 'engaged',   sfJobId: null,   syncStatus: 'lead_linked', lostReason: null, platform: 'thumbtack', sfLeadId: '107' },
+          'L_NEEDS':       { id: 'L_NEEDS',       userId: 'U1', status: 'contacted', sfJobId: null,   syncStatus: 'needs_review', lostReason: null, platform: 'thumbtack' },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.enumerateOnConnect('U1');
+      // sfJobId path runs for L_LINKED but its syncStatus is already 'linked'
+      // so no update fires (existing logic). lead_linked and needs_review
+      // hit the idempotency guard and are left untouched.
+      expect(r.markedPending).toBe(0);
+      expect(r.markedSkipped).toBe(0);
+      expect(r.alreadyLinked).toBe(1);
+      expect(leads.get('L_LINKED').syncStatus).toBe('linked');
+      expect(leads.get('L_LINKED').sfJobId).toBe('SF-1');         // unchanged
+      expect(leads.get('L_LEADLINKED').syncStatus).toBe('lead_linked'); // unchanged
+      expect(leads.get('L_LEADLINKED').sfLeadId).toBe('107');     // unchanged
+      expect(leads.get('L_NEEDS').syncStatus).toBe('needs_review'); // unchanged
+    });
+
+    it('enumerate ONLY writes syncStatus/syncReason/syncAttemptedAt — never touches Lead.status/lostReason/sfJobId/etc.', async () => {
+      // Behavior preservation contract: the rule refactor must not silently
+      // modify any field that downstream consumers (AI gates, FU gates,
+      // status pill, isSfLinkedLead) read. Confirms the update payload
+      // never includes status, lostReason, platform, sfJobId, sfCustomerId,
+      // sfLeadId, threadId, reengageAt, statusSource, or any non-sync field.
+      const { prisma, updates } = buildPrisma({
+        leads: {
+          'L_HIRED': { id: 'L_HIRED', userId: 'U1', status: 'lost', lostReason: 'hired_someone', platform: 'yelp', sfJobId: null, syncStatus: null, reengageAt: new Date('2026-07-01'), statusSource: 'platform_sync' },
+          'L_OPTOUT': { id: 'L_OPTOUT', userId: 'U1', status: 'lost', lostReason: 'opt_out', platform: 'yelp', sfJobId: null, syncStatus: null },
+          'L_CXL': { id: 'L_CXL', userId: 'U1', status: 'cancelled', platform: 'thumbtack', sfJobId: null, syncStatus: null },
+        },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      await svc.enumerateOnConnect('U1');
+
+      // Every update.data must be a strict subset of {syncStatus, syncReason, syncAttemptedAt}.
+      const allowedKeys = new Set(['syncStatus', 'syncReason', 'syncAttemptedAt']);
+      for (const u of updates) {
+        const dataKeys = Object.keys(u.data);
+        for (const k of dataKeys) {
+          expect(allowedKeys.has(k)).toBe(true);
+        }
+      }
+      // No call mutates Lead.status, lostReason, platform, sfJobId, sfCustomerId,
+      // sfLeadId, threadId, reengageAt — the predicate-driving fields stay frozen.
+      expect(updates.length).toBeGreaterThan(0); // sanity: enum actually ran
     });
   });
 
