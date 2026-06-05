@@ -124,6 +124,14 @@ export class NormalizedLead {
   syncStatus?: string | null;
   sfJobOutcome?: string | null;
   sfJobOutcomeAt?: Date | null;
+  // SF Lead identity (PR B 2026-06-04). Populated when SF's historical
+  // reconciliation found a matching SF Lead record but no SF Customer/Job
+  // yet (syncStatus='lead_linked'). Exposed for UI badge rendering only;
+  // does NOT affect isSfLinked (lead-only matches behave like LB-only
+  // operationally per the 2026-06-04 architecture lock-in).
+  sfLeadId?: string | null;
+  sfLeadStageName?: string | null;
+  sfLeadMatchedAt?: Date | null;
 
   raw?: any; // Original platform payload for debugging
 }

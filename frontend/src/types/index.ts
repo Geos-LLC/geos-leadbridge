@@ -117,6 +117,14 @@ export interface Lead {
   syncStatus?: string | null;
   sfJobOutcome?: string | null;
   sfJobOutcomeAt?: string | null;
+  // SF Lead identity (PR D 2026-06-05). Populated when SF reconciliation
+  // matched a SF Lead but no Customer/Job yet. Drives the "SF Lead" badge
+  // in Messages sidebar + header. NOT included in `isSfLinked` — the lead
+  // remains LB-managed (status editor enabled, follow-ups continue, AI
+  // unchanged). Badge is informational; clicking does nothing yet.
+  sfLeadId?: string | null;
+  sfLeadStageName?: string | null;
+  sfLeadMatchedAt?: string | null;
   raw?: any;
 }
 
