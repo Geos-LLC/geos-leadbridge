@@ -551,6 +551,149 @@ describe('FollowUpEngineService', () => {
     });
   });
 
+  describe('handleProReply', () => {
+    it('stops active enrollment with reason=pro_replied', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.handleProReply(CONVERSATION_ID);
+
+      expect(result.stopped).toBe(true);
+      expect(prisma.followUpEnrollment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { conversationId: CONVERSATION_ID, status: 'active' } }),
+      );
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'enroll-1', status: 'active' },
+        data: expect.objectContaining({ status: 'stopped', stoppedReason: 'pro_replied' }),
+      });
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            enrollmentId: 'enroll-1',
+            oldStatus: 'active',
+            newStatus: 'stopped',
+            reason: 'pro_replied',
+          }),
+        }),
+      );
+    });
+
+    it('cancels any scheduled/suggested step executions', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handleProReply(CONVERSATION_ID);
+
+      expect(prisma.followUpStepExecution.updateMany).toHaveBeenCalledWith({
+        where: {
+          enrollment: { conversationId: CONVERSATION_ID },
+          status: { in: ['scheduled', 'suggested'] },
+        },
+        data: { status: 'cancelled' },
+      });
+    });
+
+    it('clears ThreadContext cached fields on stop', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handleProReply(CONVERSATION_ID);
+
+      expect(prisma.threadContext.updateMany).toHaveBeenCalledWith({
+        where: { conversationId: CONVERSATION_ID },
+        data: expect.objectContaining({
+          activeEnrollmentId: null,
+          nextFollowUpAt: null,
+          followUpStatus: 'stopped',
+          followUpState: null,
+        }),
+      });
+    });
+
+    it('is idempotent — no active enrollment → no-op, no error', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([]);
+
+      const result = await service.handleProReply(CONVERSATION_ID);
+
+      expect(result.stopped).toBe(false);
+      expect(prisma.followUpEnrollment.updateMany).not.toHaveBeenCalled();
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
+      expect(prisma.threadContext.updateMany).not.toHaveBeenCalled();
+      expect(prisma.followUpStepExecution.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('dedups when sourceEventId matches an existing audit row', async () => {
+      // Retry-prone callers (e.g. duplicate platform-echo webhook on the
+      // same send) pass sourceEventId so the second call no-ops.
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollmentAuditLog.findFirst.mockResolvedValue({ id: 'existing-audit' });
+
+      const result = await service.handleProReply(CONVERSATION_ID, {
+        sourceEventId: 'proreply:msg:tt-msg-123',
+        actorType: 'sendMessage',
+      });
+
+      expect(result.stopped).toBe(false);
+      expect(prisma.followUpEnrollment.updateMany).not.toHaveBeenCalled();
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
+      expect(prisma.threadContext.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch Lead.status / sfJobId / sfCustomerId / sfLeadId / syncStatus', async () => {
+      // The whole point of pro_replied vs customer_replied is symmetry of
+      // side-effects scoped to the enrollment + thread context. Lead
+      // identity columns must stay untouched. Verified structurally: the
+      // mock would expose any prisma.lead.update call as side-effects on
+      // the prisma.lead namespace.
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      // Stub a .update spy on the lead namespace so we can assert it was never called.
+      prisma.lead.update = jest.fn();
+      prisma.lead.updateMany = jest.fn();
+
+      await service.handleProReply(CONVERSATION_ID);
+
+      expect(prisma.lead.update).not.toHaveBeenCalled();
+      expect(prisma.lead.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does NOT build a re-engagement alert (those are reserved for customer-replied)', async () => {
+      // The return shape is intentionally narrower than handleCustomerReply:
+      // pro replies are not the trigger for re-engagement notifications.
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.handleProReply(CONVERSATION_ID);
+
+      expect(result).toEqual({ stopped: true });
+      expect((result as any).reEngagementAlert).toBeUndefined();
+    });
+
+    it('writes audit row with sourceEventId + actorType + actorId from caller', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handleProReply(CONVERSATION_ID, {
+        sourceEventId: 'proreply:msg:tt-msg-42',
+        actorType: 'sendMessage',
+        actorId: 'user',
+      });
+
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            enrollmentId: 'enroll-1',
+            sourceEventId: 'proreply:msg:tt-msg-42',
+            actorType: 'sendMessage',
+            actorId: 'user',
+            reason: 'pro_replied',
+          }),
+        }),
+      );
+    });
+  });
+
   describe('stopEnrollment / pauseEnrollment / resumeEnrollment audit (Phase 1 Task 4)', () => {
     it('stopEnrollment writes an audit row on real transition', async () => {
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
