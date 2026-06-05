@@ -1915,11 +1915,16 @@ export function Messages() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       <StatusPill status={statusKind} label={statusLabel} />
-                      {/* SF-linked tag — keeps the inbox scannable for which
-                          leads are SF customers without forcing the operator
-                          to open each one. Tiny by design — sidebar real
-                          estate is tight. */}
-                      {lead.isSfLinked && (
+                      {/* SF identity tag — keeps the inbox scannable. Priority
+                          is structural (`if/else if`) so we never render both:
+                          SF Customer (isSfLinked, indigo, primary) takes
+                          precedence over SF Lead (sfLeadId only, slate,
+                          informational). SF Lead means "SF knows about this
+                          lead but no customer/job yet" — LB still owns
+                          acquisition, so the lead behaves like any other
+                          LB-managed row (status editable, follow-ups continue,
+                          AI/classifier unchanged). PR D (2026-06-05). */}
+                      {lead.isSfLinked ? (
                         <span
                           title="SF Customer"
                           style={{
@@ -1935,7 +1940,24 @@ export function Messages() {
                         >
                           SF
                         </span>
-                      )}
+                      ) : lead.sfLeadId ? (
+                        <span
+                          title={`Exists in ServiceFlow.\nStage at match time: ${lead.sfLeadStageName ?? 'unknown'}`}
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#f1f5f9',
+                            color: '#475569',
+                            border: '1px solid #cbd5e1',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          SF Lead
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1979,18 +2001,30 @@ export function Messages() {
                       <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
                         {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
                       </span>
-                      {/* SF Customer badge — visible whenever the lead is linked
-                          to an SF customer/job (isSfLinked driven server-side by
-                          isSfLinkedLead predicate). Static for v1 — no deep link
-                          to SF yet. */}
-                      {selectedLead.isSfLinked && (
+                      {/* SF identity badge — Customer takes precedence over Lead,
+                          structural if/else so we never render both. SF Customer
+                          (isSfLinked, indigo, primary) means SF owns the customer/
+                          job lifecycle; SF Lead (sfLeadId only, slate, secondary)
+                          means SF knows about the lead but LB still owns acquisition
+                          (status editable, follow-ups continue, AI/classifier
+                          unchanged). Stage name lives in tooltip only — see PR D
+                          spec: badge text is just "SF Lead" to avoid stale-stage
+                          surface. PR D (2026-06-05). */}
+                      {selectedLead.isSfLinked ? (
                         <span
                           className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-600 text-white"
                           title="Customer is managed in Service Flow"
                         >
                           SF Customer
                         </span>
-                      )}
+                      ) : selectedLead.sfLeadId ? (
+                        <span
+                          className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-700 border border-slate-300"
+                          title={`Exists in ServiceFlow.\nStage at match time: ${selectedLead.sfLeadStageName ?? 'unknown'}`}
+                        >
+                          SF Lead
+                        </span>
+                      ) : null}
                       {/* Editable lead status pill — click to open dropdown of LB
                           canonical statuses. Manual writes may surface a conflict
                           modal if SF is integrated or platform status disagrees.

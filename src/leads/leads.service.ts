@@ -1895,6 +1895,13 @@ export class LeadsService {
       syncStatus: lead.syncStatus ?? null,
       sfJobOutcome: lead.sfJobOutcome ?? null,
       sfJobOutcomeAt: lead.sfJobOutcomeAt ?? null,
+      // SF Lead identity (PR B). Surfaced for the SF Lead badge in the UI.
+      // Deliberately excluded from `isSfLinked` — lead-only matches are
+      // operationally LB-managed (status editor stays enabled, follow-ups
+      // continue, AI/classifier unchanged). The badge is informational only.
+      sfLeadId: lead.sfLeadId ?? null,
+      sfLeadStageName: lead.sfLeadStageName ?? null,
+      sfLeadMatchedAt: lead.sfLeadMatchedAt ?? null,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }
