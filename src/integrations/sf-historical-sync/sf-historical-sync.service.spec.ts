@@ -256,6 +256,87 @@ describe('SfHistoricalSyncService', () => {
       expect(leads.get('L1').syncStatus).toBe('no_match');
     });
 
+    // 2026-06-04 regression: confidence='low' is documented to route to
+    // needs_review the same way 'medium' does. Previously only exercised via
+    // the mixed-batch test; pinning explicitly so a future refactor of the
+    // confidence ladder doesn't silently move 'low' into a different bucket.
+    it("confidence=low → needs_review (no sfJobId write)", async () => {
+      const { prisma, leads } = buildPrisma({
+        leads: { 'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' } },
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.applyBulkLink({
+        rows: [{ lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'low', match_basis: 'name_platform' }],
+      });
+      expect(r.summary.needs_review).toBe(1);
+      expect(r.summary.linked).toBe(0);
+      expect(r.summary.no_match).toBe(0);
+      expect(leads.get('L1').sfJobId).toBeNull();
+      expect(leads.get('L1').syncStatus).toBe('needs_review');
+      expect(leads.get('L1').syncReason).toBe('sf_low_confidence:name_platform');
+    });
+
+    // 2026-06-04 regression: when row processing throws (e.g. DB connection
+    // glitch on the per-row update), the receiver must NOT abort the batch —
+    // it must catch, mark that row as 'failed' in the response, and keep
+    // processing the next rows.
+    //
+    // KNOWN CONTRACT DRIFT (intentionally pinned, not fixed here): the catch
+    // block only adds 'failed' to the response payload — it does NOT update
+    // the Lead row's syncStatus. The lead therefore stays at its prior
+    // syncStatus (typically 'pending'), and the enumeration retry logic
+    // (sf-historical-sync.service.ts:131 — "syncStatus !== 'failed'") never
+    // sees a 'failed' Lead row to retry. The failed state exists in
+    // BulkLinkRowResult.sync_status but is unreachable on the Lead model
+    // through the bulk-link path. Surfaced 2026-06-04 audit; a future PR
+    // can either (a) add `await prisma.lead.update({... syncStatus: 'failed'})`
+    // in the catch block, or (b) drop 'failed' from SYNC_STATUSES if no
+    // writer exists. Decision deferred.
+    it("row processing error → response row 'failed'; Lead.syncStatus NOT mutated (pre-update throw)", async () => {
+      const { prisma, leads } = buildPrisma({
+        leads: {
+          'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' },
+          'L2': { id: 'L2', userId: 'U1', status: 'contacted', sfJobId: null, syncStatus: 'pending' },
+        },
+      });
+      // Make ONLY the first lead.update call throw (the L1 row). Subsequent
+      // calls (L2) succeed normally. This verifies error containment: one
+      // bad row does not poison the rest of the batch.
+      let updateCalls = 0;
+      const realUpdate = prisma.lead.update;
+      prisma.lead.update = jest.fn(async (args: any) => {
+        updateCalls++;
+        if (updateCalls === 1) throw new Error('db connection reset');
+        return realUpdate(args);
+      });
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const r = await svc.applyBulkLink({
+        rows: [
+          { lb_lead_id: 'L1', sf_job_id: 'SF-A', confidence: 'exact', match_basis: 'externalRequestId' },
+          { lb_lead_id: 'L2', sf_job_id: 'SF-B', confidence: 'exact', match_basis: 'externalRequestId' },
+        ],
+      });
+      // Summary: L1 failed, L2 linked.
+      expect(r.summary.total).toBe(2);
+      expect(r.summary.failed).toBe(1);
+      expect(r.summary.linked).toBe(1);
+      // Response row for L1 reports failed with detail carrying the error message.
+      const l1Row = r.rows.find(x => x.lb_lead_id === 'L1');
+      expect(l1Row?.result).toBe('failed');
+      expect(l1Row?.sync_status).toBe('failed');
+      expect(l1Row?.detail).toContain('db connection reset');
+      // ok=false because at least one row failed.
+      expect(r.ok).toBe(false);
+      // KNOWN DRIFT: Lead row's syncStatus is UNCHANGED (still 'pending'),
+      // because the catch block doesn't write to the Lead. If a future PR
+      // closes the drift, this assertion flips to 'failed'.
+      expect(leads.get('L1').syncStatus).toBe('pending');
+      expect(leads.get('L1').sfJobId).toBeNull();
+      // L2 unaffected by L1's failure — error containment proved.
+      expect(leads.get('L2').syncStatus).toBe('linked');
+      expect(leads.get('L2').sfJobId).toBe('SF-B');
+    });
+
     it('confidence=exact but lead.sfJobId already set to DIFFERENT id → conflict (no overwrite)', async () => {
       const { prisma, leads } = buildPrisma({
         leads: { 'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: 'SF-OLD', syncStatus: 'linked' } },
@@ -275,6 +356,166 @@ describe('SfHistoricalSyncService', () => {
         rows: [{ lb_lead_id: 'GONE', sf_job_id: 'SF-A', confidence: 'exact', match_basis: 'externalRequestId' }],
       });
       expect(r.summary.not_found).toBe(1);
+    });
+
+    // ───────────────────────────────────────────────────────────────────
+    // PR B (2026-06-04): match_type='lead_only' — SF Lead identity only.
+    // No SF Customer/Job yet. LB persists the lead identity for visibility
+    // + matcher-exclusion, but behaviorally treats the row as LB-only.
+    // ───────────────────────────────────────────────────────────────────
+    describe("match_type='lead_only' — SF Lead identity only (PR B)", () => {
+      it('writes sfLeadId/StageName/MatchedAt + syncStatus=lead_linked; does NOT touch job/customer/outcome; does NOT call writeStatus', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': {
+              id: 'L1', userId: 'U1', status: 'completed',
+              sfJobId: null, sfCustomerId: null, sfJobOutcome: null, sfJobMappedAt: null,
+              sfLeadId: null, sfLeadStageName: null, sfLeadMatchedAt: null,
+              syncStatus: 'pending',
+            },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1',
+            match_type: 'lead_only',
+            sf_lead_id: 107,
+            sf_lead_stage_name: 'Contacted',
+            sf_job_id: '',                       // ignored on lead_only branch
+            confidence: 'high',
+            match_basis: 'phone_name',
+          }],
+        });
+
+        // Response shape
+        expect(r.summary.total).toBe(1);
+        expect(r.summary.lead_linked).toBe(1);
+        expect(r.summary.linked).toBe(0);
+        expect(r.summary.needs_review).toBe(0);
+        expect(r.summary.no_match).toBe(0);
+        expect(r.rows[0].result).toBe('lead_linked');
+        expect(r.rows[0].sync_status).toBe('lead_linked');
+        expect(r.rows[0].detail).toContain('sf_lead_id=107');
+        expect(r.rows[0].detail).toContain('stage=Contacted');
+
+        // Lead row — fields WRITTEN
+        const final = leads.get('L1');
+        expect(final.syncStatus).toBe('lead_linked');
+        expect(final.sfLeadId).toBe('107');                    // coerced to string
+        expect(final.sfLeadStageName).toBe('Contacted');
+        expect(final.sfLeadMatchedAt).toBeInstanceOf(Date);
+        expect(final.syncReason).toBe('sf_lead_only:phone_name');
+        expect(final.syncAttemptedAt).toBeInstanceOf(Date);
+
+        // Lead row — fields DELIBERATELY NOT TOUCHED
+        expect(final.sfJobId).toBeNull();
+        expect(final.sfCustomerId).toBeNull();
+        expect(final.sfJobOutcome).toBeNull();
+        expect(final.sfJobMappedAt).toBeNull();
+
+        // Side-effect services — NOT INVOKED
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+        expect(ls.writeSfJobOutcomeMirror).not.toHaveBeenCalled();
+
+        // Single update call (the lead_only branch makes one update; the
+        // customer_job branch would have made one too — assert no double-write)
+        expect(updates).toHaveLength(1);
+      });
+
+      it('lead_only with NULL sf_lead_id → failed (cannot persist lead identity without an ID)', async () => {
+        const { prisma, leads } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'completed', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1',
+            match_type: 'lead_only',
+            sf_lead_id: null,
+            sf_job_id: '',
+            confidence: 'high',
+            match_basis: 'phone',
+          }],
+        });
+        expect(r.summary.failed).toBe(1);
+        expect(r.summary.lead_linked).toBe(0);
+        expect(r.rows[0].result).toBe('failed');
+        expect(r.rows[0].detail).toBe('lead_only_missing_sf_lead_id');
+        // Lead unchanged
+        expect(leads.get('L1').syncStatus).toBe('pending');
+        expect(leads.get('L1').sfLeadId ?? null).toBeNull();
+      });
+
+      it('mixed batch: lead_only + customer_job + medium + none in one call — each row routes correctly', async () => {
+        const { prisma, leads } = buildPrisma({
+          leads: {
+            'LO':  { id: 'LO',  userId: 'U1', status: 'contacted', sfJobId: null, syncStatus: 'pending' },
+            'CJ':  { id: 'CJ',  userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' },
+            'MED': { id: 'MED', userId: 'U1', status: 'new',       sfJobId: null, syncStatus: 'pending' },
+            'NON': { id: 'NON', userId: 'U1', status: 'engaged',   sfJobId: null, syncStatus: 'pending' },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [
+            { lb_lead_id: 'LO',  match_type: 'lead_only',    sf_lead_id: 107, sf_lead_stage_name: 'Contacted', sf_job_id: '', confidence: 'high',   match_basis: 'phone_name' },
+            { lb_lead_id: 'CJ',  match_type: 'customer_job', sf_job_id: 'SF-1', sf_customer_id: 'C-1',         confidence: 'high',   match_basis: 'externalRequestId', sf_status: 'completed' },
+            { lb_lead_id: 'MED', sf_job_id: 'SF-2',                                                            confidence: 'medium', match_basis: 'phone_name' },
+            { lb_lead_id: 'NON', sf_job_id: '',                                                                confidence: 'none',   match_basis: 'none' },
+          ],
+        });
+
+        expect(r.summary.total).toBe(4);
+        expect(r.summary.lead_linked).toBe(1);
+        expect(r.summary.linked).toBe(1);
+        expect(r.summary.needs_review).toBe(1);
+        expect(r.summary.no_match).toBe(1);
+
+        // Per-row sync_status
+        expect(leads.get('LO').syncStatus).toBe('lead_linked');
+        expect(leads.get('LO').sfLeadId).toBe('107');
+        expect(leads.get('LO').sfJobId).toBeNull();           // critical: lead_only does NOT touch job
+        expect(leads.get('CJ').syncStatus).toBe('linked');
+        expect(leads.get('CJ').sfJobId).toBe('SF-1');
+        expect(leads.get('CJ').sfLeadId ?? null).toBeNull();  // customer_job does NOT touch sfLeadId
+        expect(leads.get('MED').syncStatus).toBe('needs_review');
+        expect(leads.get('NON').syncStatus).toBe('no_match');
+
+        // writeStatus called ONCE — for the customer_job row only (it carried sf_status)
+        // The lead_only row carried NO sf_status semantics and MUST not invoke writeStatus.
+        expect(ls.writeStatus).toHaveBeenCalledTimes(1);
+        expect(ls.writeStatus).toHaveBeenCalledWith(expect.objectContaining({ leadId: 'CJ' }));
+      });
+
+      it("backward compat: row without match_type defaults to customer_job behavior (existing high-confidence path)", async () => {
+        // Pre-PR-B SF deployments emit rows without a match_type field. The
+        // receiver must treat those identically to today (customer_job path).
+        const { prisma, leads } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1',
+            // NO match_type field — represents pre-PR-B SF payload
+            sf_job_id: 'SF-A',
+            sf_customer_id: 'C-A',
+            confidence: 'high',
+            match_basis: 'phone_name',
+            sf_status: 'scheduled',
+          }],
+        });
+        expect(r.summary.linked).toBe(1);
+        expect(r.summary.lead_linked).toBe(0);
+        expect(leads.get('L1').syncStatus).toBe('linked');
+        expect(leads.get('L1').sfJobId).toBe('SF-A');
+        expect(leads.get('L1').sfLeadId ?? null).toBeNull();
+      });
     });
 
     it('mixed batch: handles all outcomes in one call', async () => {
@@ -509,6 +750,29 @@ describe('SfHistoricalSyncService', () => {
       expect(ids).toEqual(['L_FAILED', 'L_NOMATCH', 'L_NULL_A', 'L_NULL_B', 'L_PENDING', 'L_REVIEW'].sort());
       expect(ids).not.toContain('L_LINKED');
       expect(ids).not.toContain('L_SKIPPED');
+    });
+
+    // PR B (2026-06-04): lead_linked rows have already received a verdict
+    // from SF and must NOT be re-presented to SF on the next candidate pull
+    // (otherwise SF would re-emit the same lead_only verdict each cycle,
+    // wasting roundtrips for no behavioral effect).
+    it("default (no filter) excludes syncStatus='lead_linked' (SF already issued a verdict; matcher-exclusion)", async () => {
+      const c = corpus();
+      // Add a lead_linked row to the corpus
+      (c.leads as any)['L_LEADLINKED'] = {
+        id: 'L_LEADLINKED', userId: 'U1', platform: 'thumbtack',
+        externalRequestId: 'r-ll', customerName: 'SfLeadOnly',
+        status: 'completed', syncStatus: 'lead_linked', sfJobId: null,
+        createdAt: new Date(),
+      };
+      const { prisma } = buildPrisma(c);
+      const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+      const rows = await svc.candidates('U1', {});
+      const ids = rows.map((r) => r.leadId);
+      expect(ids).not.toContain('L_LEADLINKED');
+      // Explicit-filter request still works (operator dashboard can list them)
+      const explicit = await svc.candidates('U1', { syncStatus: 'lead_linked' as any });
+      expect(explicit.map((r) => r.leadId)).toEqual(['L_LEADLINKED']);
     });
 
     it("opts.status filter narrows to that LB canonical status only (Erin-shape: status='scheduled')", async () => {

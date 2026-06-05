@@ -347,20 +347,37 @@ model Lead {
   //
   // sfCustomerId  — SF's customer record id (populated when link result
   //                 carries one; null if SF only matched job-level).
-  // syncStatus    — 'pending' | 'linked' | 'no_match' | 'needs_review'
-  //                 | 'failed' | 'skipped' (terminal). null means the
-  //                 reconciliation lifecycle has never been considered
-  //                 for this lead (e.g. lead pre-dates the connection-
-  //                 time enumeration or the user has no sf_connection).
+  // syncStatus    — 'pending' | 'lead_linked' | 'linked' | 'no_match'
+  //                 | 'needs_review' | 'failed' | 'skipped' (terminal).
+  //                 null means the reconciliation lifecycle has never been
+  //                 considered for this lead (e.g. lead pre-dates the
+  //                 connection-time enumeration or the user has no
+  //                 sf_connection).
+  //
+  //                 lead_linked = SF found a matching SF Lead record (pre-
+  //                 customer pipeline stage) but no SF Customer/Job yet.
+  //                 Behaviorally identical to LB-only: LB still owns AI,
+  //                 follow-up, classifier, status writes. Distinct from
+  //                 'linked' (which means SF owns customer/job lifecycle).
+  //                 See sf-historical-sync.contracts.ts for full lifecycle.
   // syncAttemptedAt — last time a sync attempt touched this row.
   // syncReason    — short human-readable note (e.g. 'enum_at_connect',
   //                 'manual_link_by_admin', 'sf_match_high_confidence',
   //                 'terminal_status_skipped', 'sf_no_match',
-  //                 'conflict_existing_sfJobId').
+  //                 'conflict_existing_sfJobId', 'sf_lead_only:<basis>').
+  // sfLeadId / sfLeadStageName / sfLeadMatchedAt — set when SF reports a
+  //                 lead-only match (match_type='lead_only' in bulk_link).
+  //                 Point-in-time snapshot of the SF Lead stage; no live
+  //                 stage update subscription. Promotion to 'linked' happens
+  //                 organically when SF later sends a customer_job match
+  //                 for the same lb_lead_id — sfLeadId stays additive.
   sfCustomerId           String?
   syncStatus             String?
   syncAttemptedAt        DateTime?
   syncReason             String?
+  sfLeadId               String?   @map("sf_lead_id")
+  sfLeadStageName        String?   @map("sf_lead_stage_name")
+  sfLeadMatchedAt        DateTime? @map("sf_lead_matched_at")
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -1565,17 +1582,17 @@ model CrmWebhookSubscription {
 //              + SF_ORCHESTRATION_BASE_URL/API_KEY) when no active row.
 // ==========================================
 model SfConnection {
-  id                          String   @id @default(uuid())
-  userId                      String   @unique
+  id     String @id @default(uuid())
+  userId String @unique
 
   // ─── SF-issued tenant identity ────────────────────────────────────
-  sfTenantId                  String   // SF's internal tenant id (authoritative)
-  sfTenantName                String?  // Display name (info only)
-  baseUrl                     String   // SF orchestration endpoint base
+  sfTenantId          String // SF's internal tenant id (authoritative)
+  sfTenantName        String? // Display name (info only)
+  baseUrl             String // SF orchestration endpoint base
   // Phase 2C PR-C2: S4 provisioning payload additions
-  sourceInstance              String?  // SF deployment instance, e.g. "sf-staging-us"
-  apiRegion                   String?  // SF API region label, e.g. "us-east-1"
-  signatureKeyId              String?  // SF signing key id for inbound webhook HMAC
+  sourceInstance      String? // SF deployment instance, e.g. "sf-staging-us"
+  apiRegion           String? // SF API region label, e.g. "us-east-1"
+  signatureKeyId      String? // SF signing key id for inbound webhook HMAC
   // Phase 2C PR-C2.1: contract-alignment additions
   // - tokenPrefix: 13-char safe-to-log prefix of the orchestration token
   //   (e.g. "sfo_v1.eyJ2Ij"). NEVER include past this prefix in any log.
@@ -1587,51 +1604,51 @@ model SfConnection {
   // - signatureAlgorithm / maxClockSkewSeconds: SF-declared signature
   //   metadata locked at handshake. LB validates inbound webhook against
   //   these (today: 'hmac-sha256-hex' / 300).
-  tokenPrefix                 String?
-  sfWorkspaceId               String?
-  endpointsJson               String?  @db.Text
-  signatureAlgorithm          String?
-  maxClockSkewSeconds         Int?
+  tokenPrefix         String?
+  sfWorkspaceId       String?
+  endpointsJson       String? @db.Text
+  signatureAlgorithm  String?
+  maxClockSkewSeconds Int?
 
   // ─── Current SF-issued authority token (opaque to LB) ─────────────
   // Encrypted via EncryptionUtil (AES-256-GCM + ENCRYPTION_KEY). LB
   // never parses the token contents — bearer-of-token IS the tenant
   // SF authorized. token* metadata below is SF-declared, informational.
-  orchestrationToken          String   // Encrypted bearer
-  orchestrationTokenKid       String?  // SF signing key id (if SF exposes one)
-  orchestrationTokenScope     String?  // SF-declared scope (info only)
-  tokenIssuedAt               DateTime
-  tokenExpiresAt              DateTime?
-  tokenLastReceivedAt         DateTime
-  tokenLastRotationSource     String?  // 'sf_push' | 'lb_initiated' | 'handshake'
+  orchestrationToken      String // Encrypted bearer
+  orchestrationTokenKid   String? // SF signing key id (if SF exposes one)
+  orchestrationTokenScope String? // SF-declared scope (info only)
+  tokenIssuedAt           DateTime
+  tokenExpiresAt          DateTime?
+  tokenLastReceivedAt     DateTime
+  tokenLastRotationSource String? // 'sf_push' | 'lb_initiated' | 'handshake'
 
   // ─── Rotation grace window ─────────────────────────────────────────
   // During a rotation, the prior token is preserved for 5 min as a
   // safety net. SF accepts both during this window. LB always sends
   // the current token; the previous is kept for the case where the
   // new token decrypt fails (e.g. ENCRYPTION_KEY rotation race).
-  previousOrchestrationToken  String?  // Encrypted; cleared after grace
-  previousTokenExpiresAt      DateTime?
+  previousOrchestrationToken String? // Encrypted; cleared after grace
+  previousTokenExpiresAt     DateTime?
 
   // ─── Inbound SF → LB linkage ──────────────────────────────────────
   // 1:1 with the CrmWebhookSubscription that carries the HMAC secret
   // SF uses to sign /orchestration-event + /connection/token-rotated
   // + /connection/revoked callbacks.
-  inboundSubscriptionId       String?  @unique
-  inboundSubscription         CrmWebhookSubscription? @relation(fields: [inboundSubscriptionId], references: [id], onDelete: SetNull)
+  inboundSubscriptionId String?                 @unique
+  inboundSubscription   CrmWebhookSubscription? @relation(fields: [inboundSubscriptionId], references: [id], onDelete: SetNull)
 
   // ─── Feature scope (events SF will deliver) ───────────────────────
-  events                      String[]
+  events String[]
 
   // ─── Lifecycle ─────────────────────────────────────────────────────
-  isActive                    Boolean  @default(true)
-  status                      String   @default("pending")
+  isActive            Boolean   @default(true)
+  status              String    @default("pending")
   // status: pending | active | rotating | disconnected | revoked | error
-  disconnectInitiator         String?  // 'lb_user' | 'sf_authority' | 'lb_admin'
-  lastHealthAt                DateTime?
-  lastHealthOk                Boolean?
-  lastErrorAt                 DateTime?
-  lastErrorMessage            String?
+  disconnectInitiator String? // 'lb_user' | 'sf_authority' | 'lb_admin'
+  lastHealthAt        DateTime?
+  lastHealthOk        Boolean?
+  lastErrorAt         DateTime?
+  lastErrorMessage    String?
 
   // ─── Rotation notification (R1) ───────────────────────────────────
   // SF's credential.rotated webhook is a notification — it does NOT carry
@@ -1643,18 +1660,18 @@ model SfConnection {
   //
   // Fields are nullable + default false so the migration is additive.
   // Cleared on the next successful OAuth exchange (handshake source).
-  rotationPending             Boolean  @default(false)
-  pendingRotationKid          String?
-  pendingRotationCredId       String?   // SF sends as int; stored as string
+  rotationPending               Boolean   @default(false)
+  pendingRotationKid            String?
+  pendingRotationCredId         String? // SF sends as int; stored as string
   pendingRotationGraceExpiresAt DateTime?
-  pendingRotationObservedAt   DateTime?
+  pendingRotationObservedAt     DateTime?
 
   // ─── Audit ─────────────────────────────────────────────────────────
-  connectedAt                 DateTime @default(now())
-  disconnectedAt              DateTime?
-  updatedAt                   DateTime @updatedAt
+  connectedAt    DateTime  @default(now())
+  disconnectedAt DateTime?
+  updatedAt      DateTime  @updatedAt
 
-  user                        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([isActive])
@@ -1874,25 +1891,25 @@ enum PartnerLeadEventType {
 }
 
 model PartnerBusiness {
-  id          String   @id @default(uuid())
+  id                  String   @id @default(uuid())
   // Owning workspace/tenant — currently the LeadBridge user id. Kept as a
   // plain string (not FK) so this module can be extracted later without
   // depending on the LB User table.
-  workspaceId String
-  name        String
-  category    String?
-  phone       String?
-  website     String?
+  workspaceId         String
+  name                String
+  category            String?
+  phone               String?
+  website             String?
   // Cached metadata harvested by UsersService.verifyWebsite — {title,
   // description, phone}. Populated when the admin clicks "Verify" on the
   // business form. Read by suggestRelationshipCopy to give the AI offer
   // generator real site info to ground its output. Stored as JSON text for
   // schema portability (matches User.websiteMetadataJson).
   websiteMetadataJson String?
-  serviceArea String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  serviceArea         String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   sourceRelationships      PartnerRelationship[] @relation("PartnerRelSource")
   destinationRelationships PartnerRelationship[] @relation("PartnerRelDestination")
@@ -1973,7 +1990,7 @@ model PartnerReferralCode {
 }
 
 model PartnerLead {
-  id                    String            @id @default(uuid())
+  id                    String                 @id @default(uuid())
   workspaceId           String
   referralCodeId        String
   sourceBusinessId      String
@@ -1986,14 +2003,14 @@ model PartnerLead {
   // call vs SMS as the first follow-up step.
   preferredContact      PartnerLeadContactPref @default(either)
   // Free-text notes from the customer-facing form.
-  notes                 String?           @db.Text
+  notes                 String?                @db.Text
   intentTiming          PartnerLeadIntent
   // Hardcoded for MVP: this_week=30, this_month=20, future_interest=10,
   // not_sure=10. Later this becomes per-relationship configurable; keep
   // computed at write-time so historic leads stay valued at the rate at
   // submission.
   estimatedValue        Int
-  status                PartnerLeadStatus @default(new)
+  status                PartnerLeadStatus      @default(new)
   // Manual owner field (e.g. "Mike" on the partner side). No assignment
   // automation — admin sets this by hand. Plain string so the module stays
   // portable; later this can move to a partner-side user FK.
@@ -2001,7 +2018,7 @@ model PartnerLead {
   // Flagged true when another lead exists with the same phone for the same
   // destinationBusinessId within the previous 30 days. Submission is never
   // blocked — admin reviews flagged duplicates manually.
-  possibleDuplicate     Boolean           @default(false)
+  possibleDuplicate     Boolean                @default(false)
   // Optional UTM capture from the public form's query string.
   utmSource             String?
   utmMedium             String?
@@ -2013,8 +2030,8 @@ model PartnerLead {
   pageViewedAt          DateTime?
   formStartedAt         DateTime?
   submittedAt           DateTime?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   referralCode        PartnerReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
   sourceBusiness      PartnerBusiness     @relation("PartnerLeadSource", fields: [sourceBusinessId], references: [id], onDelete: Cascade)
