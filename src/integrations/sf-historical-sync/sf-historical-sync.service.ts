@@ -41,24 +41,43 @@ import type {
   SyncTriggerResponse,
 } from './sf-historical-sync.contracts';
 
-// Hard-skip rule (2026-06-05 Phase 1 refactor): `syncStatus='skipped'` now
-// means TRUE hard exclusion — the customer must not be contacted by SF or
-// by LB re-engagement. Three sources:
+// Hard-skip rule (2026-06-05 Phase 1 refactor, revised after the
+// hard-skip semantics audit): `syncStatus='skipped'` means TRUE hard
+// exclusion — the customer must not be classified for SF reconciliation.
+// Two sources only:
 //
-//   1. platform='test'                   — admin probe leads, designated noise
-//   2. status='lost' AND lostReason='opt_out'  — explicit customer unsubscribe
-//   3. status IN {cancelled, no_show, archived}  — operator-explicit terminals
+//   1. platform='test'                          — admin probe leads. Not
+//      real customers; matching them against SF would pollute SF's matcher
+//      with phantom hits. Hard-skip is correct because there's no real
+//      customer record on either side.
 //
-// Previously the rule was `status IN {lost, cancelled, no_show, archived}`
-// which conflated explicit do-not-contact ("opt_out") with platform-algorithmic
-// "lost" (e.g., Thumbtack "No hire" with null lostReason, or Yelp Archived
-// remapped to lost+hired_someone). The latter two are *reconciliation
-// candidates* — SF likely has matching SF Lead records and should get a
-// chance to match them. Pre-refactor, 1,015 Spotless leads were incorrectly
-// hard-skipped; post-refactor they enumerate as `pending`.
+//   2. status='lost' AND lostReason='opt_out'   — explicit customer
+//      unsubscribe. Compliance-grade do-not-contact. Until LB has a
+//      `lead.do_not_contact` event in the LB → SF outbound contract that
+//      propagates the opt_out to SF's side, hard-skipping is the safer
+//      default — it prevents an operator from approving a needs_review
+//      match for an opted-out customer and inadvertently routing them
+//      into SF's outreach pipeline.
 //
-// `completed` remains actionable (pending) — Spotless wants completion
-// mirrored so SF can confirm or override via writeStatus downgrade guards.
+// Deliberately NOT hard-skipped under this rule (revised 2026-06-05 from
+// the original 5-case proposal):
+//   - status IN {cancelled, no_show, archived} — These are SF-authority
+//     signals or operator hides, NOT customer do-not-contact signals.
+//     'cancelled' specifically arrives FROM SF via the service_cancelled
+//     inbound webhook; the customer is by definition known to both
+//     systems. 'no_show' implies a real booking happened. 'archived' is
+//     an operator hide that doesn't speak to customer consent. All three
+//     should enumerate as 'pending' so SF can match them — even if LB
+//     considers them terminal locally, SF identity reconciliation is
+//     orthogonal to LB lifecycle.
+//   - status='lost' with lostReason in {null, hired_someone, canceled}
+//     — Platform-algorithmic terminal OR classifier-driven terminal.
+//     Not customer DNC.
+//
+// Pre-refactor, 1,022 Spotless leads were hard-skipped (status='lost'
+// without lostReason discrimination). Post-refactor, only 10 are hard-
+// skipped (5 opt_out + 5 test). The other 1,012 enumerate as 'pending'
+// candidates for SF identity matching.
 //
 // Behavior NOT affected by this rule change:
 //   - AI follow-ups / AI Conversation        (reads Lead.status, not syncStatus)
@@ -66,17 +85,12 @@ import type {
 //   - Lead.status / lostReason / platformStatus  (this rule only writes syncStatus)
 //   - isSfLinkedLead() predicate             (lead_linked / pending / no_match never flip it)
 //   - pro_replied conversation cooldown      (separate gate)
-const HARD_SKIP_STATUSES = new Set(['cancelled', 'no_show', 'archived']);
-
 function isHardSkippable(lead: {
   status: string;
   platform?: string | null;
   lostReason?: string | null;
 }): { hard: true; reason: string } | { hard: false } {
   if (lead.platform === 'test') return { hard: true, reason: 'test_noise' };
-  if (HARD_SKIP_STATUSES.has(lead.status)) {
-    return { hard: true, reason: `terminal_${lead.status}` };
-  }
   if (lead.status === 'lost' && lead.lostReason === 'opt_out') {
     return { hard: true, reason: 'terminal_lost_opt_out' };
   }

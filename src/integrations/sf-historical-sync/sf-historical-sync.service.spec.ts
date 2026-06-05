@@ -75,13 +75,14 @@ function buildLeadStatus(writeApplied: boolean = true) {
 
 describe('SfHistoricalSyncService', () => {
   describe('enumeration (connection-time + trigger)', () => {
-    // 2026-06-05 rule refactor: the "terminal as skipped" assumption no
-    // longer applies for `status='lost'` with non-opt_out lostReason. L2
-    // changed to carry lostReason='opt_out' so it still represents a real
-    // hard-skip case; the platform-algorithmic lost rows (No hire, archived
-    // remap) are covered in the new "hard-skip rule narrowing" describe
-    // block below.
-    it('marks actionable leads as pending, hard-skips terminal/opt_out, leaves linked alone', async () => {
+    // 2026-06-05 rule refactor (revised post hard-skip semantics audit):
+    // L2 stays as the canonical hard-skip case (opt_out). L4 (status=
+    // 'cancelled') was previously expected to skip; under the revised
+    // 2-case rule (test/noise + opt_out only) cancelled is a SF-authority
+    // signal that should enumerate as 'pending' for matching. Per-status
+    // 'cancelled / no_show / archived → pending' is exercised explicitly
+    // in the "hard-skip rule narrowing" describe block below.
+    it('marks actionable leads + cancelled as pending, hard-skips opt_out, leaves linked alone', async () => {
       const { prisma, leads, updates } = buildPrisma({
         leads: {
           'L1': { id: 'L1', userId: 'U1', status: 'scheduled', sfJobId: null, syncStatus: null },
@@ -94,15 +95,15 @@ describe('SfHistoricalSyncService', () => {
       const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
       const r = await svc.enumerateOnConnect('U1');
       expect(r.scanned).toBe(5);
-      expect(r.markedPending).toBe(2);   // L1 scheduled, L5 contacted
-      expect(r.markedSkipped).toBe(2);   // L2 lost+opt_out, L4 cancelled
+      expect(r.markedPending).toBe(3);   // L1 scheduled, L4 cancelled, L5 contacted
+      expect(r.markedSkipped).toBe(1);   // L2 lost+opt_out only
       expect(r.alreadyLinked).toBe(1);   // L3 (had sfJobId)
       expect(leads.get('L1').syncStatus).toBe('pending');
       expect(leads.get('L2').syncStatus).toBe('skipped');
       expect(leads.get('L2').syncReason).toBe('terminal_lost_opt_out');
       expect(leads.get('L3').syncStatus).toBe('linked');  // backfilled from sfJobId
-      expect(leads.get('L4').syncStatus).toBe('skipped');
-      expect(leads.get('L4').syncReason).toBe('terminal_cancelled');
+      expect(leads.get('L4').syncStatus).toBe('pending'); // revised: cancelled is SF-authority, not DNC
+      expect(leads.get('L4').syncReason).toBe('connection_time');
       expect(leads.get('L5').syncStatus).toBe('pending');
     });
 
@@ -151,24 +152,29 @@ describe('SfHistoricalSyncService', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Hard-skip rule narrowing (2026-06-05 Phase 1 refactor)
+  // Hard-skip rule narrowing (2026-06-05 Phase 1 refactor, revised after
+  // the hard-skip semantics audit)
   //
-  // `syncStatus='skipped'` now means TRUE hard exclusion only. Three sources:
-  //   (a) platform='test'                              — admin probe leads
-  //   (b) status='lost' AND lostReason='opt_out'       — explicit unsubscribe
-  //   (c) status IN {cancelled, no_show, archived}      — operator-explicit
+  // `syncStatus='skipped'` now means TRUE hard exclusion from SF identity
+  // reconciliation. TWO sources only:
   //
-  // Previously the rule was `status IN {lost, cancelled, no_show, archived}`
-  // which incorrectly hard-skipped platform-algorithmic lost (Thumbtack
-  // No hire with null lostReason, Yelp Archived remapped to lost+
-  // hired_someone). Those now enumerate as 'pending' so SF can match them
-  // to SF Lead records.
+  //   (a) platform='test'                              — not a real customer
+  //   (b) status='lost' AND lostReason='opt_out'       — explicit customer DNC
   //
-  // Tests below lock in each branch of the new rule + assert non-behavior-
-  // change on adjacent fields (status, lostReason, sfJobId, isSfLinkedLead-
-  // relevant rows).
+  // Deliberately NOT hard-skipped (revised post-audit):
+  //   - status IN {cancelled, no_show, archived}      — SF-authority signals
+  //     or operator hides. The customer is real and likely known to SF;
+  //     reconciliation should run. ('cancelled' specifically arrives FROM
+  //     SF via service_cancelled webhook — by construction the customer
+  //     is in SF's records.)
+  //   - status='lost' with non-opt_out lostReason (null / hired_someone /
+  //     canceled) — platform-algorithmic or classifier-driven terminal,
+  //     not customer DNC.
+  //
+  // Tests below lock in each branch of the revised 2-case rule + assert
+  // non-behavior-change on adjacent fields.
   // ═══════════════════════════════════════════════════════════════════════
-  describe('enumeration — hard-skip rule narrowing (2026-06-05)', () => {
+  describe('enumeration — hard-skip rule narrowing (2026-06-05 revised)', () => {
     it("status='lost' + lostReason='opt_out' → skipped with reason 'terminal_lost_opt_out'", async () => {
       const { prisma, leads } = buildPrisma({
         leads: {
@@ -199,7 +205,15 @@ describe('SfHistoricalSyncService', () => {
       expect(leads.get('L_TEST2').syncReason).toBe('test_noise');
     });
 
-    it("status IN {cancelled, no_show, archived} → skipped (operator-explicit terminals)", async () => {
+    it("status IN {cancelled, no_show, archived} → pending (NOT hard-skip — SF-authority signals)", async () => {
+      // Revised 2026-06-05 post-audit: cancelled / no_show / archived are
+      // LB lifecycle terminals but NOT customer DNC. SF identity may still
+      // exist (and for 'cancelled' it almost certainly does, since that
+      // status arrives FROM SF via service_cancelled webhook). All three
+      // must enumerate as 'pending' so SF can match them. In production
+      // these statuses typically arrive on leads that already carry
+      // sfJobId — but if they don't (e.g., archived-without-link in a
+      // future scenario), they should still enter the SF matcher.
       const { prisma, leads } = buildPrisma({
         leads: {
           'L_CAN': { id: 'L_CAN', userId: 'U1', status: 'cancelled', platform: 'thumbtack', sfJobId: null, syncStatus: null },
@@ -209,14 +223,14 @@ describe('SfHistoricalSyncService', () => {
       });
       const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
       const r = await svc.enumerateOnConnect('U1');
-      expect(r.markedSkipped).toBe(3);
-      expect(r.markedPending).toBe(0);
-      expect(leads.get('L_CAN').syncStatus).toBe('skipped');
-      expect(leads.get('L_CAN').syncReason).toBe('terminal_cancelled');
-      expect(leads.get('L_NS').syncStatus).toBe('skipped');
-      expect(leads.get('L_NS').syncReason).toBe('terminal_no_show');
-      expect(leads.get('L_ARC').syncStatus).toBe('skipped');
-      expect(leads.get('L_ARC').syncReason).toBe('terminal_archived');
+      expect(r.markedSkipped).toBe(0);
+      expect(r.markedPending).toBe(3);
+      expect(leads.get('L_CAN').syncStatus).toBe('pending');
+      expect(leads.get('L_CAN').syncReason).toBe('connection_time');
+      expect(leads.get('L_NS').syncStatus).toBe('pending');
+      expect(leads.get('L_NS').syncReason).toBe('connection_time');
+      expect(leads.get('L_ARC').syncStatus).toBe('pending');
+      expect(leads.get('L_ARC').syncReason).toBe('connection_time');
     });
 
     it("status='lost' + lostReason='hired_someone' → pending (re-engageable, SF candidate)", async () => {
