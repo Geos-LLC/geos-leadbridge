@@ -1006,8 +1006,59 @@ export class LeadsService {
       // not AI replies, so the simplest-plan tenants (alerts only, no AI)
       // also consume quota correctly.
 
+      // Pro-reply pause: stop any active follow-up enrollment for this
+      // conversation when a pro/user sent the message. Without this, a
+      // manually-typed reply (SF Inbox click, LB operator action, bulk
+      // message) is recorded as sender='pro' but the scheduler's stop
+      // signal only fires on customer-replied events — so a previously
+      // scheduled step would still fire later, producing a duplicate
+      // message to the customer.
+      //
+      // Hard rule: skip for senderType='ai'. AI sends are the scheduler
+      // firing a step inside its own active enrollment; stopping it
+      // mid-step would kill the in-flight sequence. The same skip applies
+      // to ALL AI senders that route through this method:
+      //   - follow-up-scheduler.service.ts (drip steps)
+      //   - automation.service.ts (rule.useAi === true)
+      //   - follow-up-engine.controller.ts (preview-then-send AI branch)
+      //
+      // The auto-enroll block below still runs and may create a fresh
+      // enrollment with a clock that starts now — i.e. "follow up only if
+      // the customer goes silent from this point forward." That matches
+      // operator expectation for SF Inbox sends.
+      if (senderType !== 'ai' && conversation?.id && this.followUpEngine) {
+        try {
+          // sourceEventId dedup: when the same outbound send produces a
+          // platform echo webhook that our webhook handler re-processes,
+          // the second call no-ops. externalMessageId is the platform's
+          // immutable id; fall back to leadId+timestamp when missing
+          // (Yelp's POST response sometimes omits event_id).
+          const dedupKey = sentMessage?.externalMessageId
+            ? `proreply:msg:${sentMessage.externalMessageId}`
+            : `proreply:lead:${leadId}:${Date.now()}`;
+          await this.followUpEngine.handleProReply(conversation.id, {
+            sourceEventId: dedupKey,
+            actorType: 'sendMessage',
+            actorId: senderType, // 'user' — distinguishes from 'webhook' / 'cron' etc.
+          });
+        } catch (err: any) {
+          // Surface but don't fail the send — a stale/cancelled follow-up
+          // step is recoverable; a failed outbound send already finished
+          // by this point and the customer received the message.
+          this.logger.warn(`[LeadsService] handleProReply failed for conversation ${conversation.id}: ${err.message}`);
+        }
+      }
+
       // After sending a business message, ensure a follow-up enrollment exists.
       // If the customer doesn't reply, the scheduler will send follow-ups.
+      //
+      // Interaction with the pro-reply pause above:
+      //   - user sends: pause stopped the prior enrollment (if any), then
+      //     this block creates a NEW enrollment whose clock starts now.
+      //     Net effect: "follow-up only if customer goes silent from here."
+      //   - ai sends:   pause is skipped, prior enrollment stays active,
+      //     this block returns early (activeEnrollment found). Net effect:
+      //     scheduler continues advancing its own sequence — unchanged.
       if (conversation?.id && this.followUpEngine) {
         (async () => {
           try {
