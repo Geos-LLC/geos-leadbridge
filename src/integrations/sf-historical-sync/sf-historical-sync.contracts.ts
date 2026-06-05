@@ -21,8 +21,17 @@
 //   null            — never considered for SF reconciliation
 //   'pending'       — connection-time enumeration marked it actionable;
 //                     awaiting SF match result
-//   'linked'        — SF returned a high-confidence match and LB wrote
-//                     sfJobId (and optionally sfCustomerId)
+//   'lead_linked'   — SF found a matching SF Lead record (pre-customer
+//                     pipeline stage) but no SF Customer/Job exists yet.
+//                     LB row carries sfLeadId + sfLeadStageName snapshot.
+//                     Behaviorally identical to LB-only: LB still owns
+//                     AI, follow-up, classifier, status writes. NOT a
+//                     SF-managed state. Promoted to 'linked' organically
+//                     when SF later sends a customer_job match for the
+//                     same lb_lead_id (sfLeadId stays additive).
+//   'linked'        — SF returned a high-confidence customer/job match
+//                     and LB wrote sfJobId (and optionally sfCustomerId).
+//                     SF owns customer/job lifecycle from here.
 //   'no_match'      — SF returned no match; the lead is LB-only
 //   'needs_review'  — ambiguous match (medium/low confidence); operator
 //                     must resolve via manual-link
@@ -30,7 +39,7 @@
 //   'skipped'       — terminal LB status (lost/archived/cancelled) — no
 //                     SF reconciliation needed
 export const SYNC_STATUSES = [
-  'pending', 'linked', 'no_match', 'needs_review', 'failed', 'skipped',
+  'pending', 'lead_linked', 'linked', 'no_match', 'needs_review', 'failed', 'skipped',
 ] as const;
 export type SyncStatus = typeof SYNC_STATUSES[number];
 
@@ -67,6 +76,9 @@ export interface SyncCandidate {
   syncStatus: SyncStatus | null;
   sfJobId: string | null;
   sfCustomerId: string | null;
+  sfLeadId: string | null;                    // populated when syncStatus='lead_linked'
+  sfLeadStageName: string | null;             // SF Lead pipeline stage snapshot (e.g. "Contacted")
+  sfLeadMatchedAt: string | null;             // ISO; when SF confirmed the lead-only match
   syncAttemptedAt: string | null;             // ISO
   syncReason: string | null;
   createdAt: string;                          // ISO
@@ -108,8 +120,24 @@ export interface ManualLinkResponse {
 
 export interface BulkLinkRow {
   lb_lead_id: string;
+  /**
+   * Which SF entity tier the row maps to:
+   *   'customer_job'  — SF Customer + (usually) SF Job. Default when absent
+   *                     (backward-compatible — pre-2026-06-04 rows omitted
+   *                     match_type entirely and meant customer_job).
+   *   'lead_only'     — SF Lead record only; no SF Customer/Job yet.
+   *                     Requires sf_lead_id. sf_job_id may be omitted.
+   *                     Receiver writes sfLeadId + sfLeadStageName + sets
+   *                     syncStatus='lead_linked'. Does NOT call writeStatus.
+   */
+  match_type?: 'customer_job' | 'lead_only';
+  /** SF Job PK. Required for customer_job; optional/empty for lead_only. */
   sf_job_id: string;
   sf_customer_id?: string | null;
+  /** SF Lead PK. Required for match_type='lead_only'. Ignored otherwise. */
+  sf_lead_id?: string | number | null;
+  /** Snapshot of SF Lead pipeline stage (e.g. "Contacted"). */
+  sf_lead_stage_name?: string | null;
   confidence: 'exact' | 'high' | 'medium' | 'low' | 'none';
   match_basis: 'externalRequestId' | 'phone' | 'phone_name' | 'email'
     | 'name_platform' | 'manual' | 'none';
@@ -125,7 +153,7 @@ export interface BulkLinkRequest {
 
 export interface BulkLinkRowResult {
   lb_lead_id: string;
-  result: 'linked' | 'needs_review' | 'no_match' | 'skipped'
+  result: 'linked' | 'lead_linked' | 'needs_review' | 'no_match' | 'skipped'
     | 'conflict' | 'not_found' | 'failed';
   sync_status: SyncStatus | null;
   detail?: string;
@@ -140,6 +168,7 @@ export interface BulkLinkResponse {
   summary: {
     total: number;
     linked: number;
+    lead_linked: number;
     needs_review: number;
     no_match: number;
     conflict: number;

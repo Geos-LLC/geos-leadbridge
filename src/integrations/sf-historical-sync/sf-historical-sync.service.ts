@@ -243,6 +243,10 @@ export class SfHistoricalSyncService {
     } else if (opts.syncStatus !== undefined) {
       where.syncStatus = opts.syncStatus;
     } else {
+      // Default candidate pool: rows still needing SF action.
+      // EXCLUDES 'lead_linked' (already received a verdict — SF doesn't need
+      // to re-propose; matcher exclusion is the whole point of the state per
+      // 2026-06-04 PR B). EXCLUDES 'linked' and 'skipped' (terminal).
       where.OR = [
         { syncStatus: { in: ['pending', 'needs_review', 'failed', 'no_match'] } },
         { syncStatus: null },
@@ -261,6 +265,7 @@ export class SfHistoricalSyncService {
         id: true, customerName: true, customerPhone: true, customerEmail: true,
         platform: true, businessId: true, externalRequestId: true, status: true,
         syncStatus: true, sfJobId: true, sfCustomerId: true,
+        sfLeadId: true, sfLeadStageName: true, sfLeadMatchedAt: true,
         syncAttemptedAt: true, syncReason: true, createdAt: true, statusUpdatedAt: true,
       },
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
@@ -280,6 +285,9 @@ export class SfHistoricalSyncService {
       syncStatus: (l.syncStatus as SyncStatus | null),
       sfJobId: l.sfJobId,
       sfCustomerId: l.sfCustomerId,
+      sfLeadId: l.sfLeadId ?? null,
+      sfLeadStageName: l.sfLeadStageName ?? null,
+      sfLeadMatchedAt: l.sfLeadMatchedAt?.toISOString() ?? null,
       syncAttemptedAt: l.syncAttemptedAt?.toISOString() ?? null,
       syncReason: l.syncReason,
       createdAt: l.createdAt.toISOString(),
@@ -392,7 +400,7 @@ export class SfHistoricalSyncService {
 
   async applyBulkLink(req: BulkLinkRequest): Promise<BulkLinkResponse> {
     const rows: BulkLinkRowResult[] = [];
-    let linked = 0, needsReview = 0, noMatch = 0, conflict = 0, notFound = 0, failed = 0, statusUpdates = 0;
+    let linked = 0, leadLinked = 0, needsReview = 0, noMatch = 0, conflict = 0, notFound = 0, failed = 0, statusUpdates = 0;
 
     for (const row of req.rows ?? []) {
       try {
@@ -403,6 +411,52 @@ export class SfHistoricalSyncService {
           continue;
         }
 
+        // ─── match_type='lead_only' — SF Lead identity only, no customer/job ─
+        //
+        // Approved 2026-06-04 (PR B). SF found a matching SF Lead record
+        // but no SF Customer or SF Job yet. LB persists the lead identity
+        // for visibility + matcher-exclusion, but behaviorally the row is
+        // identical to LB-only: writeStatus is NOT called, sfJobId /
+        // sfCustomerId / sfJobOutcome are NOT touched. The follow-up gate,
+        // status-pill enable, classifier, and AI behavior all continue as
+        // normal because isSfLinkedLead() returns false for syncStatus =
+        // 'lead_linked' (lead_linked is intentionally outside the
+        // SF-managed predicate).
+        //
+        // Promotion to syncStatus='linked' happens organically when SF
+        // later sends match_type='customer_job' (or omits match_type, which
+        // defaults to customer_job) for the same lb_lead_id — sfLeadId
+        // stays additive. No conversion bridge event required.
+        if (row.match_type === 'lead_only') {
+          const sfLeadIdStr = row.sf_lead_id != null ? String(row.sf_lead_id) : null;
+          if (!sfLeadIdStr) {
+            failed++;
+            rows.push({ lb_lead_id: lead.id, result: 'failed', sync_status: 'failed',
+              detail: 'lead_only_missing_sf_lead_id' });
+            continue;
+          }
+          const now = new Date();
+          await this.prisma.lead.update({
+            where: { id: lead.id },
+            data: {
+              sfLeadId: sfLeadIdStr,
+              sfLeadStageName: row.sf_lead_stage_name ?? null,
+              sfLeadMatchedAt: now,
+              syncStatus: 'lead_linked',
+              syncReason: `sf_lead_only:${row.match_basis}`,
+              syncAttemptedAt: now,
+              // Deliberately NOT setting: sfJobId, sfCustomerId, sfJobMappedAt,
+              // sfJobOutcome, sfJobOutcomeAt. lead_linked is NOT SF-managed.
+            },
+          });
+          leadLinked++;
+          rows.push({ lb_lead_id: lead.id, result: 'lead_linked', sync_status: 'lead_linked',
+            detail: `sf_lead_id=${sfLeadIdStr} stage=${row.sf_lead_stage_name ?? 'unknown'}` });
+          continue;
+        }
+
+        // ─── Default path: match_type='customer_job' (or absent = backward compat) ─
+        //
         // Confidence handling:
         //   exact|high  → auto-link
         //   medium|low  → needs_review (don't write sfJobId)
@@ -491,15 +545,15 @@ export class SfHistoricalSyncService {
 
     this.logger.log(
       `[SfHistoricalSync] event=bulk_link rows=${req.rows?.length ?? 0} linked=${linked} ` +
-        `needs_review=${needsReview} no_match=${noMatch} conflict=${conflict} not_found=${notFound} ` +
-        `failed=${failed} status_updates=${statusUpdates}`,
+        `lead_linked=${leadLinked} needs_review=${needsReview} no_match=${noMatch} ` +
+        `conflict=${conflict} not_found=${notFound} failed=${failed} status_updates=${statusUpdates}`,
     );
 
     return {
       ok: failed === 0,
       summary: {
         total: req.rows?.length ?? 0,
-        linked, needs_review: needsReview, no_match: noMatch,
+        linked, lead_linked: leadLinked, needs_review: needsReview, no_match: noMatch,
         conflict, not_found: notFound, failed, status_updates_applied: statusUpdates,
       },
       rows,
