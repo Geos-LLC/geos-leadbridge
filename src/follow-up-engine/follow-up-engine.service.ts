@@ -711,6 +711,115 @@ export class FollowUpEngineService {
   }
 
   /**
+   * Stop enrollment on pro/user reply.
+   *
+   * Symmetric to handleCustomerReply, but fires when the pro/user sends a
+   * message through LeadsService.sendMessage (SF Inbox click, LB operator
+   * action, bulk message, preview-then-send). The pre-existing customer-reply
+   * stop covers inbound; this one covers outbound.
+   *
+   * Why this exists:
+   *   The scheduler's per-enrollment guard only stops on customer-replied
+   *   signals (Message.sender='customer' since enrollment.createdAt, OR
+   *   Lead.lastCustomerActivityAt newer than enrollment.createdAt). Without
+   *   this method, a manually-sent reply via SF Inbox is recorded as
+   *   sender='pro' and the scheduler keeps firing its scheduled steps,
+   *   producing duplicate messages to the customer.
+   *
+   * Behaviour:
+   *   - Stops the active enrollment for `conversationId` (status 'active' →
+   *     'stopped', stoppedReason='pro_replied') and cancels any scheduled
+   *     or suggested FollowUpStepExecution rows on the way out — identical
+   *     pattern to handleCustomerReply.
+   *   - Idempotent via sourceEventId dedup (callers pass the platform
+   *     message id, so retries on the same outbound send no-op).
+   *   - Skips entirely when no active enrollment exists (no-op).
+   *   - Does NOT change Lead.status.
+   *   - Does NOT touch sfJobId / sfCustomerId / sfLeadId / syncStatus.
+   *   - Does NOT affect the intent classifier (no FollowUpGate calls).
+   *   - Does NOT fire a re-engagement alert (those are reserved for
+   *     customer-replied signals; the pro doesn't need re-engaging on
+   *     their own send).
+   *   - After the customer replies again later, a fresh enrollment can be
+   *     created normally (LeadsService.sendMessage auto-enroll block is
+   *     unchanged; handleCustomerReply is unchanged).
+   *
+   * Hard rule for callers:
+   *   - LeadsService.sendMessage MUST NOT call this for senderType='ai'.
+   *     AI sends are the scheduler firing a step inside its own active
+   *     enrollment; stopping it mid-step would kill the in-flight sequence.
+   *     Skip applies to ALL AI senders (follow-up-scheduler, automation
+   *     with useAi=true, follow-up-engine.controller preview-then-send AI
+   *     branch).
+   */
+  async handleProReply(
+    conversationId: string,
+    auditOpts?: EnrollmentAuditOptions,
+  ): Promise<{ stopped: boolean }> {
+    const occurredAt = new Date();
+
+    // Snapshot active enrollment(s). Partial unique index keeps this to ≤1
+    // in the normal case; treated as a list for defence in depth — same as
+    // handleCustomerReply.
+    const active = await this.prisma.followUpEnrollment.findMany({
+      where: { conversationId, status: 'active' },
+      select: { id: true },
+    });
+
+    if (active.length === 0) {
+      return { stopped: false };
+    }
+
+    let anyTransitioned = false;
+    for (const e of active) {
+      const r = await this.writeEnrollmentAudit(
+        e.id,
+        'active',
+        'stopped',
+        { stoppedReason: 'pro_replied', completedAt: occurredAt },
+        'pro_replied',
+        auditOpts,
+        occurredAt,
+      );
+      if (r.transitioned) anyTransitioned = true;
+    }
+
+    if (!anyTransitioned) {
+      // Either all enrollments were deduped (sourceEventId already seen) or
+      // they moved out of 'active' between snapshot and update. Either way
+      // we have no transition to follow up on.
+      return { stopped: false };
+    }
+
+    // Cancel any pending/suggested step executions — same primitive as
+    // handleCustomerReply uses. Without this, a step that's already past
+    // its nextStepDueAt could still fire when the worker next polls.
+    await this.prisma.followUpStepExecution.updateMany({
+      where: {
+        enrollment: { conversationId },
+        status: { in: ['scheduled', 'suggested'] },
+      },
+      data: { status: 'cancelled' },
+    });
+
+    // Clear ThreadContext cached fields. UI reads followUpStatus to render
+    // "AI stopped" / "Next follow-up in 4h" — must reflect the new state.
+    await this.prisma.threadContext.updateMany({
+      where: { conversationId },
+      data: {
+        activeEnrollmentId: null,
+        nextFollowUpAt: null,
+        followUpStatus: 'stopped',
+        followUpState: null,
+      },
+    });
+
+    this.logger.log(`Stopped follow-up for conversation ${conversationId} — pro replied`);
+
+    return { stopped: true };
+  }
+
+  /**
    * Stop enrollment manually.
    *
    * Phase 1 Task 4: writes an audit row inside the same transaction as the
