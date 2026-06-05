@@ -41,14 +41,62 @@ import type {
   SyncTriggerResponse,
 } from './sf-historical-sync.contracts';
 
-// Terminal LB statuses that have no SF reconciliation value — sync is
-// skipped for these (sfJobId never set automatically; operator can still
-// manual-link if needed).
-const TERMINAL_STATUSES = new Set(['lost', 'cancelled', 'no_show', 'archived']);
-// `completed` is technically terminal but is the most common state where
-// SF reconciliation MATTERS — Spotless wants completion mirrored. So we
-// treat `completed` as actionable (pending) so SF can confirm/agree, and
-// rely on the downgrade guard to block any spurious revert.
+// Hard-skip rule (2026-06-05 Phase 1 refactor, revised after the
+// hard-skip semantics audit): `syncStatus='skipped'` means TRUE hard
+// exclusion — the customer must not be classified for SF reconciliation.
+// Two sources only:
+//
+//   1. platform='test'                          — admin probe leads. Not
+//      real customers; matching them against SF would pollute SF's matcher
+//      with phantom hits. Hard-skip is correct because there's no real
+//      customer record on either side.
+//
+//   2. status='lost' AND lostReason='opt_out'   — explicit customer
+//      unsubscribe. Compliance-grade do-not-contact. Until LB has a
+//      `lead.do_not_contact` event in the LB → SF outbound contract that
+//      propagates the opt_out to SF's side, hard-skipping is the safer
+//      default — it prevents an operator from approving a needs_review
+//      match for an opted-out customer and inadvertently routing them
+//      into SF's outreach pipeline.
+//
+// Deliberately NOT hard-skipped under this rule (revised 2026-06-05 from
+// the original 5-case proposal):
+//   - status IN {cancelled, no_show, archived} — These are SF-authority
+//     signals or operator hides, NOT customer do-not-contact signals.
+//     'cancelled' specifically arrives FROM SF via the service_cancelled
+//     inbound webhook; the customer is by definition known to both
+//     systems. 'no_show' implies a real booking happened. 'archived' is
+//     an operator hide that doesn't speak to customer consent. All three
+//     should enumerate as 'pending' so SF can match them — even if LB
+//     considers them terminal locally, SF identity reconciliation is
+//     orthogonal to LB lifecycle.
+//   - status='lost' with lostReason in {null, hired_someone, canceled}
+//     — Platform-algorithmic terminal OR classifier-driven terminal.
+//     Not customer DNC.
+//
+// Pre-refactor, 1,022 Spotless leads were hard-skipped (status='lost'
+// without lostReason discrimination). Post-refactor, only 10 are hard-
+// skipped (5 opt_out + 5 test). The other 1,012 enumerate as 'pending'
+// candidates for SF identity matching.
+//
+// Behavior NOT affected by this rule change:
+//   - AI follow-ups / AI Conversation        (reads Lead.status, not syncStatus)
+//   - Historical FU backfill                 (has its own terminal-status list)
+//   - Lead.status / lostReason / platformStatus  (this rule only writes syncStatus)
+//   - isSfLinkedLead() predicate             (lead_linked / pending / no_match never flip it)
+//   - pro_replied conversation cooldown      (separate gate)
+function isHardSkippable(lead: {
+  status: string;
+  platform?: string | null;
+  lostReason?: string | null;
+}): { hard: true; reason: string } | { hard: false } {
+  if (lead.platform === 'test') return { hard: true, reason: 'test_noise' };
+  if (lead.status === 'lost' && lead.lostReason === 'opt_out') {
+    return { hard: true, reason: 'terminal_lost_opt_out' };
+  }
+  return { hard: false };
+}
+
 const STALE_DAYS = 14;
 
 @Injectable()
@@ -96,7 +144,13 @@ export class SfHistoricalSyncService {
 
     const leads = await this.prisma.lead.findMany({
       where,
-      select: { id: true, status: true, sfJobId: true, syncStatus: true },
+      select: {
+        id: true, status: true, sfJobId: true, syncStatus: true,
+        // Required for the post-2026-06-05 hard-skip rule — `opt_out` and
+        // platform='test' cases need lostReason/platform to disambiguate
+        // from re-engageable `lost` rows (Thumbtack No hire / Yelp archived).
+        lostReason: true, platform: true,
+      },
     });
 
     let markedPending = 0;
@@ -117,19 +171,24 @@ export class SfHistoricalSyncService {
         alreadyLinked++;
         continue;
       }
-      if (TERMINAL_STATUSES.has(lead.status)) {
-        // Terminal LB-side. Skip unless forced.
+      const skip = isHardSkippable(lead);
+      if (skip.hard) {
+        // True hard exclusion. Idempotent: don't churn rows already correctly skipped.
         if (!opts.forceResync && lead.syncStatus === 'skipped') continue;
         await this.prisma.lead.update({
           where: { id: lead.id },
-          data: { syncStatus: 'skipped', syncReason: `terminal_${lead.status}`, syncAttemptedAt: now },
+          data: { syncStatus: 'skipped', syncReason: skip.reason, syncAttemptedAt: now },
         });
         markedSkipped++;
         continue;
       }
-      // Actionable: any non-terminal, non-linked lead.
+      // Actionable: any non-hard-skip, non-linked lead. Includes:
+      //   - status='lost' with lostReason in {null, hired_someone, canceled, ...}
+      //   - status='lost' driven by platform_sync (Thumbtack No hire, Yelp Archived)
+      //   - status='completed' (always actionable — SF mirrors)
+      //   - status in {new, contacted, engaged, quoted, booked, scheduled, in_progress}
       if (!opts.forceResync && lead.syncStatus && lead.syncStatus !== 'failed') {
-        // Don't churn rows that are already pending/needs_review/no_match.
+        // Don't churn rows that are already pending/needs_review/no_match/lead_linked.
         continue;
       }
       await this.prisma.lead.update({
@@ -163,6 +222,10 @@ export class SfHistoricalSyncService {
         status: true, syncStatus: true, sfJobId: true,
         customerPhone: true, customerEmail: true, externalRequestId: true,
         statusUpdatedAt: true,
+        // Required for isHardSkippable check in the unsyncedActionable
+        // count below — must match enumerate()'s definition exactly so the
+        // dashboard counter doesn't drift from the enumerator's rule.
+        lostReason: true, platform: true,
       },
     });
 
@@ -185,8 +248,11 @@ export class SfHistoricalSyncService {
         if (l.status === 'scheduled') staleScheduled++;
         if (l.status === 'booked') staleBooked++;
       }
+      // "unsyncedActionable" counts leads still expected to receive an SF
+      // verdict. Aligns with the enumerator's hard-skip rule so dashboard
+      // and enumerator stay in lock-step.
       if (!isLinked && (ss === 'pending' || ss === 'needs_review' || ss === 'failed') &&
-          !TERMINAL_STATUSES.has(l.status)) {
+          !isHardSkippable(l).hard) {
         unsyncedActionable++;
       }
 

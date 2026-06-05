@@ -36,8 +36,22 @@
 //   'needs_review'  — ambiguous match (medium/low confidence); operator
 //                     must resolve via manual-link
 //   'failed'        — sync attempt errored; retry-eligible
-//   'skipped'       — terminal LB status (lost/archived/cancelled) — no
-//                     SF reconciliation needed
+//   'skipped'       — true hard exclusion from SF identity reconciliation.
+//                     Two cases only:
+//                       (a) platform='test'                            (test/noise — not a real customer)
+//                       (b) status='lost' AND lostReason='opt_out'     (explicit customer DNC)
+//                     Everything else — including status IN {cancelled,
+//                     no_show, archived} and status='lost' with any
+//                     non-opt_out lostReason — enumerates as 'pending'.
+//                     SF identity reconciliation is orthogonal to LB
+//                     lifecycle: a lead may be terminal in LB's view
+//                     (cancelled booking, no-show, operator hide) while
+//                     SF still has a valid customer/job record. Only
+//                     customer-initiated DNC or noise sources are
+//                     legitimately excluded from matching. The 2026-06-05
+//                     refactor narrowed this from the prior status-only
+//                     check that conflated DNC with platform-algorithmic
+//                     terminal states.
 export const SYNC_STATUSES = [
   'pending', 'lead_linked', 'linked', 'no_match', 'needs_review', 'failed', 'skipped',
 ] as const;
