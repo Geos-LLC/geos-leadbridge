@@ -4,6 +4,7 @@ import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
+  DollarSign,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -98,6 +99,7 @@ export function Layout() {
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
     if (path === '/admin') return 'Admin Dashboard';
+    if (path === '/admin/billing') return 'Subscriptions & Billing';
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
@@ -355,6 +357,7 @@ export function Layout() {
                   Admin
                 </div>
                 {renderNavItem({ icon: <Shield size={15} />, label: 'Admin Dashboard', path: '/admin' })}
+                {renderNavItem({ icon: <DollarSign size={15} />, label: 'Subscriptions', path: '/admin/billing' })}
                 {renderNavItem({ icon: <Smartphone size={15} />, label: 'Tenant Numbers', path: '/admin/tenant-numbers' })}
                 {renderNavItem({ icon: <Inbox size={15} />, label: 'SMS History', path: '/sms-history' })}
                 {renderNavItem({ icon: <FlaskConical size={15} />, label: 'API Test', path: '/api-test' })}

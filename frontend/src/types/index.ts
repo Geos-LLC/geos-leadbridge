@@ -452,6 +452,56 @@ export interface AdminStats {
   }[];
 }
 
+export type BillingBucket =
+  | 'paying'
+  | 'trialing'
+  | 'trial_ended'
+  | 'cancelled'
+  | 'past_due'
+  | 'free';
+
+export interface AdminBillingUser {
+  id: string;
+  email: string;
+  name: string | null;
+  subscriptionTier: 'STARTER' | 'PRO' | 'ENTERPRISE' | null;
+  subscriptionStatus: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE' | null;
+  subscriptionPeriodEnd: string | null;
+  stripeSubscriptionId: string | null;
+  stripeCustomerId: string | null;
+  hasOwnNumber: boolean;
+  cancelAtPeriodEnd: boolean;
+  trialStartDate: string | null;
+  trialEndDate: string | null;
+  trialEndedAt: string | null;
+  trialUsed: boolean;
+  trialLeadsHandled: number;
+  trialLeadsLimit: number;
+  createdAt: string;
+  updatedAt: string;
+  bucket: BillingBucket;
+  mrr: number;
+}
+
+export interface AdminBillingOverview {
+  stats: {
+    paying: number;
+    trialing: number;
+    trialEnded: number;
+    cancelled: number;
+    pastDue: number;
+    free: number;
+    monthlyRevenue: number;
+    trialConversionRate: number;
+    churnRate: number;
+    cancelledLast30d: number;
+  };
+  users: AdminBillingUser[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export interface AdminLog {
   id: string;
   action: string;
