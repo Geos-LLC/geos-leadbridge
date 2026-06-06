@@ -378,6 +378,13 @@ model Lead {
   sfLeadId               String?   @map("sf_lead_id")
   sfLeadStageName        String?   @map("sf_lead_stage_name")
   sfLeadMatchedAt        DateTime? @map("sf_lead_matched_at")
+  // ─── Thin Account layer (Phase A, additive plumbing) ────────────────
+  // FK to SF accounts.id (uuid). Populated by backfill (PR C) and by
+  // ingestion (future PR). NULL until backfill runs. Does NOT affect any
+  // live LB behavior — LB matcher, follow-up scheduler, classifier, and
+  // syncStatus lifecycle are unchanged. See SF migration 065 for the
+  // counterpart tables (public.accounts, public.account_identifiers).
+  accountId              String?   @map("account_id") @db.Uuid
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -405,6 +412,8 @@ model Lead {
   @@index([reengageAt])
   // Dashboard query: count leads by syncStatus per user.
   @@index([userId, syncStatus])
+  // Account-aware reverse lookup (PR B / PR D).
+  @@index([accountId])
   @@map("leads")
 }
 
