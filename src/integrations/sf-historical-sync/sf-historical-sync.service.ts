@@ -40,6 +40,7 @@ import type {
   SyncTriggerRequest,
   SyncTriggerResponse,
 } from './sf-historical-sync.contracts';
+import { TERMINAL_SKIP_REASONS } from './sf-historical-sync.contracts';
 
 // Hard-skip rule (2026-06-05 Phase 1 refactor, revised after the
 // hard-skip semantics audit): `syncStatus='skipped'` means TRUE hard
@@ -466,7 +467,7 @@ export class SfHistoricalSyncService {
 
   async applyBulkLink(req: BulkLinkRequest): Promise<BulkLinkResponse> {
     const rows: BulkLinkRowResult[] = [];
-    let linked = 0, leadLinked = 0, needsReview = 0, noMatch = 0, conflict = 0, notFound = 0, failed = 0, statusUpdates = 0;
+    let linked = 0, leadLinked = 0, needsReview = 0, noMatch = 0, conflict = 0, notFound = 0, failed = 0, terminalSkip = 0, statusUpdates = 0;
 
     for (const row of req.rows ?? []) {
       try {
@@ -474,6 +475,85 @@ export class SfHistoricalSyncService {
         if (!lead) {
           notFound++;
           rows.push({ lb_lead_id: row.lb_lead_id, result: 'not_found', sync_status: null, detail: 'lead_not_found' });
+          continue;
+        }
+
+        // ─── match_type='terminal_skip' — SF account-aware known-account terminal ─
+        //
+        // Approved 2026-06-06. SF's account-aware residual classifier
+        // identified this row as a known-account terminal outcome (e.g.
+        // repeat inquiry from a customer already on file, or a duplicate
+        // marketplace lead). NOT a no_match — SF knows the account; the
+        // row just shouldn't be reconciled further.
+        //
+        // Writes ONLY syncStatus='skipped' + syncReason='sf_terminal:<reason>'
+        // + syncAttemptedAt. Does NOT call writeStatus, does NOT touch
+        // sfJobId / sfCustomerId / sfLeadId / sfJobOutcome / Lead.status /
+        // lostReason / any other field.
+        //
+        // Hard rejects:
+        //   - terminal_reason missing or not in TERMINAL_SKIP_REASONS → failed
+        //   - payload carries sf_status or sf_payment_status (would
+        //     attempt status mutation) → failed
+        // Hard protects:
+        //   - lead.syncStatus IN {linked, lead_linked} → conflict (don't
+        //     overwrite a real classification with a terminal skip)
+        // Idempotent:
+        //   - lead already syncStatus='skipped' with matching syncReason
+        //     → no DB write; response carries result='terminal_skip' +
+        //       detail='idempotent_no_op'
+        if (row.match_type === 'terminal_skip') {
+          // Validate terminal_reason
+          const tr = row.terminal_reason;
+          if (!tr || !TERMINAL_SKIP_REASONS.includes(tr as any)) {
+            failed++;
+            rows.push({ lb_lead_id: lead.id, result: 'failed', sync_status: lead.syncStatus as SyncStatus | null,
+              detail: `terminal_skip_unknown_reason:${tr ?? 'missing'}` });
+            continue;
+          }
+          // Reject status mutation fields — terminal_skip must not carry status payload.
+          if (row.sf_status != null || row.sf_payment_status != null) {
+            failed++;
+            rows.push({ lb_lead_id: lead.id, result: 'failed', sync_status: lead.syncStatus as SyncStatus | null,
+              detail: 'terminal_skip_status_mutation_forbidden' });
+            continue;
+          }
+          // Protect existing SF classification — don't overwrite linked or lead_linked.
+          if (lead.syncStatus === 'linked' || lead.syncStatus === 'lead_linked') {
+            conflict++;
+            rows.push({ lb_lead_id: lead.id, result: 'conflict', sync_status: lead.syncStatus as SyncStatus,
+              detail: `terminal_skip_protected:${lead.syncStatus}` });
+            continue;
+          }
+          const newSyncReason = `sf_terminal:${tr}`;
+          // Idempotency: already skipped with matching reason → no DB write.
+          if (lead.syncStatus === 'skipped' && lead.syncReason === newSyncReason) {
+            terminalSkip++;
+            rows.push({ lb_lead_id: lead.id, result: 'terminal_skip', sync_status: 'skipped',
+              detail: 'idempotent_no_op' });
+            continue;
+          }
+          // Log account_id if provided (forward-compat; no column today).
+          const acctRef = row.account_id != null ? `account_id=${row.account_id} ` : '';
+          this.logger.log(
+            `[SfHistoricalSync] event=terminal_skip lead_id=${lead.id} reason=${tr} ${acctRef}` +
+              `prev_sync_status=${lead.syncStatus ?? 'null'}`,
+          );
+          await this.prisma.lead.update({
+            where: { id: lead.id },
+            data: {
+              syncStatus: 'skipped',
+              syncReason: newSyncReason,
+              syncAttemptedAt: new Date(),
+              // Deliberately NOT writing: sfJobId, sfCustomerId, sfLeadId,
+              // sfJobOutcome, sfJobMappedAt, sfLeadStageName, status, lostReason,
+              // statusSource, reengageAt, or any other field. terminal_skip
+              // is purely a sync-classification update.
+            },
+          });
+          terminalSkip++;
+          rows.push({ lb_lead_id: lead.id, result: 'terminal_skip', sync_status: 'skipped',
+            detail: newSyncReason });
           continue;
         }
 
@@ -612,7 +692,8 @@ export class SfHistoricalSyncService {
     this.logger.log(
       `[SfHistoricalSync] event=bulk_link rows=${req.rows?.length ?? 0} linked=${linked} ` +
         `lead_linked=${leadLinked} needs_review=${needsReview} no_match=${noMatch} ` +
-        `conflict=${conflict} not_found=${notFound} failed=${failed} status_updates=${statusUpdates}`,
+        `terminal_skip=${terminalSkip} conflict=${conflict} not_found=${notFound} ` +
+        `failed=${failed} status_updates=${statusUpdates}`,
     );
 
     return {
@@ -620,7 +701,8 @@ export class SfHistoricalSyncService {
       summary: {
         total: req.rows?.length ?? 0,
         linked, lead_linked: leadLinked, needs_review: needsReview, no_match: noMatch,
-        conflict, not_found: notFound, failed, status_updates_applied: statusUpdates,
+        conflict, not_found: notFound, failed, terminal_skip: terminalSkip,
+        status_updates_applied: statusUpdates,
       },
       rows,
     };

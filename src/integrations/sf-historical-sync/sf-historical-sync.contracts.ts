@@ -132,31 +132,64 @@ export interface ManualLinkResponse {
 // HMAC-signed under the same SF_LB_PROVISIONING_SHARED_SECRET as the
 // provisioning channel (different secret from the per-tenant webhook).
 
+/**
+ * Approved terminal_reason values for match_type='terminal_skip'. Each maps
+ * 1:1 to a syncReason string written on the Lead row. The receiver rejects
+ * any other value with result='failed' to keep this set explicit.
+ */
+export const TERMINAL_SKIP_REASONS = [
+  'repeat_inquiry_same_account',
+  'marketplace_duplicate',
+] as const;
+export type TerminalSkipReason = typeof TERMINAL_SKIP_REASONS[number];
+
 export interface BulkLinkRow {
   lb_lead_id: string;
   /**
    * Which SF entity tier the row maps to:
-   *   'customer_job'  — SF Customer + (usually) SF Job. Default when absent
-   *                     (backward-compatible — pre-2026-06-04 rows omitted
-   *                     match_type entirely and meant customer_job).
-   *   'lead_only'     — SF Lead record only; no SF Customer/Job yet.
-   *                     Requires sf_lead_id. sf_job_id may be omitted.
-   *                     Receiver writes sfLeadId + sfLeadStageName + sets
-   *                     syncStatus='lead_linked'. Does NOT call writeStatus.
+   *   'customer_job'   — SF Customer + (usually) SF Job. Default when absent
+   *                      (backward-compatible — pre-2026-06-04 rows omitted
+   *                      match_type entirely and meant customer_job).
+   *   'lead_only'      — SF Lead record only; no SF Customer/Job yet.
+   *                      Requires sf_lead_id. Receiver writes sfLeadId +
+   *                      sfLeadStageName + syncStatus='lead_linked'.
+   *                      Does NOT call writeStatus.
+   *   'terminal_skip'  — SF's account-aware residual classifier identified
+   *                      the row as a known-account terminal outcome
+   *                      (NOT no_match — SF knows the account, but the
+   *                      lead itself is a repeat inquiry or marketplace
+   *                      duplicate that shouldn't be reconciled further).
+   *                      Requires terminal_reason (see TERMINAL_SKIP_REASONS).
+   *                      Receiver writes ONLY syncStatus='skipped' +
+   *                      syncReason='sf_terminal:<reason>' +
+   *                      syncAttemptedAt. Does NOT call writeStatus, does
+   *                      NOT touch sfJobId/sfCustomerId/sfLeadId/sfJobOutcome.
+   *                      Rejects payloads with sf_status/sf_payment_status
+   *                      fields (status mutation forbidden on this branch).
+   *                      Idempotent if already skipped with matching reason.
+   *                      Protects linked/lead_linked rows (result=conflict).
    */
-  match_type?: 'customer_job' | 'lead_only';
-  /** SF Job PK. Required for customer_job; optional/empty for lead_only. */
+  match_type?: 'customer_job' | 'lead_only' | 'terminal_skip';
+  /** SF Job PK. Required for customer_job; optional/empty for lead_only / terminal_skip. */
   sf_job_id: string;
   sf_customer_id?: string | null;
   /** SF Lead PK. Required for match_type='lead_only'. Ignored otherwise. */
   sf_lead_id?: string | number | null;
   /** Snapshot of SF Lead pipeline stage (e.g. "Contacted"). */
   sf_lead_stage_name?: string | null;
-  confidence: 'exact' | 'high' | 'medium' | 'low' | 'none';
-  match_basis: 'externalRequestId' | 'phone' | 'phone_name' | 'email'
+  /** Required for match_type='terminal_skip'. Must be one of TERMINAL_SKIP_REASONS. */
+  terminal_reason?: TerminalSkipReason;
+  /**
+   * Optional SF account id (for terminal_skip traceability). Accepted but
+   * not stored today — Lead has no account_id column. Logged for audit
+   * and forward-compat with future schema additions.
+   */
+  account_id?: string | number | null;
+  confidence?: 'exact' | 'high' | 'medium' | 'low' | 'none';
+  match_basis?: 'externalRequestId' | 'phone' | 'phone_name' | 'email'
     | 'name_platform' | 'manual' | 'none';
-  sf_status?: string | null;                  // raw SF status
-  sf_payment_status?: string | null;
+  sf_status?: string | null;                  // raw SF status (forbidden on terminal_skip)
+  sf_payment_status?: string | null;          // forbidden on terminal_skip
   occurred_at?: string;                       // ISO
   reason?: string;
 }
@@ -168,7 +201,7 @@ export interface BulkLinkRequest {
 export interface BulkLinkRowResult {
   lb_lead_id: string;
   result: 'linked' | 'lead_linked' | 'needs_review' | 'no_match' | 'skipped'
-    | 'conflict' | 'not_found' | 'failed';
+    | 'conflict' | 'not_found' | 'failed' | 'terminal_skip';
   sync_status: SyncStatus | null;
   detail?: string;
   status_updated?: boolean;
@@ -188,6 +221,7 @@ export interface BulkLinkResponse {
     conflict: number;
     not_found: number;
     failed: number;
+    terminal_skip: number;
     status_updates_applied: number;
   };
   rows: BulkLinkRowResult[];
