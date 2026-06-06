@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, AvailablePhoneNumber } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminBillingOverview, AdminLog, AvailablePhoneNumber } from '../types';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -1500,6 +1500,20 @@ export const adminApi = {
   },
   getStats: async (): Promise<AdminStats> => {
     const { data } = await api.get('/v1/admin/stats');
+    return data.data;
+  },
+  getBillingOverview: async (params?: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AdminBillingOverview> => {
+    const qp = new URLSearchParams();
+    if (params?.status) qp.append('status', params.status);
+    if (params?.search) qp.append('search', params.search);
+    if (params?.limit !== undefined) qp.append('limit', params.limit.toString());
+    if (params?.offset !== undefined) qp.append('offset', params.offset.toString());
+    const { data } = await api.get(`/v1/admin/billing-overview?${qp.toString()}`);
     return data.data;
   },
   getAdminLogs: async (params: { limit?: number; offset?: number }): Promise<{ logs: AdminLog[]; total: number; offset: number; limit: number }> => {

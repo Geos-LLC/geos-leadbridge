@@ -353,6 +353,173 @@ export class AdminService {
     };
   }
 
+  /**
+   * Billing overview for the admin "Subscriptions" page.
+   *
+   * Buckets every USER-role account by where they sit in the funnel and
+   * returns aggregate stats + a paginated, filterable, searchable row list.
+   *
+   * Buckets:
+   *  - paying      : tier set + status ACTIVE (real money, recurring)
+   *  - trialing    : Stripe TRIALING or in-app trial window still open
+   *  - trial_ended : in-app trial finished (cap hit or window expired), no paid sub
+   *  - cancelled   : Stripe sub CANCELLED
+   *  - past_due    : Stripe sub PAST_DUE (card failure on a previously paying sub)
+   *  - free        : no tier, never started a trial
+   *
+   * "monthlyRevenue" sums tier prices + $29 phone add-on for paying users only.
+   */
+  async getBillingOverview(query: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const { status = 'all', search, limit = 50, offset = 0 } = query;
+    const now = new Date();
+
+    const where: any = { role: 'USER' };
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        subscriptionTier: true,
+        subscriptionStatus: true,
+        subscriptionPeriodEnd: true,
+        stripeSubscriptionId: true,
+        stripeCustomerId: true,
+        hasOwnNumber: true,
+        cancelAtPeriodEnd: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        trialEndedAt: true,
+        trialUsed: true,
+        trialLeadsHandled: true,
+        trialLeadsLimit: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const tierPrices: Record<string, number> = {
+      [SubscriptionTier.STARTER]: 49,
+      [SubscriptionTier.PRO]: 99,
+      [SubscriptionTier.ENTERPRISE]: 129,
+    };
+    const phoneAddOn = 29;
+
+    type Annotated = (typeof users)[number] & { bucket: string; mrr: number };
+
+    const annotated: Annotated[] = users.map((u) => {
+      const bucket = this.classifyBillingBucket(u, now);
+      let mrr = 0;
+      if (bucket === 'paying' && u.subscriptionTier) {
+        mrr = tierPrices[u.subscriptionTier] ?? 0;
+        if (u.hasOwnNumber) mrr += phoneAddOn;
+      }
+      return { ...u, bucket, mrr };
+    });
+
+    const counts = {
+      paying: 0,
+      trialing: 0,
+      trial_ended: 0,
+      cancelled: 0,
+      past_due: 0,
+      free: 0,
+    };
+    let monthlyRevenue = 0;
+    for (const u of annotated) {
+      counts[u.bucket as keyof typeof counts]++;
+      monthlyRevenue += u.mrr;
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const cancelledLast30d = annotated.filter(
+      (u) =>
+        u.subscriptionStatus === SubscriptionStatus.CANCELLED &&
+        u.updatedAt >= thirtyDaysAgo,
+    ).length;
+
+    // Conversion = paying / (paying + ever-ended-trial). Approximate but useful.
+    const conversionDenom = counts.paying + counts.trial_ended;
+    const trialConversionRate =
+      conversionDenom > 0 ? (counts.paying / conversionDenom) * 100 : 0;
+    const churnRate =
+      counts.paying > 0 ? (cancelledLast30d / counts.paying) * 100 : 0;
+
+    const filtered =
+      status === 'all'
+        ? annotated
+        : annotated.filter((u) => u.bucket === status);
+
+    const paged = filtered.slice(offset, offset + limit);
+
+    return {
+      stats: {
+        paying: counts.paying,
+        trialing: counts.trialing,
+        trialEnded: counts.trial_ended,
+        cancelled: counts.cancelled,
+        pastDue: counts.past_due,
+        free: counts.free,
+        monthlyRevenue,
+        trialConversionRate: Number(trialConversionRate.toFixed(2)),
+        churnRate: Number(churnRate.toFixed(2)),
+        cancelledLast30d,
+      },
+      users: paged,
+      total: filtered.length,
+      offset,
+      limit,
+    };
+  }
+
+  private classifyBillingBucket(
+    u: {
+      subscriptionTier: SubscriptionTier | null;
+      subscriptionStatus: SubscriptionStatus | null;
+      trialStartDate: Date | null;
+      trialEndDate: Date | null;
+      trialEndedAt: Date | null;
+    },
+    now: Date,
+  ): 'paying' | 'trialing' | 'trial_ended' | 'cancelled' | 'past_due' | 'free' {
+    if (u.subscriptionTier && u.subscriptionStatus === SubscriptionStatus.ACTIVE) {
+      return 'paying';
+    }
+    if (u.subscriptionStatus === SubscriptionStatus.TRIALING) {
+      return 'trialing';
+    }
+    if (u.subscriptionStatus === SubscriptionStatus.PAST_DUE) {
+      return 'past_due';
+    }
+    if (u.subscriptionStatus === SubscriptionStatus.CANCELLED) {
+      return 'cancelled';
+    }
+    if (u.trialEndedAt) {
+      return 'trial_ended';
+    }
+    if (u.trialEndDate && u.trialEndDate > now) {
+      return 'trialing';
+    }
+    if (u.trialStartDate && u.trialEndDate && u.trialEndDate <= now) {
+      return 'trial_ended';
+    }
+    return 'free';
+  }
+
   async updateTrialLeads(
     adminId: string,
     userId: string,

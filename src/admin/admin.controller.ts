@@ -164,6 +164,37 @@ export class AdminController {
     };
   }
 
+  @Get('billing-overview')
+  @RequiresSupportGrant('user:list')
+  async getBillingOverview(
+    @Req() req: any,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'BillingOverview',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
+    const result = await this.adminService.getBillingOverview({
+      status,
+      search,
+      limit: limit ? parseInt(limit, 10) : 50,
+      offset: offset ? parseInt(offset, 10) : 0,
+    });
+    return { success: true, data: result };
+  }
+
   @Get('logs')
   async getAdminLogs(@Query() query: { limit?: number; offset?: number }) {
     const result = await this.adminService.getAdminLogs(query);

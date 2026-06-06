@@ -726,6 +726,338 @@ describe('SfHistoricalSyncService', () => {
       });
     });
 
+    // ───────────────────────────────────────────────────────────────────
+    // PR (2026-06-06): match_type='terminal_skip' — SF account-aware
+    // residual classifier identified the row as a known-account terminal
+    // outcome. NOT no_match — SF knows the account; the row just shouldn't
+    // be reconciled further. Writes ONLY syncStatus='skipped' + syncReason
+    // 'sf_terminal:<reason>' + syncAttemptedAt. Strict allowlist on
+    // terminal_reason. Rejects payloads carrying status-mutation fields.
+    // Protects linked/lead_linked rows. Idempotent on repeat.
+    // ───────────────────────────────────────────────────────────────────
+    describe("match_type='terminal_skip' — SF known-account terminal", () => {
+      it("terminal_reason='repeat_inquiry_same_account' → skipped + syncReason 'sf_terminal:repeat_inquiry_same_account'", async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': {
+              id: 'L1', userId: 'U1', status: 'new', platform: 'thumbtack',
+              sfJobId: null, sfCustomerId: null, sfJobOutcome: null,
+              sfLeadId: null, sfLeadStageName: null,
+              syncStatus: 'pending',
+            },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1',
+            match_type: 'terminal_skip',
+            terminal_reason: 'repeat_inquiry_same_account',
+            sf_job_id: '',
+            occurred_at: '2026-06-06T01:00:00Z',
+          }],
+        });
+        expect(r.summary.total).toBe(1);
+        expect(r.summary.terminal_skip).toBe(1);
+        expect(r.summary.linked).toBe(0);
+        expect(r.summary.lead_linked).toBe(0);
+        expect(r.summary.no_match).toBe(0);
+        expect(r.summary.failed).toBe(0);
+        expect(r.rows[0].result).toBe('terminal_skip');
+        expect(r.rows[0].sync_status).toBe('skipped');
+        expect(r.rows[0].detail).toBe('sf_terminal:repeat_inquiry_same_account');
+
+        const final = leads.get('L1');
+        expect(final.syncStatus).toBe('skipped');
+        expect(final.syncReason).toBe('sf_terminal:repeat_inquiry_same_account');
+        expect(final.syncAttemptedAt).toBeInstanceOf(Date);
+        // No SF identity / status / outcome writes.
+        expect(final.sfJobId).toBeNull();
+        expect(final.sfCustomerId).toBeNull();
+        expect(final.sfLeadId).toBeNull();
+        expect(final.sfJobOutcome).toBeNull();
+        expect(final.status).toBe('new');           // status untouched
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+        expect(ls.writeSfJobOutcomeMirror).not.toHaveBeenCalled();
+        expect(updates).toHaveLength(1);
+      });
+
+      it("terminal_reason='marketplace_duplicate' → skipped + syncReason 'sf_terminal:marketplace_duplicate'", async () => {
+        const { prisma, leads } = buildPrisma({
+          leads: {
+            'L1': { id: 'L1', userId: 'U1', status: 'contacted', platform: 'yelp', sfJobId: null, syncStatus: 'pending' },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1',
+            match_type: 'terminal_skip',
+            terminal_reason: 'marketplace_duplicate',
+            sf_job_id: '',
+          }],
+        });
+        expect(r.summary.terminal_skip).toBe(1);
+        expect(r.rows[0].result).toBe('terminal_skip');
+        expect(leads.get('L1').syncStatus).toBe('skipped');
+        expect(leads.get('L1').syncReason).toBe('sf_terminal:marketplace_duplicate');
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+      });
+
+      it('idempotent retry: row already skipped with same syncReason → no DB write, response still terminal_skip', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': {
+              id: 'L1', userId: 'U1', status: 'new', platform: 'thumbtack', sfJobId: null,
+              syncStatus: 'skipped', syncReason: 'sf_terminal:repeat_inquiry_same_account',
+            },
+          },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'repeat_inquiry_same_account', sf_job_id: '',
+          }],
+        });
+        // Response carries terminal_skip with idempotent marker.
+        expect(r.summary.terminal_skip).toBe(1);
+        expect(r.rows[0].result).toBe('terminal_skip');
+        expect(r.rows[0].detail).toBe('idempotent_no_op');
+        // No DB write happened — updates list is empty.
+        expect(updates).toHaveLength(0);
+        // Row state unchanged.
+        expect(leads.get('L1').syncStatus).toBe('skipped');
+        expect(leads.get('L1').syncReason).toBe('sf_terminal:repeat_inquiry_same_account');
+      });
+
+      it('unknown terminal_reason rejected with result=failed', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', platform: 'thumbtack', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'made_up_reason' as any, sf_job_id: '',
+          }],
+        });
+        expect(r.summary.failed).toBe(1);
+        expect(r.summary.terminal_skip).toBe(0);
+        expect(r.rows[0].result).toBe('failed');
+        expect(r.rows[0].detail).toContain('terminal_skip_unknown_reason');
+        expect(r.rows[0].detail).toContain('made_up_reason');
+        // No DB write
+        expect(updates).toHaveLength(0);
+        expect(leads.get('L1').syncStatus).toBe('pending'); // unchanged
+      });
+
+      it('terminal_reason missing → failed', async () => {
+        const { prisma, updates } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{ lb_lead_id: 'L1', match_type: 'terminal_skip', sf_job_id: '' }],
+        });
+        expect(r.summary.failed).toBe(1);
+        expect(r.rows[0].detail).toContain('terminal_skip_unknown_reason:missing');
+        expect(updates).toHaveLength(0);
+      });
+
+      it('payload carrying sf_status rejected (no status mutation allowed on terminal_skip)', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'repeat_inquiry_same_account',
+            sf_job_id: '', sf_status: 'completed',
+          }],
+        });
+        expect(r.summary.failed).toBe(1);
+        expect(r.summary.terminal_skip).toBe(0);
+        expect(r.rows[0].result).toBe('failed');
+        expect(r.rows[0].detail).toBe('terminal_skip_status_mutation_forbidden');
+        // CRITICAL: no DB write, no writeStatus call — the rejection
+        // happens before any side effect.
+        expect(updates).toHaveLength(0);
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+        expect(leads.get('L1').syncStatus).toBe('pending');
+      });
+
+      it('payload carrying sf_payment_status also rejected', async () => {
+        const { prisma, updates } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'marketplace_duplicate',
+            sf_job_id: '', sf_payment_status: 'paid',
+          }],
+        });
+        expect(r.summary.failed).toBe(1);
+        expect(r.rows[0].detail).toBe('terminal_skip_status_mutation_forbidden');
+        expect(updates).toHaveLength(0);
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+      });
+
+      it('linked row protected — terminal_skip does NOT overwrite syncStatus=linked', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': { id: 'L1', userId: 'U1', status: 'completed', sfJobId: 'SF-A', sfCustomerId: 'C-1', syncStatus: 'linked' },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'repeat_inquiry_same_account', sf_job_id: '',
+          }],
+        });
+        expect(r.summary.conflict).toBe(1);
+        expect(r.summary.terminal_skip).toBe(0);
+        expect(r.rows[0].result).toBe('conflict');
+        expect(r.rows[0].detail).toBe('terminal_skip_protected:linked');
+        expect(r.rows[0].sync_status).toBe('linked');
+        // Row state unchanged
+        expect(leads.get('L1').syncStatus).toBe('linked');
+        expect(leads.get('L1').sfJobId).toBe('SF-A');
+        expect(leads.get('L1').sfCustomerId).toBe('C-1');
+        expect(updates).toHaveLength(0);
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+      });
+
+      it('lead_linked row protected — terminal_skip does NOT overwrite syncStatus=lead_linked', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': {
+              id: 'L1', userId: 'U1', status: 'engaged',
+              sfJobId: null, sfCustomerId: null,
+              sfLeadId: '107', sfLeadStageName: 'Contacted',
+              syncStatus: 'lead_linked',
+            },
+          },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'marketplace_duplicate', sf_job_id: '',
+          }],
+        });
+        expect(r.summary.conflict).toBe(1);
+        expect(r.rows[0].result).toBe('conflict');
+        expect(r.rows[0].detail).toBe('terminal_skip_protected:lead_linked');
+        expect(leads.get('L1').syncStatus).toBe('lead_linked'); // unchanged
+        expect(leads.get('L1').sfLeadId).toBe('107');           // unchanged
+        expect(updates).toHaveLength(0);
+      });
+
+      it('account_id in payload accepted but NOT stored (no Lead column today; logged for audit)', async () => {
+        const { prisma, leads, updates } = buildPrisma({
+          leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'repeat_inquiry_same_account',
+            account_id: 12345,
+            sf_job_id: '',
+          }],
+        });
+        // Trigger succeeded — no error from account_id presence.
+        expect(r.summary.terminal_skip).toBe(1);
+        expect(r.rows[0].result).toBe('terminal_skip');
+        // Only the 3 sync fields were written; nothing else (including
+        // no `account_id` column ending up on the update payload).
+        expect(updates).toHaveLength(1);
+        const allowedKeys = new Set(['syncStatus', 'syncReason', 'syncAttemptedAt']);
+        for (const k of Object.keys(updates[0].data)) {
+          expect(allowedKeys.has(k)).toBe(true);
+        }
+      });
+
+      it('idempotency check rejects WRONG existing syncReason — wrong reason → DB update fires', async () => {
+        // Already skipped, but for a DIFFERENT reason. New terminal_reason
+        // should overwrite the reason (still no DB write to status etc).
+        const { prisma, leads, updates } = buildPrisma({
+          leads: {
+            'L1': {
+              id: 'L1', userId: 'U1', status: 'new', sfJobId: null,
+              syncStatus: 'skipped', syncReason: 'terminal_lost_opt_out', // pre-existing different skip reason
+            },
+          },
+        });
+        const svc = new SfHistoricalSyncService(prisma, buildLeadStatus());
+        const r = await svc.applyBulkLink({
+          rows: [{
+            lb_lead_id: 'L1', match_type: 'terminal_skip',
+            terminal_reason: 'marketplace_duplicate', sf_job_id: '',
+          }],
+        });
+        // Idempotency check requires BOTH skipped + matching reason. Here
+        // reasons differ, so the write fires (SF's terminal classification
+        // takes precedence over the LB-side opt_out marker on this lead's
+        // SF reconciliation classification — Lead.lostReason is untouched).
+        expect(r.summary.terminal_skip).toBe(1);
+        expect(r.rows[0].detail).toBe('sf_terminal:marketplace_duplicate');
+        expect(leads.get('L1').syncReason).toBe('sf_terminal:marketplace_duplicate');
+        expect(updates).toHaveLength(1);
+      });
+
+      it('mixed batch: terminal_skip + customer_job + lead_only + invalid terminal_reason — each row routes independently', async () => {
+        const { prisma, leads } = buildPrisma({
+          leads: {
+            'TS1':  { id: 'TS1',  userId: 'U1', status: 'new',       platform: 'thumbtack', sfJobId: null, syncStatus: 'pending' },
+            'TS2':  { id: 'TS2',  userId: 'U1', status: 'contacted', platform: 'yelp',      sfJobId: null, syncStatus: 'pending' },
+            'CJ':   { id: 'CJ',   userId: 'U1', status: 'scheduled', platform: 'thumbtack', sfJobId: null, syncStatus: 'pending' },
+            'LO':   { id: 'LO',   userId: 'U1', status: 'engaged',   platform: 'thumbtack', sfJobId: null, syncStatus: 'pending' },
+            'BAD':  { id: 'BAD',  userId: 'U1', status: 'new',       platform: 'thumbtack', sfJobId: null, syncStatus: 'pending' },
+            'PROT': { id: 'PROT', userId: 'U1', status: 'completed', platform: 'thumbtack', sfJobId: 'SF-X', syncStatus: 'linked' },
+          },
+        });
+        const ls = buildLeadStatus(true);
+        const svc = new SfHistoricalSyncService(prisma, ls);
+        const r = await svc.applyBulkLink({
+          rows: [
+            { lb_lead_id: 'TS1',  match_type: 'terminal_skip', terminal_reason: 'repeat_inquiry_same_account', sf_job_id: '' },
+            { lb_lead_id: 'TS2',  match_type: 'terminal_skip', terminal_reason: 'marketplace_duplicate',       sf_job_id: '' },
+            { lb_lead_id: 'CJ',   match_type: 'customer_job',  sf_job_id: 'SF-CJ', sf_customer_id: 'C-CJ', confidence: 'high', match_basis: 'externalRequestId' },
+            { lb_lead_id: 'LO',   match_type: 'lead_only',     sf_lead_id: 999, sf_lead_stage_name: 'Contacted', sf_job_id: '', confidence: 'high', match_basis: 'phone_name' },
+            { lb_lead_id: 'BAD',  match_type: 'terminal_skip', terminal_reason: 'unknown' as any, sf_job_id: '' },
+            { lb_lead_id: 'PROT', match_type: 'terminal_skip', terminal_reason: 'repeat_inquiry_same_account', sf_job_id: '' },
+          ],
+        });
+        expect(r.summary.total).toBe(6);
+        expect(r.summary.terminal_skip).toBe(2);
+        expect(r.summary.linked).toBe(1);
+        expect(r.summary.lead_linked).toBe(1);
+        expect(r.summary.failed).toBe(1);   // BAD
+        expect(r.summary.conflict).toBe(1); // PROT (linked-protected)
+        expect(leads.get('TS1').syncStatus).toBe('skipped');
+        expect(leads.get('TS2').syncStatus).toBe('skipped');
+        expect(leads.get('CJ').syncStatus).toBe('linked');
+        expect(leads.get('LO').syncStatus).toBe('lead_linked');
+        expect(leads.get('BAD').syncStatus).toBe('pending');  // unchanged on failed
+        expect(leads.get('PROT').syncStatus).toBe('linked');  // protected
+        expect(leads.get('PROT').sfJobId).toBe('SF-X');       // protected
+        // writeStatus only invoked for the customer_job row that carried
+        // sf_status — but this row didn't carry sf_status, so 0 writeStatus calls.
+        expect(ls.writeStatus).not.toHaveBeenCalled();
+      });
+    });
+
     it('mixed batch: handles all outcomes in one call', async () => {
       const { prisma, leads } = buildPrisma({
         leads: {
