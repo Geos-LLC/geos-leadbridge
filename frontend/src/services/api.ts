@@ -1121,21 +1121,33 @@ export interface RoomStatsMetric {
 }
 
 /**
- * Outcome split — Conversion Rate + Active Lead Rate (2026-06-08).
- *   active = new + engaged (+ legal-but-inactive quoted, in_progress)
- *   won    = booked + completed (+ legacy 'scheduled')
- *   lost   = lost + cancelled + no_show + archived
- *   conversionRate  = won / (won + lost)
- *   activeLeadRate  = active / total
+ * Outcome split — marketplace-labelled KPIs.
+ *
+ *   Active card     ← new + engaged (+ legal-but-inactive quoted, in_progress)
+ *   Scheduled card  ← Lead.status = booked        (was "Booked"/"Won")
+ *   Done card       ← Lead.status = completed     (was "Completed"/"Won")
+ *   Lost card       ← Lead.status in {lost, no_show, archived}
+ *   Cancelled card  ← Lead.status = cancelled     (separated from Lost)
+ *
+ *   hireRate    = (scheduled + done) / (scheduled + done + lost + cancelled)
+ *   activeRate  = active / total
+ *
+ * `won`, `conversionRate`, `activeLeadRate` are kept as back-compat aliases
+ * over the same math.
  * Driven exclusively by Lead.status — raw platform statuses excluded.
  */
 export interface OutcomeBreakdown {
   active: number;
-  won: number;
+  scheduled: number;
+  done: number;
+  won: number;        // alias = scheduled + done
   lost: number;
+  cancelled: number;
   total: number;
-  conversionRate: number | null;
-  activeLeadRate: number | null;
+  hireRate: number | null;
+  conversionRate: number | null; // alias of hireRate
+  activeRate: number | null;
+  activeLeadRate: number | null; // alias of activeRate
 }
 
 export interface AnalyticsData {
@@ -1179,16 +1191,28 @@ export interface TimeSeriesPoint {
   period: string;
   label: string;
   total: number;
-  statuses: { [status: string]: number };
-  /** Active/won/lost breakdown for this bucket (canonical Lead.status). */
-  wonCount: number;
+  /**
+   * 5-bucket marketplace-aggregated counts, keyed by display label:
+   * Active / Scheduled / Done / Lost / Cancelled. Drives the stacked-bar
+   * segments on the Trends chart.
+   */
+  statuses: { [bucketLabel: string]: number };
   activeCount: number;
+  scheduledCount: number;
+  doneCount: number;
   lostCount: number;
+  cancelledCount: number;
+  /** Aggregate won = scheduledCount + doneCount. */
+  wonCount: number;
   /** Legacy alias for wonCount — kept for back-compat with older builds. */
   hiredCount: number;
-  /** won / (won + lost), null when no resolved leads in bucket. */
+  /** won / (won + lost + cancelled), null when no resolved leads in bucket. */
+  hireRate: number | null;
+  /** Legacy alias of hireRate. */
   conversionRate: number | null;
   /** active / total, null when bucket is empty. */
+  activeRate: number | null;
+  /** Legacy alias of activeRate. */
   activeLeadRate: number | null;
   avgBudget: number | null;
   totalBudget: number | null;
