@@ -107,6 +107,18 @@ export class NormalizedLead {
   // human attention (new leads, customer-responded leads, human-touched leads).
   isAutoHandled?: boolean;
 
+  // Lead activity badge — derived at query time from
+  // ThreadContext.conversationState + Lead.status. See
+  // src/conversation-context/activity-bucket.ts for the mapping.
+  // Null when Lead.status is terminal (booked/completed/lost/cancelled/...) —
+  // no secondary badge in those cases.
+  //
+  // 'engagement'      first contact / no customer reply yet
+  // 'ai_conversation' AI is actively replying
+  // 'follow_up'       waiting for the customer; sequence active
+  // 'human_handoff'   customer waiting on a human (visually urgent in UI)
+  activityBucket?: 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff' | null;
+
   // SF-connected mode signals. Derived (`isSfLinked`) computed via
   // `isSfLinkedLead` so the API contract uses the same predicate as the
   // status-write guards in LeadStatusService — single source of truth, no

@@ -74,6 +74,28 @@ describe('analytics status classification (2026-06-08)', () => {
         active: 0, scheduled: 0, done: 0, won: 0, lost: 0, cancelled: 0, total: 0,
         hireRate: null, conversionRate: null,
         activeRate: null, activeLeadRate: null,
+        activeBuckets: { engagement: 0, ai_conversation: 0, follow_up: 0, human_handoff: 0 },
+      });
+    });
+
+    it('passes activeBuckets through from opts', () => {
+      const r = computeOutcomeBreakdown(
+        [{ status: 'engaged', count: 100 }],
+        { activeBuckets: { engagement: 30, ai_conversation: 20, follow_up: 25, human_handoff: 25 } },
+      );
+      expect(r.active).toBe(100);
+      expect(r.activeBuckets).toEqual({
+        engagement: 30, ai_conversation: 20, follow_up: 25, human_handoff: 25,
+      });
+    });
+
+    it('zero-fills missing activeBuckets opt entries', () => {
+      const r = computeOutcomeBreakdown(
+        [{ status: 'engaged', count: 50 }],
+        { activeBuckets: { engagement: 50 } as any },
+      );
+      expect(r.activeBuckets).toEqual({
+        engagement: 50, ai_conversation: 0, follow_up: 0, human_handoff: 0,
       });
     });
 
