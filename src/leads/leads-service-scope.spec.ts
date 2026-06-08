@@ -33,6 +33,7 @@ function buildService(opts: {
     /* templatesService */ {} as any,
     /* analyticsService */ {} as any,
     /* conversationContext */ {} as any,
+    /* conversationRuntime */ {} as any,
     /* followUpEngine */ null,
     /* crmWebhookService */ null,
     /* trialService */ {} as any,
