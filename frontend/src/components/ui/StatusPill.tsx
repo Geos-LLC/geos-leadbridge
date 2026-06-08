@@ -22,15 +22,15 @@ const MAP: Record<Status, PillSpec> = {
   warning: { label: 'Warning', fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
   error:   { label: 'Error',   fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
   neutral: { label: '—',       fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
-  // Canonical (post-2026-06-08)
+  // Canonical group kinds — marketplace labels (Scheduled / Done).
   active:    { label: 'Active',    fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
-  booked:    { label: 'Booked',    fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
-  completed: { label: 'Completed', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  booked:    { label: 'Scheduled', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  completed: { label: 'Done',      fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
   lost:      { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
   // Retired kinds aliased to current canonical labels for back-compat:
-  scheduled:   { label: 'Booked',    fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  scheduled:   { label: 'Scheduled', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
   in_progress: { label: 'Active',    fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
-  done:        { label: 'Completed', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  done:        { label: 'Done',      fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
   no_hire:     { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
   archived:    { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
 };

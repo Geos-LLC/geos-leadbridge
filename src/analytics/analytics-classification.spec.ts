@@ -13,6 +13,7 @@ import {
   classifyStatus,
   computeOutcomeBreakdown,
   statusDisplayLabel,
+  statusBucketLabel,
   ACTIVE_STATUSES,
   WON_STATUSES,
   LOST_STATUSES,
@@ -69,87 +70,129 @@ describe('analytics status classification (2026-06-08)', () => {
   describe('computeOutcomeBreakdown', () => {
     it('produces zeros + null rates on empty input', () => {
       const r = computeOutcomeBreakdown([]);
-      expect(r).toEqual({
-        active: 0, won: 0, lost: 0, total: 0,
-        conversionRate: null, activeLeadRate: null,
+      expect(r).toMatchObject({
+        active: 0, scheduled: 0, done: 0, won: 0, lost: 0, cancelled: 0, total: 0,
+        hireRate: null, conversionRate: null,
+        activeRate: null, activeLeadRate: null,
       });
     });
 
-    it('matches the production sample (snapshot 2026-06-08 pre-migration)', () => {
-      // Production status distribution at the time the spec was written.
-      // After migration, contacted→engaged + scheduled→booked, but the
-      // resulting Conversion Rate is unchanged (the migration collapses
-      // synonyms within the same outcome class).
+    it('matches the production sample (post-migration distribution, marketplace buckets)', () => {
       const r = computeOutcomeBreakdown([
-        { status: 'new',       count: 758 },
-        { status: 'contacted', count: 88  }, // legacy synonym for engaged
-        { status: 'engaged',   count: 73  },
-        { status: 'booked',    count: 11  },
-        { status: 'scheduled', count: 4   }, // legacy synonym for booked
+        { status: 'new',       count: 763 },
+        { status: 'engaged',   count: 162 },
+        { status: 'booked',    count: 15  },
         { status: 'completed', count: 260 },
         { status: 'lost',      count: 1151 },
         { status: 'cancelled', count: 42  },
       ]);
-      const active = 758 + 88 + 73;       // 919
-      const won    = 11 + 4 + 260;        // 275
-      const lost   = 1151 + 42;           // 1193
-      const total  = active + won + lost; // 2387
-      const resolved = won + lost;        // 1468
-      expect(r.active).toBe(active);
-      expect(r.won).toBe(won);
-      expect(r.lost).toBe(lost);
-      expect(r.total).toBe(total);
-      expect(r.conversionRate).toBeCloseTo((won / resolved) * 100, 4);
-      expect(r.activeLeadRate).toBeCloseTo((active / total) * 100, 4);
-      // Sanity check on the absolute numbers the spec author was looking at:
-      expect(r.conversionRate).toBeCloseTo(18.7, 1);
-      expect(r.activeLeadRate).toBeCloseTo(38.5, 1);
+      expect(r.active).toBe(925);     // new + engaged
+      expect(r.scheduled).toBe(15);   // booked
+      expect(r.done).toBe(260);       // completed
+      expect(r.won).toBe(275);        // scheduled + done
+      expect(r.lost).toBe(1151);
+      expect(r.cancelled).toBe(42);
+      expect(r.total).toBe(2393);
+      // Hire Rate = won / (won + lost + cancelled) = 275 / 1468
+      expect(r.hireRate).toBeCloseTo(18.73, 1);
+      expect(r.conversionRate).toBe(r.hireRate);     // alias
+      expect(r.activeRate).toBeCloseTo(38.65, 1);    // 925 / 2393
+      expect(r.activeLeadRate).toBe(r.activeRate);   // alias
     });
 
-    it('drops unknown statuses from the won/active/lost split (does not silently absorb)', () => {
+    it('legacy-safe synonyms collapse correctly (contacted→active, scheduled-canonical→scheduled bucket)', () => {
+      const r = computeOutcomeBreakdown([
+        { status: 'contacted', count: 88 }, // legacy → Active
+        { status: 'engaged',   count: 74 },
+        { status: 'scheduled', count: 4  }, // legacy → Scheduled bucket (alongside booked)
+        { status: 'booked',    count: 11 },
+      ]);
+      expect(r.active).toBe(88 + 74);
+      expect(r.scheduled).toBe(4 + 11);
+      expect(r.won).toBe(15);
+    });
+
+    it('drops unknown statuses from the breakdown (does not silently absorb)', () => {
       const r = computeOutcomeBreakdown([
         { status: 'booked', count: 5 },
         { status: 'lost',   count: 5 },
         { status: 'made_up_status', count: 99 }, // unknown — excluded
       ]);
-      expect(r.won).toBe(5);
+      expect(r.scheduled).toBe(5);
       expect(r.lost).toBe(5);
+      expect(r.cancelled).toBe(0);
       expect(r.active).toBe(0);
       expect(r.total).toBe(10);                  // unknown NOT counted in total
-      expect(r.conversionRate).toBe(50);
-      expect(r.activeLeadRate).toBe(0);
+      expect(r.hireRate).toBe(50);
+      expect(r.activeRate).toBe(0);
     });
 
-    it('Conversion Rate denominator excludes active leads (spec rule 4A)', () => {
-      // 100 active, 10 won, 5 lost
+    it('Hire Rate denominator includes lost + cancelled but excludes active', () => {
+      // 100 active, 10 booked, 5 lost, 5 cancelled
       const r = computeOutcomeBreakdown([
-        { status: 'new',     count: 100 },
-        { status: 'booked',  count: 10 },
-        { status: 'lost',    count: 5 },
+        { status: 'new',       count: 100 },
+        { status: 'booked',    count: 10 },
+        { status: 'lost',      count: 5 },
+        { status: 'cancelled', count: 5 },
       ]);
-      // Conversion Rate should be 10 / (10 + 5) = 66.7%, not 10/115 ≈ 8.7%.
-      expect(r.conversionRate).toBeCloseTo(66.67, 1);
-      // Active Lead Rate should be 100 / 115 ≈ 87.0%
-      expect(r.activeLeadRate).toBeCloseTo(86.96, 1);
+      // Hire Rate = 10 / (10 + 5 + 5) = 50%
+      expect(r.hireRate).toBeCloseTo(50.0, 4);
+      // Active Rate = 100 / 120 ≈ 83.3%
+      expect(r.activeRate).toBeCloseTo(83.33, 1);
     });
 
-    it('returns null Conversion Rate when there are zero resolved leads', () => {
+    it('returns null Hire Rate when there are zero resolved leads', () => {
       const r = computeOutcomeBreakdown([{ status: 'new', count: 50 }]);
+      expect(r.hireRate).toBeNull();
       expect(r.conversionRate).toBeNull();
-      expect(r.activeLeadRate).toBe(100);
+      expect(r.activeRate).toBe(100);
     });
   });
 
-  describe('statusDisplayLabel', () => {
+  describe('statusBucketLabel — analytics 5-bucket aggregation', () => {
     it.each([
+      // Active bucket — granular pipeline statuses collapsed
+      ['new',         'Active'],
+      ['engaged',     'Active'],
+      ['contacted',   'Active'],   // legacy
+      ['quoted',      'Active'],
+      ['in_progress', 'Active'],
+      // Scheduled bucket
+      ['booked',      'Scheduled'],
+      ['scheduled',   'Scheduled'], // legacy
+      // Done bucket
+      ['completed',   'Done'],
+      // Cancelled is its own bucket (separated from Lost)
+      ['cancelled',   'Cancelled'],
+      // Lost bucket — terminal-not-won
+      ['lost',        'Lost'],
+      ['no_show',     'Lost'],
+      ['archived',    'Lost'],
+    ])('%s → %s', (s, bucket) => {
+      expect(statusBucketLabel(s)).toBe(bucket);
+    });
+
+    it('returns Unknown for nullish / empty / unknown', () => {
+      expect(statusBucketLabel(null)).toBe('Unknown');
+      expect(statusBucketLabel(undefined)).toBe('Unknown');
+      expect(statusBucketLabel('')).toBe('Unknown');
+      expect(statusBucketLabel('imaginary')).toBe('Unknown');
+    });
+  });
+
+  describe('statusDisplayLabel (granular per-lead pill labels)', () => {
+    it.each([
+      // Marketplace terminology — booked surfaces as "Scheduled",
+      // completed as "Done". new/engaged keep granular labels for the
+      // conversation view (analytics aggregates them via statusBucketLabel).
       ['new',         'New'],
       ['engaged',     'Engaged'],
-      ['contacted',   'Engaged'],   // legacy-safe label
+      ['contacted',   'Engaged'],     // legacy-safe label
       ['quoted',      'Quoted'],
       ['in_progress', 'In progress'],
-      ['booked',      'Booked'],
-      ['scheduled',   'Booked'],    // legacy-safe label
-      ['completed',   'Completed'],
+      ['booked',      'Scheduled'],
+      ['scheduled',   'Scheduled'],   // legacy-safe label
+      ['completed',   'Done'],
       ['lost',        'Lost'],
       ['cancelled',   'Cancelled'],
       ['no_show',     'No show'],

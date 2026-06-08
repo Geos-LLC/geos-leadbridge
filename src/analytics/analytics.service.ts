@@ -17,17 +17,39 @@ export interface TimeSeriesPoint {
   period: string;
   label: string;
   total: number;
-  statuses: { [status: string]: number };
-  // Count of leads in this bucket classified as 'won' (booked + completed +
-  // legacy scheduled). Kept as `wonCount` for clarity; `hiredCount` alias
-  // preserved for back-compat with older frontend builds.
-  wonCount: number;
-  hiredCount: number;
+  /**
+   * 5-bucket aggregate keyed by marketplace label
+   * (Active / Scheduled / Done / Lost / Cancelled). Drives the stacked-bar
+   * segments. Unknown statuses surface under their raw label.
+   */
+  statuses: { [bucketLabel: string]: number };
+  /** Active = new + engaged + quoted + in_progress (+ legacy contacted). */
   activeCount: number;
+  /** Scheduled = booked (+ legacy scheduled). */
+  scheduledCount: number;
+  /** Done = completed. */
+  doneCount: number;
+  /** Lost = lost + no_show + archived. */
   lostCount: number;
-  /** won / (won + lost), null when there are zero resolved leads. */
+  /** Cancelled = cancelled (separate from Lost). */
+  cancelledCount: number;
+  /**
+   * Aggregate won = scheduledCount + doneCount. Kept so the existing chart
+   * stacked-bar logic can read either fine-grained or aggregate.
+   */
+  wonCount: number;
+  /** Legacy alias of wonCount — pre-2026-06-08 frontend builds read this. */
+  hiredCount: number;
+  /**
+   * Hire Rate for this bucket: won / (won + lost + cancelled).
+   * Null when there are zero resolved leads in the bucket.
+   */
+  hireRate: number | null;
+  /** Legacy alias of hireRate. */
   conversionRate: number | null;
-  /** active / total, null when total is zero. */
+  /** active / total in the bucket; null when bucket is empty. */
+  activeRate: number | null;
+  /** Legacy alias of activeRate. */
   activeLeadRate: number | null;
   avgBudget: number | null;
   totalBudget: number | null;
@@ -86,19 +108,27 @@ export function classifyStatus(s: string | null | undefined): OutcomeClass {
   return 'unknown';
 }
 
-/** Human-readable label for canonical Lead.status values. */
+/**
+ * Granular display label for a canonical Lead.status — used on per-lead
+ * pills, conversation headers, and the Job Status detail panel where
+ * operators want to see the specific lifecycle position.
+ *
+ * Marketplace-friendly (Thumbtack/Yelp) terminology:
+ *   booked    → "Scheduled" (the lead is on the calendar)
+ *   completed → "Done"      (the job has been performed)
+ */
 export function statusDisplayLabel(s: string | null | undefined): string {
   if (!s) return 'Unknown';
   const lower = s.toLowerCase().trim();
   switch (lower) {
     case 'new':         return 'New';
     case 'engaged':     return 'Engaged';
-    case 'contacted':   return 'Engaged';       // legacy-safe
+    case 'contacted':   return 'Engaged';      // legacy-safe
     case 'quoted':      return 'Quoted';
     case 'in_progress': return 'In progress';
-    case 'booked':      return 'Booked';
-    case 'scheduled':   return 'Booked';        // legacy-safe
-    case 'completed':   return 'Completed';
+    case 'booked':      return 'Scheduled';
+    case 'scheduled':   return 'Scheduled';    // legacy-safe
+    case 'completed':   return 'Done';
     case 'lost':        return 'Lost';
     case 'cancelled':   return 'Cancelled';
     case 'no_show':     return 'No show';
@@ -107,25 +137,62 @@ export function statusDisplayLabel(s: string | null | undefined): string {
   }
 }
 
+/**
+ * 5-bucket aggregate label for analytics dashboards — collapses new/engaged
+ * (and other active sub-states) into a single "Active" segment so the
+ * Trends chart and KPI row read at the marketplace level rather than the
+ * canonical pipeline level.
+ *
+ *   Active     ← new, engaged, quoted, in_progress, contacted (legacy)
+ *   Scheduled  ← booked, scheduled (legacy)
+ *   Done       ← completed
+ *   Cancelled  ← cancelled                       (separated from Lost per UX spec)
+ *   Lost       ← lost, no_show, archived
+ */
+export type BucketLabel = 'Active' | 'Scheduled' | 'Done' | 'Cancelled' | 'Lost' | 'Unknown';
+
+export function statusBucketLabel(s: string | null | undefined): BucketLabel {
+  if (!s) return 'Unknown';
+  const lower = s.toLowerCase().trim();
+  if (lower === 'cancelled') return 'Cancelled';
+  if (lower === 'booked' || lower === 'scheduled') return 'Scheduled';
+  if (lower === 'completed') return 'Done';
+  if (LOST_STATUSES.has(lower)) return 'Lost';
+  if (ACTIVE_STATUSES.has(lower)) return 'Active';
+  return 'Unknown';
+}
+
 export function computeOutcomeBreakdown(rows: { status: string; count: number }[]): OutcomeBreakdown {
-  let active = 0, won = 0, lost = 0;
+  let active = 0, scheduled = 0, done = 0, lost = 0, cancelled = 0;
   for (const r of rows) {
+    const lower = (r.status ?? '').toLowerCase().trim();
+    if (lower === 'cancelled') { cancelled += r.count; continue; }
+    if (lower === 'booked' || lower === 'scheduled') { scheduled += r.count; continue; }
+    if (lower === 'completed') { done += r.count; continue; }
     switch (classifyStatus(r.status)) {
       case 'active': active += r.count; break;
-      case 'won':    won    += r.count; break;
       case 'lost':   lost   += r.count; break;
-      case 'unknown': break; // intentionally excluded — never silently absorbed
+      // 'won' is fully decomposed above into scheduled / done.
+      // 'unknown' is intentionally excluded — never silently absorbed.
     }
   }
-  const total = active + won + lost;
-  const resolved = won + lost;
+  const won = scheduled + done;
+  const total = active + scheduled + done + lost + cancelled;
+  const resolved = won + lost + cancelled;
+  const hireRate = resolved > 0 ? (won / resolved) * 100 : null;
+  const activeRate = total > 0 ? (active / total) * 100 : null;
   return {
     active,
+    scheduled,
+    done,
     won,
     lost,
+    cancelled,
     total,
-    conversionRate: resolved > 0 ? (won / resolved) * 100 : null,
-    activeLeadRate: total > 0 ? (active / total) * 100 : null,
+    hireRate,
+    conversionRate: hireRate,    // back-compat alias
+    activeRate,
+    activeLeadRate: activeRate,  // back-compat alias
   };
 }
 
@@ -360,9 +427,10 @@ export class AnalyticsService {
       dto.platform ?? null,
     );
 
-    // Pivot rows into one point per bucket. Each canonical status is shown
-    // under its display label (Engaged / Booked / Completed / Lost / etc.)
-    // and counted into the active / won / lost class for KPI math.
+    // Pivot rows into one point per bucket. Each canonical status is
+    // assigned to one of the 5 marketplace buckets — Active / Scheduled /
+    // Done / Lost / Cancelled — for both the stacked-bar `statuses` dict and
+    // the per-bucket KPI fields.
     const bucketMap = new Map<string, TimeSeriesPoint>();
     for (const row of rows) {
       const key = row.bucket.toISOString();
@@ -372,11 +440,16 @@ export class AnalyticsService {
           label: this.formatPeriodLabel(row.bucket, period as 'day' | 'week' | 'month' | 'year'),
           total: 0,
           statuses: {},
-          wonCount: 0,
-          hiredCount: 0, // alias of wonCount for legacy frontend
           activeCount: 0,
+          scheduledCount: 0,
+          doneCount: 0,
           lostCount: 0,
+          cancelledCount: 0,
+          wonCount: 0,
+          hiredCount: 0,
+          hireRate: null,
           conversionRate: null,
+          activeRate: null,
           activeLeadRate: null,
           avgBudget: row.avg_budget != null ? parseFloat(row.avg_budget) : null,
           totalBudget: row.total_budget != null ? parseFloat(row.total_budget) : null,
@@ -384,21 +457,29 @@ export class AnalyticsService {
       }
       const entry = bucketMap.get(key)!;
       const cnt = Number(row.cnt);
-      const display = statusDisplayLabel(row.job_status);
-      entry.statuses[display] = (entry.statuses[display] ?? 0) + cnt;
+      const bucket = statusBucketLabel(row.job_status);
+      entry.statuses[bucket] = (entry.statuses[bucket] ?? 0) + cnt;
       entry.total += cnt;
-      const klass = classifyStatus(row.job_status);
-      if (klass === 'won')    { entry.wonCount += cnt; entry.hiredCount += cnt; }
-      if (klass === 'active')   entry.activeCount += cnt;
-      if (klass === 'lost')     entry.lostCount += cnt;
-      // 'unknown' rows are excluded from the won/active/lost split — they
-      // still appear in `statuses` under their raw label and in `total`.
+      switch (bucket) {
+        case 'Active':    entry.activeCount    += cnt; break;
+        case 'Scheduled': entry.scheduledCount += cnt; break;
+        case 'Done':      entry.doneCount      += cnt; break;
+        case 'Lost':      entry.lostCount      += cnt; break;
+        case 'Cancelled': entry.cancelledCount += cnt; break;
+        // 'Unknown' rows still appear in `statuses` and `total` but
+        // are excluded from the Active / Scheduled / Done / Lost /
+        // Cancelled KPI fields — never silently absorbed.
+      }
     }
 
     for (const entry of bucketMap.values()) {
-      const resolved = entry.wonCount + entry.lostCount;
-      entry.conversionRate = resolved > 0 ? (entry.wonCount / resolved) * 100 : null;
-      entry.activeLeadRate = entry.total > 0 ? (entry.activeCount / entry.total) * 100 : null;
+      entry.wonCount = entry.scheduledCount + entry.doneCount;
+      entry.hiredCount = entry.wonCount;
+      const resolved = entry.wonCount + entry.lostCount + entry.cancelledCount;
+      entry.hireRate = resolved > 0 ? (entry.wonCount / resolved) * 100 : null;
+      entry.conversionRate = entry.hireRate;
+      entry.activeRate = entry.total > 0 ? (entry.activeCount / entry.total) * 100 : null;
+      entry.activeLeadRate = entry.activeRate;
     }
 
     return Array.from(bucketMap.values());
@@ -547,11 +628,12 @@ export class AnalyticsService {
     return filter;
   }
 
-  // Job Status Distribution — driven exclusively by canonical Lead.status.
-  // Raw platform statuses (thumbtackStatus, platformStatus) are excluded per
-  // 2026-06-08 spec rule 6. Each row carries the canonical status, its
-  // display label, and its outcome class (active/won/lost) so the UI can
-  // render colored badges + group totals without re-deriving the mapping.
+  // Job Status Distribution — aggregated to the 5 marketplace buckets
+  // (Active / Scheduled / Done / Lost / Cancelled) per the 2026-06-08 UX
+  // spec. new/engaged are intentionally collapsed into Active for the
+  // dashboard; per-lead pills continue to show the granular status via
+  // statusDisplayLabel. Driven exclusively by canonical Lead.status — raw
+  // platform statuses are excluded.
   private async getJobStatusDistribution(
     where: any,
   ): Promise<ServiceDetailDistribution[]> {
@@ -567,22 +649,26 @@ export class AnalyticsService {
         ...(where.createdAt && { createdAt: where.createdAt }),
       },
       _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
     });
 
-    const cleaned = rows
-      .map((r) => ({
-        raw: (r.status ?? '').toString().toLowerCase().trim(),
-        count: r._count.id,
-      }))
-      .filter((r) => r.raw !== '');
-
-    const total = cleaned.reduce((s, r) => s + r.count, 0);
-    return cleaned.map((r) => ({
-      name: statusDisplayLabel(r.raw),
-      count: r.count,
-      percentage: total > 0 ? (r.count / total) * 100 : 0,
-    }));
+    const bucketCounts = new Map<string, number>();
+    for (const r of rows) {
+      const raw = (r.status ?? '').toString().toLowerCase().trim();
+      if (!raw) continue;
+      const bucket = statusBucketLabel(raw);
+      if (bucket === 'Unknown') continue;
+      bucketCounts.set(bucket, (bucketCounts.get(bucket) ?? 0) + r._count.id);
+    }
+    const total = Array.from(bucketCounts.values()).reduce((s, n) => s + n, 0);
+    // Stable display order matching the KPI row.
+    const order: BucketLabel[] = ['Active', 'Scheduled', 'Done', 'Lost', 'Cancelled'];
+    return order
+      .filter((b) => (bucketCounts.get(b) ?? 0) > 0)
+      .map((b) => ({
+        name: b,
+        count: bucketCounts.get(b)!,
+        percentage: total > 0 ? (bucketCounts.get(b)! / total) * 100 : 0,
+      }));
   }
 
   // Outcome breakdown — active / won / lost split + Conversion Rate +
@@ -591,7 +677,7 @@ export class AnalyticsService {
   private async getOutcomes(where: any): Promise<OutcomeBreakdown> {
     const userId = where.userId;
     if (!userId) {
-      return { active: 0, won: 0, lost: 0, total: 0, conversionRate: null, activeLeadRate: null };
+      return computeOutcomeBreakdown([]);
     }
     const rows = await this.prisma.lead.groupBy({
       by: ['status'],

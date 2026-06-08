@@ -466,7 +466,7 @@ export function Analytics() {
               <TrendingUp size={14} style={{ color: 'var(--lb-accent)' }} />
               Trends over time
             </h3>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--lb-ink-5)' }}>Lead volume, revenue, and conversion rate by period</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--lb-ink-5)' }}>Lead volume, revenue, and hire rate by period</p>
           </div>
           {/* Period selector */}
           <div
@@ -507,20 +507,19 @@ export function Analytics() {
         </div>
 
         {(() => {
-          // Status colors (post-2026-06-08 simplification). Canonical Lead.status
-          // display labels: New / Engaged / Booked / Completed / Lost / Cancelled
-          // plus legal-but-inactive Quoted / In progress / No show / Archived.
+          // Status colors — marketplace bucket labels for the stacked bar.
+          // Trends time series aggregates Lead.status into 5 buckets:
+          //   Active (new + engaged + quoted + in_progress)
+          //   Scheduled (booked)
+          //   Done (completed)
+          //   Lost (lost + no_show + archived)
+          //   Cancelled (cancelled — separated from Lost)
           const STATUS_COLORS: Record<string, string> = {
-            'New':         '#3b82f6',   // active — blue
-            'Engaged':     '#6366f1',   // active — indigo
-            'Quoted':      '#8b5cf6',   // active — violet
-            'In progress': '#0ea5e9',   // active — sky
-            'Booked':      '#10b981',   // won — emerald
-            'Completed':   '#059669',   // won — emerald-dark
-            'Lost':        '#94a3b8',   // lost — slate
-            'Cancelled':   '#64748b',   // lost — slate-darker
-            'No show':     '#9ca3af',   // lost — gray
-            'Archived':    '#a1a1aa',   // lost — zinc
+            'Active':    '#3b82f6',  // blue
+            'Scheduled': '#10b981',  // emerald
+            'Done':      '#059669',  // emerald-dark
+            'Lost':      '#94a3b8',  // slate
+            'Cancelled': '#f97316',  // orange — distinct from Lost
           };
           const fallbackColors = ['#fb923c','#06b6d4','#f59e0b','#ec4899','#64748b'];
           const allStatuses = Array.from(
@@ -540,28 +539,26 @@ export function Analytics() {
             <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
           ) : (
             <>
-              {/* Summary strip — post-2026-06-08 KPIs:
-                  Total Leads / Won (booked + completed) /
-                  Conversion Rate (won / (won + lost)) /
-                  Active Lead Rate (active / total). Active = mid-funnel
-                  leads not yet resolved — kept distinct from Lost. */}
+              {/* Summary strip — marketplace KPIs.
+                  Hire Rate = (Scheduled + Done) / (Scheduled + Done + Lost + Cancelled)
+                  Scheduled and Done are surfaced as separate raw counts
+                  (no aggregate "Won" card per UX spec). */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 {(() => {
-                  const totalLeads  = tsData.reduce((s, r) => s + r.total, 0);
-                  const wonTotal    = tsData.reduce((s, r) => s + (r.wonCount    ?? r.hiredCount ?? 0), 0);
-                  const lostTotal   = tsData.reduce((s, r) => s + (r.lostCount   ?? 0), 0);
-                  const activeTotal = tsData.reduce((s, r) => s + (r.activeCount ?? 0), 0);
-                  const resolved = wonTotal + lostTotal;
+                  const totalLeads     = tsData.reduce((s, r) => s + r.total, 0);
+                  const scheduledTotal = tsData.reduce((s, r) => s + (r.scheduledCount ?? 0), 0);
+                  const doneTotal      = tsData.reduce((s, r) => s + (r.doneCount      ?? 0), 0);
+                  const lostTotal      = tsData.reduce((s, r) => s + (r.lostCount      ?? 0), 0);
+                  const cancelledTotal = tsData.reduce((s, r) => s + (r.cancelledCount ?? 0), 0);
+                  const wonTotal       = scheduledTotal + doneTotal;
+                  const resolved       = wonTotal + lostTotal + cancelledTotal;
                   return [
-                    { label: 'Total Leads', value: totalLeads.toString() },
-                    { label: 'Won (Booked + Completed)', value: wonTotal.toString() },
+                    { label: 'Total Leads',    value: totalLeads.toString() },
+                    { label: 'Scheduled',      value: scheduledTotal.toString() },
+                    { label: 'Done',           value: doneTotal.toString() },
                     {
-                      label: 'Conversion Rate',
+                      label: 'Hire Rate',
                       value: resolved > 0 ? `${((wonTotal / resolved) * 100).toFixed(1)}%` : '—',
-                    },
-                    {
-                      label: 'Active Lead Rate',
-                      value: totalLeads > 0 ? `${((activeTotal / totalLeads) * 100).toFixed(1)}%` : '—',
                     },
                   ];
                 })().map(({ label, value }) => (
@@ -601,7 +598,7 @@ export function Analytics() {
                   <Tooltip
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
                     formatter={(value: any, name: string | undefined) => {
-                      if (name === 'Conversion Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                      if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
                       if (name === '_total') return null as any;
                       return [value, name ?? ''];
                     }}
@@ -625,12 +622,15 @@ export function Analytics() {
                   <Line
                     yAxisId="right"
                     type="monotone"
-                    name="Conversion Rate"
+                    name="Hire Rate"
                     dataKey={(d: TimeSeriesPoint) => {
-                      // won / (won + lost) — null when no resolved leads.
-                      const won  = d.wonCount  ?? d.hiredCount ?? 0;
-                      const lost = d.lostCount ?? 0;
-                      const resolved = won + lost;
+                      // Hire Rate = won / (won + lost + cancelled). 0 when
+                      // no resolved leads in bucket (chart doesn't render
+                      // null cleanly; the empty-period gap is acceptable).
+                      const won       = d.wonCount       ?? 0;
+                      const lost      = d.lostCount      ?? 0;
+                      const cancelled = d.cancelledCount ?? 0;
+                      const resolved  = won + lost + cancelled;
                       return resolved > 0 ? (won / resolved) * 100 : 0;
                     }}
                     stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }}
@@ -694,19 +694,23 @@ export function Analytics() {
 
       {displayData ? (
         <>
-          {/* Outcome KPIs (2026-06-08 spec):
-              Conversion Rate = won / (won + lost) — only resolved leads in
-                denominator. Won and Lost are also surfaced as raw counts so
-                operators can see the underlying sample size.
-              Active Lead Rate = active / total — shows how much pipeline is
-                still unresolved. */}
+          {/* Outcome KPIs — marketplace terminology.
+              6 cards: Hire Rate, Active, Scheduled, Done, Lost, Cancelled.
+              Hire Rate = (Scheduled + Done) / (Scheduled + Done + Lost + Cancelled)
+              Active   = new + engaged (collapsed; granular labels remain on
+                         per-lead pills). */}
           {displayData.outcomes && (() => {
             const o = displayData.outcomes;
-            const cvr = o.conversionRate != null ? `${o.conversionRate.toFixed(1)}%` : '—';
-            const alr = o.activeLeadRate != null ? `${o.activeLeadRate.toFixed(1)}%` : '—';
+            // Tolerate legacy payload shape (older deploys returned only
+            // conversionRate/won) by falling back through aliases.
+            const hireRate = (o.hireRate ?? o.conversionRate);
+            const hireRateStr = hireRate != null ? `${hireRate.toFixed(1)}%` : '—';
+            const scheduled = o.scheduled ?? 0;
+            const done = o.done ?? 0;
+            const cancelled = o.cancelled ?? 0;
             return (
               <div
-                className="grid grid-cols-2 md:grid-cols-4"
+                className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
                 style={{
                   background: 'var(--lb-surface)',
                   border: '1px solid var(--lb-line)',
@@ -714,24 +718,35 @@ export function Analytics() {
                 }}
               >
                 <Kpi
-                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Conversion rate</span>}
-                  value={cvr}
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Hire rate</span>}
+                  value={hireRateStr}
                   loading={isUpdating}
                 />
                 <Kpi
-                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={12} /> Active lead rate</span>}
-                  value={alr}
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Active</span>}
+                  value={o.active}
                   loading={isUpdating}
                   muted
                 />
                 <Kpi
-                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Won leads</span>}
-                  value={o.won}
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Scheduled</span>}
+                  value={scheduled}
                   loading={isUpdating}
                 />
                 <Kpi
-                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Lost leads</span>}
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Done</span>}
+                  value={done}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Lost</span>}
                   value={o.lost}
+                  loading={isUpdating}
+                  muted
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Cancelled</span>}
+                  value={cancelled}
                   loading={isUpdating}
                   muted
                 />

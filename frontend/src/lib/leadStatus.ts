@@ -1,19 +1,19 @@
 /**
- * Lead status display helper.
+ * Lead status display helper — marketplace terminology.
  *
  * The backend stores canonical statuses (see src/leads/canonical-status.ts on
- * the server). After the 2026-06-08 status simplification, the UI groups them
- * into 4 outcome-aligned buckets that mirror the analytics classification:
+ * the server). The UI groups them into outcome-aligned buckets using the
+ * marketplace terms LB users know from Thumbtack / Yelp:
  *
- *   Active           = new / engaged (+ legacy contacted, plus quoted, in_progress)
- *   Booked           = booked      (+ legacy scheduled)
- *   Completed        = completed
- *   Lost             = lost / cancelled (+ no_show, archived)
+ *   Active     = new / engaged (+ legacy contacted, plus quoted, in_progress)
+ *   Scheduled  = booked        (+ legacy 'scheduled')
+ *   Done       = completed
+ *   Lost       = lost / cancelled (+ no_show, archived)
  *
- * The dedicated Archived UI bucket was retired — `archived` Lead.status rows
- * fold into Lost (matching Yelp's archive semantic which already mapped to
- * 'lost'). Raw platformStatus='archived' is still available as source data
- * but is not exposed through this helper.
+ * The Analytics dashboard surfaces Cancelled as a separate KPI card (it
+ * carries different operational meaning than Lost) — see Analytics.tsx. The
+ * `lost` group here keeps them together for filter / pill purposes where
+ * the distinction isn't surfaced.
  *
  * Legacy raw values (from older platform-sync writes) are mapped display-only
  * via LEGACY_DISPLAY_MAP — never stored back to the DB.
@@ -21,8 +21,8 @@
 
 export type StatusGroupId =
   | 'active'
-  | 'booked'
-  | 'completed'
+  | 'booked'        // id stays 'booked' (canonical Lead.status value); label is "Scheduled"
+  | 'completed'     // id stays 'completed' (canonical); label is "Done"
   | 'lost'
   | 'unknown';
 
@@ -37,9 +37,10 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
   // tolerated if any drift remains. 'quoted' and 'in_progress' are legal-but-
   // inactive canonical values that route here so they never render as "Lost".
   { id: 'active',    label: 'Active',    statuses: ['new', 'engaged', 'contacted', 'quoted', 'in_progress'] },
-  // 'scheduled' kept as legacy-safe synonym for booked.
-  { id: 'booked',    label: 'Booked',    statuses: ['booked', 'scheduled'] },
-  { id: 'completed', label: 'Completed', statuses: ['completed'] },
+  // booked → "Scheduled" in UX; 'scheduled' legacy synonym kept.
+  { id: 'booked',    label: 'Scheduled', statuses: ['booked', 'scheduled'] },
+  // completed → "Done" in UX.
+  { id: 'completed', label: 'Done',      statuses: ['completed'] },
   // archived/no_show fold into Lost — see leadStatus.ts header.
   { id: 'lost',      label: 'Lost',      statuses: ['lost', 'cancelled', 'no_show', 'archived'] },
 ];

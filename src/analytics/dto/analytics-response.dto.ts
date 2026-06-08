@@ -54,30 +54,55 @@ export interface AverageLeadPriceMetric {
 /**
  * Outcome split of all leads in the period.
  *
- * Classification (2026-06-08 status simplification):
- *   active = new + engaged + quoted + in_progress
- *   won    = booked + completed (+ legacy 'scheduled' / 'contacted' if present)
- *   lost   = lost + cancelled + no_show + archived
+ * Internal canonical Lead.status values vs marketplace-facing display:
+ *   new + engaged + quoted + in_progress  →  Active  (one card)
+ *   booked                                →  Scheduled
+ *   completed                             →  Done
+ *   lost  + no_show + archived            →  Lost
+ *   cancelled                             →  Cancelled  (separate card)
+ *
+ * `won` and `conversionRate` are kept as aggregate aliases over Scheduled +
+ * Done for back-compat; `hireRate` is the same value re-labelled with the
+ * marketplace term LB users expect.
  *
  * Driven exclusively by Lead.status — raw platform statuses (thumbtackStatus,
  * platformStatus) are NOT consulted for KPI math.
  */
 export interface OutcomeBreakdown {
   active: number;
+  /** Lead.status='booked' count — surfaces as the "Scheduled" KPI card. */
+  scheduled: number;
+  /** Lead.status='completed' count — surfaces as the "Done" KPI card. */
+  done: number;
+  /**
+   * Aggregate "won" = scheduled + done. Kept for back-compat with consumers
+   * built against the 2026-06-08 OutcomeBreakdown; new consumers should
+   * read scheduled / done directly.
+   */
   won: number;
+  /** Lead.status in {lost, no_show, archived}. */
   lost: number;
+  /** Lead.status='cancelled' — separated for the dedicated "Cancelled" card. */
+  cancelled: number;
   total: number;
   /**
-   * Conversion Rate (primary KPI):
-   *   won / (won + lost)
-   * Null when there are zero resolved leads (no won + no lost).
+   * Hire Rate (primary KPI, marketplace label):
+   *   (scheduled + done) / (scheduled + done + lost + cancelled)
+   * Null when there are zero resolved leads.
+   */
+  hireRate: number | null;
+  /**
+   * Legacy alias of hireRate — same value, kept for back-compat with any
+   * consumer built against the 2026-06-08 payload.
    */
   conversionRate: number | null;
   /**
-   * Active Lead Rate:
+   * Active Rate:
    *   active / total
    * Null when total is zero.
    */
+  activeRate: number | null;
+  /** Legacy alias of activeRate — kept for back-compat. */
   activeLeadRate: number | null;
 }
 
