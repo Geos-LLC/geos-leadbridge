@@ -47,7 +47,40 @@ const TERMINAL_LEAD_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Pure derivation: (ThreadContext.conversationState, Lead.status) → ActivityBucket | null.
+ * Optional message-timestamp signals used to refine stale TC states.
+ *
+ * When TC.conversationState says `customer_replied` or `human_handling`
+ * — both of which would otherwise map to `human_handoff` — but an outbound
+ * (AI or business) message has arrived AFTER the customer's last message,
+ * the TC state is stale: the operator already responded but the runtime
+ * never transitioned the state. We catch this here and rewrite the bucket
+ * to `follow_up` (business is latest) or `ai_conversation` (AI is latest).
+ *
+ * Without the override, ~30% of "Human Handoff" badges in production today
+ * are stale (operator replied days ago, TC never moved). The proper fix is
+ * in the conversation runtime; this is the targeted hotfix.
+ *
+ * Pass an empty `{}` (or omit) when timestamps aren't available — the
+ * helper falls through to the original mapping unchanged.
+ */
+export interface ActivityBucketContext {
+  lastCustomerMessageAt?: Date | string | number | null;
+  lastBusinessMessageAt?: Date | string | number | null;
+  lastAiMessageAt?: Date | string | number | null;
+}
+
+function tsOrZero(v: Date | string | number | null | undefined): number {
+  if (v == null) return 0;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  const d = new Date(v);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Pure derivation: (ThreadContext.conversationState, Lead.status, optional
+ * message timestamps) → ActivityBucket | null.
  *
  * Mapping (source of truth: §4 of the audit report):
  *
@@ -55,19 +88,18 @@ const TERMINAL_LEAD_STATUSES: ReadonlySet<string> = new Set([
  *   TC = ai_engaging                                → ai_conversation
  *   TC = awaiting_customer / deferred / long_silent → follow_up
  *   TC = customer_replied / human_handling          → human_handoff
+ *     ^ unless message timestamps in `context` show an outbound is newer
+ *       than the customer's last message — then `follow_up` (business newest)
+ *       or `ai_conversation` (AI newest). Stale-state hotfix.
  *   TC = new                                        → engagement
  *   TC = closed / opted_out / hired_elsewhere /
  *        booked_in_lb                                → null  (terminal TC; Lead.status should also be terminal)
- *   TC null, Lead.status = new                      → engagement   (cold lead, no conversation yet)
- *   TC null, Lead.status = engaged                  → engagement   (fallback; PR 3 may refine via message-history derivation)
- *
- * Future PR may inspect message history to disambiguate the
- * `TC null, Lead.status='engaged'` case (e.g., latest sender → AI vs human).
- * That refinement lives outside this function so this stays a pure mapping.
+ *   TC null, Lead.status = new or engaged           → engagement   (cold lead / fallback)
  */
 export function activityBucketFromThreadContext(
   tcState: ConversationState | string | null | undefined,
   leadStatus: string | null | undefined,
+  context: ActivityBucketContext = {},
 ): ActivityBucket | null {
   const status = (leadStatus ?? '').toLowerCase().trim();
   if (TERMINAL_LEAD_STATUSES.has(status)) return null;
@@ -76,6 +108,19 @@ export function activityBucketFromThreadContext(
     // Cold lead (no TC row yet, or TC exists with null state) — default to
     // engagement. Refinement via message history is a later PR.
     return 'engagement';
+  }
+
+  // Stale-state override for the two "customer is waiting" TC values.
+  // Apply only when we have a customer timestamp to compare against — the
+  // mapping is pure when no timestamps are passed.
+  if (tcState === 'customer_replied' || tcState === 'human_handling') {
+    const customer = tsOrZero(context.lastCustomerMessageAt);
+    const business = tsOrZero(context.lastBusinessMessageAt);
+    const ai       = tsOrZero(context.lastAiMessageAt);
+    if (customer > 0 && (business > customer || ai > customer)) {
+      // Outbound is newer → TC is stale.
+      return ai > business ? 'ai_conversation' : 'follow_up';
+    }
   }
 
   switch (tcState) {
