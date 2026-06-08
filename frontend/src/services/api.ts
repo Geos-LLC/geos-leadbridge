@@ -1136,6 +1136,24 @@ export interface RoomStatsMetric {
  * over the same math.
  * Driven exclusively by Lead.status — raw platform statuses excluded.
  */
+/**
+ * Sub-breakdown of the Active card. Derived from
+ * ThreadContext.conversationState + Lead.status. Sums to `active`.
+ *
+ *   engagement      first contact / no customer reply yet
+ *   ai_conversation AI is actively replying
+ *   follow_up       waiting for customer; sequence active
+ *   human_handoff   customer waiting on a human (visually urgent)
+ */
+export interface ActiveBuckets {
+  engagement: number;
+  ai_conversation: number;
+  follow_up: number;
+  human_handoff: number;
+}
+
+export type ActivityBucket = keyof ActiveBuckets;
+
 export interface OutcomeBreakdown {
   active: number;
   scheduled: number;
@@ -1144,6 +1162,7 @@ export interface OutcomeBreakdown {
   lost: number;
   cancelled: number;
   total: number;
+  activeBuckets?: ActiveBuckets;  // optional on the wire — older deploys omit
   hireRate: number | null;
   conversionRate: number | null; // alias of hireRate
   activeRate: number | null;

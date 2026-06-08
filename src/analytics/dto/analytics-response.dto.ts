@@ -86,6 +86,23 @@ export interface OutcomeBreakdown {
   cancelled: number;
   total: number;
   /**
+   * Sub-breakdown of the Active card derived from
+   * ThreadContext.conversationState + Lead.status.
+   *
+   *   engagement      — first contact / no customer reply yet
+   *   ai_conversation — AI is actively replying
+   *   follow_up       — waiting for the customer; sequence active
+   *   human_handoff   — customer waiting on a human (visually urgent)
+   *
+   * Sums to `active`. Driven by src/conversation-context/activity-bucket.ts.
+   */
+  activeBuckets: {
+    engagement: number;
+    ai_conversation: number;
+    follow_up: number;
+    human_handoff: number;
+  };
+  /**
    * Hire Rate (primary KPI, marketplace label):
    *   (scheduled + done) / (scheduled + done + lost + cancelled)
    * Null when there are zero resolved leads.

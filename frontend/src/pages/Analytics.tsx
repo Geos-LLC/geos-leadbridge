@@ -754,6 +754,76 @@ export function Analytics() {
             );
           })()}
 
+          {/* Active sub-bucket breakdown — derived from
+              ThreadContext.conversationState + Lead.status. Sums to the
+              Active KPI above. Human Handoff is visually urgent because
+              the customer is waiting on a human. */}
+          {displayData.outcomes?.activeBuckets && (() => {
+            const ab = displayData.outcomes!.activeBuckets!;
+            const total = ab.engagement + ab.ai_conversation + ab.follow_up + ab.human_handoff;
+            const subBuckets: { id: keyof typeof ab; label: string; color: string; urgent?: boolean }[] = [
+              { id: 'engagement',      label: 'Engagement',      color: '#3b82f6' },
+              { id: 'ai_conversation', label: 'AI Conversation', color: '#8b5cf6' },
+              { id: 'follow_up',       label: 'Follow-up',       color: '#06b6d4' },
+              { id: 'human_handoff',   label: 'Human Handoff',   color: '#ef4444', urgent: true },
+            ];
+            return (
+              <div
+                style={{
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 'var(--lb-radius-lg)',
+                  padding: '12px 16px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{
+                  fontSize: 11, color: 'var(--lb-ink-5)',
+                  textTransform: 'uppercase', letterSpacing: 0.06,
+                  fontFamily: 'var(--lb-font-mono)', fontWeight: 500,
+                }}>
+                  Active sub-buckets · {total} total
+                </div>
+                <div
+                  className="grid grid-cols-2 md:grid-cols-4"
+                  style={{ gap: 10 }}
+                >
+                  {subBuckets.map((sb) => {
+                    const n = ab[sb.id] ?? 0;
+                    return (
+                      <div
+                        key={sb.id}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--lb-radius)',
+                          background: sb.urgent && n > 0 ? '#fef2f2' : 'var(--lb-ink-10)',
+                          borderLeft: `3px solid ${sb.color}`,
+                        }}
+                      >
+                        <span style={{
+                          fontSize: 11, color: sb.urgent && n > 0 ? '#991b1b' : 'var(--lb-ink-5)',
+                          fontWeight: sb.urgent && n > 0 ? 600 : 500,
+                          fontFamily: 'var(--lb-font-mono)',
+                        }}>
+                          {sb.label}{sb.urgent && n > 0 ? '  ⚠' : ''}
+                        </span>
+                        <span style={{
+                          fontSize: 20, fontWeight: 700,
+                          color: sb.urgent && n > 0 ? '#991b1b' : 'var(--lb-ink-1)',
+                          letterSpacing: '-0.01em',
+                        }}>{n}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Summary KPIs — single bordered row.
               Adds Avg Lead Price (Thumbtack-only, hidden on all_yelp) and
               Avg Job Price (any platform, when there are won leads). */}

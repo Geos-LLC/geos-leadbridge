@@ -1915,6 +1915,48 @@ export function Messages() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       <StatusPill status={statusKind} label={statusLabel} />
+                      {/* Activity bucket — secondary badge under the main
+                          status pill. Derived server-side from
+                          ThreadContext.conversationState + Lead.status.
+                          Null on terminal Lead.status. Human Handoff is
+                          visually urgent (red) because the customer is
+                          waiting on a human. */}
+                      {(() => {
+                        const ab = (lead as any).activityBucket as
+                          | 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff'
+                          | null | undefined;
+                        if (!ab) return null;
+                        const labels = {
+                          engagement:      'Engagement',
+                          ai_conversation: 'AI Conv',
+                          follow_up:       'Follow-up',
+                          human_handoff:   'Handoff',
+                        } as const;
+                        const tones = {
+                          engagement:      { bg: '#eff6ff', fg: '#1e40af' },
+                          ai_conversation: { bg: '#f5f3ff', fg: '#6d28d9' },
+                          follow_up:       { bg: '#ecfeff', fg: '#0e7490' },
+                          human_handoff:   { bg: '#fef2f2', fg: '#991b1b' },
+                        } as const;
+                        const t = tones[ab];
+                        return (
+                          <span
+                            title={ab === 'human_handoff' ? 'Human Handoff — customer waiting' : labels[ab]}
+                            style={{
+                              fontSize: 9,
+                              fontWeight: ab === 'human_handoff' ? 700 : 600,
+                              letterSpacing: 0.04,
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              background: t.bg,
+                              color: t.fg,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            {labels[ab]}{ab === 'human_handoff' ? ' ⚠' : ''}
+                          </span>
+                        );
+                      })()}
                       {/* SF identity tag — keeps the inbox scannable. Priority
                           is structural (`if/else if`) so we never render both:
                           SF Customer (isSfLinked, indigo, primary) takes

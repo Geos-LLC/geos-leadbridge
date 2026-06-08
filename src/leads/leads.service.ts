@@ -29,6 +29,7 @@ import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
+import { activityBucketFromThreadContext } from '../conversation-context/activity-bucket';
 
 const LEAD_LIST_TTL_SECONDS = 30;
 const LEAD_DETAIL_TTL_SECONDS = 60;
@@ -229,7 +230,21 @@ export class LeadsService {
           throw new NotFoundException('Lead not found');
         }
 
-        return this.convertToNormalizedLead(lead);
+        const normalized = this.convertToNormalizedLead(lead);
+        // Single-lead path: resolve activityBucket via a focused TC lookup.
+        if (lead.threadId) {
+          const tc = await this.prisma.threadContext.findUnique({
+            where: { conversationId: lead.threadId },
+            select: { conversationState: true },
+          });
+          normalized.activityBucket = activityBucketFromThreadContext(
+            tc?.conversationState ?? null,
+            lead.status,
+          );
+        } else {
+          normalized.activityBucket = activityBucketFromThreadContext(null, lead.status);
+        }
+        return normalized;
       },
     );
   }
@@ -284,17 +299,26 @@ export class LeadsService {
 
       const leads = await this.prisma.lead.findMany(queryOptions);
 
+      const convIds = leads.map((l: any) => l.conversation?.id).filter(Boolean);
+
       // Compute isAutoHandled per conversation in a single distinct query —
       // far cheaper than expanding the messages include. We only need the set
       // of (sender, senderType) tuples that exist per conversation.
-      const autoHandledByConv = await this.computeAutoHandledFlags(
-        leads.map((l: any) => l.conversation?.id).filter(Boolean),
-      );
+      const autoHandledByConv = await this.computeAutoHandledFlags(convIds);
+
+      // Batched ThreadContext.conversationState lookup for activity-bucket
+      // derivation. Done as a separate query (not Prisma include) so the
+      // existing leads-list cache contract stays unchanged.
+      const tcStateByConvId = await this.loadTcStateByConvId(convIds);
 
       return leads.map((lead: any) => {
         const normalized = this.convertToNormalizedLead(lead);
         const convId = lead.conversation?.id;
         normalized.isAutoHandled = convId ? autoHandledByConv.get(convId) ?? false : false;
+        normalized.activityBucket = activityBucketFromThreadContext(
+          convId ? tcStateByConvId.get(convId) ?? null : null,
+          lead.status,
+        );
         return normalized;
       });
     };
@@ -1873,6 +1897,24 @@ export class LeadsService {
   // Past human/customer activity doesn't matter — only what's most recent.
   // The earlier presence-based rule hid almost nothing because every TT/Yelp
   // lead has a customer initial-inquiry message that disqualified it.
+  /**
+   * Batched lookup of ThreadContext.conversationState keyed by conversationId.
+   * Used by getCachedLeads to derive Lead.activityBucket without expanding
+   * the Prisma include (which would pollute the leads-list cache shape).
+   */
+  private async loadTcStateByConvId(
+    conversationIds: string[],
+  ): Promise<Map<string, string | null>> {
+    const map = new Map<string, string | null>();
+    if (conversationIds.length === 0) return map;
+    const rows = await this.prisma.threadContext.findMany({
+      where: { conversationId: { in: conversationIds } },
+      select: { conversationId: true, conversationState: true },
+    });
+    for (const r of rows) map.set(r.conversationId, r.conversationState ?? null);
+    return map;
+  }
+
   private async computeAutoHandledFlags(
     conversationIds: string[],
   ): Promise<Map<string, boolean>> {

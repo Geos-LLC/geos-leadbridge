@@ -12,6 +12,7 @@ import {
   ServiceDetailDistribution,
   OutcomeBreakdown,
 } from './dto/analytics-response.dto';
+import { activityBucketFromThreadContext } from '../conversation-context/activity-bucket';
 
 export interface TimeSeriesPoint {
   period: string;
@@ -162,7 +163,25 @@ export function statusBucketLabel(s: string | null | undefined): BucketLabel {
   return 'Unknown';
 }
 
-export function computeOutcomeBreakdown(rows: { status: string; count: number }[]): OutcomeBreakdown {
+/**
+ * Optional Active sub-bucket counts. When omitted the breakdown returns a
+ * zeroed `activeBuckets`. Callers that have joined ThreadContext can
+ * compute the per-bucket totals via activityBucketFromThreadContext and
+ * pass them through here.
+ */
+export interface ComputeOutcomeBreakdownOpts {
+  activeBuckets?: {
+    engagement?: number;
+    ai_conversation?: number;
+    follow_up?: number;
+    human_handoff?: number;
+  };
+}
+
+export function computeOutcomeBreakdown(
+  rows: { status: string; count: number }[],
+  opts: ComputeOutcomeBreakdownOpts = {},
+): OutcomeBreakdown {
   let active = 0, scheduled = 0, done = 0, lost = 0, cancelled = 0;
   for (const r of rows) {
     const lower = (r.status ?? '').toLowerCase().trim();
@@ -189,6 +208,12 @@ export function computeOutcomeBreakdown(rows: { status: string; count: number }[
     lost,
     cancelled,
     total,
+    activeBuckets: {
+      engagement:      opts.activeBuckets?.engagement      ?? 0,
+      ai_conversation: opts.activeBuckets?.ai_conversation ?? 0,
+      follow_up:       opts.activeBuckets?.follow_up       ?? 0,
+      human_handoff:   opts.activeBuckets?.human_handoff   ?? 0,
+    },
     hireRate,
     conversionRate: hireRate,    // back-compat alias
     activeRate,
@@ -674,24 +699,76 @@ export class AnalyticsService {
   // Outcome breakdown — active / won / lost split + Conversion Rate +
   // Active Lead Rate. Driven exclusively by canonical Lead.status; raw
   // platform statuses are excluded.
+  //
+  // The Active card is sub-bucketed via a second join against
+  // ThreadContext.conversationState. The mapping (TC → bucket) lives in
+  // src/conversation-context/activity-bucket.ts.
   private async getOutcomes(where: any): Promise<OutcomeBreakdown> {
     const userId = where.userId;
     if (!userId) {
       return computeOutcomeBreakdown([]);
     }
-    const rows = await this.prisma.lead.groupBy({
-      by: ['status'],
-      where: {
-        userId,
-        ...(where.businessId && { businessId: where.businessId }),
-        ...(where.platform && { platform: where.platform }),
-        ...(where.createdAt && { createdAt: where.createdAt }),
-      },
-      _count: { id: true },
-    });
+    const [rows, activeBuckets] = await Promise.all([
+      this.prisma.lead.groupBy({
+        by: ['status'],
+        where: {
+          userId,
+          ...(where.businessId && { businessId: where.businessId }),
+          ...(where.platform && { platform: where.platform }),
+          ...(where.createdAt && { createdAt: where.createdAt }),
+        },
+        _count: { id: true },
+      }),
+      this.getActiveBuckets(where),
+    ]);
     return computeOutcomeBreakdown(
       rows.map((r) => ({ status: (r.status ?? '').toString(), count: r._count.id })),
+      { activeBuckets },
     );
+  }
+
+  /**
+   * Active sub-bucket counts — joins Lead → ThreadContext on the active
+   * pool and applies `activityBucketFromThreadContext` per
+   * (lead.status × tc.conversationState) cell. Single raw SQL.
+   */
+  private async getActiveBuckets(where: any): Promise<{
+    engagement: number;
+    ai_conversation: number;
+    follow_up: number;
+    human_handoff: number;
+  }> {
+    const userId = where.userId;
+    const rows = await this.prisma.$queryRawUnsafe<Array<{
+      lead_status: string | null;
+      tc_state: string | null;
+      cnt: bigint;
+    }>>(
+      `SELECT l.status AS lead_status,
+              tc."conversationState" AS tc_state,
+              COUNT(*)::bigint AS cnt
+         FROM leads l
+         LEFT JOIN thread_contexts tc ON tc."conversationId" = l."threadId"
+        WHERE l."userId" = $1
+          AND ($2::text IS NULL OR l."businessId" = $2::text)
+          AND ($3::text IS NULL OR l."platform"   = $3::text)
+          AND ($4::timestamptz IS NULL OR l."createdAt" >= $4::timestamptz)
+          AND ($5::timestamptz IS NULL OR l."createdAt" <= $5::timestamptz)
+          AND LOWER(COALESCE(l.status, '')) IN ('new','engaged','contacted','quoted','in_progress')
+        GROUP BY l.status, tc."conversationState"`,
+      userId,
+      where.businessId ?? null,
+      where.platform ?? null,
+      where.createdAt?.gte ?? null,
+      where.createdAt?.lte ?? null,
+    );
+
+    const buckets = { engagement: 0, ai_conversation: 0, follow_up: 0, human_handoff: 0 };
+    for (const r of rows) {
+      const b = activityBucketFromThreadContext(r.tc_state, r.lead_status);
+      if (b) buckets[b] += Number(r.cnt);
+    }
+    return buckets;
   }
 
   // Category Distribution - Group by category field
