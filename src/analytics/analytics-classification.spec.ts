@@ -99,7 +99,7 @@ describe('analytics status classification (2026-06-08)', () => {
       });
     });
 
-    it('matches the production sample (post-migration distribution, marketplace buckets)', () => {
+    it('matches the production sample (pre-PR4 distribution, marketplace buckets)', () => {
       const r = computeOutcomeBreakdown([
         { status: 'new',       count: 763 },
         { status: 'engaged',   count: 162 },
@@ -115,11 +115,31 @@ describe('analytics status classification (2026-06-08)', () => {
       expect(r.lost).toBe(1151);
       expect(r.cancelled).toBe(42);
       expect(r.total).toBe(2393);
-      // Hire Rate = won / (won + lost + cancelled) = 275 / 1468
+      // Cumulative Hire Rate = won / (won + lost + cancelled + recoverable)
+      // pre-PR4: recoverable=0, so = 275/1468 = 18.73%
       expect(r.hireRate).toBeCloseTo(18.73, 1);
       expect(r.conversionRate).toBe(r.hireRate);     // alias
       expect(r.activeRate).toBeCloseTo(38.65, 1);    // 925 / 2393
       expect(r.activeLeadRate).toBe(r.activeRate);   // alias
+    });
+
+    it('headline Hire Rate is INVARIANT to the PR 4 migration (cumulative formula)', () => {
+      // Same business outcome as the row above, but post-PR4: 880
+      // recoverable rows moved lost → engaged. They stay in the
+      // cumulative denominator so the headline rate matches exactly.
+      const post = computeOutcomeBreakdown(
+        [
+          { status: 'new',       count: 763 },
+          { status: 'engaged',   count: 162 + 880 },  // flipped
+          { status: 'booked',    count: 15  },
+          { status: 'completed', count: 260 },
+          { status: 'lost',      count: 1151 - 880 }, // shrunk
+          { status: 'cancelled', count: 42  },
+        ],
+        { recoverable: 880 },
+      );
+      // 275 / (275 + 271 + 42 + 880) = 275/1468 = 18.73% — SAME as pre-PR4
+      expect(post.hireRate).toBeCloseTo(18.73, 1);
     });
 
     it('legacy-safe synonyms collapse correctly (contacted→active, scheduled-canonical→scheduled bucket)', () => {
@@ -149,7 +169,7 @@ describe('analytics status classification (2026-06-08)', () => {
       expect(r.activeRate).toBe(0);
     });
 
-    it('Hire Rate denominator includes lost + cancelled but excludes active', () => {
+    it('Hire Rate denominator (resolved-only) includes lost + cancelled + recoverable but excludes plain active', () => {
       // 100 active, 10 booked, 5 lost, 5 cancelled
       const r = computeOutcomeBreakdown([
         { status: 'new',       count: 100 },
