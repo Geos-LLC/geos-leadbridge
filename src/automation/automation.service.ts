@@ -1003,13 +1003,15 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(
             `[AUTOMATION] ✗ Auto-reply paused — ${manualReply.senderType} pro message within ${pauseMinutes}min via fuReEnrollDelay (msg=${manualReply.id} at=${manualReply.sentAt.toISOString()})`,
           );
-          // Phase 1: durable mirror of the recency-window pause. A human is
-          // handling this thread; surface that in the UI without making it
-          // re-run the 60-min Message query.
+          // Phase 1: durable mirror of the recency-window pause. The human
+          // has ALREADY REPLIED inside the pause window — we are now
+          // waiting for the customer, not for the human. Hence
+          // awaiting_customer (NOT human_handling, which is reserved for
+          // "customer wants live contact, no human reply yet").
           await this.conversationRuntime.setState(lead.threadId, {
             aiStatus: 'paused_human',
             aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
-            conversationState: 'human_handling',
+            conversationState: 'awaiting_customer',
             conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
           });
           await this.conversationRuntime.resolveHandoff(lead.threadId);

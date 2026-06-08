@@ -8,7 +8,12 @@ describe('mapStopReasonToRuntime', () => {
     ['classifier_agreed',            { aiStatus: 'stopped_booked',    conversationState: 'booked_in_lb' }],
     ['classifier_wants_live_contact',{ aiStatus: 'stopped_booked',    conversationState: 'human_handling' }],
     ['classifier_deferring',         { aiStatus: 'paused_deferral',   conversationState: 'deferred' }],
-    ['manual',                       { aiStatus: 'paused_human',      conversationState: 'human_handling' }],
+    // 'manual' = operator/dispatcher reply happened. After their reply we
+    // are waiting for the CUSTOMER, hence awaiting_customer. Reserved
+    // human_handling for the pre-reply state ("customer wants live contact,
+    // no human reply yet"). Fixed 2026-06-08 — bad TC values were leaving
+    // ~30% of "Human Handoff" badges stale on the inbox.
+    ['manual',                       { aiStatus: 'paused_human',      conversationState: 'awaiting_customer' }],
   ])('maps reason %s correctly', (reason, expected) => {
     const r = mapStopReasonToRuntime(reason);
     expect(r).not.toBeNull();
