@@ -34,6 +34,7 @@ const BADGE_TONES = {
   blue:   { bg: '#dbeafe', fg: '#2563eb' },
   orange: { bg: '#ffedd5', fg: '#ea580c' },
   rose:   { bg: '#ffe4e6', fg: '#e11d48' },
+  gray:   { bg: '#f1f5f9', fg: '#475569' },
 } as const;
 
 export type BadgeTone = keyof typeof BADGE_TONES;
