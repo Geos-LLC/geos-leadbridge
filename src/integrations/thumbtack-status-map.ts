@@ -8,15 +8,20 @@
  *
  * | Thumbtack raw                       | LB canonical |
  * |-------------------------------------|--------------|
- * | Active                              | contacted    |
- * | Not scheduled yet                   | contacted    |
+ * | Active                              | engaged      |
+ * | Not scheduled yet                   | engaged      |
  * | Hired / Job hired                   | booked       |
- * | Scheduled / Job scheduled           | scheduled    |
+ * | Scheduled / Job scheduled           | booked       |
  * | Job in progress / In progress       | in_progress  |
  * | Done / Job done                     | completed    |
  * | Not hired / No hire                 | lost         |
  * | Closed                              | lost         |
  * | Archived                            | archived     |
+ *
+ * Status simplification (2026-06-08): `contacted` collapsed into `engaged`,
+ * `scheduled` collapsed into `booked`. LB no longer distinguishes
+ * "scheduled but not yet booked" from "booked" — both are won-side terminal
+ * for KPIs. See plans/status-simplification-2026-06-08.md.
  *
  * The `Job …` variants are what the Thumbtack pro inbox actually renders for
  * post-hire states (verified in production audit logs — e.g. raw value "No
@@ -29,9 +34,8 @@
  */
 
 export type ThumbtackLbStatus =
-  | 'contacted'
+  | 'engaged'
   | 'booked'
-  | 'scheduled'
   | 'in_progress'
   | 'completed'
   | 'lost'
@@ -46,13 +50,12 @@ export function mapThumbtackToLbStatus(
   switch (lower) {
     case 'active':
     case 'not scheduled yet':
-      return 'contacted';
+      return 'engaged';
     case 'hired':
     case 'job hired':
-      return 'booked';
     case 'scheduled':
     case 'job scheduled':
-      return 'scheduled';
+      return 'booked';
     case 'in progress':
     case 'job in progress':
       return 'in_progress';

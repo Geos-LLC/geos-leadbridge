@@ -2,26 +2,28 @@ import { mapSfStatus, isSfTerminal } from './sf-status-map';
 
 describe('sf-status-map', () => {
   describe('mapSfStatus', () => {
-    it('maps SF pending → scheduled', () => {
-      expect(mapSfStatus('pending')).toBe('scheduled');
+    // Post-2026-06-08 status simplification: SF wire format unchanged
+    // (`pending` / `confirmed` / `rescheduled` / `scheduled` still emitted by
+    // SF), but LB collapses all of them — plus `booked` — to canonical
+    // `booked`. LB no longer distinguishes scheduled-not-yet-booked from
+    // booked.
+    it('maps SF pending → booked', () => {
+      expect(mapSfStatus('pending')).toBe('booked');
     });
 
-    it('maps SF confirmed → scheduled', () => {
-      expect(mapSfStatus('confirmed')).toBe('scheduled');
+    it('maps SF confirmed → booked', () => {
+      expect(mapSfStatus('confirmed')).toBe('booked');
     });
 
-    it('maps SF rescheduled → scheduled', () => {
-      expect(mapSfStatus('rescheduled')).toBe('scheduled');
+    it('maps SF rescheduled → booked', () => {
+      expect(mapSfStatus('rescheduled')).toBe('booked');
     });
 
-    // Issue #47 — SF emits literal lifecycle strings in connected mode.
-    // Prior to the fix these returned null and the receiver dropped the
-    // event as unmapped_status, leaving Lead.status='new' on linked leads.
-    it('maps SF scheduled → scheduled (literal lifecycle string)', () => {
-      expect(mapSfStatus('scheduled')).toBe('scheduled');
+    it('maps SF scheduled → booked (post-simplification)', () => {
+      expect(mapSfStatus('scheduled')).toBe('booked');
     });
 
-    it('maps SF booked → booked (literal lifecycle string)', () => {
+    it('maps SF booked → booked', () => {
       expect(mapSfStatus('booked')).toBe('booked');
     });
 
@@ -51,8 +53,8 @@ describe('sf-status-map', () => {
     });
 
     it('handles case variations', () => {
-      expect(mapSfStatus('PENDING')).toBe('scheduled');
-      expect(mapSfStatus('Confirmed')).toBe('scheduled');
+      expect(mapSfStatus('PENDING')).toBe('booked');
+      expect(mapSfStatus('Confirmed')).toBe('booked');
       expect(mapSfStatus(' CoMpLeTeD ')).toBe('completed');
     });
 
@@ -64,18 +66,17 @@ describe('sf-status-map', () => {
       expect(mapSfStatus(undefined)).toBeNull();
     });
 
-    it('passes through early-funnel values', () => {
+    it('passes through early-funnel values (contacted folds into engaged)', () => {
       expect(mapSfStatus('new')).toBe('new');
-      expect(mapSfStatus('contacted')).toBe('contacted');
+      expect(mapSfStatus('contacted')).toBe('engaged'); // legacy-safe collapse
       expect(mapSfStatus('engaged')).toBe('engaged');
       expect(mapSfStatus('quoted')).toBe('quoted');
     });
   });
 
   describe('isSfTerminal', () => {
-    it('treats booked / scheduled / in_progress / completed / cancelled / lost / archived as terminal', () => {
+    it('treats booked / in_progress / completed / cancelled / lost / archived as terminal', () => {
       expect(isSfTerminal('booked')).toBe(true);
-      expect(isSfTerminal('scheduled')).toBe(true);
       expect(isSfTerminal('in_progress')).toBe(true);
       expect(isSfTerminal('completed')).toBe(true);
       expect(isSfTerminal('cancelled')).toBe(true);
@@ -89,7 +90,6 @@ describe('sf-status-map', () => {
 
     it('does NOT treat early-funnel as terminal', () => {
       expect(isSfTerminal('new')).toBe(false);
-      expect(isSfTerminal('contacted')).toBe(false);
       expect(isSfTerminal('engaged')).toBe(false);
       expect(isSfTerminal('quoted')).toBe(false);
     });

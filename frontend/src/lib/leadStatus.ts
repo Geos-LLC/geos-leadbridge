@@ -2,15 +2,18 @@
  * Lead status display helper.
  *
  * The backend stores canonical statuses (see src/leads/canonical-status.ts on
- * the server). The UI groups them into 6 buckets so operators see a tighter
- * vocabulary than the engineering pipeline:
+ * the server). After the 2026-06-08 status simplification, the UI groups them
+ * into 4 outcome-aligned buckets that mirror the analytics classification:
  *
- *   Active         = new / contacted / engaged / quoted
- *   Scheduled      = booked / scheduled
- *   Job in progress = in_progress
- *   Done           = completed
- *   No hire        = lost / cancelled / no_show
- *   Archived       = archived
+ *   Active           = new / engaged (+ legacy contacted, plus quoted, in_progress)
+ *   Booked           = booked      (+ legacy scheduled)
+ *   Completed        = completed
+ *   Lost             = lost / cancelled (+ no_show, archived)
+ *
+ * The dedicated Archived UI bucket was retired — `archived` Lead.status rows
+ * fold into Lost (matching Yelp's archive semantic which already mapped to
+ * 'lost'). Raw platformStatus='archived' is still available as source data
+ * but is not exposed through this helper.
  *
  * Legacy raw values (from older platform-sync writes) are mapped display-only
  * via LEGACY_DISPLAY_MAP — never stored back to the DB.
@@ -18,11 +21,9 @@
 
 export type StatusGroupId =
   | 'active'
-  | 'scheduled'
-  | 'in_progress'
-  | 'done'
-  | 'no_hire'
-  | 'archived'
+  | 'booked'
+  | 'completed'
+  | 'lost'
   | 'unknown';
 
 export interface StatusGroup {
@@ -32,12 +33,15 @@ export interface StatusGroup {
 }
 
 export const STATUS_GROUPS: readonly StatusGroup[] = [
-  { id: 'active',       label: 'Active',           statuses: ['new', 'contacted', 'engaged', 'quoted'] },
-  { id: 'scheduled',    label: 'Scheduled',        statuses: ['booked', 'scheduled'] },
-  { id: 'in_progress',  label: 'Job in progress',  statuses: ['in_progress'] },
-  { id: 'done',         label: 'Done',             statuses: ['completed'] },
-  { id: 'no_hire',      label: 'No hire',          statuses: ['lost', 'cancelled', 'no_show'] },
-  { id: 'archived',     label: 'Archived',         statuses: ['archived'] },
+  // 'contacted' kept as legacy-safe — should be zero rows post-migration but
+  // tolerated if any drift remains. 'quoted' and 'in_progress' are legal-but-
+  // inactive canonical values that route here so they never render as "Lost".
+  { id: 'active',    label: 'Active',    statuses: ['new', 'engaged', 'contacted', 'quoted', 'in_progress'] },
+  // 'scheduled' kept as legacy-safe synonym for booked.
+  { id: 'booked',    label: 'Booked',    statuses: ['booked', 'scheduled'] },
+  { id: 'completed', label: 'Completed', statuses: ['completed'] },
+  // archived/no_show fold into Lost — see leadStatus.ts header.
+  { id: 'lost',      label: 'Lost',      statuses: ['lost', 'cancelled', 'no_show', 'archived'] },
 ];
 
 /**
@@ -61,7 +65,8 @@ export const LEGACY_DISPLAY_MAP: Readonly<Record<string, string>> = {
   active: 'new',
   picked: 'new',
   canceled: 'cancelled',
-  hired: 'scheduled',
+  // Post-simplification: hired/scheduled raw values both display as Booked.
+  hired: 'booked',
   done: 'completed',
   'not hired': 'lost',
   not_hired: 'lost',
@@ -94,16 +99,14 @@ export function displayLabel(status: string | null | undefined): string {
 
 /**
  * Maps a status to the StatusPill kind used elsewhere. New canonical kinds
- * (active/scheduled/in_progress/done/no_hire/archived) are added directly to
- * the pill component; this helper hands them back to callers.
+ * (active/booked/completed/lost) are added directly to the pill component;
+ * this helper hands them back to callers.
  */
 export type StatusPillKind =
   | 'active'
-  | 'scheduled'
-  | 'in_progress'
-  | 'done'
-  | 'no_hire'
-  | 'archived'
+  | 'booked'
+  | 'completed'
+  | 'lost'
   | 'neutral';
 
 export function displayPillKind(status: string | null | undefined): StatusPillKind {

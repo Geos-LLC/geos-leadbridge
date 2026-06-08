@@ -1125,7 +1125,10 @@ export class FollowUpEngineService {
         where: { id: enrollment.leadId },
         select: { status: true, statusSource: true },
       });
-      const sfTerminal = ['scheduled', 'in_progress', 'completed', 'cancelled', 'lost', 'archived'];
+      // 'scheduled' kept as legacy-safe — post-2026-06-08 SF inbound now writes
+      // 'booked' instead. no_show is intentionally NOT a hard stop (handled
+      // separately by the long-term-mode switch in the SF inbound service).
+      const sfTerminal = ['booked', 'scheduled', 'in_progress', 'completed', 'cancelled', 'lost', 'archived'];
       if (
         lead?.statusSource === 'service_flow' &&
         lead.status &&

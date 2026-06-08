@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 
 type Status =
-  // Legacy kinds — kept so existing call-sites compile while the codebase
-  // migrates to canonical group kinds.
-  | 'new' | 'replied' | 'quoted' | 'won' | 'lost'
+  // Legacy kinds — kept so existing call-sites compile.
+  | 'new' | 'replied' | 'quoted' | 'won'
   | 'warning' | 'error' | 'neutral'
-  // Canonical group kinds (mirrors STATUS_GROUPS in lib/leadStatus.ts).
-  | 'active' | 'scheduled' | 'in_progress' | 'done' | 'no_hire' | 'archived';
+  // Canonical group kinds (2026-06-08 simplification — mirrors STATUS_GROUPS
+  // in lib/leadStatus.ts: active / booked / completed / lost).
+  | 'active' | 'booked' | 'completed' | 'lost'
+  // Retired but still referenced by older call-sites — alias to current
+  // canonical kinds. Remove once no usages remain.
+  | 'scheduled' | 'in_progress' | 'done' | 'no_hire' | 'archived';
 
 interface PillSpec { label: string; fg: string; bg: string; dot: string; }
 
@@ -16,17 +19,20 @@ const MAP: Record<Status, PillSpec> = {
   replied: { label: 'Replied', fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
   quoted:  { label: 'Quoted',  fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
   won:     { label: 'Booked',  fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
-  lost:    { label: 'Lost',    fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
   warning: { label: 'Warning', fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
   error:   { label: 'Error',   fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
   neutral: { label: '—',       fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
-  // Canonical
-  active:      { label: 'Active',          fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
-  scheduled:   { label: 'Scheduled',       fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
-  in_progress: { label: 'Job in progress', fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
-  done:        { label: 'Done',            fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
-  no_hire:     { label: 'No hire',         fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
-  archived:    { label: 'Archived',        fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
+  // Canonical (post-2026-06-08)
+  active:    { label: 'Active',    fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
+  booked:    { label: 'Booked',    fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  completed: { label: 'Completed', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  lost:      { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
+  // Retired kinds aliased to current canonical labels for back-compat:
+  scheduled:   { label: 'Booked',    fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  in_progress: { label: 'Active',    fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
+  done:        { label: 'Completed', fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  no_hire:     { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
+  archived:    { label: 'Lost',      fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
 };
 
 interface StatusPillProps {

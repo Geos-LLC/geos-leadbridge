@@ -8,16 +8,20 @@
  *
  * | Yelp raw                    | LB canonical | Notes                  |
  * |-----------------------------|--------------|------------------------|
- * | Active                      | contacted    |                        |
+ * | Active                      | engaged      |                        |
  * | Quoted                      | quoted       |                        |
  * | Hired / Booked              | booked       |                        |
- * | Scheduled                   | scheduled    |                        |
+ * | Scheduled                   | booked       | post-simplification — was 'scheduled' |
  * | In progress                 | in_progress  |                        |
  * | Done                        | completed    |                        |
  * | Not hired                   | lost         | lostReason=hired_someone |
  * | Closed                      | lost         | lostReason=hired_someone |
  * | Archived                    | lost         | lostReason=hired_someone — Yelp "archived" is "the lead didn't pan out"; surfaces as "No hire" in the UI |
  * | Cancelled / Canceled        | cancelled    |                        |
+ *
+ * Status simplification (2026-06-08): `contacted` collapsed into `engaged`,
+ * `scheduled` collapsed into `booked`. See
+ * plans/status-simplification-2026-06-08.md.
  *
  * Unknown values return null — callers must still update platformStatus but
  * must NOT touch Lead.status. Keep this map narrow rather than guessing —
@@ -26,10 +30,9 @@
  */
 
 export type YelpLbStatus =
-  | 'contacted'
+  | 'engaged'
   | 'quoted'
   | 'booked'
-  | 'scheduled'
   | 'in_progress'
   | 'completed'
   | 'lost'
@@ -41,14 +44,13 @@ export function mapYelpToLbStatus(raw: string | null | undefined): YelpLbStatus 
 
   switch (lower) {
     case 'active':
-      return 'contacted';
+      return 'engaged';
     case 'quoted':
       return 'quoted';
     case 'hired':
     case 'booked':
-      return 'booked';
     case 'scheduled':
-      return 'scheduled';
+      return 'booked';
     case 'in progress':
       return 'in_progress';
     case 'done':

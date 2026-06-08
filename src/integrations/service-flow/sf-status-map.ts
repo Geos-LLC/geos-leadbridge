@@ -11,11 +11,9 @@
 
 export const LB_PIPELINE_STATUSES = [
   'new',
-  'contacted',
   'engaged',
   'quoted',
   'booked',
-  'scheduled',
   'in_progress',
   'completed',
   'cancelled',
@@ -31,14 +29,14 @@ export type LbPipelineStatus = (typeof LB_PIPELINE_STATUSES)[number];
  * when the canonical status lands on one of these.
  *
  * `booked` is included: once the deal is won, lead-nurturing follow-ups must
- * stop even if a calendar slot hasn't been set yet.
+ * stop even if a calendar slot hasn't been set yet. (`scheduled` was a
+ * pre-simplification synonym for booked; collapsed into booked 2026-06-08.)
  *
  * Note: no_show is handled separately; it triggers a switch to long-term mode
  * rather than a hard stop.
  */
 export const SF_TERMINAL_STATUSES: ReadonlyArray<LbPipelineStatus> = [
   'booked',
-  'scheduled',
   'in_progress',
   'completed',
   'cancelled',
@@ -56,14 +54,14 @@ export function mapSfStatus(raw: string | null | undefined): LbPipelineStatus | 
 
   switch (lower) {
     // SF in connected mode emits literal lifecycle strings (Wave 1B/1C).
-    // pending/confirmed/rescheduled are kept for back-compat with older SF
-    // payloads that haven't been migrated to the canonical vocabulary yet.
+    // pending/confirmed/rescheduled/scheduled all collapse to LB `booked`
+    // post-simplification (2026-06-08) — LB no longer distinguishes
+    // "scheduled but not yet booked" from "booked". SF wire format unchanged;
+    // only LB-side interpretation differs.
     case 'pending':
     case 'confirmed':
     case 'rescheduled':
     case 'scheduled':
-      return 'scheduled';
-
     case 'booked':
       return 'booked';
 
@@ -94,11 +92,11 @@ export function mapSfStatus(raw: string | null | undefined): LbPipelineStatus | 
     case 'lost':
       return 'lost';
 
-    // Early-funnel values from SF (if ever emitted) stay in early-funnel
+    // Early-funnel values from SF (if ever emitted). `contacted` is a
+    // pre-simplification SF value — collapses to canonical `engaged`.
     case 'new':
       return 'new';
     case 'contacted':
-      return 'contacted';
     case 'engaged':
       return 'engaged';
     case 'quoted':

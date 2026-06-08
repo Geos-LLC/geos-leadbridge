@@ -1120,6 +1120,24 @@ export interface RoomStatsMetric {
   minBathrooms: number;
 }
 
+/**
+ * Outcome split — Conversion Rate + Active Lead Rate (2026-06-08).
+ *   active = new + engaged (+ legal-but-inactive quoted, in_progress)
+ *   won    = booked + completed (+ legacy 'scheduled')
+ *   lost   = lost + cancelled + no_show + archived
+ *   conversionRate  = won / (won + lost)
+ *   activeLeadRate  = active / total
+ * Driven exclusively by Lead.status — raw platform statuses excluded.
+ */
+export interface OutcomeBreakdown {
+  active: number;
+  won: number;
+  lost: number;
+  total: number;
+  conversionRate: number | null;
+  activeLeadRate: number | null;
+}
+
 export interface AnalyticsData {
   categoryDistribution: CategoryDistribution[];
   connectionTime: ConnectionTimeMetric;
@@ -1128,8 +1146,9 @@ export interface AnalyticsData {
   messagesPerLead: MessagesPerLeadMetric;
   customerEngagement: CustomerEngagementMetric;
   totalLeads: number;
+  outcomes?: OutcomeBreakdown;
 
-  // Job status from Thumbtack UI
+  // Job status counts by canonical Lead.status, display-labeled.
   jobStatusDistribution?: ServiceDetailDistribution[];
 
   // When the last lead was synced (extension or webhook)
@@ -1161,8 +1180,16 @@ export interface TimeSeriesPoint {
   label: string;
   total: number;
   statuses: { [status: string]: number };
+  /** Active/won/lost breakdown for this bucket (canonical Lead.status). */
+  wonCount: number;
+  activeCount: number;
+  lostCount: number;
+  /** Legacy alias for wonCount — kept for back-compat with older builds. */
   hiredCount: number;
-  conversionRate: number;
+  /** won / (won + lost), null when no resolved leads in bucket. */
+  conversionRate: number | null;
+  /** active / total, null when bucket is empty. */
+  activeLeadRate: number | null;
   avgBudget: number | null;
   totalBudget: number | null;
 }

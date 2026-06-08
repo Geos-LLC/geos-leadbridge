@@ -5,17 +5,10 @@
 
 import { IsString, IsOptional, IsNumber, IsDate, IsEnum, IsBoolean } from 'class-validator';
 
-// ==========================================
-// Lead Status Enum
-// ==========================================
-
-export enum LeadStatus {
-  NEW = 'new',
-  CONTACTED = 'contacted',
-  QUOTED = 'quoted',
-  BOOKED = 'booked',
-  LOST = 'lost',
-}
+// LeadStatus enum removed 2026-06-08 — was stale (only 5 of the 10 canonical
+// values, included pre-simplification `contacted`) and had zero call sites.
+// Canonical statuses live in src/leads/canonical-status.ts; see also
+// src/integrations/{thumbtack,yelp,service-flow/sf}-status-map.ts.
 
 // ==========================================
 // Normalized Lead
