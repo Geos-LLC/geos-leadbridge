@@ -1030,25 +1030,46 @@ export class LeadsService {
         data: { lastMessageAt: new Date() },
       });
 
-      // A manual dispatcher/operator reply resolves any open handoff and flips
-      // the runtime to paused_human — mirrors the pause-window path in
-      // automation.service.ts handleCustomerReply (~line 1009). Without this,
-      // the "Handoff requested — please reply" banner stays up until the next
-      // customer message triggers handleCustomerReply (incident: Jessica
-      // Beasley 2026-06-08 — dispatcher quoted but banner persisted).
-      // AI sends are intentionally skipped: automation owns runtime state for
-      // those, and may re-raise handoff via the classifier post-send.
+      // Every outbound send transitions conversationState because TC.state
+      // is the source of truth that drives the Active sub-bucket badge
+      // (engagement / ai_conversation / follow_up / human_handoff). Without
+      // these writes the state stayed stuck at customer_replied or
+      // human_handling and ~30% of "Human Handoff" badges in production
+      // were stale (operator replied days ago, badge still red).
+      //
+      // user/manual sends:
+      //   - Resolve any open handoff (mirrors Jessica Beasley 2026-06-08 fix).
+      //   - aiStatus = paused_human (human is on the case; pause AI auto-reply).
+      //   - conversationState = awaiting_customer  ← NOT human_handling.
+      //     human_handling means "customer wants a human, no reply yet"; once
+      //     the human has SENT a reply we are waiting for the customer, not
+      //     the other way around.
+      //
+      // ai sends:
+      //   - conversationState = ai_engaging (AI is actively replying;
+      //     awaiting customer). Without this the state stayed customer_replied
+      //     forever and badges read "Handoff ⚠" on a thread the AI is
+      //     happily handling.
       if (senderType === 'user') {
         try {
           await this.conversationRuntime.resolveHandoff(conversation.id);
           await this.conversationRuntime.setState(conversation.id, {
             aiStatus: 'paused_human',
             aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
-            conversationState: 'human_handling',
+            conversationState: 'awaiting_customer',
             conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
           });
         } catch (err: any) {
           this.logger.warn(`[LeadsService] resolveHandoff/setState failed for conversation ${conversation.id}: ${err.message}`);
+        }
+      } else if (senderType === 'ai') {
+        try {
+          await this.conversationRuntime.setState(conversation.id, {
+            conversationState: 'ai_engaging',
+            conversationStateReason: CONVERSATION_STATE_REASONS.AI_REPLIED,
+          });
+        } catch (err: any) {
+          this.logger.warn(`[LeadsService] AI setState failed for conversation ${conversation.id}: ${err.message}`);
         }
       }
 

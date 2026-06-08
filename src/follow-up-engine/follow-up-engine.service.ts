@@ -95,12 +95,14 @@ export function mapStopReasonToRuntime(reason: string): {
     };
   }
 
-  // Operator manually stopped the sequence.
+  // Operator manually stopped the sequence — a manual reply happened, so
+  // we're now waiting for the customer. NOT human_handling (which is
+  // reserved for "customer wants a human, no human reply yet").
   if (r === 'manual') {
     return {
       aiStatus: 'paused_human',
       aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
-      conversationState: 'human_handling',
+      conversationState: 'awaiting_customer',
       conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
     };
   }
