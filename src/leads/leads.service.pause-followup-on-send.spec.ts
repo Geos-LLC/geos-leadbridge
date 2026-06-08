@@ -119,6 +119,7 @@ function buildService({ externalMessageId = PLATFORM_MSG_ID as string | null, fo
     stubsAny, // templatesService
     stubsAny, // analyticsService
     conversationContext,
+    stubsAny, // conversationRuntime
     followUpEngine, // <-- the dependency under test
     null, // crmWebhookService
     trialService,

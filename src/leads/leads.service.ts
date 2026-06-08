@@ -13,6 +13,11 @@ import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { ConversationRuntimeService } from '../conversation-context/conversation-runtime.service';
+import {
+  AI_STATUS_REASONS,
+  CONVERSATION_STATE_REASONS,
+} from '../conversation-context/conversation-runtime';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { LeadStatusService } from './lead-status.service';
@@ -109,6 +114,7 @@ export class LeadsService {
     private templatesService: TemplatesService,
     private analyticsService: AnalyticsService,
     private conversationContext: ConversationContextService,
+    private conversationRuntime: ConversationRuntimeService,
     @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
     @Optional() @Inject(CrmWebhookService) private crmWebhookService: CrmWebhookService | null,
     private trialService: TrialService,
@@ -999,6 +1005,28 @@ export class LeadsService {
         where: { id: conversation.id },
         data: { lastMessageAt: new Date() },
       });
+
+      // A manual dispatcher/operator reply resolves any open handoff and flips
+      // the runtime to paused_human — mirrors the pause-window path in
+      // automation.service.ts handleCustomerReply (~line 1009). Without this,
+      // the "Handoff requested — please reply" banner stays up until the next
+      // customer message triggers handleCustomerReply (incident: Jessica
+      // Beasley 2026-06-08 — dispatcher quoted but banner persisted).
+      // AI sends are intentionally skipped: automation owns runtime state for
+      // those, and may re-raise handoff via the classifier post-send.
+      if (senderType === 'user') {
+        try {
+          await this.conversationRuntime.resolveHandoff(conversation.id);
+          await this.conversationRuntime.setState(conversation.id, {
+            aiStatus: 'paused_human',
+            aiStatusReason: AI_STATUS_REASONS.MANUAL_REPLY_WINDOW,
+            conversationState: 'human_handling',
+            conversationStateReason: CONVERSATION_STATE_REASONS.MANUAL_REPLY,
+          });
+        } catch (err: any) {
+          this.logger.warn(`[LeadsService] resolveHandoff/setState failed for conversation ${conversation.id}: ${err.message}`);
+        }
+      }
 
       // Trial meter lives at the inbound webhook layer now — see
       // WebhooksService.handleNegotiationCreated / handleMessageCreated /

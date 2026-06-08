@@ -38,6 +38,7 @@ function makeSvc(prisma: any) {
     {} as any, // templatesService
     {} as any, // analyticsService
     {} as any, // conversationContext
+    {} as any, // conversationRuntime
     null,      // followUpEngine (optional)
     null,      // crmWebhookService (optional)
     {} as any, // trialService

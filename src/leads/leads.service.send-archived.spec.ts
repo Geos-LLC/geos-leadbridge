@@ -85,6 +85,7 @@ function buildService(opts: { platform: 'yelp' | 'thumbtack' }) {
     stubsAny, // templatesService
     stubsAny, // analyticsService
     stubsAny, // conversationContext
+    stubsAny, // conversationRuntime
     null, // followUpEngine (optional)
     null, // crmWebhookService (optional)
     trialService,
