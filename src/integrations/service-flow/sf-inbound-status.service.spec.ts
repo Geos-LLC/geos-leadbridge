@@ -112,7 +112,7 @@ function okLead(overrides: Partial<any> = {}) {
     id: LEAD_ID,
     userId: USER_ID,
     threadId: CONV_ID,
-    status: 'contacted',
+    status: 'engaged',
     // Fields read by the enrichment helper. Tests that exercise the response
     // shape rely on these being populated; tests that don't are unaffected.
     platform: 'yelp',
@@ -293,7 +293,7 @@ describe('SfInboundStatusService', () => {
         expect(r.httpStatus).toBe(200);
         expect(r.result).toBe('applied');
         expect(leadStatus.writeStatus).toHaveBeenCalledWith(
-          expect.objectContaining({ newStatus: 'scheduled', source: 'service_flow' }),
+          expect.objectContaining({ newStatus: 'booked', source: 'service_flow' }),
         );
       },
     );
@@ -311,7 +311,7 @@ describe('SfInboundStatusService', () => {
       leadStatus.writeStatus.mockResolvedValueOnce({
         leadId: LEAD_ID,
         applied: false,
-        status: 'scheduled',
+        status: 'booked',
         platformStatus: null,
         conflict: null,
         auditLogId: null,
@@ -426,7 +426,7 @@ describe('SfInboundStatusService', () => {
     it('primary job — status update flows through writeStatus', async () => {
       // Lead has sfJobId === incoming payload.sf_job_id → guard does NOT trip.
       prisma.lead.findFirst.mockResolvedValue(
-        okLead({ sfJobId: PRIMARY_JOB, status: 'contacted' }),
+        okLead({ sfJobId: PRIMARY_JOB, status: 'engaged' }),
       );
 
       const r = await service.process(
@@ -475,7 +475,7 @@ describe('SfInboundStatusService', () => {
       const jobs = [PRIMARY_JOB, 'sfjob-r2', 'sfjob-r3', 'sfjob-r4', 'sfjob-r5'];
       for (const jobId of jobs) {
         prisma.lead.findFirst.mockResolvedValueOnce(
-          okLead({ sfJobId: PRIMARY_JOB, status: 'contacted' }),
+          okLead({ sfJobId: PRIMARY_JOB, status: 'engaged' }),
         );
         const newStatus = jobId === PRIMARY_JOB ? 'completed' : 'confirmed';
         await service.process(
@@ -583,7 +583,7 @@ describe('SfInboundStatusService', () => {
       expect(leadStatus.writeStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           leadId: LEAD_ID,
-          newStatus: 'scheduled',
+          newStatus: 'booked',
           source: 'service_flow',
         }),
       );
@@ -610,7 +610,7 @@ describe('SfInboundStatusService', () => {
 
     it('SF in_progress payload on linked contacted lead → writeStatus(in_progress)', async () => {
       prisma.lead.findFirst.mockResolvedValue(
-        okLead({ status: 'contacted', sfJobId: JOB_ID }),
+        okLead({ status: 'engaged', sfJobId: JOB_ID }),
       );
 
       const r = await service.process(
@@ -626,7 +626,7 @@ describe('SfInboundStatusService', () => {
 
     it('SF completed payload on linked scheduled lead → writeStatus(completed) + stops follow-ups', async () => {
       prisma.lead.findFirst.mockResolvedValue(
-        okLead({ status: 'scheduled', sfJobId: JOB_ID }),
+        okLead({ status: 'booked', sfJobId: JOB_ID }),
       );
       prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-Z' }]);
 
@@ -695,7 +695,7 @@ describe('SfInboundStatusService', () => {
 
   describe('process — write + reaction', () => {
     it('writes Lead.status via LeadStatusService + records inbound event (applied)', async () => {
-      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted' }));
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'engaged' }));
 
       const r = await service.process(basePayload({ status: { new: 'completed' } }), {
         id: SUB_ID, userId: USER_ID,
@@ -729,7 +729,7 @@ describe('SfInboundStatusService', () => {
       leadStatus.writeStatus.mockResolvedValueOnce({
         leadId: LEAD_ID,
         applied: false,
-        status: 'contacted',
+        status: 'engaged',
         platformStatus: null,
         conflict: null,
         auditLogId: null,
@@ -754,7 +754,7 @@ describe('SfInboundStatusService', () => {
       leadStatus.writeStatus.mockResolvedValueOnce({
         leadId: LEAD_ID,
         applied: false,
-        status: 'contacted',
+        status: 'engaged',
         platformStatus: null,
         conflict: null,
         auditLogId: null,
@@ -771,7 +771,7 @@ describe('SfInboundStatusService', () => {
       leadStatus.writeStatus.mockResolvedValueOnce({
         leadId: LEAD_ID,
         applied: false,
-        status: 'contacted',
+        status: 'engaged',
         platformStatus: null,
         conflict: null,
         auditLogId: null,
@@ -863,12 +863,12 @@ describe('SfInboundStatusService', () => {
 
     it('stale (stale_event from writeStatus) returns skipReason + currentStatus', async () => {
       prisma.lead.findFirst.mockResolvedValue(
-        okLead({ status: 'scheduled', platformStatus: 'Scheduled', platform: 'thumbtack' }),
+        okLead({ status: 'booked', platformStatus: 'Scheduled', platform: 'thumbtack' }),
       );
       leadStatus.writeStatus.mockResolvedValueOnce({
         leadId: LEAD_ID,
         applied: false,
-        status: 'scheduled',
+        status: 'booked',
         platformStatus: 'Scheduled',
         conflict: null,
         auditLogId: null,
@@ -879,7 +879,7 @@ describe('SfInboundStatusService', () => {
 
       expect(r.result).toBe('stale');
       expect(r.skipReason).toBe('stale_event');
-      expect(r.currentStatus).toBe('scheduled');
+      expect(r.currentStatus).toBe('booked');
       expect(r.currentPlatformStatus).toBe('Scheduled');
       expect(r.platform).toBe('thumbtack');
     });
@@ -933,7 +933,7 @@ describe('SfInboundStatusService', () => {
       // guard passes through to the loop guard (the situation under test).
       prisma.lead.findFirst.mockResolvedValue(
         okLead({
-          status: 'scheduled',
+          status: 'booked',
           platformStatus: 'Hired',
           statusSource: 'service_flow',
           sfLastEventAt: past,
@@ -948,7 +948,7 @@ describe('SfInboundStatusService', () => {
 
       expect(r.result).toBe('stale');
       expect(r.skipReason).toBe('older_than_last_sf_event');
-      expect(r.currentStatus).toBe('scheduled');
+      expect(r.currentStatus).toBe('booked');
       expect(r.currentPlatformStatus).toBe('Hired');
       expect(r.sfJobId).toBe('142288');
     });
@@ -970,7 +970,7 @@ describe('SfInboundStatusService', () => {
     });
 
     it('applied response carries currentStatus + currentPlatformStatus (no skipReason)', async () => {
-      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted', platform: 'yelp' }));
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'engaged', platform: 'yelp' }));
       // Default leadStatus.writeStatus mock returns applied=true; let it ride.
 
       const r = await service.process(
@@ -1015,7 +1015,7 @@ describe('SfInboundStatusService', () => {
       // mirror SQL lives inside LeadStatusService.writeSfJobOutcomeMirror;
       // here we just verify the receiver delegates to it with the right
       // args. The stale-protection clause is exercised in lead-status.service.spec.ts.
-      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted' }));
+      prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'engaged' }));
 
       const occurredAt = new Date('2026-05-25T17:30:19Z');
       await service.process(
@@ -1114,16 +1114,20 @@ describe('SfInboundStatusService', () => {
       };
     }
 
-    it.each([
-      ['scheduled'],
-      ['booked'],
-      ['in_progress'],
-      ['completed'],
-      ['cancelled'],
-      ['no_show'],
+    // SF wire value → canonical LB status post-2026-06-08 simplification:
+    //   scheduled → booked   (SF "scheduled" no longer exists in LB canonical)
+    //   booked    → booked
+    //   the others map 1:1.
+    it.each<[string, string]>([
+      ['scheduled',  'booked'],
+      ['booked',     'booked'],
+      ['in_progress','in_progress'],
+      ['completed',  'completed'],
+      ['cancelled',  'cancelled'],
+      ['no_show',    'no_show'],
     ])(
-      'SF %s on SF-linked lead → applied (mirror-only), Lead.status untouched, enrollments stopped',
-      async (sfStatus) => {
+      'SF %s on SF-linked lead → applied (mirror-only as %s), Lead.status untouched, enrollments stopped',
+      async (sfWire, canonical) => {
         prisma.lead.findFirst.mockResolvedValue(
           okLead({ status: 'engaged', sfJobId: JOB_ID, threadId: CONV_ID }),
         );
@@ -1131,7 +1135,7 @@ describe('SfInboundStatusService', () => {
         leadStatus.writeStatus.mockResolvedValueOnce(sfLifecycleManagedSkip());
 
         const r = await service.process(
-          basePayload({ status: { new: sfStatus } }),
+          basePayload({ status: { new: sfWire } }),
           { id: SUB_ID, userId: USER_ID },
         );
 
@@ -1145,12 +1149,14 @@ describe('SfInboundStatusService', () => {
         // writeSfJobOutcomeMirror still fires (Phase 1, before writeStatus)
         expect(leadStatus.writeSfJobOutcomeMirror).toHaveBeenCalled();
 
-        // Inbound event row records mirror-only outcome (greppable).
+        // Inbound event row records mirror-only outcome (greppable). The
+        // suffix is the *canonical* status, so SF 'scheduled' becomes
+        // 'sf_linked_mirror_only:booked' post-simplification.
         expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
           expect.objectContaining({
             create: expect.objectContaining({
               status: 'applied',
-              result: `sf_linked_mirror_only:${sfStatus}`,
+              result: `sf_linked_mirror_only:${canonical}`,
             }),
           }),
         );
@@ -1159,7 +1165,7 @@ describe('SfInboundStatusService', () => {
         // without waiting for the next scheduler tick.
         expect(engine.stopEnrollment).toHaveBeenCalledWith(
           'enr-1',
-          `sf_linked_customer:${sfStatus}`,
+          `sf_linked_customer:${canonical}`,
         );
       },
     );

@@ -466,7 +466,7 @@ export function Analytics() {
               <TrendingUp size={14} style={{ color: 'var(--lb-accent)' }} />
               Trends over time
             </h3>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--lb-ink-5)' }}>Lead volume, revenue, and hire rate by period</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--lb-ink-5)' }}>Lead volume, revenue, and conversion rate by period</p>
           </div>
           {/* Period selector */}
           <div
@@ -507,15 +507,22 @@ export function Analytics() {
         </div>
 
         {(() => {
-          // Collect all unique statuses across all periods, sorted by total desc
+          // Status colors (post-2026-06-08 simplification). Canonical Lead.status
+          // display labels: New / Engaged / Booked / Completed / Lost / Cancelled
+          // plus legal-but-inactive Quoted / In progress / No show / Archived.
           const STATUS_COLORS: Record<string, string> = {
-            'Hired':         '#10b981',
-            'Job done':      '#059669',
-            'Scheduled':     '#3b82f6',
-            'Not hired':     '#94a3b8',
-            'Not interested':'#fb923c',
+            'New':         '#3b82f6',   // active — blue
+            'Engaged':     '#6366f1',   // active — indigo
+            'Quoted':      '#8b5cf6',   // active — violet
+            'In progress': '#0ea5e9',   // active — sky
+            'Booked':      '#10b981',   // won — emerald
+            'Completed':   '#059669',   // won — emerald-dark
+            'Lost':        '#94a3b8',   // lost — slate
+            'Cancelled':   '#64748b',   // lost — slate-darker
+            'No show':     '#9ca3af',   // lost — gray
+            'Archived':    '#a1a1aa',   // lost — zinc
           };
-          const fallbackColors = ['#8b5cf6','#06b6d4','#f59e0b','#ec4899','#64748b'];
+          const fallbackColors = ['#fb923c','#06b6d4','#f59e0b','#ec4899','#64748b'];
           const allStatuses = Array.from(
             tsData.reduce((set, r) => { Object.keys(r.statuses).forEach(s => set.add(s)); return set; }, new Set<string>())
           ).sort((a, b) => {
@@ -533,30 +540,31 @@ export function Analytics() {
             <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
           ) : (
             <>
-              {/* Summary strip */}
+              {/* Summary strip — post-2026-06-08 KPIs:
+                  Total Leads / Won (booked + completed) /
+                  Conversion Rate (won / (won + lost)) /
+                  Active Lead Rate (active / total). Active = mid-funnel
+                  leads not yet resolved — kept distinct from Lost. */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-                {[
-                  { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
-                  {
-                    label: 'Total Hired & Scheduled',
-                    value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString(),
-                  },
-                  {
-                    label: 'Lead Spend',
-                    value: (() => {
-                      const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
-                      return sum > 0 ? `$${sum.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
-                    })(),
-                  },
-                  {
-                    label: 'Avg Hire Rate',
-                    value: (() => {
-                      const total = tsData.reduce((s, r) => s + r.total, 0);
-                      const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
-                      return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
-                    })(),
-                  },
-                ].map(({ label, value }) => (
+                {(() => {
+                  const totalLeads  = tsData.reduce((s, r) => s + r.total, 0);
+                  const wonTotal    = tsData.reduce((s, r) => s + (r.wonCount    ?? r.hiredCount ?? 0), 0);
+                  const lostTotal   = tsData.reduce((s, r) => s + (r.lostCount   ?? 0), 0);
+                  const activeTotal = tsData.reduce((s, r) => s + (r.activeCount ?? 0), 0);
+                  const resolved = wonTotal + lostTotal;
+                  return [
+                    { label: 'Total Leads', value: totalLeads.toString() },
+                    { label: 'Won (Booked + Completed)', value: wonTotal.toString() },
+                    {
+                      label: 'Conversion Rate',
+                      value: resolved > 0 ? `${((wonTotal / resolved) * 100).toFixed(1)}%` : '—',
+                    },
+                    {
+                      label: 'Active Lead Rate',
+                      value: totalLeads > 0 ? `${((activeTotal / totalLeads) * 100).toFixed(1)}%` : '—',
+                    },
+                  ];
+                })().map(({ label, value }) => (
                   <div
                     key={label}
                     style={{
@@ -593,7 +601,7 @@ export function Analytics() {
                   <Tooltip
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
                     formatter={(value: any, name: string | undefined) => {
-                      if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                      if (name === 'Conversion Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
                       if (name === '_total') return null as any;
                       return [value, name ?? ''];
                     }}
@@ -614,7 +622,19 @@ export function Analytics() {
                   <Bar yAxisId="left" dataKey={() => 0} stackId="status" fill="transparent" legendType="none" maxBarSize={56} name="_total">
                     <LabelList dataKey="total" position="top" style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }} />
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey={(d: TimeSeriesPoint) => d.total > 0 ? (d.hiredCount / d.total) * 100 : 0} name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    name="Conversion Rate"
+                    dataKey={(d: TimeSeriesPoint) => {
+                      // won / (won + lost) — null when no resolved leads.
+                      const won  = d.wonCount  ?? d.hiredCount ?? 0;
+                      const lost = d.lostCount ?? 0;
+                      const resolved = won + lost;
+                      return resolved > 0 ? (won / resolved) * 100 : 0;
+                    }}
+                    stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }}
+                  />
                 </ComposedChart>
               </ResponsiveContainer>
 
@@ -674,6 +694,51 @@ export function Analytics() {
 
       {displayData ? (
         <>
+          {/* Outcome KPIs (2026-06-08 spec):
+              Conversion Rate = won / (won + lost) — only resolved leads in
+                denominator. Won and Lost are also surfaced as raw counts so
+                operators can see the underlying sample size.
+              Active Lead Rate = active / total — shows how much pipeline is
+                still unresolved. */}
+          {displayData.outcomes && (() => {
+            const o = displayData.outcomes;
+            const cvr = o.conversionRate != null ? `${o.conversionRate.toFixed(1)}%` : '—';
+            const alr = o.activeLeadRate != null ? `${o.activeLeadRate.toFixed(1)}%` : '—';
+            return (
+              <div
+                className="grid grid-cols-2 md:grid-cols-4"
+                style={{
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 'var(--lb-radius-lg)',
+                }}
+              >
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Conversion rate</span>}
+                  value={cvr}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={12} /> Active lead rate</span>}
+                  value={alr}
+                  loading={isUpdating}
+                  muted
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Won leads</span>}
+                  value={o.won}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Lost leads</span>}
+                  value={o.lost}
+                  loading={isUpdating}
+                  muted
+                />
+              </div>
+            );
+          })()}
+
           {/* Summary KPIs — single bordered row.
               Adds Avg Lead Price (Thumbtack-only, hidden on all_yelp) and
               Avg Job Price (any platform, when there are won leads). */}

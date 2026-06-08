@@ -51,6 +51,36 @@ export interface AverageLeadPriceMetric {
   count: number;
 }
 
+/**
+ * Outcome split of all leads in the period.
+ *
+ * Classification (2026-06-08 status simplification):
+ *   active = new + engaged + quoted + in_progress
+ *   won    = booked + completed (+ legacy 'scheduled' / 'contacted' if present)
+ *   lost   = lost + cancelled + no_show + archived
+ *
+ * Driven exclusively by Lead.status — raw platform statuses (thumbtackStatus,
+ * platformStatus) are NOT consulted for KPI math.
+ */
+export interface OutcomeBreakdown {
+  active: number;
+  won: number;
+  lost: number;
+  total: number;
+  /**
+   * Conversion Rate (primary KPI):
+   *   won / (won + lost)
+   * Null when there are zero resolved leads (no won + no lost).
+   */
+  conversionRate: number | null;
+  /**
+   * Active Lead Rate:
+   *   active / total
+   * Null when total is zero.
+   */
+  activeLeadRate: number | null;
+}
+
 export class AnalyticsResponseDto {
   categoryDistribution: CategoryDistribution[];
   connectionTime: ConnectionTimeMetric;
@@ -60,7 +90,15 @@ export class AnalyticsResponseDto {
   customerEngagement: CustomerEngagementMetric;
   totalLeads: number;
 
-  // Job status from Thumbtack UI (Hired, Not hired, etc.)
+  /**
+   * Outcome split of all leads matching the current filter.
+   * Provides Conversion Rate + Active Lead Rate per the 2026-06-08 spec.
+   */
+  outcomes?: OutcomeBreakdown;
+
+  // Job status counts by canonical Lead.status (active/won/lost class noted
+  // per row). Derived from Lead.status only — raw platform statuses are
+  // excluded.
   jobStatusDistribution?: ServiceDetailDistribution[];
 
   // When the last lead was synced (extension or webhook)

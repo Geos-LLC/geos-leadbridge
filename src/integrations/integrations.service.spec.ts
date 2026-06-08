@@ -98,9 +98,12 @@ describe('IntegrationsService.collectLeadIds — Thumbtack status sync (single-c
     it.each<[string, string]>([
       ['Hired', 'booked'],
       ['Done', 'completed'],
-      ['Scheduled', 'scheduled'],
-      ['Active', 'contacted'],
-      ['Not scheduled yet', 'contacted'],
+      // Post-2026-06-08: TT Scheduled/Job Scheduled collapse into 'booked'
+      // (was 'scheduled'); TT Active and Not scheduled yet collapse into
+      // 'engaged' (was 'contacted').
+      ['Scheduled', 'booked'],
+      ['Active', 'engaged'],
+      ['Not scheduled yet', 'engaged'],
       ['Not hired', 'lost'],
       ['Closed', 'lost'],
       ['Archived', 'archived'],
@@ -153,10 +156,10 @@ describe('IntegrationsService.collectLeadIds — Thumbtack status sync (single-c
       // IntegrationsService no longer reads SF_STATUS_WINS — it forwards both
       // fields and trusts the service to skip canonical via skipReason=sf_protected.
       const { service, leadStatusService } = buildService({
-        existingLead: leadFixture({ status: 'contacted' }),
+        existingLead: leadFixture({ status: 'engaged' }),
         writeResult: {
           applied: true,
-          status: 'contacted',
+          status: 'engaged',
           platformStatus: 'Hired',
           skipReason: 'sf_protected',
         },
@@ -192,7 +195,7 @@ describe('IntegrationsService.collectLeadIds — Thumbtack status sync (single-c
       expect(leadStatusService.writeStatus).toHaveBeenCalledTimes(1);
       const arg = leadStatusService.writeStatus.mock.calls[0][0];
       expect(arg.platformStatus).toBe('Active');
-      expect(arg.newStatus).toBe('contacted');
+      expect(arg.newStatus).toBe('engaged');
     });
   });
 

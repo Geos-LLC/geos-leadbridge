@@ -184,7 +184,7 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       );
     });
 
-    it('Yelp Active → newStatus=contacted', async () => {
+    it('Yelp Active → newStatus=engaged', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -195,7 +195,7 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       });
 
       expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ newStatus: 'contacted', platformStatus: 'Active' }),
+        expect.objectContaining({ newStatus: 'engaged', platformStatus: 'Active' }),
       );
     });
 
@@ -376,7 +376,7 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       });
     }
 
-    it('Active → creates lead with status=new, then writeStatus(newStatus=contacted, platformStatus=Active)', async () => {
+    it('Active → creates lead with status=new, then writeStatus(newStatus=engaged, platformStatus=Active)', async () => {
       const { controller, prisma, leadStatusService } = fallbackController();
 
       await controller.collectLeads(FAKE_USER, {
@@ -395,7 +395,7 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       expect(writeArgs).toEqual(
         expect.objectContaining({
           source: 'platform_sync',
-          newStatus: 'contacted',
+          newStatus: 'engaged',
           platformStatus: 'Active',
           actorType: 'extension',
         }),
@@ -635,7 +635,7 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
       expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           source: 'platform_sync',
-          newStatus: 'contacted',
+          newStatus: 'engaged',
           platformStatus: 'Active',
         }),
       );

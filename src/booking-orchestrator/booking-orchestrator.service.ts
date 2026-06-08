@@ -261,6 +261,10 @@ export class BookingOrchestratorService {
     // Map SF event to bookingState terminal + sfJobOutcome.
     switch (input.eventType) {
       case 'service_scheduled': {
+        // sfJobOutcome stays 'scheduled' — that column is a faithful mirror
+        // of the raw SF state. Lead.status (separate column) is governed by
+        // sf-inbound-status.service → mapSfStatus, which since 2026-06-08
+        // collapses SF 'scheduled' → LB canonical 'booked'.
         await this.applySfOutcome(input, 'service_scheduled', 'scheduled', {
           aiStatus: 'stopped_booked',
           aiReason: AI_STATUS_REASONS.CLASSIFIER_AGREED,

@@ -115,11 +115,11 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
       });
 
       expect(res.applied).toBe(true);
-      expect(res.status).toBe('scheduled');
+      expect(res.status).toBe('booked');
       expect(res.conflict).toBeNull();
       expect(prisma._state.audits[0].conflict).toBe(false);
       expect(events.emit).not.toHaveBeenCalled();
@@ -133,12 +133,12 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'manual',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         actorId: USER_ID,
       });
 
       expect(res.applied).toBe(true);
-      expect(res.status).toBe('scheduled');
+      expect(res.status).toBe('booked');
       expect(res.conflict).not.toBeNull();
       expect(res.conflict?.kind).toBe('sf_push_needed');
       expect(res.conflict?.sfJobId).toBe('sf_job_42');
@@ -156,7 +156,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'manual',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
       });
 
       expect(res.applied).toBe(true);
@@ -171,7 +171,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'manual',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.applied).toBe(true);
@@ -283,7 +283,7 @@ describe('LeadStatusService', () => {
 
     it.each([
       ['booked'],
-      ['scheduled'],
+      ['booked'],
       ['in_progress'],
       ['completed'],
       ['cancelled'],
@@ -319,7 +319,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_keep_reason',
         reason: 'job_142288_created',
       });
@@ -330,7 +330,7 @@ describe('LeadStatusService', () => {
 
     it.each([
       ['new'],
-      ['contacted'],
+      ['engaged'],
       ['engaged'],
       ['quoted'],
       ['lost'],
@@ -362,7 +362,7 @@ describe('LeadStatusService', () => {
         const res = await svc.writeStatus({
           leadId: LEAD_ID,
           source,
-          newStatus: 'scheduled',
+          newStatus: 'booked',
           sourceEventId: `${source}_evt_block`,
         });
 
@@ -387,7 +387,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'platform_sync',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         platformStatus: 'Active',
         sourceEventId: 'yelp_scrape_evt_block',
       });
@@ -411,7 +411,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_stale',
         occurredAt: new Date('2026-05-25T17:30:19Z'),
       });
@@ -433,7 +433,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_duplicate',
       });
 
@@ -468,19 +468,19 @@ describe('LeadStatusService', () => {
       const r1 = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_reactivate',
         occurredAt: new Date('2026-05-25T17:30:19Z'),
       });
       expect(r1.applied).toBe(true);
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
 
       // Step 2: a later platform_sync says Active (→contacted) — must NOT
       // downgrade the canonical status, but platformStatus is allowed to move.
       const r2 = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'platform_sync',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
         platformStatus: 'Active',
         sourceEventId: 'yelp_scrape_active',
         occurredAt: new Date('2026-05-25T18:00:00Z'),
@@ -489,7 +489,7 @@ describe('LeadStatusService', () => {
       // partial_skip: platformStatus flowed, Lead.status held by pipeline_downgrade.
       expect(r2.applied).toBe(true);
       expect(r2.skipReason).toBe('pipeline_downgrade');
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
       expect(prisma._state.lead.platformStatus).toBe('Active');
     });
 
@@ -502,7 +502,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_log_check',
       });
 
@@ -514,7 +514,7 @@ describe('LeadStatusService', () => {
       expect(reactivationLog).toMatch(/result=applied/);
       expect(reactivationLog).toMatch(/source=service_flow/);
       expect(reactivationLog).toMatch(/old_status=archived/);
-      expect(reactivationLog).toMatch(/status=scheduled/);
+      expect(reactivationLog).toMatch(/status=booked/);
     });
   });
 
@@ -575,7 +575,7 @@ describe('LeadStatusService', () => {
 
     it('blocks source=manual on SF-linked lead when sf_connection is active', async () => {
       const prisma = buildPrismaMock(
-        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfJobId: 'sf_42', status: 'booked' },
         { sfConnection: ACTIVE_CONN },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -591,12 +591,12 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(false);
       expect(res.skipReason).toBe('sf_managed');
       // Lead.status untouched.
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
     });
 
     it('does NOT block source=manual when there is no sf_connection (autonomous LB mode)', async () => {
       const prisma = buildPrismaMock(
-        { sfJobId: 'sf_42', status: 'scheduled' },  // sfJobId set, but no connection
+        { sfJobId: 'sf_42', status: 'booked' },  // sfJobId set, but no connection
         { sfConnection: null },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -612,7 +612,7 @@ describe('LeadStatusService', () => {
 
     it('does NOT block source=manual when the lead has no sfJobId (unlinked)', async () => {
       const prisma = buildPrismaMock(
-        { sfJobId: null, status: 'scheduled' },
+        { sfJobId: null, status: 'booked' },
         { sfConnection: ACTIVE_CONN },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -628,7 +628,7 @@ describe('LeadStatusService', () => {
 
     it('does NOT block source=manual when sf_connection is inactive', async () => {
       const prisma = buildPrismaMock(
-        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfJobId: 'sf_42', status: 'booked' },
         { sfConnection: { isActive: false, status: 'disconnected' } },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -644,7 +644,7 @@ describe('LeadStatusService', () => {
 
     it('adminOverride=true bypasses the guard (support/admin path)', async () => {
       const prisma = buildPrismaMock(
-        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfJobId: 'sf_42', status: 'booked' },
         { sfConnection: ACTIVE_CONN },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -666,7 +666,7 @@ describe('LeadStatusService', () => {
       // (sf_managed) test's invariant — "this guard doesn't fire for
       // service_flow" — still holds; the new Guard 2a intercepts first.
       const prisma = buildPrismaMock(
-        { sfJobId: 'sf_42', status: 'scheduled' },
+        { sfJobId: 'sf_42', status: 'booked' },
         { sfConnection: ACTIVE_CONN },
       );
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
@@ -826,7 +826,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'manual',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
       });
 
       expect(res.applied).toBe(true);
@@ -922,7 +922,7 @@ describe('LeadStatusService', () => {
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'lb_automation',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.applied).toBe(false);
@@ -945,7 +945,7 @@ describe('LeadStatusService', () => {
     });
 
     it('allows contacted → booked (skipping quoted is fine)', async () => {
-      const prisma = buildPrismaMock({ status: 'contacted' });
+      const prisma = buildPrismaMock({ status: 'engaged' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
       const res = await svc.writeStatus({
@@ -1229,7 +1229,7 @@ describe('LeadStatusService', () => {
         leadId: LEAD_ID,
         source: 'platform_sync',
         platformStatus: 'Active',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.applied).toBe(true);
@@ -1250,7 +1250,7 @@ describe('LeadStatusService', () => {
         leadId: LEAD_ID,
         source: 'platform_sync',
         platformStatus: 'Active',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.applied).toBe(true);
@@ -1267,7 +1267,7 @@ describe('LeadStatusService', () => {
         leadId: LEAD_ID,
         source: 'platform_sync',
         platformStatus: 'Active',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.applied).toBe(true);
@@ -1276,18 +1276,18 @@ describe('LeadStatusService', () => {
     });
 
     it('scheduled + Active(contacted) → canonical NOT overwritten', async () => {
-      const prisma = buildPrismaMock({ status: 'scheduled', platformStatus: null });
+      const prisma = buildPrismaMock({ status: 'booked', platformStatus: null });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'platform_sync',
         platformStatus: 'Active',
-        newStatus: 'contacted',
+        newStatus: 'engaged',
       });
 
       expect(res.skipReason).toBe('pipeline_downgrade');
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
     });
 
     it('completed-lock: completed + Yelp Closed(lost) → canonical NOT overwritten (completed locks against terminals too)', async () => {
@@ -1312,7 +1312,7 @@ describe('LeadStatusService', () => {
     });
 
     it('forward progression: contacted + Yelp Hired(booked) → canonical updated, no skipReason', async () => {
-      const prisma = buildPrismaMock({ status: 'contacted', platformStatus: 'Active' });
+      const prisma = buildPrismaMock({ status: 'engaged', platformStatus: 'Active' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
       const res = await svc.writeStatus({
@@ -1329,7 +1329,7 @@ describe('LeadStatusService', () => {
     });
 
     it('terminal exit from active pipeline: contacted + Yelp Not hired(lost) → canonical=lost (terminals exempt from downgrade)', async () => {
-      const prisma = buildPrismaMock({ status: 'contacted', platformStatus: 'Active' });
+      const prisma = buildPrismaMock({ status: 'engaged', platformStatus: 'Active' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
       const res = await svc.writeStatus({
@@ -1361,7 +1361,7 @@ describe('LeadStatusService', () => {
     it('1. Yelp archived + no SF link → lost / no hire (lostReason=hired_someone)', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'contacted',
+        status: 'engaged',
         platformStatus: 'Active',
         sfJobId: null,
         sfCustomerId: null,
@@ -1393,7 +1393,7 @@ describe('LeadStatusService', () => {
     it('2. Yelp archived + sfJobId set → SF-link guard blocks canonical, platformStatus still flows', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'scheduled',
+        status: 'booked',
         platformStatus: 'Hired',
         sfJobId: 'sfjob-99',
         sfCustomerId: null,
@@ -1413,7 +1413,7 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(true);
       expect(res.skipReason).toBe('sf_link_protected');
       // Canonical preserved — SF still owns lifecycle.
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
       expect(prisma._state.lead.lostReason).toBeNull();
       // platformStatus still updated so the breadcrumb survives.
       expect(prisma._state.lead.platformStatus).toBe('Archived');
@@ -1479,7 +1479,7 @@ describe('LeadStatusService', () => {
       // covers `archived`. SF should win.
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'contacted',
+        status: 'engaged',
         sfJobId: null,
         sfCustomerId: null,
         syncStatus: null,
@@ -1519,7 +1519,7 @@ describe('LeadStatusService', () => {
     it('6. Yelp archived then SF scheduled later → SF wins (sideways out of lost)', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'contacted',
+        status: 'engaged',
         sfJobId: null,
         sfCustomerId: null,
         syncStatus: null,
@@ -1540,13 +1540,13 @@ describe('LeadStatusService', () => {
       const r2 = await svc.writeStatus({
         leadId: LEAD_ID,
         source: 'service_flow',
-        newStatus: 'scheduled',
+        newStatus: 'booked',
         sourceEventId: 'sf_evt_scheduled_step2_b',
         occurredAt: new Date('2026-06-02T15:00:00Z'),
       });
 
       expect(r2.applied).toBe(true);
-      expect(prisma._state.lead.status).toBe('scheduled');
+      expect(prisma._state.lead.status).toBe('booked');
       expect(prisma._state.lead.statusSource).toBe('service_flow');
       expect(prisma._state.lead.lostReason).toBeNull();
     });
@@ -1554,7 +1554,7 @@ describe('LeadStatusService', () => {
     it('7. duplicate Yelp archived event → idempotent, no duplicate audit spam', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'contacted',
+        status: 'engaged',
         sfJobId: null,
         sfCustomerId: null,
         syncStatus: null,
@@ -1603,7 +1603,7 @@ describe('LeadStatusService', () => {
     it('forward progression to booked on SF-linked lead is NOT blocked by sf_link_protected', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'contacted',
+        status: 'engaged',
         sfJobId: 'sfjob-99',
         sfCustomerId: null,
         syncStatus: null,
@@ -1629,9 +1629,9 @@ describe('LeadStatusService', () => {
       // off-platform. The marketplace view is stale; LB must hold the
       // fulfillment state. Independent of SF — pure marketplace-vs-LB
       // semantics. Cancellation/lost from `engaged` still flows freely.
-      const states: Array<'booked' | 'scheduled' | 'in_progress'> = [
+      const states: Array<'booked' | 'booked' | 'in_progress'> = [
         'booked',
-        'scheduled',
+        'booked',
         'in_progress',
       ];
       for (const fromState of states) {
@@ -1665,7 +1665,7 @@ describe('LeadStatusService', () => {
     it('emits a greppable "skipped_archived_due_to_sf_link" log marker when blocked', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
-        status: 'scheduled',
+        status: 'booked',
         sfJobId: 'sfjob-99',
         sfCustomerId: null,
         syncStatus: null,
@@ -1714,11 +1714,11 @@ describe('LeadStatusService', () => {
       const prisma = buildPrismaMock({ sfJobOutcomeAt: null, sfJobOutcome: null });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
       const occurredAt = new Date('2026-06-03T17:30:00Z');
-      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', occurredAt, {
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'booked', occurredAt, {
         sfJobId: 'SF-A', sourceEventId: 'evt-1', userId: USER_ID,
       });
       expect(r.written).toBe(true);
-      expect(prisma._state.lead.sfJobOutcome).toBe('scheduled');
+      expect(prisma._state.lead.sfJobOutcome).toBe('booked');
       expect(prisma._state.lead.sfJobOutcomeAt).toEqual(occurredAt);
     });
 
@@ -1737,7 +1737,7 @@ describe('LeadStatusService', () => {
       const older = new Date('2026-06-01T00:00:00Z');
       const prisma = buildPrismaMock({ sfJobOutcomeAt: newer, sfJobOutcome: 'completed' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
-      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', older);
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'booked', older);
       expect(r.written).toBe(false);
       expect(prisma._state.lead.sfJobOutcome).toBe('completed');
       expect(prisma._state.lead.sfJobOutcomeAt).toEqual(newer);
@@ -1747,7 +1747,7 @@ describe('LeadStatusService', () => {
       const prisma = buildPrismaMock();
       prisma.lead.updateMany.mockRejectedValueOnce(new Error('connection lost'));
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
-      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'scheduled', new Date());
+      const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'booked', new Date());
       expect(r.written).toBe(false);
     });
   });

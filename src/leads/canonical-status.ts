@@ -1,9 +1,23 @@
 /**
  * Canonical LeadBridge pipeline statuses.
  *
+ * Target production statuses (the only values the system actively writes):
+ *   new, engaged, booked, completed, lost, cancelled
+ *
+ * Legal-but-inactive statuses kept in the union for back-compat / future use:
+ *   quoted        — Yelp scrape still emits it; routes to active for KPIs
+ *   in_progress   — reserved for future SF lifecycle (not currently written)
+ *   no_show       — SF follow-up engine still keys on it
+ *   archived      — UI bucket retired but value remains legal for raw imports
+ *
+ * Migrated-away (no longer written; kept readable for legacy rows during the
+ * cleanup window; analytics treats them as legacy-safe synonyms):
+ *   contacted     → engaged
+ *   scheduled     → booked
+ *
  * The pipeline (`PIPELINE_ORDER`) describes the *direction* a lead moves
- * through. `quoted` is optional — a lead can jump from `contacted`/`engaged`
- * straight to `booked`. The order is only used by the no-downgrade guard.
+ * through. `quoted` is optional — a lead can jump from `engaged` straight to
+ * `booked`. The order is only used by the no-downgrade guard.
  *
  * Off-pipeline terminals (`lost`, `cancelled`, `no_show`, `archived`) are
  * reachable from any pipeline status; they are not part of `PIPELINE_ORDER`
@@ -18,11 +32,9 @@
 
 export const CANONICAL_STATUSES = [
   'new',
-  'contacted',
   'engaged',
   'quoted',
   'booked',
-  'scheduled',
   'in_progress',
   'completed',
   'lost',
@@ -39,11 +51,9 @@ export type CanonicalStatus = typeof CANONICAL_STATUSES[number];
  */
 export const PIPELINE_ORDER: readonly CanonicalStatus[] = [
   'new',
-  'contacted',
   'engaged',
   'quoted',
   'booked',
-  'scheduled',
   'in_progress',
   'completed',
 ];

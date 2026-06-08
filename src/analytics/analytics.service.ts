@@ -10,6 +10,7 @@ import {
   MessagesPerLeadMetric,
   CustomerEngagementMetric,
   ServiceDetailDistribution,
+  OutcomeBreakdown,
 } from './dto/analytics-response.dto';
 
 export interface TimeSeriesPoint {
@@ -17,10 +18,115 @@ export interface TimeSeriesPoint {
   label: string;
   total: number;
   statuses: { [status: string]: number };
+  // Count of leads in this bucket classified as 'won' (booked + completed +
+  // legacy scheduled). Kept as `wonCount` for clarity; `hiredCount` alias
+  // preserved for back-compat with older frontend builds.
+  wonCount: number;
   hiredCount: number;
-  conversionRate: number;
+  activeCount: number;
+  lostCount: number;
+  /** won / (won + lost), null when there are zero resolved leads. */
+  conversionRate: number | null;
+  /** active / total, null when total is zero. */
+  activeLeadRate: number | null;
   avgBudget: number | null;
   totalBudget: number | null;
+}
+
+// ===========================================================================
+// Status classification — driven exclusively by Lead.status (canonical).
+//
+// Target production statuses:
+//   active : new, engaged
+//   won    : booked, completed
+//   lost   : lost, cancelled
+//
+// Legal-but-inactive (kept here so they never default to "Not hired"):
+//   active : quoted, in_progress
+//   lost   : no_show, archived
+//
+// Legacy-safe (pre-2026-06-08 status simplification; should be zero rows
+// after the migration but the analytics layer reads them defensively in
+// case any drift creeps in):
+//   active : contacted     → counted as active (was the engaged synonym)
+//   won    : scheduled     → counted as won (was the booked synonym)
+// ===========================================================================
+
+export const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
+  'new',
+  'engaged',
+  'quoted',
+  'in_progress',
+  // legacy-safe
+  'contacted',
+]);
+
+export const WON_STATUSES: ReadonlySet<string> = new Set([
+  'booked',
+  'completed',
+  // legacy-safe
+  'scheduled',
+]);
+
+export const LOST_STATUSES: ReadonlySet<string> = new Set([
+  'lost',
+  'cancelled',
+  'no_show',
+  'archived',
+]);
+
+export type OutcomeClass = 'active' | 'won' | 'lost' | 'unknown';
+
+export function classifyStatus(s: string | null | undefined): OutcomeClass {
+  if (!s) return 'unknown';
+  const lower = s.toLowerCase().trim();
+  if (WON_STATUSES.has(lower)) return 'won';
+  if (LOST_STATUSES.has(lower)) return 'lost';
+  if (ACTIVE_STATUSES.has(lower)) return 'active';
+  return 'unknown';
+}
+
+/** Human-readable label for canonical Lead.status values. */
+export function statusDisplayLabel(s: string | null | undefined): string {
+  if (!s) return 'Unknown';
+  const lower = s.toLowerCase().trim();
+  switch (lower) {
+    case 'new':         return 'New';
+    case 'engaged':     return 'Engaged';
+    case 'contacted':   return 'Engaged';       // legacy-safe
+    case 'quoted':      return 'Quoted';
+    case 'in_progress': return 'In progress';
+    case 'booked':      return 'Booked';
+    case 'scheduled':   return 'Booked';        // legacy-safe
+    case 'completed':   return 'Completed';
+    case 'lost':        return 'Lost';
+    case 'cancelled':   return 'Cancelled';
+    case 'no_show':     return 'No show';
+    case 'archived':    return 'Archived';
+    default:            return s;
+  }
+}
+
+export function computeOutcomeBreakdown(rows: { status: string; count: number }[]): OutcomeBreakdown {
+  let active = 0, won = 0, lost = 0;
+  for (const r of rows) {
+    switch (classifyStatus(r.status)) {
+      case 'active': active += r.count; break;
+      case 'won':    won    += r.count; break;
+      case 'lost':   lost   += r.count; break;
+      case 'unknown': break; // intentionally excluded — never silently absorbed
+    }
+  }
+  const total = active + won + lost;
+  const resolved = won + lost;
+  return {
+    active,
+    won,
+    lost,
+    total,
+    conversionRate: resolved > 0 ? (won / resolved) * 100 : null,
+    activeLeadRate: total > 0 ? (active / total) * 100 : null,
+  };
 }
 
 @Injectable()
@@ -53,12 +159,13 @@ export class AnalyticsService {
     };
 
     // Execute only fast metrics in parallel
-    const [categoryDist, engagement, totalLeads, jobStatusDist, businessInfo, lastLead] =
+    const [categoryDist, engagement, totalLeads, jobStatusDist, outcomes, businessInfo, lastLead] =
       await Promise.all([
         this.getCategoryDistribution(baseWhere),
         this.getCustomerEngagement(baseWhere),
         this.getTotalLeads(baseWhere),
         this.getJobStatusDistribution(baseWhere),
+        this.getOutcomes(baseWhere),
         query.businessId
           ? this.getBusinessInfo(userId, query.businessId)
           : null,
@@ -78,6 +185,7 @@ export class AnalyticsService {
       customerEngagement: engagement,
       totalLeads,
       jobStatusDistribution: jobStatusDist,
+      outcomes,
       lastLeadSyncAt: lastLead?.createdAt?.toISOString() || null,
       dateRange: {
         start: query.startDate || 'all-time',
@@ -155,39 +263,21 @@ export class AnalyticsService {
     // period is validated by DTO @IsIn — safe to embed as SQL literal
     const period = dto.period ?? 'month';
 
-    // Statuses that count as 'hired/converted' for conversion rate.
-    // Includes Thumbtack terminal-complete + Yelp terminal-complete (done/closed/completed).
-    const HIRED_STATUSES = new Set([
-      'hired', 'job scheduled', 'scheduled', 'job done',
-      'done', 'closed', 'completed', 'job complete', 'booked',
-    ]);
-
-    // Canonical lead date selection:
-    // 1) When tli.leadDate has an explicit year ("May 7, 2025") — parse it. This is
-    //    the only signal that can correctly place leads >12 months old.
-    // 2) Otherwise use lead.createdAt — the webhook event time, accurate to the day.
+    // Bucket leads by Lead.status only. Raw platform statuses are
+    // intentionally excluded from KPI math (2026-06-08 spec rule 6).
+    // tli.leadDate is still used for date placement of legacy leads.
     //
-    // We tried "Mon DD" year inference against lead.createdAt as a middle step, but
-    // it misfires near the boundary: a lead with leadDate="Jun 18" and createdAt=
-    // 2025-06-15 has "Jun 18 2025 > Jun 15 2025", which rolls back to 2024. The
-    // leadDate prefix without a year is too coarse to ever override createdAt.
-    //
-    // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
+    // leadPrice from rawJson is the cost Thumbtack charged the pro per lead.
     const sqlStr = `
       WITH raw_leads AS (
         SELECT
           l.id,
           l."userId",
           l."businessId",
-          l."thumbtackStatus",
           l."status" AS lead_status,
           l."rawJson",
-          tli."thumbtackStatus" AS tli_status,
           tli."capturedAt"      AS tli_captured_at,
           l."createdAt"         AS l_created_at,
-          -- Try to extract a full "Mon D[D], YYYY" date (new extension format).
-          -- Optional comma; 1- or 2-digit day; 4-digit year. If absent, we ignore
-          -- tli.leadDate entirely and fall back to lead.createdAt.
           CASE
             WHEN tli."leadDate" ~ '^[A-Za-z]{3}\\s+[0-9]{1,2},?\\s+[0-9]{4}'
             THEN regexp_replace(
@@ -206,14 +296,10 @@ export class AnalyticsService {
       ),
       lead_dates AS (
         SELECT
-          id, "userId", "businessId", "thumbtackStatus", lead_status, "rawJson", tli_status,
+          id, "userId", "businessId", lead_status, "rawJson",
           CASE
-            -- Full date with year, parsed directly. Only signal that can place
-            -- leads >12 months in the past correctly.
             WHEN full_date_str IS NOT NULL
             THEN TO_DATE(full_date_str, 'Mon DD YYYY')::timestamptz
-            -- Otherwise use lead.createdAt — the webhook event time, accurate to
-            -- the day. Falls through to tli.capturedAt if createdAt is missing.
             ELSE COALESCE(l_created_at, tli_captured_at)
           END AS lead_date
         FROM raw_leads
@@ -221,13 +307,7 @@ export class AnalyticsService {
       status_counts AS (
         SELECT
           DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
-          -- Prefer thumbtackStatus, fall back to tli_status (Thumbtack), then lead_status (Yelp + generic).
-          -- Exclude 'new' — that's the default on creation and doesn't represent a job outcome.
-          COALESCE(
-            NULLIF(TRIM(COALESCE(ld."thumbtackStatus", ld.tli_status)), ''),
-            NULLIF(CASE WHEN LOWER(ld.lead_status) = 'new' THEN NULL ELSE ld.lead_status END, ''),
-            'No Status'
-          ) AS job_status,
+          COALESCE(NULLIF(TRIM(LOWER(ld.lead_status)), ''), 'unknown') AS job_status,
           COUNT(*) AS cnt
         FROM lead_dates ld
         WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
@@ -280,24 +360,9 @@ export class AnalyticsService {
       dto.platform ?? null,
     );
 
-    // Normalize display labels: merge similar statuses into canonical buckets.
-    // Covers both Thumbtack (Hired, Job Done, etc.) and Yelp (Hired, Done, Closed, etc.).
-    const normalizeStatus = (s: string): string => {
-      const lower = s.toLowerCase();
-      if (lower === 'hired')                               return 'Hired';
-      if (lower === 'done' || lower === 'job done' || lower === 'job complete' || lower === 'completed')
-                                                           return 'Job done';
-      if (lower === 'closed' || lower === 'booked')        return 'Job done';
-      if (lower === 'job scheduled' || lower === 'scheduled' || lower === 'in progress')
-                                                           return 'Scheduled';
-      if (lower === 'not scheduled yet') return 'Not hired';
-      if (lower === 'not hired')         return 'Not hired';
-      if (lower === 'no response' || lower === 'lost')     return 'Not hired';
-      if (lower === 'no status')         return 'Not hired';   // no status → not hired
-      return 'Not hired'; // any other unknown status → not hired
-    };
-
-    // Pivot rows into one point per bucket
+    // Pivot rows into one point per bucket. Each canonical status is shown
+    // under its display label (Engaged / Booked / Completed / Lost / etc.)
+    // and counted into the active / won / lost class for KPI math.
     const bucketMap = new Map<string, TimeSeriesPoint>();
     for (const row of rows) {
       const key = row.bucket.toISOString();
@@ -307,24 +372,33 @@ export class AnalyticsService {
           label: this.formatPeriodLabel(row.bucket, period as 'day' | 'week' | 'month' | 'year'),
           total: 0,
           statuses: {},
-          hiredCount: 0,
-          conversionRate: 0,
+          wonCount: 0,
+          hiredCount: 0, // alias of wonCount for legacy frontend
+          activeCount: 0,
+          lostCount: 0,
+          conversionRate: null,
+          activeLeadRate: null,
           avgBudget: row.avg_budget != null ? parseFloat(row.avg_budget) : null,
           totalBudget: row.total_budget != null ? parseFloat(row.total_budget) : null,
         });
       }
       const entry = bucketMap.get(key)!;
       const cnt = Number(row.cnt);
-      const status = normalizeStatus(row.job_status);
-      entry.statuses[status] = (entry.statuses[status] ?? 0) + cnt; // merge same-display statuses
+      const display = statusDisplayLabel(row.job_status);
+      entry.statuses[display] = (entry.statuses[display] ?? 0) + cnt;
       entry.total += cnt;
-      if (HIRED_STATUSES.has(row.job_status.toLowerCase())) {
-        entry.hiredCount += cnt;
-      }
+      const klass = classifyStatus(row.job_status);
+      if (klass === 'won')    { entry.wonCount += cnt; entry.hiredCount += cnt; }
+      if (klass === 'active')   entry.activeCount += cnt;
+      if (klass === 'lost')     entry.lostCount += cnt;
+      // 'unknown' rows are excluded from the won/active/lost split — they
+      // still appear in `statuses` under their raw label and in `total`.
     }
 
     for (const entry of bucketMap.values()) {
-      entry.conversionRate = entry.total > 0 ? (entry.hiredCount / entry.total) * 100 : 0;
+      const resolved = entry.wonCount + entry.lostCount;
+      entry.conversionRate = resolved > 0 ? (entry.wonCount / resolved) * 100 : null;
+      entry.activeLeadRate = entry.total > 0 ? (entry.activeCount / entry.total) * 100 : null;
     }
 
     return Array.from(bucketMap.values());
@@ -384,6 +458,7 @@ export class AnalyticsService {
       engagement,
       totalLeads,
       jobStatusDist,
+      outcomes,
       businessInfo,
       cleaningTypes,
       addOns,
@@ -403,6 +478,7 @@ export class AnalyticsService {
       this.timed('customerEngagement', () => this.getCustomerEngagement(baseWhere)),
       this.timed('totalLeads', () => this.getTotalLeads(baseWhere)),
       this.timed('jobStatusDistribution', () => this.getJobStatusDistribution(baseWhere)),
+      this.timed('outcomes', () => this.getOutcomes(baseWhere)),
       query.businessId
         ? this.timed('businessInfo', () => this.getBusinessInfo(userId, query.businessId!))
         : Promise.resolve(null),
@@ -436,6 +512,7 @@ export class AnalyticsService {
       customerEngagement: engagement,
       totalLeads,
       jobStatusDistribution: jobStatusDist,
+      outcomes,
       lastLeadSyncAt: lastLead?.createdAt?.toISOString() || null,
       cleaningTypeDistribution: cleaningTypes,
       addOnsDistribution: addOns,
@@ -470,68 +547,65 @@ export class AnalyticsService {
     return filter;
   }
 
-  // Job Status Distribution — combines Thumbtack (thumbtackStatus) and Yelp (lead.status)
-  // into a single distribution. Yelp uses l.status with values like 'done', 'closed',
-  // 'hired', etc. Thumbtack uses thumbtackStatus. 'new' is excluded for both.
+  // Job Status Distribution — driven exclusively by canonical Lead.status.
+  // Raw platform statuses (thumbtackStatus, platformStatus) are excluded per
+  // 2026-06-08 spec rule 6. Each row carries the canonical status, its
+  // display label, and its outcome class (active/won/lost) so the UI can
+  // render colored badges + group totals without re-deriving the mapping.
   private async getJobStatusDistribution(
     where: any,
   ): Promise<ServiceDetailDistribution[]> {
-    // Pull all leads with any terminal status via raw SQL so we can COALESCE and filter
     const userId = where.userId;
     if (!userId) return [];
 
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ job_status: string; cnt: bigint }>>(
-      `SELECT
-         COALESCE(
-           NULLIF(TRIM(l."thumbtackStatus"), ''),
-           NULLIF(CASE WHEN LOWER(l."status") = 'new' THEN NULL ELSE l."status" END, ''),
-           'Unknown'
-         ) AS job_status,
-         COUNT(*)::bigint AS cnt
-       FROM leads l
-       WHERE l."userId" = $1
-         AND ($2::text IS NULL OR l."businessId" = $2::text)
-         AND ($3::text IS NULL OR l."platform" = $3::text)
-         AND (
-           (l."thumbtackStatus" IS NOT NULL AND TRIM(l."thumbtackStatus") <> '')
-           OR (l."status" IS NOT NULL AND LOWER(l."status") NOT IN ('new', '') AND TRIM(l."status") <> '')
-         )
-       GROUP BY job_status
-       ORDER BY cnt DESC`,
-      userId,
-      where.businessId ?? null,
-      where.platform ?? null,
-    );
+    const rows = await this.prisma.lead.groupBy({
+      by: ['status'],
+      where: {
+        userId,
+        ...(where.businessId && { businessId: where.businessId }),
+        ...(where.platform && { platform: where.platform }),
+        ...(where.createdAt && { createdAt: where.createdAt }),
+      },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+    });
 
-    if (rows.length === 0) {
-      // Fallback for legacy Thumbtack leads: ThumbtackLeadId table
-      const collectedWithStatus = await this.prisma.thumbtackLeadId.groupBy({
-        by: ['thumbtackStatus'],
-        where: {
-          userId,
-          thumbtackStatus: { not: null },
-          imported: true,
-          ...(where.businessId ? {
-            savedAccount: { businessId: where.businessId },
-          } : {}),
-        },
-        _count: { id: true },
-        orderBy: { _count: { id: 'desc' } },
-      });
-      const total = collectedWithStatus.reduce((sum, r) => sum + r._count.id, 0);
-      return collectedWithStatus.map((r) => ({
-        name: r.thumbtackStatus || 'Unknown',
+    const cleaned = rows
+      .map((r) => ({
+        raw: (r.status ?? '').toString().toLowerCase().trim(),
         count: r._count.id,
-        percentage: total > 0 ? (r._count.id / total) * 100 : 0,
-      }));
-    }
+      }))
+      .filter((r) => r.raw !== '');
 
-    const total = rows.reduce((sum, r) => sum + Number(r.cnt), 0);
-    return rows.map((r) => ({
-      name: r.job_status,
-      count: Number(r.cnt),
-      percentage: total > 0 ? (Number(r.cnt) / total) * 100 : 0,
+    const total = cleaned.reduce((s, r) => s + r.count, 0);
+    return cleaned.map((r) => ({
+      name: statusDisplayLabel(r.raw),
+      count: r.count,
+      percentage: total > 0 ? (r.count / total) * 100 : 0,
     }));
+  }
+
+  // Outcome breakdown — active / won / lost split + Conversion Rate +
+  // Active Lead Rate. Driven exclusively by canonical Lead.status; raw
+  // platform statuses are excluded.
+  private async getOutcomes(where: any): Promise<OutcomeBreakdown> {
+    const userId = where.userId;
+    if (!userId) {
+      return { active: 0, won: 0, lost: 0, total: 0, conversionRate: null, activeLeadRate: null };
+    }
+    const rows = await this.prisma.lead.groupBy({
+      by: ['status'],
+      where: {
+        userId,
+        ...(where.businessId && { businessId: where.businessId }),
+        ...(where.platform && { platform: where.platform }),
+        ...(where.createdAt && { createdAt: where.createdAt }),
+      },
+      _count: { id: true },
+    });
+    return computeOutcomeBreakdown(
+      rows.map((r) => ({ status: (r.status ?? '').toString(), count: r._count.id })),
+    );
   }
 
   // Category Distribution - Group by category field
@@ -870,19 +944,17 @@ export class AnalyticsService {
     return this.prisma.lead.count({ where });
   }
 
-  // Average job price across leads in a "won" terminal state — booked /
-  // scheduled / hired / completed / done / closed (Yelp + Thumbtack vocab).
-  // Reads Lead.budget (customer-stated budget at request time) as the
-  // closest proxy for actual job value, since neither platform reliably
-  // exposes a final-price field.
+  // Average job price across leads in a "won" canonical state
+  // (booked / completed, plus legacy-safe 'scheduled'). Reads
+  // Lead.budget (customer-stated budget at request time) as the closest
+  // proxy for actual job value, since neither platform reliably exposes a
+  // final-price field. Driven exclusively by Lead.status — raw platform
+  // statuses are excluded per 2026-06-08 spec rule 6.
   private async getAverageJobPrice(
     userId: string,
     query: AnalyticsQueryDto,
   ): Promise<{ value: number | null; count: number }> {
-    const wonStatuses = [
-      'hired', 'job scheduled', 'scheduled', 'job done',
-      'done', 'closed', 'completed', 'job complete', 'booked',
-    ];
+    const wonStatuses = Array.from(WON_STATUSES); // booked, completed, scheduled (legacy-safe)
     const rows = await this.prisma.$queryRawUnsafe<Array<{ avg_price: string | null; cnt: bigint }>>(
       `SELECT
          AVG(l."budget")::text AS avg_price,
@@ -894,10 +966,7 @@ export class AnalyticsService {
          AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
          AND ($5::text IS NULL OR l."platform" = $5::text)
          AND l."budget" IS NOT NULL
-         AND (
-           LOWER(COALESCE(l."thumbtackStatus", '')) = ANY($6::text[])
-           OR LOWER(COALESCE(l."status", '')) = ANY($6::text[])
-         )`,
+         AND LOWER(COALESCE(l."status", '')) = ANY($6::text[])`,
       userId,
       query.businessId ?? null,
       query.startDate ? new Date(query.startDate) : null,

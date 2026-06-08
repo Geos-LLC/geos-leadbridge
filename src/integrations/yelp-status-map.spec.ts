@@ -2,21 +2,18 @@ import { mapYelpToLbStatus, getYelpLostReason } from './yelp-status-map';
 
 describe('yelp-status-map', () => {
   describe('mapYelpToLbStatus', () => {
-    it('maps Yelp Active → contacted', () => {
-      expect(mapYelpToLbStatus('Active')).toBe('contacted');
+    it('maps Yelp Active → engaged', () => {
+      expect(mapYelpToLbStatus('Active')).toBe('engaged');
     });
 
     it('maps Yelp Quoted → quoted', () => {
       expect(mapYelpToLbStatus('Quoted')).toBe('quoted');
     });
 
-    it('maps Yelp Hired / Booked → booked', () => {
+    it('maps Yelp Hired / Booked / Scheduled → booked (post-simplification)', () => {
       expect(mapYelpToLbStatus('Hired')).toBe('booked');
       expect(mapYelpToLbStatus('Booked')).toBe('booked');
-    });
-
-    it('maps Yelp Scheduled → scheduled', () => {
-      expect(mapYelpToLbStatus('Scheduled')).toBe('scheduled');
+      expect(mapYelpToLbStatus('Scheduled')).toBe('booked');
     });
 
     it('maps Yelp In progress → in_progress', () => {
@@ -48,7 +45,7 @@ describe('yelp-status-map', () => {
     });
 
     it('handles case + whitespace variations', () => {
-      expect(mapYelpToLbStatus('ACTIVE')).toBe('contacted');
+      expect(mapYelpToLbStatus('ACTIVE')).toBe('engaged');
       expect(mapYelpToLbStatus('  hired  ')).toBe('booked');
       expect(mapYelpToLbStatus('NOT HIRED')).toBe('lost');
       expect(mapYelpToLbStatus('done')).toBe('completed');
