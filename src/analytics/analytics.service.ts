@@ -739,21 +739,14 @@ export class AnalyticsService {
     human_handoff: number;
   }> {
     const userId = where.userId;
-    // Row-level fetch (not GROUP BY) so the helper can apply the stale-TC
-    // refinement using per-row message timestamps. ~1k Active rows in
-    // production today — fine to iterate in JS.
     const rows = await this.prisma.$queryRawUnsafe<Array<{
       lead_status: string | null;
       tc_state: string | null;
-      last_customer_at: Date | null;
-      last_business_at: Date | null;
-      last_ai_at: Date | null;
+      cnt: bigint;
     }>>(
-      `SELECT l.status                       AS lead_status,
-              tc."conversationState"         AS tc_state,
-              tc."lastCustomerMessageAt"     AS last_customer_at,
-              tc."lastBusinessMessageAt"     AS last_business_at,
-              tc."lastAiMessageAt"           AS last_ai_at
+      `SELECT l.status AS lead_status,
+              tc."conversationState" AS tc_state,
+              COUNT(*)::bigint AS cnt
          FROM leads l
          LEFT JOIN thread_contexts tc ON tc."conversationId" = l."threadId"
         WHERE l."userId" = $1
@@ -761,7 +754,8 @@ export class AnalyticsService {
           AND ($3::text IS NULL OR l."platform"   = $3::text)
           AND ($4::timestamptz IS NULL OR l."createdAt" >= $4::timestamptz)
           AND ($5::timestamptz IS NULL OR l."createdAt" <= $5::timestamptz)
-          AND LOWER(COALESCE(l.status, '')) IN ('new','engaged','contacted','quoted','in_progress')`,
+          AND LOWER(COALESCE(l.status, '')) IN ('new','engaged','contacted','quoted','in_progress')
+        GROUP BY l.status, tc."conversationState"`,
       userId,
       where.businessId ?? null,
       where.platform ?? null,
@@ -771,12 +765,8 @@ export class AnalyticsService {
 
     const buckets = { engagement: 0, ai_conversation: 0, follow_up: 0, human_handoff: 0 };
     for (const r of rows) {
-      const b = activityBucketFromThreadContext(r.tc_state, r.lead_status, {
-        lastCustomerMessageAt: r.last_customer_at,
-        lastBusinessMessageAt: r.last_business_at,
-        lastAiMessageAt:       r.last_ai_at,
-      });
-      if (b) buckets[b] += 1;
+      const b = activityBucketFromThreadContext(r.tc_state, r.lead_status);
+      if (b) buckets[b] += Number(r.cnt);
     }
     return buckets;
   }

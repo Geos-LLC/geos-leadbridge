@@ -231,26 +231,15 @@ export class LeadsService {
         }
 
         const normalized = this.convertToNormalizedLead(lead);
-        // Single-lead path: resolve activityBucket via a focused TC lookup
-        // including the message timestamps so stale states get refined.
+        // Single-lead path: resolve activityBucket via a focused TC lookup.
         if (lead.threadId) {
           const tc = await this.prisma.threadContext.findUnique({
             where: { conversationId: lead.threadId },
-            select: {
-              conversationState: true,
-              lastCustomerMessageAt: true,
-              lastBusinessMessageAt: true,
-              lastAiMessageAt: true,
-            },
+            select: { conversationState: true },
           });
           normalized.activityBucket = activityBucketFromThreadContext(
             tc?.conversationState ?? null,
             lead.status,
-            {
-              lastCustomerMessageAt: tc?.lastCustomerMessageAt ?? null,
-              lastBusinessMessageAt: tc?.lastBusinessMessageAt ?? null,
-              lastAiMessageAt: tc?.lastAiMessageAt ?? null,
-            },
           );
         } else {
           normalized.activityBucket = activityBucketFromThreadContext(null, lead.status);
@@ -326,17 +315,9 @@ export class LeadsService {
         const normalized = this.convertToNormalizedLead(lead);
         const convId = lead.conversation?.id;
         normalized.isAutoHandled = convId ? autoHandledByConv.get(convId) ?? false : false;
-        const tc = convId ? tcStateByConvId.get(convId) : undefined;
         normalized.activityBucket = activityBucketFromThreadContext(
-          tc?.conversationState ?? null,
+          convId ? tcStateByConvId.get(convId) ?? null : null,
           lead.status,
-          tc
-            ? {
-                lastCustomerMessageAt: tc.lastCustomerMessageAt,
-                lastBusinessMessageAt: tc.lastBusinessMessageAt,
-                lastAiMessageAt: tc.lastAiMessageAt,
-              }
-            : {},
         );
         return normalized;
       });
@@ -1917,39 +1898,20 @@ export class LeadsService {
   // The earlier presence-based rule hid almost nothing because every TT/Yelp
   // lead has a customer initial-inquiry message that disqualified it.
   /**
-   * Batched lookup of ThreadContext signals keyed by conversationId. Returns
-   * conversationState plus per-sender-type last-message timestamps so the
-   * activity-bucket helper can override stale TC states (e.g. handoff badge
-   * stuck at human_handling after operator replied). One query per list.
+   * Batched lookup of ThreadContext.conversationState keyed by conversationId.
+   * Used by getCachedLeads to derive Lead.activityBucket without expanding
+   * the Prisma include (which would pollute the leads-list cache shape).
    */
   private async loadTcStateByConvId(
     conversationIds: string[],
-  ): Promise<Map<string, {
-    conversationState: string | null;
-    lastCustomerMessageAt: Date | null;
-    lastBusinessMessageAt: Date | null;
-    lastAiMessageAt: Date | null;
-  }>> {
-    const map = new Map<string, any>();
+  ): Promise<Map<string, string | null>> {
+    const map = new Map<string, string | null>();
     if (conversationIds.length === 0) return map;
     const rows = await this.prisma.threadContext.findMany({
       where: { conversationId: { in: conversationIds } },
-      select: {
-        conversationId: true,
-        conversationState: true,
-        lastCustomerMessageAt: true,
-        lastBusinessMessageAt: true,
-        lastAiMessageAt: true,
-      },
+      select: { conversationId: true, conversationState: true },
     });
-    for (const r of rows) {
-      map.set(r.conversationId, {
-        conversationState: r.conversationState ?? null,
-        lastCustomerMessageAt: r.lastCustomerMessageAt ?? null,
-        lastBusinessMessageAt: r.lastBusinessMessageAt ?? null,
-        lastAiMessageAt: r.lastAiMessageAt ?? null,
-      });
-    }
+    for (const r of rows) map.set(r.conversationId, r.conversationState ?? null);
     return map;
   }
 
