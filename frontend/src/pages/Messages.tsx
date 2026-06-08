@@ -324,6 +324,10 @@ export function Messages() {
   const dateFilter = searchParams.get('date') || 'all';
   // Status group filter — keys match StatusGroupId in lib/leadStatus.ts.
   const statusFilter = (searchParams.get('status') || 'all') as 'all' | StatusGroupId;
+  // Activity sub-bucket filter — only meaningful when statusFilter='active'.
+  // Mirrors Lead.activityBucket (derived from ThreadContext.conversationState).
+  type ActivityFilter = 'all' | 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff';
+  const activityFilter = (searchParams.get('activity') || 'all') as ActivityFilter;
   // "Hide auto-handled" toggle: hides leads whose only outbound activity is
   // AI sends (no human reply, no customer reply). Default on so the inbox
   // surfaces leads needing human attention; persisted per-browser.
@@ -552,12 +556,23 @@ export function Messages() {
     setSearchParams(searchParams);
   };
 
-  // Update status filter in URL
+  // Update status filter in URL. Clears the activity sub-filter whenever the
+  // primary status changes, since 'activity' is only meaningful under Active.
   const setStatusFilter = (value: 'all' | StatusGroupId) => {
     if (value === 'all') {
       searchParams.delete('status');
     } else {
       searchParams.set('status', value);
+    }
+    if (value !== 'active') searchParams.delete('activity');
+    setSearchParams(searchParams);
+  };
+
+  const setActivityFilter = (value: ActivityFilter) => {
+    if (value === 'all') {
+      searchParams.delete('activity');
+    } else {
+      searchParams.set('activity', value);
     }
     setSearchParams(searchParams);
   };
@@ -1507,6 +1522,13 @@ export function Messages() {
     // Status group filter
     const matchesStatus =
       statusFilter === 'all' || matchesGroupFilter(lead.status, statusFilter);
+    // Activity sub-bucket filter — only applies when the primary status
+    // group is 'active'. activityBucket is null on terminal leads so this
+    // naturally excludes them.
+    const matchesActivity =
+      statusFilter !== 'active' ||
+      activityFilter === 'all' ||
+      (lead as any).activityBucket === activityFilter;
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1516,7 +1538,7 @@ export function Messages() {
     // sets isAutoHandled when an AI message exists but no human send and no
     // customer reply do — see leads.service.ts::computeAutoHandledFlags.
     const matchesAutoHandled = !hideAutoHandled || !lead.isAutoHandled;
-    return matchesAccount && matchesDate && matchesStatus && matchesSearch && matchesAutoHandled;
+    return matchesAccount && matchesDate && matchesStatus && matchesActivity && matchesSearch && matchesAutoHandled;
   });
   const autoHandledHiddenCount = hideAutoHandled
     ? leadsFromSavedAccounts.filter((l) => l.isAutoHandled).length
@@ -1754,6 +1776,29 @@ export function Messages() {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
           </div>
         </div>
+
+        {/* Activity sub-bucket filter — shown only when the primary status
+            is 'active'. Mirrors Lead.activityBucket which the backend derives
+            from ThreadContext.conversationState. */}
+        {statusFilter === 'active' && (
+          <div className="px-4 py-2 border-b border-slate-100">
+            <div className="relative">
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <select
+                value={activityFilter}
+                onChange={(e) => setActivityFilter(e.target.value as ActivityFilter)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Active</option>
+                <option value="engagement">Engagement</option>
+                <option value="ai_conversation">AI Conversation</option>
+                <option value="follow_up">Follow-up</option>
+                <option value="human_handoff">Human Handoff ⚠</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
+          </div>
+        )}
 
         {/* Hide auto-handled toggle */}
         <label className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-3 cursor-pointer select-none">
