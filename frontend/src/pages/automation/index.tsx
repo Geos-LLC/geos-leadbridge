@@ -6,8 +6,9 @@ import { AccountTabs, ScopeBanner, ALL_ACCOUNTS } from '../../components/automat
 import { AutomationRespond } from './Respond';
 import { AutomationFollowups } from './Followups';
 import { AutomationConversation } from './Conversation';
+import { AutomationPlaybook } from './Playbook';
 
-type SubTab = 'respond' | 'engage' | 'convert';
+type SubTab = 'respond' | 'engage' | 'playbook' | 'convert';
 
 const META: Record<SubTab, { title: string; subtitle: string; badge: { label: string; tone: BadgeTone } }> = {
   respond: {
@@ -20,15 +21,21 @@ const META: Record<SubTab, { title: string; subtitle: string; badge: { label: st
     subtitle: 'Automatically follow up with leads who stop responding.',
     badge: { label: 'Engage', tone: 'purple' },
   },
+  playbook: {
+    title: 'AI Playbook',
+    subtitle: 'How AI should behave in common conversation moments — booking, defers, opt-outs, key details.',
+    badge: { label: 'Playbook', tone: 'blue' },
+  },
   convert: {
-    title: 'AI Conversation',
-    subtitle: 'Let the system continue the conversation based on previous messages.',
-    badge: { label: 'Convert', tone: 'blue' },
+    title: 'AI Conversation (Advanced)',
+    subtitle: 'Original AI Conversation settings — same data as the Playbook, technical grouping. Use the Playbook for day-to-day setup.',
+    badge: { label: 'Advanced', tone: 'gray' },
   },
 };
 
 function pathToTab(path: string): SubTab {
   if (path.endsWith('/engage')) return 'engage';
+  if (path.endsWith('/playbook')) return 'playbook';
   if (path.endsWith('/convert')) return 'convert';
   return 'respond';
 }
@@ -62,9 +69,10 @@ export function AutomationPage() {
       <AccountTabs value={accountId} onChange={onChangeScope} accounts={storedAccounts} />
       <ScopeBanner accountId={accountId} accounts={storedAccounts} />
 
-      {tab === 'respond' && <AutomationRespond accountId={accountId} />}
-      {tab === 'engage'  && <AutomationFollowups accountId={accountId} />}
-      {tab === 'convert' && <AutomationConversation accountId={accountId} />}
+      {tab === 'respond'  && <AutomationRespond accountId={accountId} />}
+      {tab === 'engage'   && <AutomationFollowups accountId={accountId} />}
+      {tab === 'playbook' && <AutomationPlaybook accountId={accountId} />}
+      {tab === 'convert'  && <AutomationConversation accountId={accountId} />}
     </div>
   );
 }

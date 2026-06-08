@@ -67,7 +67,7 @@ export function Layout() {
     navigate('/login');
   };
 
-  type NavChild = { label: string; path: string; hint: string; tone: 'green' | 'purple' | 'blue' };
+  type NavChild = { label: string; path: string; hint: string; tone: 'green' | 'purple' | 'blue' | 'gray' };
   type NavItem = { icon: React.ReactNode; label: string; path: string; children?: NavChild[] };
 
   const NAV_ITEMS: NavItem[] = [
@@ -78,9 +78,10 @@ export function Layout() {
       label: 'Automation',
       path: '/automation',
       children: [
-        { label: 'When a Lead Arrives', path: '/automation/respond', hint: 'Respond', tone: 'green' },
-        { label: 'Follow-ups',          path: '/automation/engage',  hint: 'Engage',  tone: 'purple' },
-        { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert', tone: 'blue' },
+        { label: 'When a Lead Arrives', path: '/automation/respond',  hint: 'Respond',  tone: 'green' },
+        { label: 'Follow-ups',          path: '/automation/engage',   hint: 'Engage',   tone: 'purple' },
+        { label: 'AI Playbook',         path: '/automation/playbook', hint: 'Playbook', tone: 'blue' },
+        { label: 'AI Conversation',     path: '/automation/convert',  hint: 'Advanced', tone: 'gray' },
       ],
     },
     { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
@@ -115,6 +116,7 @@ export function Layout() {
   const backLabelFor = (path: string): string => {
     if (path.startsWith('/automation/respond')) return 'When a Lead Arrives';
     if (path.startsWith('/automation/engage')) return 'Follow-ups';
+    if (path.startsWith('/automation/playbook')) return 'AI Playbook';
     if (path.startsWith('/automation/convert')) return 'AI Conversation';
     if (path.startsWith('/automation')) return 'Automation';
     if (path.startsWith('/settings/communication')) return 'Communication';
@@ -161,10 +163,11 @@ export function Layout() {
     </NavLink>
   );
 
-  const HINT_TONES: Record<'green' | 'purple' | 'blue', { bg: string; fg: string }> = {
+  const HINT_TONES: Record<'green' | 'purple' | 'blue' | 'gray', { bg: string; fg: string }> = {
     green:  { bg: '#dcfce7', fg: '#15803d' },
     purple: { bg: '#ede9fe', fg: '#6d28d9' },
     blue:   { bg: '#dbeafe', fg: '#1d4ed8' },
+    gray:   { bg: '#f1f5f9', fg: '#475569' },
   };
 
   // Render a primary nav item that may have nested children. Children show only
