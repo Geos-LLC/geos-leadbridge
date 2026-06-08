@@ -108,6 +108,17 @@ export interface Lead {
     sentAt: string;
   };
   isAutoHandled?: boolean; // Drives the "Hide auto-handled" sidebar filter.
+  /**
+   * Lead activity badge — derived at query time from
+   * ThreadContext.conversationState + Lead.status. Drives the secondary
+   * pill underneath the main status pill on the Messages page.
+   *   'engagement'      first contact / no customer reply yet
+   *   'ai_conversation' AI is actively replying
+   *   'follow_up'       waiting for the customer
+   *   'human_handoff'   customer waiting on a human (visually urgent)
+   * Null when Lead.status is terminal.
+   */
+  activityBucket?: 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff' | null;
   // SF-connected mode signals. `isSfLinked` is derived server-side via the
   // same `isSfLinkedLead` predicate the status-write guards use — UI mirrors
   // server rules without re-deriving the OR-chain.
