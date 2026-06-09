@@ -25,6 +25,7 @@ import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
+import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -189,10 +190,11 @@ export class FollowUpGeneratorService {
       requestDetails = `Customer request: ${lead.message.substring(0, 200)}`;
     }
 
-    // Load all account fields once — used for pricing, business profile, and urgency.
+    // Load all account fields once — used for pricing, business profile, urgency, and Playbook.
     let timezone: string = 'America/New_York';
     let businessContext = '';
     let urgencyContext = '';
+    let playbookBlock = '';
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
@@ -204,6 +206,7 @@ export class FollowUpGeneratorService {
           followUpSettingsJson: true,
           followUpActiveHoursStart: true,
           followUpActiveHoursEnd: true,
+          aiConversationMode: true,
         },
       });
       const owner = await this.prisma.user.findUnique({
@@ -296,6 +299,14 @@ export class FollowUpGeneratorService {
         else if (urgentCapability === '48h') urgencyContext += ' Offer 1-2 days out, NOT same-day.';
         else urgencyContext += ' Do NOT imply urgent availability. Offer next available slot.';
       }
+
+      // PLAYBOOK — behavior summary (generated from settings) + user
+      // instructions. Pure render; empty string when nothing to show.
+      playbookBlock = renderPlaybookBlock({
+        aiConversationMode: account?.aiConversationMode ?? null,
+        followUpSettingsJson: account?.followUpSettingsJson ?? null,
+        servicePricingJson: account?.servicePricingJson ?? null,
+      });
     }
 
     // Step 4: Load custom prompt template if specified
@@ -347,6 +358,15 @@ export class FollowUpGeneratorService {
 
     if (objectiveFlavor) {
       systemParts.push('', `STEP FLAVOR: ${objectiveFlavor}`);
+    }
+
+    // PLAYBOOK — situational behavior summary + user instructions. Sits AFTER
+    // strategy + STEP FLAVOR (modifiers) and BEFORE customPrompt (per-step
+    // user override) so the Playbook is foundational guidance; per-step
+    // overrides still win when explicitly set. Block already includes its
+    // own `=== PLAYBOOK ===` header.
+    if (playbookBlock) {
+      systemParts.push('', playbookBlock);
     }
 
     if (customPrompt) {
