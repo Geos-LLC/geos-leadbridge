@@ -1348,6 +1348,19 @@ export class LeadsService {
    * Uses the original createdAt from the platform (Thumbtack) if available
    */
   private async upsertLead(userId: string, lead: NormalizedLead): Promise<void> {
+    // Phone routing: this path comes from adapter.getLead (GET /negotiations/{id}).
+    // For Thumbtack, that endpoint returns a substitute/forwarding number — never
+    // the real one — so it must NOT overwrite Lead.customerPhone (owned by the
+    // LEADS_V4 webhook). For other platforms (e.g. Yelp), GET returns the real
+    // unmasked phone after opt-in, so behavior stays as it was.
+    const isThumbtack = lead.platform === 'thumbtack';
+    const phoneCreate = isThumbtack
+      ? { customerPhone: null, customerPhoneSubstitute: lead.customerPhone ?? null }
+      : { customerPhone: lead.customerPhone };
+    const phoneUpdate = isThumbtack
+      ? { customerPhoneSubstitute: lead.customerPhone ?? undefined }
+      : { customerPhone: lead.customerPhone };
+
     // Lead.status is intentionally NOT set in this upsert. New rows default to
     // "new" via the Prisma schema; canonical status writes flow through
     // LeadStatusService.writeStatus below so every transition is audit-logged
@@ -1365,7 +1378,7 @@ export class LeadsService {
         businessId: lead.businessId,
         externalRequestId: lead.externalRequestId,
         customerName: lead.customerName,
-        customerPhone: lead.customerPhone,
+        ...phoneCreate,
         customerEmail: lead.customerEmail,
         message: lead.message,
         budget: lead.budget,
@@ -1383,7 +1396,7 @@ export class LeadsService {
         userId, // Update userId in case lead was imported by different user before
         businessId: lead.businessId,
         customerName: lead.customerName,
-        customerPhone: lead.customerPhone,
+        ...phoneUpdate,
         customerEmail: lead.customerEmail,
         message: lead.message,
         budget: lead.budget,
@@ -2112,6 +2125,14 @@ export class LeadsService {
     const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
     this.logger.log(`Refetch result: name=${freshLead.customerName}, category=${freshLead.category}, msg=${(freshLead.message || '').substring(0, 50)}`);
 
+    // Phone routing: same rule as upsertLead — for Thumbtack the GET endpoint
+    // returns a substitute number, never the real one. Route it to
+    // customerPhoneSubstitute and leave customerPhone (webhook-owned) alone.
+    const isThumbtack = lead.platform === 'thumbtack';
+    const phonePatch = isThumbtack
+      ? { customerPhoneSubstitute: freshLead.customerPhone || lead.customerPhoneSubstitute || undefined }
+      : { customerPhone: freshLead.customerPhone || lead.customerPhone || undefined };
+
     // Non-status fields go through a plain update; status is routed below
     // through LeadStatusService so SF_STATUS_WINS / canonical / dedup guards
     // apply consistently.
@@ -2119,7 +2140,7 @@ export class LeadsService {
       where: { id: leadId },
       data: {
         customerName: freshLead.customerName || lead.customerName,
-        customerPhone: freshLead.customerPhone || lead.customerPhone || undefined,
+        ...phonePatch,
         customerEmail: freshLead.customerEmail || lead.customerEmail || undefined,
         message: freshLead.message || lead.message || undefined,
         category: freshLead.category || lead.category || undefined,
