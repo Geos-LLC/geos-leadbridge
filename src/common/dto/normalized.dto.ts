@@ -45,6 +45,10 @@ export class NormalizedLead {
 
   @IsOptional()
   @IsString()
+  customerPhoneSubstitute?: string | null;
+
+  @IsOptional()
+  @IsString()
   customerEmail?: string;
 
   @IsString()
