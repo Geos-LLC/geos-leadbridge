@@ -629,14 +629,13 @@ export function Analytics() {
                     type="monotone"
                     name="Hire Rate"
                     dataKey={(d: TimeSeriesPoint) => {
-                      // Hire Rate = won / (won + lost + cancelled). 0 when
-                      // no resolved leads in bucket (chart doesn't render
-                      // null cleanly; the empty-period gap is acceptable).
-                      const won       = d.wonCount       ?? 0;
-                      const lost      = d.lostCount      ?? 0;
-                      const cancelled = d.cancelledCount ?? 0;
-                      const resolved  = won + lost + cancelled;
-                      return resolved > 0 ? (won / resolved) * 100 : 0;
+                      // Hire Rate = won / total — same formula as the
+                      // headline KPI strip and the main outcomes card.
+                      // Active leads stay in the denominator as
+                      // still-potential opportunities.
+                      const won   = d.wonCount ?? 0;
+                      const total = d.total    ?? 0;
+                      return total > 0 ? (won / total) * 100 : 0;
                     }}
                     stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }}
                   />
