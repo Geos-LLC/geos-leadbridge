@@ -4,7 +4,7 @@ import {
   Brain, Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   Users, PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
-  MessageSquareText, AlertTriangle,
+  MessageSquareText, AlertTriangle, Power,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../../components/automation/ui';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
 import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
 
 // Module-level cache that survives mount/unmount AND tab switches, so toggling
@@ -45,6 +46,17 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const fromState = { from: location.pathname + location.search, fromLabel: 'AI Conversation' };
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
+
+  // Master AI Conversation toggle — user-scoped per the 2026-05-23 migration
+  // (User.aiConversationEnabled is the single source of truth). The legacy
+  // per-account write target stays put: saveSettings(accountId, {aiConversationEnabled})
+  // is rewritten server-side to update the User row, regardless of which
+  // account tab the user is currently on.
+  const authUser = useAuthStore(s => s.user);
+  const setAuthUser = useAuthStore(s => s.setAuth);
+  const authToken = useAuthStore(s => s.token);
+  const canUseAi = !!authUser?.trialActive || authUser?.subscriptionTier === 'ENTERPRISE';
+  const [aiOn, setAiOn] = useState<boolean>(!!authUser?.aiConversationEnabled);
 
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
   const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
@@ -81,6 +93,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     const t = setTimeout(() => setSavedAt(null), 2000);
     return () => clearTimeout(t);
   }, [savedAt]);
+
+  // Keep the master toggle in sync if the auth user's aiConversationEnabled
+  // changes from elsewhere (Services page, Communication page, login).
+  useEffect(() => {
+    setAiOn(!!authUser?.aiConversationEnabled);
+  }, [authUser?.aiConversationEnabled]);
 
   // Reset dirty on scope change so the next user action starts fresh.
   useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
@@ -359,12 +377,56 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
 
+  // Master toggle handler — writes to User.aiConversationEnabled via the
+  // per-account saveSettings endpoint (server-side it's user-scope). On
+  // success the auth store mirrors the new value so other pages (Services,
+  // Communication, Layout badges) react without a refresh.
+  const onAiToggle = async (on: boolean) => {
+    if (on && !canUseAi) return;
+    setAiOn(on);
+    setSavedAt(Date.now());
+    setSaving(true); setError(null);
+    try {
+      // Pick any account id to satisfy the route param; backend writes the
+      // user row regardless. Fall back to first account when viewing 'all'.
+      const targetId = !isAll ? accountId : accounts[0]?.id;
+      if (targetId) {
+        await followUpApi.saveSettings(targetId, { aiConversationEnabled: on } as any);
+      }
+      if (authUser && authToken) {
+        setAuthUser({ ...authUser, aiConversationEnabled: on }, authToken);
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Failed to save');
+      setAiOn(!on); // rollback
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {error && <StatusPill status="error" message={error} />}
       {!error && saving && <StatusPill status="saving" />}
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
+
+      {/* Master AI Conversation toggle. User-scoped — applies across all
+          accounts, not just the visible tab. */}
+      <SettingCard
+        icon={Power}
+        iconTone="violet"
+        title="AI Conversation"
+        subtitle={aiOn
+          ? 'AI replies to customers automatically based on your strategy.'
+          : canUseAi
+            ? 'Turn on to let AI handle customer conversations end-to-end.'
+            : 'Upgrade to Convert to unlock AI Conversation.'}
+        enabled={aiOn}
+        onToggle={canUseAi ? onAiToggle : undefined}
+      />
+
+      {!aiOn ? null : <>
 
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
@@ -570,6 +632,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           <FlowStep icon={Hand}               iconTone="rose"   title="If a Stop Rule matches," subtitle="AI stops replying" />
         </div>
       </SectionCard>
+
+      </>}
     </div>
   );
 }
