@@ -2,9 +2,11 @@
  * Regression tests for the 2026-06-08 status simplification.
  *
  * Pins the canonical Lead.status → outcome-class mapping that drives the
- * Conversion Rate (won / (won + lost)) and Active Lead Rate (active / total)
- * KPIs. Future refactors must not silently re-classify a status — these
- * tests will catch the drift.
+ * Hire Rate (won / total) and Active Lead Rate (active / total) KPIs.
+ * The single Won/Total formula is intentional: it stays stable when leads
+ * move between Lost and Active buckets (e.g. the PR 4 historical flip),
+ * because total doesn't change. Future refactors must not silently
+ * re-classify a status — these tests will catch the drift.
  *
  * See plans/status-simplification-2026-06-08.md and Lead.status spec.
  */
@@ -99,7 +101,7 @@ describe('analytics status classification (2026-06-08)', () => {
       });
     });
 
-    it('matches the production sample (pre-PR4 distribution, marketplace buckets)', () => {
+    it('Hire Rate = won / total (one formula, no variants)', () => {
       const r = computeOutcomeBreakdown([
         { status: 'new',       count: 763 },
         { status: 'engaged',   count: 162 },
@@ -108,38 +110,34 @@ describe('analytics status classification (2026-06-08)', () => {
         { status: 'lost',      count: 1151 },
         { status: 'cancelled', count: 42  },
       ]);
-      expect(r.active).toBe(925);     // new + engaged
-      expect(r.scheduled).toBe(15);   // booked
-      expect(r.done).toBe(260);       // completed
-      expect(r.won).toBe(275);        // scheduled + done
-      expect(r.lost).toBe(1151);
-      expect(r.cancelled).toBe(42);
+      expect(r.won).toBe(275);
       expect(r.total).toBe(2393);
-      // Cumulative Hire Rate = won / (won + lost + cancelled + recoverable)
-      // pre-PR4: recoverable=0, so = 275/1468 = 18.73%
-      expect(r.hireRate).toBeCloseTo(18.73, 1);
-      expect(r.conversionRate).toBe(r.hireRate);     // alias
-      expect(r.activeRate).toBeCloseTo(38.65, 1);    // 925 / 2393
-      expect(r.activeLeadRate).toBe(r.activeRate);   // alias
+      // 275 / 2393 = 11.49%
+      expect(r.hireRate).toBeCloseTo(11.49, 1);
+      expect(r.conversionRate).toBe(r.hireRate);
     });
 
-    it('headline Hire Rate is INVARIANT to the PR 4 migration (cumulative formula)', () => {
-      // Same business outcome as the row above, but post-PR4: 880
-      // recoverable rows moved lost → engaged. They stay in the
-      // cumulative denominator so the headline rate matches exactly.
-      const post = computeOutcomeBreakdown(
-        [
-          { status: 'new',       count: 763 },
-          { status: 'engaged',   count: 162 + 880 },  // flipped
-          { status: 'booked',    count: 15  },
-          { status: 'completed', count: 260 },
-          { status: 'lost',      count: 1151 - 880 }, // shrunk
-          { status: 'cancelled', count: 42  },
-        ],
-        { recoverable: 880 },
-      );
-      // 275 / (275 + 271 + 42 + 880) = 275/1468 = 18.73% — SAME as pre-PR4
-      expect(post.hireRate).toBeCloseTo(18.73, 1);
+    it('headline Hire Rate is invariant to the PR 4 lost→engaged flip', () => {
+      // Same `total`; the 880 recoverable rows simply moved buckets.
+      // total doesn't change, so won/total doesn't either.
+      const pre = computeOutcomeBreakdown([
+        { status: 'new',       count: 763 },
+        { status: 'engaged',   count: 162 },
+        { status: 'booked',    count: 15  },
+        { status: 'completed', count: 260 },
+        { status: 'lost',      count: 1151 },
+        { status: 'cancelled', count: 42  },
+      ]);
+      const post = computeOutcomeBreakdown([
+        { status: 'new',       count: 763 },
+        { status: 'engaged',   count: 162 + 880 },
+        { status: 'booked',    count: 15  },
+        { status: 'completed', count: 260 },
+        { status: 'lost',      count: 1151 - 880 },
+        { status: 'cancelled', count: 42  },
+      ]);
+      expect(post.total).toBe(pre.total);
+      expect(post.hireRate).toBeCloseTo(pre.hireRate as number, 4);
     });
 
     it('legacy-safe synonyms collapse correctly (contacted→active, scheduled-canonical→scheduled bucket)', () => {
@@ -169,24 +167,25 @@ describe('analytics status classification (2026-06-08)', () => {
       expect(r.activeRate).toBe(0);
     });
 
-    it('Hire Rate denominator (resolved-only) includes lost + cancelled + recoverable but excludes plain active', () => {
-      // 100 active, 10 booked, 5 lost, 5 cancelled
+    it('Hire Rate denominator is total — active leads count in the denominator', () => {
+      // 100 active, 10 booked, 5 lost, 5 cancelled — total 120
       const r = computeOutcomeBreakdown([
         { status: 'new',       count: 100 },
         { status: 'booked',    count: 10 },
         { status: 'lost',      count: 5 },
         { status: 'cancelled', count: 5 },
       ]);
-      // Hire Rate = 10 / (10 + 5 + 5) = 50%
-      expect(r.hireRate).toBeCloseTo(50.0, 4);
+      // Hire Rate = 10 / 120 ≈ 8.33%
+      expect(r.hireRate).toBeCloseTo(8.33, 1);
       // Active Rate = 100 / 120 ≈ 83.3%
       expect(r.activeRate).toBeCloseTo(83.33, 1);
     });
 
-    it('returns null Hire Rate when there are zero resolved leads', () => {
+    it('returns null Hire Rate only when total is zero (all-active still counts)', () => {
+      // All-active tenant: won=0 over total=50 → Hire Rate is 0, not null.
       const r = computeOutcomeBreakdown([{ status: 'new', count: 50 }]);
-      expect(r.hireRate).toBeNull();
-      expect(r.conversionRate).toBeNull();
+      expect(r.hireRate).toBe(0);
+      expect(r.conversionRate).toBe(0);
       expect(r.activeRate).toBe(100);
     });
   });

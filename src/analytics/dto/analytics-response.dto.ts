@@ -104,8 +104,10 @@ export interface OutcomeBreakdown {
   };
   /**
    * Hire Rate (primary KPI, marketplace label):
-   *   (scheduled + done) / (scheduled + done + lost + cancelled)
-   * Null when there are zero resolved leads.
+   *   (scheduled + done) / total
+   * One simple formula. Stays stable when leads move between Lost and
+   * Active buckets (e.g. the PR 4 historical flip) because total doesn't
+   * change. Null only when total is zero.
    */
   hireRate: number | null;
   /**

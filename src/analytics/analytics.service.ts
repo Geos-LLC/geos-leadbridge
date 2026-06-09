@@ -176,16 +176,6 @@ export interface ComputeOutcomeBreakdownOpts {
     follow_up?: number;
     human_handoff?: number;
   };
-  /**
-   * Count of historical lost leads that were flipped to Active by the PR 4
-   * backfill (statusSource='backfill_pr4_v1') AND are no longer in 'lost'.
-   * These leads are now visible in the Active card but stay in the Hire
-   * Rate denominator as "recoverable opportunities" so the headline rate
-   * is invariant across the migration — re-categorization alone cannot
-   * move it, only real new wins / losses can. Per the user-approved
-   * "Option B (cumulative)" spec from 2026-06-08.
-   */
-  recoverable?: number;
 }
 
 export function computeOutcomeBreakdown(
@@ -201,18 +191,15 @@ export function computeOutcomeBreakdown(
     switch (classifyStatus(r.status)) {
       case 'active': active += r.count; break;
       case 'lost':   lost   += r.count; break;
-      // 'won' is fully decomposed above into scheduled / done.
-      // 'unknown' is intentionally excluded — never silently absorbed.
     }
   }
   const won = scheduled + done;
-  const recoverable = Math.max(0, opts.recoverable ?? 0);
   const total = active + scheduled + done + lost + cancelled;
-  // Cumulative denominator (Option B — headline). Includes the recoverable
-  // count so the rate is stable when historical "Lost" rows flip to Active.
-  // Without `recoverable` the math reduces to resolved-only (Option A).
-  const cumulativeDenom = won + lost + cancelled + recoverable;
-  const hireRate = cumulativeDenom > 0 ? (won / cumulativeDenom) * 100 : null;
+  // Hire Rate = won / total — converted leads as a fraction of every lead in
+  // the period. Active leads stay in the denominator as "still-potential";
+  // the rate is stable across the PR 4 re-categorization because total
+  // doesn't change when we re-bucket between Lost and Active.
+  const hireRate = total > 0 ? (won / total) * 100 : null;
   const activeRate = total > 0 ? (active / total) * 100 : null;
   return {
     active,
@@ -514,8 +501,8 @@ export class AnalyticsService {
     for (const entry of bucketMap.values()) {
       entry.wonCount = entry.scheduledCount + entry.doneCount;
       entry.hiredCount = entry.wonCount;
-      const resolved = entry.wonCount + entry.lostCount + entry.cancelledCount;
-      entry.hireRate = resolved > 0 ? (entry.wonCount / resolved) * 100 : null;
+      // Hire Rate = won / total per bucket — same formula as the headline.
+      entry.hireRate = entry.total > 0 ? (entry.wonCount / entry.total) * 100 : null;
       entry.conversionRate = entry.hireRate;
       entry.activeRate = entry.total > 0 ? (entry.activeCount / entry.total) * 100 : null;
       entry.activeLeadRate = entry.activeRate;
@@ -722,7 +709,7 @@ export class AnalyticsService {
     if (!userId) {
       return computeOutcomeBreakdown([]);
     }
-    const [rows, activeBuckets, recoverable] = await Promise.all([
+    const [rows, activeBuckets] = await Promise.all([
       this.prisma.lead.groupBy({
         by: ['status'],
         where: {
@@ -734,23 +721,10 @@ export class AnalyticsService {
         _count: { id: true },
       }),
       this.getActiveBuckets(where),
-      // Count of historical lost rows flipped to Active by the PR 4 backfill.
-      // These leads stay in the Hire Rate denominator as "recoverable
-      // opportunities" so the headline rate is invariant to the migration.
-      this.prisma.lead.count({
-        where: {
-          userId,
-          statusSource: 'backfill_pr4_v1',
-          status: { not: 'lost' },
-          ...(where.businessId && { businessId: where.businessId }),
-          ...(where.platform && { platform: where.platform }),
-          ...(where.createdAt && { createdAt: where.createdAt }),
-        },
-      }),
     ]);
     return computeOutcomeBreakdown(
       rows.map((r) => ({ status: (r.status ?? '').toString(), count: r._count.id })),
-      { activeBuckets, recoverable },
+      { activeBuckets },
     );
   }
 
