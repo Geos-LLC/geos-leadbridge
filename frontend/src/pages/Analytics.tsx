@@ -540,25 +540,30 @@ export function Analytics() {
           ) : (
             <>
               {/* Summary strip — marketplace KPIs.
-                  Hire Rate = (Scheduled + Done) / (Scheduled + Done + Lost + Cancelled)
-                  Scheduled and Done are surfaced as separate raw counts
-                  (no aggregate "Won" card per UX spec). */}
+                  Hire Rate uses the cumulative formula (Option B): the
+                  backend includes the "recoverable" count (historical
+                  Lost rows flipped to Active by PR 4) in the denominator
+                  so the rate is invariant to re-categorization. We pull
+                  it from displayData.outcomes.hireRate rather than
+                  recomputing from time-series buckets, because the
+                  time-series doesn't carry recoverable per-month. */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 {(() => {
                   const totalLeads     = tsData.reduce((s, r) => s + r.total, 0);
                   const scheduledTotal = tsData.reduce((s, r) => s + (r.scheduledCount ?? 0), 0);
                   const doneTotal      = tsData.reduce((s, r) => s + (r.doneCount      ?? 0), 0);
-                  const lostTotal      = tsData.reduce((s, r) => s + (r.lostCount      ?? 0), 0);
-                  const cancelledTotal = tsData.reduce((s, r) => s + (r.cancelledCount ?? 0), 0);
-                  const wonTotal       = scheduledTotal + doneTotal;
-                  const resolved       = wonTotal + lostTotal + cancelledTotal;
+                  const cumulativeHireRate = displayData?.outcomes?.hireRate
+                    ?? displayData?.outcomes?.conversionRate
+                    ?? null;
                   return [
                     { label: 'Total Leads',    value: totalLeads.toString() },
                     { label: 'Scheduled',      value: scheduledTotal.toString() },
                     { label: 'Done',           value: doneTotal.toString() },
                     {
                       label: 'Hire Rate',
-                      value: resolved > 0 ? `${((wonTotal / resolved) * 100).toFixed(1)}%` : '—',
+                      value: cumulativeHireRate != null
+                        ? `${cumulativeHireRate.toFixed(1)}%`
+                        : '—',
                     },
                   ];
                 })().map(({ label, value }) => (
