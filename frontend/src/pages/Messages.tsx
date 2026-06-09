@@ -2212,19 +2212,42 @@ export function Messages() {
                           <span key="acct" className="text-slate-400 whitespace-nowrap">{accountName}</span>
                         );
                       }
-                      items.push(
-                        selectedLead.customerPhone ? (
-                          <a key="phone" href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-slate-600 hover:text-blue-600 whitespace-nowrap">
-                            <Phone size={14} />
-                            {formatPhoneNumber(selectedLead.customerPhone)}
-                          </a>
-                        ) : (
-                          <span key="phone" className="flex items-center gap-1.5 text-slate-400 whitespace-nowrap">
-                            <Phone size={14} />
-                            No phone
-                          </span>
-                        )
-                      );
+                      {
+                        const realPhone = selectedLead.customerPhone;
+                        const subPhone = selectedLead.customerPhoneSubstitute;
+                        if (realPhone) {
+                          items.push(
+                            <a key="phone" href={`tel:${realPhone}`} className="flex items-center gap-1.5 text-slate-600 hover:text-blue-600 whitespace-nowrap">
+                              <Phone size={14} />
+                              {formatPhoneNumber(realPhone)}
+                            </a>
+                          );
+                          if (subPhone && subPhone !== realPhone) {
+                            items.push(
+                              <a key="phone-sub" href={`tel:${subPhone}`} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-600 whitespace-nowrap">
+                                <Phone size={14} />
+                                {formatPhoneNumber(subPhone)}
+                                <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-slate-100 text-slate-500">Forwarding</span>
+                              </a>
+                            );
+                          }
+                        } else if (subPhone) {
+                          items.push(
+                            <a key="phone" href={`tel:${subPhone}`} className="flex items-center gap-1.5 text-slate-600 hover:text-blue-600 whitespace-nowrap">
+                              <Phone size={14} />
+                              {formatPhoneNumber(subPhone)}
+                              <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-slate-100 text-slate-500">Forwarding</span>
+                            </a>
+                          );
+                        } else {
+                          items.push(
+                            <span key="phone" className="flex items-center gap-1.5 text-slate-400 whitespace-nowrap">
+                              <Phone size={14} />
+                              No phone
+                            </span>
+                          );
+                        }
+                      }
                       items.push(
                         <span key="date" className="hidden md:flex items-center gap-1.5 text-slate-600 whitespace-nowrap">
                           <Calendar size={14} />
