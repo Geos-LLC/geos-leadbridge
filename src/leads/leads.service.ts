@@ -2022,6 +2022,7 @@ export class LeadsService {
       externalRequestId: lead.externalRequestId,
       customerName: lead.customerName,
       customerPhone: lead.customerPhone,
+      customerPhoneSubstitute: lead.customerPhoneSubstitute ?? null,
       customerEmail: lead.customerEmail,
       message: lead.message,
       budget: lead.budget ? parseFloat(lead.budget.toString()) : undefined,
