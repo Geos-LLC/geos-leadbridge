@@ -345,6 +345,11 @@ export class StripeService {
       cancelAtPeriodEnd: user.cancelAtPeriodEnd || false,
       hasOwnNumber: user.hasOwnNumber || false,
       features,
+      // Persistent flag — true once the user has consumed their one-shot trial,
+      // regardless of whether the trial is currently active. Used by the
+      // Pricing page to switch the CTA from "Start Free Trial" to "Subscribe"
+      // for trial-burned users without a current subscription.
+      trialUsed: user.trialUsed || false,
       trial: {
         // Adaptive view (preferred for new UI)
         type: view.trialType,
