@@ -25,6 +25,7 @@ import {
   previewPlaybookCategories,
   CATEGORY_ORDER,
   CATEGORY_UI_LABELS,
+  DEFAULT_INSTRUCTIONS,
   INSTRUCTION_LENGTH_SOFT,
   INSTRUCTION_LENGTH_WARN,
   type PlaybookCategoryKey,
@@ -170,11 +171,12 @@ export function SettingsAiPlaybook() {
         return (
           <PlaybookCard
             key={category}
-            category={category}
             label={CATEGORY_UI_LABELS[category]}
             behaviorBullets={card.behaviorBullets}
             value={instructions[category] ?? ''}
+            defaultText={DEFAULT_INSTRUCTIONS[category]}
             onChange={v => onInstructionChange(category, v)}
+            onRevertToDefault={() => onInstructionChange(category, '')}
           />
         );
       })}
@@ -248,17 +250,20 @@ function HelpBlock() {
 // ─── Per-category card ────────────────────────────────────────────────────
 
 function PlaybookCard({
-  category, label, behaviorBullets, value, onChange,
+  label, behaviorBullets, value, defaultText, onChange, onRevertToDefault,
 }: {
-  category: PlaybookCategoryKey;
   label: string;
   behaviorBullets: string[];
   value: string;
+  defaultText: string;
   onChange: (v: string) => void;
+  onRevertToDefault: () => void;
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const chars = value.length;
   const overSoft = chars >= INSTRUCTION_LENGTH_SOFT;
   const overWarn = chars >= INSTRUCTION_LENGTH_WARN;
+  const isUsingDefault = value.trim().length === 0;
 
   const counterColor = overWarn ? '#b91c1c' : overSoft ? '#d97706' : 'var(--lb-ink-6)';
 
@@ -276,6 +281,16 @@ function PlaybookCard({
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             {label}
           </div>
+        </div>
+        <div style={{
+          flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.04,
+          padding: '4px 9px', borderRadius: 999,
+          background: isUsingDefault ? '#f1f5f9' : '#dcfce7',
+          color:      isUsingDefault ? '#475569' : '#15803d',
+          fontFamily: 'var(--lb-font-mono)',
+          textTransform: 'uppercase',
+        }}>
+          {isUsingDefault ? 'Default' : 'Customized'}
         </div>
       </div>
 
@@ -321,7 +336,7 @@ function PlaybookCard({
           <textarea
             value={value}
             onChange={e => onChange(e.target.value)}
-            placeholder={PLACEHOLDERS[category]}
+            placeholder={defaultText}
             rows={6}
             style={{
               width: '100%', boxSizing: 'border-box',
@@ -334,6 +349,77 @@ function PlaybookCard({
               minHeight: 120,
             }}
           />
+          <div style={{
+            marginTop: 6,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontSize: 11.5,
+          }}>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(v => !v)}
+              style={{
+                background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                color: 'var(--lb-accent)',
+              }}
+            >
+              {showAdvanced ? 'Hide default prompt' : 'View default prompt'}
+            </button>
+            {!isUsingDefault && (
+              <button
+                type="button"
+                onClick={onRevertToDefault}
+                style={{
+                  background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                  color: 'var(--lb-ink-5)',
+                }}
+              >
+                Revert to default ↺
+              </button>
+            )}
+          </div>
+
+          {showAdvanced && (
+            <div style={{
+              marginTop: 10,
+              padding: '10px 12px',
+              background: '#f8fafc',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 8,
+              fontSize: 12.5, color: 'var(--lb-ink-2)',
+              lineHeight: 1.55,
+            }}>
+              <div style={{
+                fontSize: 10.5, fontWeight: 700, color: 'var(--lb-ink-5)',
+                letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 6,
+                fontFamily: 'var(--lb-font-mono)',
+              }}>
+                Default prompt
+              </div>
+              <div>{defaultText}</div>
+              {isUsingDefault ? (
+                <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 8, fontStyle: 'italic' }}>
+                  Currently active — AI uses this text by default.
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onChange(defaultText)}
+                  style={{
+                    marginTop: 8,
+                    background: 'transparent', border: '1px solid var(--lb-line)',
+                    padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                    color: 'var(--lb-ink-2)',
+                  }}
+                >
+                  Use as starting point
+                </button>
+              )}
+            </div>
+          )}
+
           {overWarn && (
             <div style={{
               marginTop: 8,
@@ -353,24 +439,3 @@ function PlaybookCard({
     </SectionCard>
   );
 }
-
-// Per-category placeholder text shown when the user hasn't written anything
-// yet. Concrete examples drawn from the Stage 3 design discussion.
-const PLACEHOLDERS: Record<PlaybookCategoryKey, string> = {
-  booking_requests:
-    "e.g. Offer the earliest available slot first.\n     Mention recurring service discounts when appropriate.",
-  human_contact:
-    "e.g. Ask for the best callback time before pausing.\n     Share the main business line if customer wants a phone number.",
-  pricing:
-    "e.g. When customer says \"too expensive\": ask what budget they had in mind first.\n     Offer reduced scope if their budget is below our range.\n     Never discount immediately — always exchange something.",
-  customer_defers:
-    "e.g. Acknowledge they want time to decide — don't pressure.\n     If they named a specific date, confirm we'll reach out then.",
-  hired_another:
-    "e.g. Wish them well sincerely.\n     Leave the door open for future jobs.",
-  opt_out:
-    "e.g. If the customer seems frustrated rather than opting out, ask once.\n     Send the standard goodbye message on confirmed opt-out.",
-  key_details:
-    "e.g. Confirm the phone number back to the customer.\n     For deep cleans, also ask about pet hair and cabinet interiors before quoting.",
-  general_behavior:
-    "e.g. Match the customer's tone.\n     Use the owner's first name in sign-offs.\n     Switch to Spanish if the customer writes in Spanish.",
-};

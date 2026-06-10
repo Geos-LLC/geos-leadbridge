@@ -237,12 +237,43 @@ function renderBehaviorSummary(
   }
 }
 
+/**
+ * Default instructions shipped per category — mirrors
+ * src/ai/playbook-renderer.ts:DEFAULT_INSTRUCTIONS. Keep in sync.
+ *
+ * UI shows these on each Playbook card so users see what the AI is told by
+ * default. The backend renderer also falls back to these when the user has
+ * NOT customized — so every category contributes guidance to the prompt
+ * out-of-the-box.
+ */
+export const DEFAULT_INSTRUCTIONS: Record<PlaybookCategoryKey, string> = {
+  booking_requests:
+    'When the customer is ready to book, acknowledge their interest first. Confirm one key detail you need (preferred date/time or service address). Let them know a team member will confirm the appointment shortly.',
+  human_contact:
+    'When the customer asks to speak to a person, acknowledge their request. Ask for the best time and number to reach them at. Keep the message brief and warm — don\'t try to resolve the issue in chat.',
+  pricing:
+    'When discussing price, lead with a clear range based on the pricing table. Note that the dispatcher confirms the exact number before booking. If the customer pushes back on price, ask what budget they had in mind before offering reduced scope. Never discount immediately.',
+  customer_defers:
+    'When the customer asks for more time, acknowledge it and don\'t pressure them. Confirm we\'ll reach out at the time they suggested (or our configured check-in window). Mention they can text back anytime if their timing changes.',
+  hired_another:
+    'When the customer says they hired another company, wish them well sincerely — no passive-aggression, no pushing for the lead. Leave the door open: "If anything doesn\'t go as expected, we\'re happy to help next time."',
+  opt_out:
+    'When the customer opts out, acknowledge their request politely and stop messaging. Do not ask why or try to retain them. Confirm we\'ve removed them from outreach.',
+  key_details:
+    'When the customer shares key details (phone, address, home size, scope), confirm what they\'ve given so they know we received it. Then ask one follow-up question to complete the picture if anything is still missing.',
+  general_behavior:
+    'Reply in a warm, professional tone matching the customer\'s energy. Be concise — under 3 sentences when possible. Use the business owner\'s voice (the AI represents the business, not itself). Don\'t use exclamation points except for genuine excitement (booking confirmed, etc.).',
+};
+
 export type PerCategoryPreview = {
   category: PlaybookCategoryKey;
   promptLabel: string;
   uiLabel: string;
   behaviorBullets: string[];
-  instructions: string;
+  /** User's saved custom text, or '' when none. Empty means defaults are active. */
+  customInstructions: string;
+  /** Shipped default for this category — always non-empty. */
+  defaultInstructions: string;
 };
 
 export function previewPlaybookCategories(savedAccount: RawSavedAccount): PerCategoryPreview[] {
@@ -250,13 +281,14 @@ export function previewPlaybookCategories(savedAccount: RawSavedAccount): PerCat
   const pricingRowCount = countPricingRows(savedAccount.servicePricingJson);
   return CATEGORY_ORDER.map(category => {
     const raw = settings.instructions[category];
-    const instructions = typeof raw === 'string' ? raw.trim() : '';
+    const customInstructions = typeof raw === 'string' ? raw.trim() : '';
     return {
       category,
       promptLabel: CATEGORY_DISPLAY_LABELS[category],
       uiLabel: CATEGORY_UI_LABELS[category],
       behaviorBullets: renderBehaviorSummary(category, settings, savedAccount.aiConversationMode, pricingRowCount),
-      instructions,
+      customInstructions,
+      defaultInstructions: DEFAULT_INSTRUCTIONS[category],
     };
   });
 }

@@ -269,6 +269,54 @@ function renderBehaviorSummary(
   }
 }
 
+// ─── Default per-category instructions ───────────────────────────────────
+
+/**
+ * Default instructions shipped per category. Used in two places:
+ *  1. UI shows these on each Playbook card so users see what the AI is told
+ *     by default, with a "Revert to default" affordance.
+ *  2. The renderer falls back to these when the user has NOT customized
+ *     instructions for a category — so every Playbook category contributes
+ *     guidance to the prompt out-of-the-box.
+ *
+ * Keep these business-language, short, and safe. The LLM weighs them as
+ * situational rules, NOT hard gates. Stop rules, opt-out compliance, and
+ * handoff alerts still run as code-level gates before AI reply generation.
+ */
+export const DEFAULT_INSTRUCTIONS: Record<PlaybookCategoryKey, string> = {
+  booking_requests:
+    'When the customer is ready to book, acknowledge their interest first. Confirm one key detail you need (preferred date/time or service address). Let them know a team member will confirm the appointment shortly.',
+  human_contact:
+    'When the customer asks to speak to a person, acknowledge their request. Ask for the best time and number to reach them at. Keep the message brief and warm — don\'t try to resolve the issue in chat.',
+  pricing:
+    'When discussing price, lead with a clear range based on the pricing table. Note that the dispatcher confirms the exact number before booking. If the customer pushes back on price, ask what budget they had in mind before offering reduced scope. Never discount immediately.',
+  customer_defers:
+    'When the customer asks for more time, acknowledge it and don\'t pressure them. Confirm we\'ll reach out at the time they suggested (or our configured check-in window). Mention they can text back anytime if their timing changes.',
+  hired_another:
+    'When the customer says they hired another company, wish them well sincerely — no passive-aggression, no pushing for the lead. Leave the door open: "If anything doesn\'t go as expected, we\'re happy to help next time."',
+  opt_out:
+    'When the customer opts out, acknowledge their request politely and stop messaging. Do not ask why or try to retain them. Confirm we\'ve removed them from outreach.',
+  key_details:
+    'When the customer shares key details (phone, address, home size, scope), confirm what they\'ve given so they know we received it. Then ask one follow-up question to complete the picture if anything is still missing.',
+  general_behavior:
+    'Reply in a warm, professional tone matching the customer\'s energy. Be concise — under 3 sentences when possible. Use the business owner\'s voice (the AI represents the business, not itself). Don\'t use exclamation points except for genuine excitement (booking confirmed, etc.).',
+};
+
+/**
+ * Resolves the effective instructions text for a category. User-saved
+ * non-empty text wins; otherwise the shipped default is used. Whitespace-only
+ * input is treated as empty.
+ */
+export function resolveInstructions(
+  category: PlaybookCategoryKey,
+  userInstructions: PlaybookInstructionsBlob,
+): { text: string; isDefault: boolean } {
+  const raw = userInstructions[category];
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (trimmed.length > 0) return { text: trimmed, isDefault: false };
+  return { text: DEFAULT_INSTRUCTIONS[category], isDefault: true };
+}
+
 // ─── Public renderer ──────────────────────────────────────────────────────
 
 /**
@@ -286,8 +334,11 @@ export function renderPlaybookBlock(savedAccount: RawSavedAccount): string {
   const sections: string[] = [];
   for (const category of CATEGORY_ORDER) {
     const summaryBullets = renderBehaviorSummary(category, settings, savedAccount.aiConversationMode, pricingRowCount);
-    const rawInstr = instructions[category];
-    const userText = typeof rawInstr === 'string' ? rawInstr.trim() : '';
+    // Resolved instructions = user custom if set, else shipped default. Every
+    // category contributes Instructions text to the prompt — users opt OUT
+    // by clicking "Revert to default" in the UI (which clears their custom
+    // text and falls back here to the shipped default).
+    const { text: userText } = resolveInstructions(category, instructions);
     if (summaryBullets.length === 0 && !userText) continue;
     const parts: string[] = [`[${CATEGORY_DISPLAY_LABELS[category]}]`];
     if (summaryBullets.length > 0) {
@@ -309,7 +360,10 @@ export type PerCategoryPreview = {
   category: PlaybookCategoryKey;
   label: string;
   behaviorBullets: string[];
-  instructions: string;
+  /** User's saved text, or '' when none. The UI uses this to decide whether to show "Revert to default". */
+  customInstructions: string;
+  /** The shipped default for this category (always non-empty). UI surfaces this so users know what AI sees by default. */
+  defaultInstructions: string;
 };
 
 /**
@@ -322,12 +376,13 @@ export function previewPlaybookCategories(savedAccount: RawSavedAccount): PerCat
   const pricingRowCount = countPricingRows(savedAccount.servicePricingJson);
   return CATEGORY_ORDER.map(category => {
     const raw = settings.instructions[category];
-    const instructions = typeof raw === 'string' ? raw.trim() : '';
+    const customInstructions = typeof raw === 'string' ? raw.trim() : '';
     return {
       category,
       label: CATEGORY_DISPLAY_LABELS[category],
       behaviorBullets: renderBehaviorSummary(category, settings, savedAccount.aiConversationMode, pricingRowCount),
-      instructions,
+      customInstructions,
+      defaultInstructions: DEFAULT_INSTRUCTIONS[category],
     };
   });
 }
