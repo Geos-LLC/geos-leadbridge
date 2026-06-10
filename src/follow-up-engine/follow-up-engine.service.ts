@@ -804,6 +804,155 @@ export class FollowUpEngineService {
   }
 
   /**
+   * Post-historical-reactivation lifecycle hop.
+   *
+   * Called by the scheduler IMMEDIATELY after a historical_reactivation
+   * enrollment one-shot send completes. Creates a fresh long-term
+   * follow-up enrollment for the same conversation/lead, scheduled
+   * +30 days out — so a successfully re-engaged historical lead doesn't
+   * drop off the follow-up radar.
+   *
+   * Design rules (set by the post-send-lifecycle spec):
+   *   - One enrollment per conversation. Idempotent: if a
+   *     post_historical_reactivation_followup already exists active,
+   *     return its id without creating a duplicate.
+   *   - Never enrolls SF-linked leads (carve-out delegated to SF).
+   *   - First step is +30 days, NOT the standard 10-minute / 1-hour
+   *     intra-sequence cadence.
+   *   - ThreadContext is repointed at the new enrollment so
+   *     `activeEnrollmentId` is non-null and the runtime sees a live
+   *     follow-up — without this, recovered leads look idle and the
+   *     historical-reactivation cohort report under-counts active.
+   *   - Reuses the `customer_hired_competitor` template (same content
+   *     family as historical reactivation). Caller can extend later
+   *     to a dedicated `historical_reactivation_followup` trigger if
+   *     the copy needs to diverge.
+   *   - Returns empty string when SF-linked or no template found —
+   *     mirrors the enrollAsHistoricalReactivation sentinel so the
+   *     scheduler caller can log and move on instead of crashing the
+   *     enrollment's one-shot completion.
+   *
+   * Pure DB writes. No message generation. No customer-facing side
+   * effects until the scheduler picks up the new enrollment in 30 days.
+   */
+  async createPostHistoricalReactivationFollowup(
+    conversationId: string,
+    leadId: string,
+    completedAt: Date,
+  ): Promise<string> {
+    const POST_MODE_REASON = 'post_historical_reactivation_followup';
+    const DELAY_DAYS = 30;
+    const nextStepDueAt = new Date(completedAt.getTime() + DELAY_DAYS * 24 * 60 * 60 * 1000);
+
+    // 1. SF-link guard.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        userId: true, platform: true, threadId: true,
+        sfJobId: true, sfCustomerId: true, syncStatus: true,
+      },
+    });
+    if (!lead) throw new Error(`Lead ${leadId} not found`);
+    if (isSfLinkedLead(lead)) {
+      this.logger.log(
+        `[FollowUpEngine] createPostHistoricalReactivationFollowup skipped — sf_linked lead=${leadId}`,
+      );
+      return '';
+    }
+
+    // 2. Idempotency — return existing active post-followup id if any.
+    const existing = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active', modeReason: POST_MODE_REASON },
+      select: { id: true },
+    });
+    if (existing) {
+      this.logger.debug(
+        `[FollowUpEngine] createPostHistoricalReactivationFollowup: ${conversationId} already has ${existing.id} — returning existing`,
+      );
+      return existing.id;
+    }
+
+    // 3. Template lookup — reuse customer_hired_competitor family.
+    const template = await this.prisma.followUpSequenceTemplate.findFirst({
+      where: {
+        userId: lead.userId,
+        platform: lead.platform,
+        triggerState: HISTORICAL_RECOVERY_INTERNAL_TRIGGER_STATE,
+        enabled: true,
+      },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true, name: true, mode: true },
+    });
+    if (!template) {
+      this.logger.warn(
+        `[FollowUpEngine] createPostHistoricalReactivationFollowup: no template for user=${lead.userId} platform=${lead.platform} — leaving conversation idle`,
+      );
+      return '';
+    }
+
+    // 4. Transactional insert + ThreadContext repoint. Same race-aware
+    //    pattern as enrollAsHistoricalReactivation so duplicate scheduler
+    //    ticks can't double-enroll.
+    try {
+      const enrollmentId = await this.prisma.$transaction(async (tx) => {
+        const racedIn = await tx.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active', modeReason: POST_MODE_REASON },
+          select: { id: true },
+        });
+        if (racedIn) return racedIn.id;
+
+        const created = await tx.followUpEnrollment.create({
+          data: {
+            sequenceTemplateId: template.id,
+            conversationId,
+            leadId,
+            platform: lead.platform,
+            status: 'active',
+            currentStepIndex: 0,
+            nextStepDueAt,
+            mode: template.mode || 'auto_send',
+            followUpMode: 'long_term',
+            modeReason: POST_MODE_REASON,
+          },
+          select: { id: true },
+        });
+
+        await tx.threadContext.updateMany({
+          where: { conversationId },
+          data: {
+            activeEnrollmentId: created.id,
+            nextFollowUpAt: nextStepDueAt,
+            followUpStatus: 'active',
+            conversationState: 'awaiting_customer',
+          },
+        });
+
+        return created.id;
+      });
+
+      this.logger.log(
+        `[FollowUpEngine] post_historical_reactivation_followup enrolled — conversation=${conversationId} lead=${leadId} ` +
+        `enrollment=${enrollmentId} nextStepDueAt=${nextStepDueAt.toISOString()} (+${DELAY_DAYS}d)`,
+      );
+      return enrollmentId;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const winner = await this.prisma.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active', modeReason: POST_MODE_REASON },
+          select: { id: true },
+        });
+        if (winner) {
+          this.logger.warn(
+            `[FollowUpEngine] createPostHistoricalReactivationFollowup P2002 race on ${conversationId} — returning existing ${winner.id}`,
+          );
+          return winner.id;
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Stop enrollment on customer reply. Idempotent — safe for duplicate webhooks.
    * Returns whether any enrollment was actually stopped (for re-engagement alerts).
    *
