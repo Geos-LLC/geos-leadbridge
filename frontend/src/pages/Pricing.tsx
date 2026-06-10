@@ -124,6 +124,9 @@ export default function Pricing() {
   const hasActiveSubscription = subscription?.tier &&
     ['ACTIVE', 'TRIALING', 'PAST_DUE'].includes(subscription.status || '');
   const currentTier = hasActiveSubscription ? subscription?.tier : null;
+  // Ordered for upgrade/switch label decisions. Higher index = higher tier.
+  const TIER_RANK: Record<string, number> = { STARTER: 0, PRO: 1, ENTERPRISE: 2 };
+  const trialUsed = subscription?.trialUsed === true;
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-12">
@@ -228,6 +231,14 @@ export default function Pricing() {
                   </>
                 ) : isCurrentPlan ? (
                   'Current Plan'
+                ) : hasActiveSubscription && currentTier ? (
+                  // Has an existing subscription — upgrade / downgrade / switch.
+                  TIER_RANK[tier.id] > TIER_RANK[currentTier]
+                    ? `Upgrade to ${tier.label}`
+                    : `Switch to ${tier.label}`
+                ) : trialUsed ? (
+                  // Trial already consumed; this is a paid subscription.
+                  `Subscribe to ${tier.label}`
                 ) : (
                   'Start Free Trial'
                 )}
