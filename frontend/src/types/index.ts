@@ -394,6 +394,8 @@ export interface SubscriptionDetails {
   cancelAtPeriodEnd: boolean;
   hasOwnNumber: boolean;
   features: string[];
+  /** True once the user has consumed their one-shot trial (even if no current subscription). */
+  trialUsed: boolean;
   trial: {
     // Adaptive trial fields (preferred)
     type: 'LEAD_BASED' | 'TIME_BASED' | 'HYBRID' | null;
