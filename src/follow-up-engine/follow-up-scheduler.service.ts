@@ -1186,34 +1186,64 @@ export class FollowUpSchedulerService implements OnModuleInit {
    *   2. account.followUpSettingsJson.aiHiredCompetitorMessage
    *   3. null
    *
-   * Pure DB read — no side effects.
+   * After resolving the raw template string, applies placeholder
+   * substitution for `{{lead.name}}` and `{{name}}` so the customer sees
+   * their first name instead of the literal placeholder. Missing names
+   * fall back to "there" (defensive — keeps the message grammatical).
+   *
+   * Pure DB read — no side effects beyond template loading.
    */
   private async resolveHistoricalReactivationMessage(enrollment: any): Promise<string | null> {
+    let rawMessage: string | null = null;
+    let lead: { userId: string; businessId: string | null; customerName: string | null } | null = null;
+
+    if (enrollment.leadId) {
+      lead = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { userId: true, businessId: true, customerName: true },
+      });
+    }
+
     try {
       const raw = enrollment.sequenceTemplate?.stepsJson;
       const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const steps = Array.isArray(obj) ? obj : (obj?.steps || []);
       const msg = steps[0]?.messageTemplate || steps[0]?.message;
-      if (typeof msg === 'string' && msg.trim().length > 0) return msg;
+      if (typeof msg === 'string' && msg.trim().length > 0) rawMessage = msg;
     } catch {}
 
-    if (!enrollment.leadId) return null;
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: enrollment.leadId },
-      select: { userId: true, businessId: true },
-    });
-    if (!lead?.businessId) return null;
-    const acct = await this.prisma.savedAccount.findFirst({
-      where: { userId: lead.userId, businessId: lead.businessId },
-      select: { followUpSettingsJson: true },
-    });
-    if (!acct?.followUpSettingsJson) return null;
-    try {
-      const settings = JSON.parse(acct.followUpSettingsJson);
-      const msg = settings.aiHiredCompetitorMessage;
-      if (typeof msg === 'string' && msg.trim().length > 0) return msg;
-    } catch {}
-    return null;
+    if (!rawMessage && lead?.businessId) {
+      const acct = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (acct?.followUpSettingsJson) {
+        try {
+          const settings = JSON.parse(acct.followUpSettingsJson);
+          const msg = settings.aiHiredCompetitorMessage;
+          if (typeof msg === 'string' && msg.trim().length > 0) rawMessage = msg;
+        } catch {}
+      }
+    }
+
+    if (!rawMessage) return null;
+
+    return this.applyHistoricalReactivationPlaceholders(rawMessage, lead?.customerName ?? null);
+  }
+
+  /**
+   * Render `{{lead.name}}` / `{{name}}` (with arbitrary inner whitespace)
+   * against the customer's first name. Missing customerName falls back to
+   * "there" so the message stays grammatical. Pure function — exposed for
+   * unit testing.
+   *
+   * Internal only — the standard follow-up generator (AI / template) has its
+   * own substitution layer and is intentionally untouched.
+   */
+  applyHistoricalReactivationPlaceholders(message: string, customerName: string | null): string {
+    const first = (customerName ?? '').trim().split(/\s+/)[0];
+    const display = first && first.length > 0 ? first : 'there';
+    return message.replace(/\{\{\s*(?:lead\.name|name)\s*\}\}/gi, display);
   }
 
   /**
