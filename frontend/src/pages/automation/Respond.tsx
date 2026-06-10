@@ -15,6 +15,7 @@ import {
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
 import { automationApi, callConnectApi, followUpApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
+import { LeadBridgeNumberLock } from '../../components/LeadBridgeNumberLock';
 import { useAppStore } from '../../store/appStore';
 import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
 
@@ -658,6 +659,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       </SettingCard>
 
       {/* Instant Text */}
+      <LeadBridgeNumberLock feature="Instant Text" />
       <SettingCard
         icon={MessageCircle}
         iconTone="green"
@@ -707,6 +709,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       </SettingCard>
 
       {/* Instant Call */}
+      <LeadBridgeNumberLock feature="Instant Call" />
       <SettingCard
         icon={Phone}
         iconTone="violet"

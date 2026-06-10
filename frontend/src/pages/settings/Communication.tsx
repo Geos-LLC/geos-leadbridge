@@ -11,6 +11,7 @@ import type { MessageTemplate, NotificationRule, SavedAccount } from '../../type
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
 import { LeadBridgeNumberManager } from '../../components/LeadBridgeNumberManager';
+import { LeadBridgeNumberLock } from '../../components/LeadBridgeNumberLock';
 
 function formatPhone(e164: string | null): string {
   if (!e164) return '—';
@@ -468,6 +469,7 @@ export function SettingsCommunication() {
         </FieldRow>
       </SettingCard>
 
+      <LeadBridgeNumberLock feature="SMS business alerts" />
       <SettingCard
         icon={Bell}
         iconTone="orange"
