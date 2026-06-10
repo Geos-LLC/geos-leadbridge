@@ -15,6 +15,7 @@ import {
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
+import { UpgradeOverlay } from '../../components/UpgradeOverlay';
 import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
 
 // Module-level cache that survives mount/unmount AND tab switches, so toggling
@@ -411,8 +412,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      {/* Master AI Conversation toggle. User-scoped — applies across all
-          accounts, not just the visible tab. */}
+      {/* Master AI Conversation toggle + the rest of the page. Wrapped in
+          UpgradeOverlay so non-Convert users still see the full UI behind a
+          translucent "Upgrade to Convert" overlay — the controls aren't
+          interactive, but the user can see what they'd unlock. */}
+      <UpgradeOverlay tier="convert">
+
       <SettingCard
         icon={Power}
         iconTone="violet"
@@ -421,12 +426,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           ? 'AI replies to customers automatically based on your strategy.'
           : canUseAi
             ? 'Turn on to let AI handle customer conversations end-to-end.'
-            : 'Upgrade to Convert to unlock AI Conversation.'}
+            : 'Turn on to let AI handle customer conversations end-to-end.'}
         enabled={aiOn}
-        onToggle={canUseAi ? onAiToggle : undefined}
+        onToggle={onAiToggle}
       />
 
-      {!aiOn ? null : <>
+      {!(aiOn || !canUseAi) ? null : <>
 
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
@@ -634,6 +639,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       </SectionCard>
 
       </>}
+
+      </UpgradeOverlay>
     </div>
   );
 }

@@ -20,6 +20,7 @@ import { Info, Loader2, Sparkles } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
 import { followUpApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { UpgradeOverlay } from '../../components/UpgradeOverlay';
 import {
   previewPlaybookCategories,
   CATEGORY_ORDER,
@@ -141,6 +142,10 @@ export function SettingsAiPlaybook() {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
+      {/* AI Playbook is part of AI Conversation — Convert tier. Wrap so
+          non-Convert users see the page with a transparent upgrade overlay. */}
+      <UpgradeOverlay tier="convert">
+
       <HelpBlock />
 
       {accountCount === 0 && (
@@ -199,6 +204,8 @@ export function SettingsAiPlaybook() {
           </button>
         </div>
       )}
+
+      </UpgradeOverlay>
     </div>
   );
 }
