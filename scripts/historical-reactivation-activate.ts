@@ -57,6 +57,17 @@
  *                                offset is for deterministic windowing.
  *   --include-non-pr4           Allow non-PR4 historical recovery matches
  *                                (Clause B: marketplace terminal outcomes)
+ *   --immediate                 Bypass slot grid + working-hour gating.
+ *                                Schedules each lead at
+ *                                  now + first-lead-seconds + i * stagger-seconds
+ *                                For "fire this batch now" activation passes
+ *                                where the operator paces between batches
+ *                                (e.g. 15-30 min observation window).
+ *   --stagger-seconds=90        Intra-batch stagger in IMMEDIATE mode
+ *                                (default 90s = batch 20 spans ~30 min).
+ *   --first-lead-seconds=30     Delay before the first lead fires
+ *                                (default 30s gives the scheduler one tick
+ *                                to pick up the new row).
  *
  * Post-run report (printed automatically after dry-run or apply):
  *   - enrolled this run / SF skips this run
@@ -89,6 +100,9 @@ interface CliArgs {
   limit: number | null;
   offset: number;
   includeNonPr4: boolean;
+  immediate: boolean;
+  staggerSeconds: number;
+  immediateLeadSeconds: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -96,10 +110,12 @@ function parseArgs(argv: string[]): CliArgs {
     apply: false, userId: null, businessId: null, platform: null,
     batchSize: 20, slotMinutes: 30, startHour: 9, endHour: 18,
     startAfter: null, maxLeads: null, limit: null, offset: 0, includeNonPr4: false,
+    immediate: false, staggerSeconds: 90, immediateLeadSeconds: 30,
   };
   for (const arg of argv.slice(2)) {
     if (arg === '--apply') a.apply = true;
     else if (arg === '--include-non-pr4') a.includeNonPr4 = true;
+    else if (arg === '--immediate') a.immediate = true;
     else if (arg.startsWith('--user-id=')) a.userId = arg.slice('--user-id='.length);
     else if (arg.startsWith('--business-id=')) a.businessId = arg.slice('--business-id='.length);
     else if (arg.startsWith('--platform=')) a.platform = arg.slice('--platform='.length);
@@ -111,6 +127,8 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg.startsWith('--max-leads=')) a.maxLeads = parseInt(arg.slice('--max-leads='.length), 10);
     else if (arg.startsWith('--limit=')) a.limit = parseInt(arg.slice('--limit='.length), 10);
     else if (arg.startsWith('--offset=')) a.offset = parseInt(arg.slice('--offset='.length), 10);
+    else if (arg.startsWith('--stagger-seconds=')) a.staggerSeconds = parseInt(arg.slice('--stagger-seconds='.length), 10);
+    else if (arg.startsWith('--first-lead-seconds=')) a.immediateLeadSeconds = parseInt(arg.slice('--first-lead-seconds='.length), 10);
   }
   return a;
 }
@@ -291,40 +309,66 @@ async function main() {
   const queue = eligible.slice(offset, sliceEnd);
   console.log(`\nQueue window: offset=${offset}, limit=${limitN ?? 'all'}, picked ${queue.length} of ${eligible.length} eligible`);
 
-  // ── 4. Compute slot times ──
+  // ── 4. Compute scheduledAt ──
+  // Two modes:
+  //   - DEFAULT slot-grid: tomorrow at start-hour ET, 20 leads/30-min slot.
+  //     For operator-paced batches across multiple days.
+  //   - IMMEDIATE: scheduledAt = now + first-lead-seconds + i * stagger-seconds.
+  //     For "fire this batch now" — the operator owns pacing across batches
+  //     (wait 15-30 min, observe, then run next batch). Bypasses the slot
+  //     grid entirely; no TZ math, no working-hour gating.
   const TZ = 'America/New_York';
-  // Seed: --start-after if given, else tomorrow at midnight in TZ.
-  const seedBase = args.startAfter
-    ? new Date(args.startAfter + 'T00:00:00')
-    : new Date(now.getTime() + 24 * 60 * 60 * 1000);
-
-  const slotsPerDay = Math.floor(((args.endHour - args.startHour) * 60) / args.slotMinutes);
-  const totalSlots = Math.ceil(queue.length / args.batchSize);
-  const intraBatchStaggerSec = Math.floor((args.slotMinutes * 60) / args.batchSize);
-
-  console.log('\n=== Activation schedule ===');
-  console.log(`  Working hours: ${args.startHour}:00–${args.endHour}:00 ${TZ}`);
-  console.log(`  Batch size: ${args.batchSize} leads / ${args.slotMinutes}-min slot`);
-  console.log(`  Slots per day: ${slotsPerDay}  (= ${slotsPerDay * args.batchSize} leads/day capacity)`);
-  console.log(`  Total slots needed: ${totalSlots}`);
-  console.log(`  Estimated days to complete: ${Math.ceil(totalSlots / slotsPerDay)}`);
-  console.log(`  Intra-batch stagger: ${intraBatchStaggerSec}s between leads`);
-
   type Plan = {
     lead: typeof eligible[number];
     scheduledAt: Date;
     slotIndex: number;
     recencyDays: number | null;
   };
-  const plans: Plan[] = queue.map((lead, idx) => {
-    const slotIndex = Math.floor(idx / args.batchSize);
-    const indexInSlot = idx % args.batchSize;
-    const slotStart = computeSlotTime(seedBase, slotIndex, args.slotMinutes, args.startHour, args.endHour, TZ);
-    const scheduledAt = new Date(slotStart.getTime() + indexInSlot * intraBatchStaggerSec * 1000);
-    const last = lastCustomerMap.get(lead.threadId!);
-    const recencyDays = last ? Math.round((now.getTime() - last.sentAt.getTime()) / 86400_000) : null;
-    return { lead, scheduledAt, slotIndex, recencyDays };
-  });
+  let plans: Plan[];
+
+  if (args.immediate) {
+    const firstLeadAt = new Date(now.getTime() + args.immediateLeadSeconds * 1000);
+    console.log('\n=== Activation schedule (IMMEDIATE mode) ===');
+    console.log(`  First lead fires at: ${firstLeadAt.toISOString()} (now + ${args.immediateLeadSeconds}s)`);
+    console.log(`  Intra-batch stagger: ${args.staggerSeconds}s between leads`);
+    console.log(`  Batch span: ${queue.length} leads × ${args.staggerSeconds}s = ${Math.round(queue.length * args.staggerSeconds / 60)} min`);
+    console.log(`  Last lead fires at:  ${new Date(firstLeadAt.getTime() + (queue.length - 1) * args.staggerSeconds * 1000).toISOString()}`);
+    console.log(`  (Slot grid + working-hours gating bypassed.)`);
+
+    plans = queue.map((lead, idx) => {
+      const scheduledAt = new Date(firstLeadAt.getTime() + idx * args.staggerSeconds * 1000);
+      const last = lastCustomerMap.get(lead.threadId!);
+      const recencyDays = last ? Math.round((now.getTime() - last.sentAt.getTime()) / 86400_000) : null;
+      return { lead, scheduledAt, slotIndex: 0, recencyDays };
+    });
+  } else {
+    // Seed: --start-after if given, else tomorrow at midnight in TZ.
+    const seedBase = args.startAfter
+      ? new Date(args.startAfter + 'T00:00:00')
+      : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const slotsPerDay = Math.floor(((args.endHour - args.startHour) * 60) / args.slotMinutes);
+    const totalSlots = Math.ceil(queue.length / args.batchSize);
+    const intraBatchStaggerSec = Math.floor((args.slotMinutes * 60) / args.batchSize);
+
+    console.log('\n=== Activation schedule ===');
+    console.log(`  Working hours: ${args.startHour}:00–${args.endHour}:00 ${TZ}`);
+    console.log(`  Batch size: ${args.batchSize} leads / ${args.slotMinutes}-min slot`);
+    console.log(`  Slots per day: ${slotsPerDay}  (= ${slotsPerDay * args.batchSize} leads/day capacity)`);
+    console.log(`  Total slots needed: ${totalSlots}`);
+    console.log(`  Estimated days to complete: ${Math.ceil(totalSlots / slotsPerDay)}`);
+    console.log(`  Intra-batch stagger: ${intraBatchStaggerSec}s between leads`);
+
+    plans = queue.map((lead, idx) => {
+      const slotIndex = Math.floor(idx / args.batchSize);
+      const indexInSlot = idx % args.batchSize;
+      const slotStart = computeSlotTime(seedBase, slotIndex, args.slotMinutes, args.startHour, args.endHour, TZ);
+      const scheduledAt = new Date(slotStart.getTime() + indexInSlot * intraBatchStaggerSec * 1000);
+      const last = lastCustomerMap.get(lead.threadId!);
+      const recencyDays = last ? Math.round((now.getTime() - last.sentAt.getTime()) / 86400_000) : null;
+      return { lead, scheduledAt, slotIndex, recencyDays };
+    });
+  }
 
   // ── 5. Report ──
   console.log('\n=== Excluded buckets ===');
