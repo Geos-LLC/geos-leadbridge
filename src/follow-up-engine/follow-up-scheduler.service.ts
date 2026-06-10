@@ -586,17 +586,34 @@ export class FollowUpSchedulerService implements OnModuleInit {
           });
         } else if (decision.sideEffect === 'stop_and_lost') {
           // opt_out / hired_elsewhere / completed → lost
-          const lostReason = intent === 'opt_out' ? 'opt_out' : 'hired_someone';
-          const reengageAt = intent === 'opt_out'
-            ? null
-            : new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
-          await this.leadStatusService.writeStatus({
-            ...baseInput,
-            newStatus: 'lost',
-            lostReason,
-            reason: `followup_classifier_${intent}`,
-            reengageAt,
-          });
+          //
+          // Historical reactivation guard: when the classifier triggers on
+          // OLD conversation history (hired_elsewhere, completed), DO NOT
+          // rewrite Lead.status to lost. Those intents reflect what the
+          // customer said weeks or months ago; the recovery flow was
+          // designed to re-engage them assuming circumstances may have
+          // changed. Preserve Lead.status='engaged' and stop the enrollment
+          // only. opt_out still flips to lost — that's a real unsubscribe
+          // signal we honor regardless of mode.
+          const isHistorical = enrollment.modeReason === 'historical_reactivation';
+          const shouldWriteLost = !isHistorical || intent === 'opt_out';
+          if (!shouldWriteLost) {
+            this.logger.log(
+              `[FollowUpScheduler] historical_reactivation: preserving Lead.status — skip writeStatus on intent=${intent} for enrollment ${enrollment.id}`,
+            );
+          } else {
+            const lostReason = intent === 'opt_out' ? 'opt_out' : 'hired_someone';
+            const reengageAt = intent === 'opt_out'
+              ? null
+              : new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+            await this.leadStatusService.writeStatus({
+              ...baseInput,
+              newStatus: 'lost',
+              lostReason,
+              reason: `followup_classifier_${intent}`,
+              reengageAt,
+            });
+          }
         }
       } catch (err: any) {
         this.logger.warn(`[FollowUpScheduler] writeStatus failed for lead ${enrollment.leadId}: ${err.message}`);
@@ -880,13 +897,53 @@ export class FollowUpSchedulerService implements OnModuleInit {
     const stoppedByClassifier = await this.classifyAndMaybeStop(enrollment, now);
     if (stoppedByClassifier) return;
 
+    // Historical reactivation: fail-closed message resolution.
+    // The flow uses a dedicated re-engagement copy ("hope your cleaning went
+    // well, circumstances may have changed"). Falling through to the AI
+    // qualification generator on a missing template would send wrong-tone
+    // messaging (we saw this in the Jun 10 smoke — generator produced
+    // "can you share the square footage" instead of the reactivation copy).
+    // Stop the enrollment and surface a stoppedReason an operator can grep
+    // for instead of shipping bad messaging to real customers.
+    let historicalReactivationMessage: string | null = null;
+    if (enrollment.modeReason === 'historical_reactivation') {
+      historicalReactivationMessage = await this.resolveHistoricalReactivationMessage(enrollment);
+      if (!historicalReactivationMessage) {
+        this.logger.warn(
+          `[FollowUpScheduler] historical_reactivation: stopping enrollment ${enrollment.id} — no reactivation template/message configured`,
+        );
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            status: 'stopped',
+            stoppedReason: 'historical_reactivation_no_template',
+            completedAt: now,
+          },
+        });
+        await this.prisma.threadContext.updateMany({
+          where: { conversationId: enrollment.conversationId },
+          data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'stopped' },
+        });
+        return;
+      }
+    }
+
     // Generate message. The generator throws when AI is down AND the account
     // has no saved template text for this step — that's deliberate. We do NOT
     // send a generic "Following up on your request." placeholder; instead we
     // record the execution as failed and retry in 15 minutes, same as a send
     // failure. This keeps the customer experience clean during OpenAI outages.
+    //
+    // Historical reactivation skips this path entirely — its dedicated copy
+    // is resolved above (no AI call, no qualification fallback).
     let generated: GeneratedFollowUp;
-    try {
+    if (historicalReactivationMessage) {
+      generated = {
+        message: historicalReactivationMessage,
+        objective: 'historical_reactivation',
+        strategyUsed: 'historical_reactivation',
+      };
+    } else try {
       generated = await this.generatorService.generateMessage(
         step,
         enrollment.conversationId,
@@ -1044,6 +1101,32 @@ export class FollowUpSchedulerService implements OnModuleInit {
       });
     }
 
+    // Historical reactivation: one-shot semantics. The flow is a single
+    // check-in to re-engage previously-closed marketplace leads — there is
+    // no step 1, no 11-step plan continuation. Mark the enrollment
+    // completed immediately after the successful step 0 send and skip the
+    // advance/schedule machinery below. The duplicate-send guard at the
+    // top of processEnrollment will catch any future tick that somehow
+    // re-queues this enrollment.
+    if (enrollment.modeReason === 'historical_reactivation') {
+      await this.prisma.followUpEnrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          status: 'completed',
+          completedAt: now,
+          lastExecutedAt: now,
+        },
+      });
+      await this.prisma.threadContext.updateMany({
+        where: { conversationId: enrollment.conversationId },
+        data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'completed' },
+      });
+      this.logger.log(
+        `[FollowUpScheduler] Enrollment ${enrollment.id} completed — historical_reactivation one-shot (step 0 sent)`,
+      );
+      return;
+    }
+
     // Advance to next step (only on success or suggest).
     // Follow-ups do NOT use active hours — they use quiet hours (handled
     // at the top of processEnrollment). Pass null to skip active-hours snap.
@@ -1091,6 +1174,46 @@ export class FollowUpSchedulerService implements OnModuleInit {
 
       this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} completed after final step`);
     }
+  }
+
+  /**
+   * Resolve the dedicated reactivation message for a historical_reactivation
+   * enrollment. Returns null when no copy is configured — the caller must
+   * fail closed in that case (no AI qualification fallback).
+   *
+   * Resolution order:
+   *   1. enrollment.sequenceTemplate.stepsJson.steps[0].messageTemplate
+   *   2. account.followUpSettingsJson.aiHiredCompetitorMessage
+   *   3. null
+   *
+   * Pure DB read — no side effects.
+   */
+  private async resolveHistoricalReactivationMessage(enrollment: any): Promise<string | null> {
+    try {
+      const raw = enrollment.sequenceTemplate?.stepsJson;
+      const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const steps = Array.isArray(obj) ? obj : (obj?.steps || []);
+      const msg = steps[0]?.messageTemplate || steps[0]?.message;
+      if (typeof msg === 'string' && msg.trim().length > 0) return msg;
+    } catch {}
+
+    if (!enrollment.leadId) return null;
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: enrollment.leadId },
+      select: { userId: true, businessId: true },
+    });
+    if (!lead?.businessId) return null;
+    const acct = await this.prisma.savedAccount.findFirst({
+      where: { userId: lead.userId, businessId: lead.businessId },
+      select: { followUpSettingsJson: true },
+    });
+    if (!acct?.followUpSettingsJson) return null;
+    try {
+      const settings = JSON.parse(acct.followUpSettingsJson);
+      const msg = settings.aiHiredCompetitorMessage;
+      if (typeof msg === 'string' && msg.trim().length > 0) return msg;
+    } catch {}
+    return null;
   }
 
   /**
