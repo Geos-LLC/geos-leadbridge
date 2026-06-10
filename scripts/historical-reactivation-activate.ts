@@ -41,8 +41,30 @@
  *   --start-after=YYYY-MM-DD    First eligible date for slot scheduling
  *                                (default: tomorrow in the account timezone)
  *   --max-leads=N               Cap how many leads to enroll this run
+ *                                (deprecated alias of --limit)
+ *   --limit=N                   Max leads to enroll this run
+ *   --offset=N                  Skip first N rows of the eligible queue
+ *                                (after standard exclusions). Used for
+ *                                successive operator-paced batches:
+ *                                  --limit=20            → first 20
+ *                                  --limit=20 --offset=20 → next 20
+ *                                  --limit=50 --offset=40 → next 50
+ *                                  --limit=100 --offset=90 → next 100
+ *                                  --offset=190           → remainder
+ *                                Note: already-enrolled leads are filtered
+ *                                automatically via `already_active_enrollment`,
+ *                                so re-runs without offset would also work —
+ *                                offset is for deterministic windowing.
  *   --include-non-pr4           Allow non-PR4 historical recovery matches
  *                                (Clause B: marketplace terminal outcomes)
+ *
+ * Post-run report (printed automatically after dry-run or apply):
+ *   - enrolled this run / SF skips this run
+ *   - cumulative cohort counters (sent / failed / completed / stopped /
+ *     delivery failures / classifier stops / opt-outs) across ALL prior
+ *     historical_reactivation enrollments in the same user/platform scope.
+ *   Lets the operator review between successive --apply runs without
+ *   manual Loki queries.
  */
 
 import { PrismaClient } from '../generated/prisma';
@@ -64,6 +86,8 @@ interface CliArgs {
   endHour: number;
   startAfter: string | null;
   maxLeads: number | null;
+  limit: number | null;
+  offset: number;
   includeNonPr4: boolean;
 }
 
@@ -71,7 +95,7 @@ function parseArgs(argv: string[]): CliArgs {
   const a: CliArgs = {
     apply: false, userId: null, businessId: null, platform: null,
     batchSize: 20, slotMinutes: 30, startHour: 9, endHour: 18,
-    startAfter: null, maxLeads: null, includeNonPr4: false,
+    startAfter: null, maxLeads: null, limit: null, offset: 0, includeNonPr4: false,
   };
   for (const arg of argv.slice(2)) {
     if (arg === '--apply') a.apply = true;
@@ -85,6 +109,8 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg.startsWith('--end-hour=')) a.endHour = parseInt(arg.slice('--end-hour='.length), 10);
     else if (arg.startsWith('--start-after=')) a.startAfter = arg.slice('--start-after='.length);
     else if (arg.startsWith('--max-leads=')) a.maxLeads = parseInt(arg.slice('--max-leads='.length), 10);
+    else if (arg.startsWith('--limit=')) a.limit = parseInt(arg.slice('--limit='.length), 10);
+    else if (arg.startsWith('--offset=')) a.offset = parseInt(arg.slice('--offset='.length), 10);
   }
   return a;
 }
@@ -257,7 +283,13 @@ async function main() {
     return la - lb;
   });
 
-  const queue = args.maxLeads ? eligible.slice(0, args.maxLeads) : eligible;
+  // Slice the eligible queue with offset + limit. `--max-leads` is the
+  // deprecated alias; `--limit` wins if both are passed.
+  const offset = Math.max(0, args.offset);
+  const limitN = args.limit ?? args.maxLeads ?? null;
+  const sliceEnd = limitN !== null ? offset + limitN : eligible.length;
+  const queue = eligible.slice(offset, sliceEnd);
+  console.log(`\nQueue window: offset=${offset}, limit=${limitN ?? 'all'}, picked ${queue.length} of ${eligible.length} eligible`);
 
   // ── 4. Compute slot times ──
   const TZ = 'America/New_York';
@@ -341,6 +373,7 @@ async function main() {
     console.log('\n[DRY-RUN] No writes performed. Re-run with --apply to enroll.');
     console.log('  Reminder: --apply creates FollowUpEnrollment rows but does NOT send messages.');
     console.log('  The scheduler service fires messages from the rows at their nextStepDueAt.');
+    await printCohortReport(prisma, { userId: args.userId, platform: args.platform }, 0, 0);
     await prisma.$disconnect();
     return;
   }
@@ -412,7 +445,159 @@ async function main() {
   }
   console.log(`\n  APPLY summary: wrote=${wrote}  skipped_sf=${skippedSf}  skipped_existing=${skippedExisting}  errors=${errors}`);
 
+  await printCohortReport(prisma, { userId: args.userId, platform: args.platform }, wrote, skippedSf);
   await prisma.$disconnect();
+}
+
+/**
+ * Post-run cohort report.
+ *
+ * Operator runs the script iteratively (20 → review → 20 → review → …)
+ * and needs to know after each batch:
+ *   - what this run wrote (enrolled / SF-skipped),
+ *   - what the cumulative health of the cohort looks like across ALL
+ *     prior historical_reactivation enrollments in the same scope.
+ *
+ * The cumulative counters are joined to FollowUpStepExecution for delivery
+ * status (sent/failed step counts) and bucketed by `stoppedReason` for
+ * delivery-vs-classifier-vs-opt-out attribution. No external log dive needed.
+ *
+ * Scope is the same user/platform the script was run against — so a Spotless
+ * TT operator sees Spotless TT cohort health, not other tenants'.
+ */
+async function printCohortReport(
+  prisma: PrismaClient,
+  scope: { userId: string | null; platform: string | null },
+  thisRunEnrolled: number,
+  thisRunSfSkipped: number,
+): Promise<void> {
+  const leadWhere: any = {};
+  if (scope.userId) leadWhere.userId = scope.userId;
+  if (scope.platform) leadWhere.platform = scope.platform;
+
+  const enrollments = await prisma.followUpEnrollment.findMany({
+    where: {
+      modeReason: 'historical_reactivation',
+      ...(Object.keys(leadWhere).length ? { lead: leadWhere } : {}),
+    },
+    select: {
+      id: true,
+      status: true,
+      stoppedReason: true,
+      stepExecutions: { select: { status: true } },
+    },
+  });
+
+  // Enrollment status tallies.
+  let active = 0, completed = 0, stopped = 0, paused = 0, other = 0;
+  // Step-execution tallies — counts attempts, not enrollments.
+  let stepsSent = 0, stepsFailed = 0;
+  // Stop-reason buckets — only count when status='stopped' so we don't
+  // double-count active rows that previously had a transient reason.
+  let deliveryFailures = 0;
+  let classifierStops = 0;
+  let optOuts = 0;
+  let customerReplies = 0;
+  let leadStatusStops = 0;
+  let sfStatusStops = 0;
+  let otherStops = 0;
+
+  // Delivery-blocker strings the runtime + script share (kept in sync with
+  // `ReactivationDeliveryBlocker` in src/leads/historical-recovery.ts) plus
+  // a few send-time delivery reasons the scheduler may write.
+  const DELIVERY_BLOCKER_REASONS = new Set([
+    'no_thread_id',
+    'platform_thread_closed',
+    'platform_thread_archived',
+    'no_delivery_channel',
+    'awaiting_human_response',
+    'deferral_phrase',
+    'thread_closed',
+    'platform_send_failed',
+    'delivery_failed',
+  ]);
+
+  for (const e of enrollments) {
+    if (e.status === 'active') active++;
+    else if (e.status === 'completed') completed++;
+    else if (e.status === 'stopped') stopped++;
+    else if (e.status === 'paused') paused++;
+    else other++;
+
+    for (const s of e.stepExecutions) {
+      if (s.status === 'sent') stepsSent++;
+      else if (s.status === 'failed') stepsFailed++;
+    }
+
+    if (e.status !== 'stopped') continue;
+    const r = (e.stoppedReason ?? '').toLowerCase();
+    // Delivery bucket catches the canonical blocker strings + the substring
+    // 'delivery_fail' so ad-hoc operator labels (e.g.
+    // 'smoke_v2_delivery_failed_retry_loop') still classify correctly.
+    if (DELIVERY_BLOCKER_REASONS.has(r) || r.startsWith('delivery_') || r.includes('delivery_fail')) {
+      deliveryFailures++;
+    } else if (r === 'classifier_opt_out') {
+      // Opt-out is a classifier stop, but it's also the most important
+      // single category for operator review — show it on its own line.
+      optOuts++;
+      classifierStops++;
+    } else if (r.startsWith('classifier_')) {
+      classifierStops++;
+    } else if (r === 'customer_replied') {
+      customerReplies++;
+    } else if (r.startsWith('lead_status_')) {
+      leadStatusStops++;
+    } else if (r.startsWith('sf_status_')) {
+      sfStatusStops++;
+    } else {
+      otherStops++;
+    }
+  }
+
+  console.log('\n================================================================');
+  console.log('  Cohort report — historical_reactivation enrollments in scope');
+  if (scope.userId) console.log(`  Scope: userId=${scope.userId} platform=${scope.platform ?? 'all'}`);
+  else console.log('  Scope: ALL users (no --user-id filter)');
+  console.log('================================================================');
+
+  console.log('\n=== This run ===');
+  console.log(`  enrolled:      ${thisRunEnrolled}`);
+  console.log(`  SF skips:      ${thisRunSfSkipped}`);
+
+  console.log('\n=== Cumulative enrollment status ===');
+  console.log(`  active:        ${active}`);
+  console.log(`  completed:     ${completed}`);
+  console.log(`  stopped:       ${stopped}`);
+  console.log(`  paused:        ${paused}`);
+  if (other > 0) console.log(`  other:         ${other}`);
+  console.log(`  TOTAL:         ${enrollments.length}`);
+
+  console.log('\n=== Delivery (step executions) ===');
+  console.log(`  sent:          ${stepsSent}`);
+  console.log(`  failed:        ${stepsFailed}`);
+
+  console.log('\n=== Stop reasons ===');
+  console.log(`  delivery failures: ${deliveryFailures}`);
+  console.log(`  classifier stops:  ${classifierStops}`);
+  console.log(`  opt-outs:          ${optOuts}   (subset of classifier stops)`);
+  console.log(`  customer replies:  ${customerReplies}`);
+  console.log(`  lead-status stops: ${leadStatusStops}`);
+  console.log(`  sf-status stops:   ${sfStatusStops}`);
+  if (otherStops > 0) console.log(`  other:             ${otherStops}`);
+
+  console.log('\n=== Operator review hints ===');
+  if (stepsFailed > stepsSent && stepsFailed >= 5) {
+    console.log(`  WARN: failed >= sent (${stepsFailed} failed vs ${stepsSent} sent) — pause before next batch.`);
+  }
+  if (deliveryFailures >= 3 && deliveryFailures >= Math.max(1, stopped * 0.2)) {
+    console.log(`  WARN: ${deliveryFailures} delivery-blocker stops — investigate before widening cohort.`);
+  }
+  if (active > 0) {
+    console.log(`  ${active} enrollments still scheduled — let them play out before the next batch.`);
+  }
+  if (stepsSent === 0 && active > 0) {
+    console.log(`  No sends yet — first send fires at the earliest scheduledAt above.`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
