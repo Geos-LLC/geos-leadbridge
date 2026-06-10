@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
 import { PageSkeleton } from './components/PageSkeleton';
+import { ChunkReloadBoundary } from './components/ChunkReloadBoundary';
 import { useAuthStore } from './store/authStore';
 
 // Public / unauthenticated routes — kept eager so landing + login render on
@@ -86,6 +87,7 @@ function App() {
     <BrowserRouter>
       {/* Global toast notifications */}
       <ToastNotifications />
+      <ChunkReloadBoundary>
       <Suspense fallback={<PageSkeleton />}>
         <Routes>
           {/* Public routes */}
@@ -209,6 +211,7 @@ function App() {
           <Route path="*" element={<Navigate to={isAuthenticated ? '/overview' : '/'} />} />
         </Routes>
       </Suspense>
+      </ChunkReloadBoundary>
     </BrowserRouter>
   );
 }
