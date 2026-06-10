@@ -53,8 +53,8 @@ describe('renderPlaybookBlock — defaults', () => {
     }
     // Block prefixed with section header
     expect(block.startsWith('=== PLAYBOOK ===\n')).toBe(true);
-    // No "Instructions:" anywhere (user has not edited any)
-    expect(block).not.toContain('Instructions:');
+    // Instructions section IS present — defaults fall back when user has no custom text
+    expect(block).toContain('Instructions:');
   });
 
   it('produces the same defaults when followUpSettingsJson is null vs empty object', () => {
@@ -173,9 +173,16 @@ describe('renderPlaybookBlock — Customer Defers', () => {
     expect(block).toContain('Send a re-engagement message at that time.');
   });
 
-  it('omits the entire section when aiDeferralCheckIn=false AND no user instructions', () => {
+  it('keeps the CUSTOMER DEFERS section header when aiDeferralCheckIn=false because the default Instructions still apply', () => {
+    // Stage 3.x: default instructions per category always contribute text,
+    // even when no behavior bullets fire. The section header is kept.
     const block = renderPlaybookBlock(makeAccount({ settings: { aiDeferralCheckIn: false } }));
-    expect(block).not.toContain('[CUSTOMER DEFERS]');
+    expect(block).toContain('[CUSTOMER DEFERS]');
+    // Behavior summary is absent because the toggle suppressed both bullets
+    const deferSection = block.split('[CUSTOMER DEFERS]')[1].split('\n[')[0];
+    expect(deferSection).not.toContain('Current behavior:');
+    // But Instructions section is present (default fallback)
+    expect(deferSection).toContain('Instructions:');
   });
 
   it('keeps the section header when user instructions are non-empty but toggle is off', () => {
@@ -277,15 +284,17 @@ describe('renderPlaybookBlock — User instructions', () => {
     expect(block).toContain('Ask for budget first when the customer says "too expensive".');
   });
 
-  it('treats whitespace-only instructions as empty and omits the Instructions section', () => {
+  it('treats whitespace-only instructions as empty and falls back to the shipped default', () => {
     const instructions: PlaybookInstructionsBlob = { pricing: '   \n   ' };
     const block = renderPlaybookBlock(makeAccount({
       settings: { aiPlaybookInstructions: instructions }, pricingTableRows: 5,
     }));
-    // PRICING header present (because behavior summary has bullets), but no instructions section
+    // PRICING header present, Instructions section present with the default text
     expect(block).toContain('[PRICING]');
     const pricingSection = block.split('[PRICING]')[1].split('[')[0];
-    expect(pricingSection).not.toContain('Instructions:');
+    expect(pricingSection).toContain('Instructions:');
+    // Shipped default for pricing mentions "budget" (a stable phrase from the default)
+    expect(pricingSection).toContain('budget');
   });
 
   it('ignores non-string instructions values defensively', () => {
@@ -356,11 +365,13 @@ describe('previewPlaybookCategories — UI helper', () => {
       settings: { aiPlaybookInstructions: instructions }, pricingTableRows: 5,
     }));
     const pricing = preview.find(p => p.category === 'pricing')!;
-    expect(pricing.instructions).toBe('Custom pricing rules here');
+    expect(pricing.customInstructions).toBe('Custom pricing rules here');
+    expect(pricing.defaultInstructions.length).toBeGreaterThan(0);
     expect(pricing.behaviorBullets.length).toBeGreaterThan(0);
 
     const optOut = preview.find(p => p.category === 'opt_out')!;
-    expect(optOut.instructions).toBe('');
+    expect(optOut.customInstructions).toBe('');
+    expect(optOut.defaultInstructions.length).toBeGreaterThan(0);
     expect(optOut.behaviorBullets).toContain('Do not contact again.');
   });
 });
