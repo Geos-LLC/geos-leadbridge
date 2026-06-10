@@ -871,6 +871,77 @@ describe('FollowUpSchedulerService', () => {
       expect(lostWrites[0][0].reengageAt).toBeNull();
     });
 
+    // ── Placeholder substitution (follow-up patch) ──
+    // Smoke #2 from the prod hardening rollout shipped the literal
+    // `{{lead.name}}` to customers because the new historical_reactivation
+    // path bypasses the AI generator (which would have woven the name in)
+    // and the per-account `aiHiredCompetitorMessage` stored the placeholder
+    // verbatim. The standard follow-up generator has its own substitution
+    // layer and is intentionally untouched.
+
+    it('placeholder: renders {{lead.name}} as customer first name', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        'Hi {{lead.name}}, hope your cleaning went well!',
+        'Joseph Evans',
+      );
+      expect(rendered).toBe('Hi Joseph, hope your cleaning went well!');
+    });
+
+    it('placeholder: renders {{ name }} (with whitespace) as customer first name', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        'Hi {{ name }}, just checking in.',
+        'Eli Bachofner',
+      );
+      expect(rendered).toBe('Hi Eli, just checking in.');
+    });
+
+    it('placeholder: missing name falls back to "there"', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        'Hi {{lead.name}}, hope your cleaning went well!',
+        null,
+      );
+      expect(rendered).toBe('Hi there, hope your cleaning went well!');
+    });
+
+    it('placeholder: empty-string customerName falls back to "there"', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        'Hi {{lead.name}}!', '',
+      );
+      expect(rendered).toBe('Hi there!');
+    });
+
+    it('placeholder: substitutes BOTH variants in the same message', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        '{{lead.name}}, hey {{ name }} — quick note.',
+        'Gabby David',
+      );
+      expect(rendered).toBe('Gabby, hey Gabby — quick note.');
+    });
+
+    it('placeholder: leaves a message with no placeholders unchanged', () => {
+      const rendered = (service as any).applyHistoricalReactivationPlaceholders(
+        'Hi there, just a quick check-in!',
+        'Anyone',
+      );
+      expect(rendered).toBe('Hi there, just a quick check-in!');
+    });
+
+    it('placeholder: does NOT affect the normal-generator path (only resolved for historical_reactivation)', () => {
+      // The substitution helper is invoked ONLY from
+      // resolveHistoricalReactivationMessage. Source-presence assertion:
+      // grep the scheduler service for the only call site.
+      const src = readFileSync(
+        join(__dirname, 'follow-up-scheduler.service.ts'),
+        'utf8',
+      );
+      const callMatches = src.match(/applyHistoricalReactivationPlaceholders\(/g) ?? [];
+      // Expect 1 definition + 1 call site = 2 occurrences total.
+      expect(callMatches.length).toBe(2);
+      // The call site must be inside resolveHistoricalReactivationMessage —
+      // there's no other place that should be invoking it.
+      expect(src).toMatch(/resolveHistoricalReactivationMessage[\s\S]*?applyHistoricalReactivationPlaceholders/);
+    });
+
     it('7. duplicate-send guard prevents re-sending step 0 when execution already sent', async () => {
       // Even after the one-shot complete, if somehow the row gets re-queued,
       // the existing alreadySent guard (lines ~819-846) catches it.
