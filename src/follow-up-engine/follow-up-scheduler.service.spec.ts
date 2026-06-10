@@ -72,6 +72,12 @@ function buildGeneratorMock() {
   } as any;
 }
 
+// Used by the source-presence assertion in the starvation-fix guard test.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { readFileSync } = require('fs');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { join } = require('path');
+
 describe('FollowUpSchedulerService', () => {
   let service: FollowUpSchedulerService;
   let prisma: ReturnType<typeof buildPrismaMock>;
@@ -569,6 +575,87 @@ describe('FollowUpSchedulerService', () => {
           { processingUntil: { lt: expect.any(Date) } },
         ]),
       );
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // Starvation fix — claim query excludes pending-suggested enrollments
+    // and orders deterministically. Covers the bug where stuck `suggest`-mode
+    // rows from weeks ago occupied every tick's 20-row claim window and
+    // starved newer auto-send enrollments (incl. Historical Reactivation).
+    // ────────────────────────────────────────────────────────────────────
+
+    it('starvation-fix: claim query excludes rows with status=suggested step execution', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([]);
+
+      await service.processFollowUps();
+
+      const findManyCalls = prisma.followUpEnrollment.findMany.mock.calls as any[][];
+      const claimCall = findManyCalls.find(c => c[0]?.where?.status === 'active' && c[0]?.where?.nextStepDueAt);
+      expect(claimCall).toBeDefined();
+      expect(claimCall![0].where).toEqual(
+        expect.objectContaining({
+          status: 'active',
+          nextStepDueAt: { lte: expect.any(Date) },
+          stepExecutions: { none: { status: 'suggested' } },
+        }),
+      );
+    });
+
+    it('starvation-fix: claim query orders by nextStepDueAt ASC, id ASC', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([]);
+
+      await service.processFollowUps();
+
+      const findManyCalls = prisma.followUpEnrollment.findMany.mock.calls as any[][];
+      const claimCall = findManyCalls.find(c => c[0]?.where?.status === 'active' && c[0]?.where?.nextStepDueAt);
+      expect(claimCall).toBeDefined();
+      expect(claimCall![0].orderBy).toEqual([
+        { nextStepDueAt: 'asc' },
+        { id: 'asc' },
+      ]);
+    });
+
+    it('starvation-fix: auto-send enrollment is not starved when suggested rows exist (DB-shaped mock)', async () => {
+      // Mock the DB to honor the filter: a "suggested" row never appears in
+      // findMany results because the WHERE clause excludes it. The auto-send
+      // row is returned and gets claimed.
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      const autoSendRow = makeEnrollment('auto-1', CONVERSATION_ID, new Date('2026-04-01T11:00:00Z'));
+      prisma.followUpEnrollment.findMany.mockImplementation(async (args: any) => {
+        // The fix asserts: the WHERE clause filters out suggested rows.
+        // Returning the auto-send row only mirrors what Postgres would do.
+        if (args?.where?.stepExecutions?.none?.status === 'suggested') return [autoSendRow];
+        return [];
+      });
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+      jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      const claims = (service as any).processEnrollment.mock.calls;
+      expect(claims).toHaveLength(1);
+      expect(claims[0][0].id).toBe('auto-1');
+    });
+
+    it('starvation-fix: post-claim guard remains in source (defense-in-depth)', () => {
+      // The user spec requires the post-claim guard be preserved as
+      // defense-in-depth. The fix only changes the claim query — the
+      // suggested-step short-circuit at processEnrollment is untouched.
+      // Code-presence assertion: a behavioral test through processEnrollment
+      // requires reproducing every gate (trial, cooldown, terminal status,
+      // quiet/active hours, SF link) in mock form, which adds brittleness
+      // without buying additional signal — the source pattern is the right
+      // boundary to assert on.
+      const src = readFileSync(
+        join(__dirname, 'follow-up-scheduler.service.ts'),
+        'utf8',
+      );
+      // Verbatim slice from processEnrollment's pending-suggestion guard.
+      expect(src).toContain("Pending-suggestion guard");
+      expect(src).toContain("status: 'suggested'");
+      expect(src).toContain('already pending approval');
     });
 
     it('6. claim-phase transaction is short — no 10-minute timeout configured', async () => {

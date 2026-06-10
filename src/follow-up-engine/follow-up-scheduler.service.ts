@@ -265,11 +265,31 @@ export class FollowUpSchedulerService implements OnModuleInit {
     tx: CronLockTx,
   ): Promise<Array<{ enrollment: any; token: string }>> {
     const now = new Date();
+    // Starvation fix: exclude enrollments whose current-step suggestion is still
+    // pending user approval. The post-claim guard at processEnrollment() also
+    // catches this case (defense-in-depth), but excluding here is what restores
+    // throughput — otherwise stuck `suggest`-mode rows from weeks ago occupy
+    // every tick's 20-row claim window and starve newer auto-send enrollments.
+    //
+    // Relation filter (`stepExecutions: { none: { status: 'suggested' } }`) is
+    // a slight broadening of the post-claim guard (which compares step_index
+    // to current_step_index exactly). In normal operation only one execution
+    // per (enrollment, stepIndex) carries `suggested`, so any pending-suggested
+    // anywhere means the user hasn't actioned the row and it would no-op past
+    // the guard anyway. Orphan suggestions at a non-current step are treated
+    // as data corruption — skipping them is safer than letting them through.
+    //
+    // Deterministic ordering: nextStepDueAt ASC, id ASC. Without ORDER BY,
+    // Postgres returns rows in physical heap order, so the oldest blocked
+    // rows always sat at the head of the result set. With FIFO ordering plus
+    // the suggested-skip filter, due rows are reached in age order.
     const dueEnrollments = await tx.followUpEnrollment.findMany({
       where: {
         status: 'active',
         nextStepDueAt: { lte: now },
+        stepExecutions: { none: { status: 'suggested' } },
       },
+      orderBy: [{ nextStepDueAt: 'asc' }, { id: 'asc' }],
       take: 20,
       include: { sequenceTemplate: true },
     });
