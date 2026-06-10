@@ -1101,13 +1101,20 @@ export class FollowUpSchedulerService implements OnModuleInit {
       });
     }
 
-    // Historical reactivation: one-shot semantics. The flow is a single
-    // check-in to re-engage previously-closed marketplace leads — there is
-    // no step 1, no 11-step plan continuation. Mark the enrollment
-    // completed immediately after the successful step 0 send and skip the
-    // advance/schedule machinery below. The duplicate-send guard at the
-    // top of processEnrollment will catch any future tick that somehow
-    // re-queues this enrollment.
+    // Historical reactivation: one-shot send, then hop into a long-term
+    // post-followup enrollment +30 days out. The flow is:
+    //   1. Mark THIS enrollment completed (no step 1 in the historical
+    //      sequence — there is no 11-step plan continuation).
+    //   2. Create a fresh `post_historical_reactivation_followup` enrollment
+    //      for the same conversation. The engine call is idempotent so
+    //      a duplicate scheduler tick re-entering this branch won't
+    //      double-enroll.
+    //   3. The engine call ALSO repoints ThreadContext at the new
+    //      enrollment (`activeEnrollmentId`, `nextFollowUpAt`,
+    //      `followUpStatus='active'`) — so we don't clear the cache here.
+    //      If the post-followup engine call fails (no template, SF-link,
+    //      etc.) we fall back to clearing the cache as before so the
+    //      original enrollment's completion isn't blocked.
     if (enrollment.modeReason === 'historical_reactivation') {
       await this.prisma.followUpEnrollment.update({
         where: { id: enrollment.id },
@@ -1117,13 +1124,37 @@ export class FollowUpSchedulerService implements OnModuleInit {
           lastExecutedAt: now,
         },
       });
-      await this.prisma.threadContext.updateMany({
-        where: { conversationId: enrollment.conversationId },
-        data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'completed' },
-      });
-      this.logger.log(
-        `[FollowUpScheduler] Enrollment ${enrollment.id} completed — historical_reactivation one-shot (step 0 sent)`,
-      );
+
+      let postFollowupEnrollmentId: string | null = null;
+      try {
+        const id = await this.engineService.createPostHistoricalReactivationFollowup(
+          enrollment.conversationId,
+          enrollment.leadId!,
+          now,
+        );
+        postFollowupEnrollmentId = id || null;
+      } catch (err: any) {
+        this.logger.error(
+          `[FollowUpScheduler] post_historical_reactivation_followup hop failed for ${enrollment.id}: ${err?.message}`,
+        );
+      }
+
+      if (!postFollowupEnrollmentId) {
+        // No post-followup created (sf_linked, missing template, error).
+        // Clear ThreadContext so we don't leave a dangling pointer to the
+        // now-completed historical_reactivation enrollment.
+        await this.prisma.threadContext.updateMany({
+          where: { conversationId: enrollment.conversationId },
+          data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'completed' },
+        });
+        this.logger.log(
+          `[FollowUpScheduler] Enrollment ${enrollment.id} completed — historical_reactivation one-shot (no post-followup hop)`,
+        );
+      } else {
+        this.logger.log(
+          `[FollowUpScheduler] Enrollment ${enrollment.id} completed — historical_reactivation one-shot; hopped to post-followup ${postFollowupEnrollmentId}`,
+        );
+      }
       return;
     }
 
