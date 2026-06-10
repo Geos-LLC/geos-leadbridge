@@ -19,6 +19,12 @@ import {
 } from '../conversation-context/conversation-runtime';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
 import { isSfLinkedLead } from '../leads/sf-link';
+import {
+  isHistoricalMarketplaceRecovery,
+  getReactivationDeliveryBlocker,
+  HISTORICAL_RECOVERY_DISPLAY_LABEL,
+  HISTORICAL_RECOVERY_INTERNAL_TRIGGER_STATE,
+} from '../leads/historical-recovery';
 
 /**
  * Map a free-form stopEnrollment `reason` string to the canonical
@@ -593,6 +599,208 @@ export class FollowUpEngineService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Enroll a conversation in the Historical Lead Reactivation flow.
+   *
+   * Dedicated path for historical marketplace recovery leads (PR 4 backfill,
+   * future TT/Yelp historical imports, bulk reactivation campaigns). Bypasses
+   * `deriveFollowUpState()` and standard "After Initial / Question / Price"
+   * routing — historical leads were never in an active negotiation, so the
+   * negotiation-stage templates don't apply.
+   *
+   * Internally reuses the `customer_hired_competitor` template + cadence (the
+   * sequence and copy already match the re-engagement tone). The user-facing
+   * label is "Historical Lead Reactivation"
+   * (see `HISTORICAL_RECOVERY_DISPLAY_LABEL`).
+   *
+   * Caller owns scheduling. `scheduledAt` is written directly to
+   * `nextStepDueAt` — NOT computed from `lastProMsg + delay` like the
+   * standard path. This is the activation-time-anchored behavior the
+   * historical reactivation business rule requires.
+   *
+   * Safety guards mirror `enrollInSequence`:
+   *   - SF-link short-circuit (LB does not chase SF-converted customers).
+   *   - Active-enrollment uniqueness (partial index + pre-check).
+   *   - P2002 race recovery returns the winner's id.
+   *
+   * The lead-eligibility predicate (`isHistoricalMarketplaceRecovery`) is the
+   * caller's responsibility — this method is the enrollment primitive. The
+   * activation script + future `evaluateThread` integration apply the
+   * predicate before calling here.
+   *
+   * Returns the enrollment id (existing or newly-created). Empty string on
+   * SF-link skip (mirrors `enrollInSequence` sentinel for consistency).
+   */
+  async enrollAsHistoricalReactivation(
+    conversationId: string,
+    leadId: string,
+    scheduledAt: Date,
+  ): Promise<string> {
+    // 1. SF-link guard — historical reactivation never chases SF customers.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        userId: true, platform: true, threadId: true,
+        sfJobId: true, sfCustomerId: true, syncStatus: true,
+      },
+    });
+    if (!lead) throw new Error(`Lead ${leadId} not found`);
+    if (lead.threadId !== conversationId) {
+      throw new Error(`Lead ${leadId}.threadId (${lead.threadId}) does not match conversationId (${conversationId})`);
+    }
+    if (isSfLinkedLead(lead)) {
+      this.logger.log(
+        `[FollowUpEngine] enrollAsHistoricalReactivation skipped — sf_linked_customer lead=${leadId} sf_job_id=${lead.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'}`,
+      );
+      return '';
+    }
+
+    // 2. Pre-check — return existing active enrollment id if any.
+    const existing = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      select: { id: true },
+    });
+    if (existing) {
+      this.logger.debug(
+        `[FollowUpEngine] enrollAsHistoricalReactivation: conversation ${conversationId} already has active enrollment ${existing.id} — returning existing`,
+      );
+      return existing.id;
+    }
+
+    // 3. Find the historical reactivation template — internally reuses the
+    //    customer_hired_competitor sequence. Per-user, per-platform default.
+    const template = await this.prisma.followUpSequenceTemplate.findFirst({
+      where: {
+        userId: lead.userId,
+        platform: lead.platform,
+        triggerState: HISTORICAL_RECOVERY_INTERNAL_TRIGGER_STATE,
+        enabled: true,
+      },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true, name: true, mode: true },
+    });
+    if (!template) {
+      throw new Error(
+        `No enabled '${HISTORICAL_RECOVERY_INTERNAL_TRIGGER_STATE}' template found for user ${lead.userId} platform ${lead.platform}. ` +
+        `Seed the template before activating historical reactivation.`,
+      );
+    }
+
+    // 4. Insert enrollment + update ThreadContext cache. Single transaction
+    //    so the partial unique index can't be tricked by partial writes.
+    try {
+      const enrollmentId = await this.prisma.$transaction(async (tx) => {
+        // Race-aware pre-check inside the txn.
+        const racedIn = await tx.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active' },
+          select: { id: true },
+        });
+        if (racedIn) return racedIn.id;
+
+        const created = await tx.followUpEnrollment.create({
+          data: {
+            sequenceTemplateId: template.id,
+            conversationId,
+            leadId,
+            platform: lead.platform,
+            status: 'active',
+            currentStepIndex: 0,
+            nextStepDueAt: scheduledAt,
+            mode: template.mode || 'auto_send',
+            // Mark engagement-aware mode so the scheduler treats this as
+            // short-term (the historical reactivation is a single check-in,
+            // not a long-term drip — engine will complete after the one
+            // message fires or stops on customer reply).
+            followUpMode: 'short_term',
+            modeReason: 'historical_reactivation',
+          },
+          select: { id: true },
+        });
+
+        await tx.threadContext.updateMany({
+          where: { conversationId },
+          data: {
+            activeEnrollmentId: created.id,
+            nextFollowUpAt: scheduledAt,
+            followUpStatus: 'active',
+          },
+        });
+
+        return created.id;
+      });
+
+      this.logger.log(
+        `[FollowUpEngine] ${HISTORICAL_RECOVERY_DISPLAY_LABEL} enrolled — conversation=${conversationId} lead=${leadId} ` +
+        `template=${template.name} enrollment=${enrollmentId} scheduledAt=${scheduledAt.toISOString()}`,
+      );
+      return enrollmentId;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const winner = await this.prisma.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active' },
+          select: { id: true },
+        });
+        if (winner) {
+          this.logger.warn(
+            `[FollowUpEngine] enrollAsHistoricalReactivation P2002 race on ${conversationId} — returning existing enrollment ${winner.id}`,
+          );
+          return winner.id;
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Convenience wrapper: caller passes the Lead row + scheduledAt, the
+   * predicate decides whether to route through historical reactivation OR
+   * skip entirely. Returns `{ enrolled: boolean, enrollmentId, reason }`.
+   *
+   * Used by activation scripts that want a single call per lead and don't
+   * want to duplicate the predicate at every call site. The predicate is
+   * also exported standalone (`isHistoricalMarketplaceRecovery`) for callers
+   * that need to filter / count before deciding to enroll.
+   */
+  async maybeEnrollAsHistoricalReactivation(
+    lead: {
+      id: string; threadId: string | null;
+      platform: string | null;
+      status: string | null; lostReason: string | null;
+      statusSource: string | null;
+      thumbtackStatus: string | null; platformStatus: string | null;
+      customerPhone?: string | null; customerPhoneSubstitute?: string | null;
+      sfJobId: string | null; sfCustomerId: string | null; syncStatus: string | null;
+      conversationState?: string | null;
+      lastCustomerMessageContent?: string | null;
+    },
+    scheduledAt: Date,
+  ): Promise<{ enrolled: boolean; enrollmentId: string | null; reason: string | null }> {
+    if (!lead.threadId) return { enrolled: false, enrollmentId: null, reason: 'no threadId' };
+    if (!isHistoricalMarketplaceRecovery(lead)) {
+      return { enrolled: false, enrollmentId: null, reason: 'not_historical_marketplace_recovery' };
+    }
+    // Pre-activation delivery filter — skip leads we know we can't deliver to
+    // (closed/archived thread, no phone + no platform channel, deferral on
+    // last customer message, conversation awaiting human response). Returns
+    // the stable skip reason so callers can aggregate and report.
+    const deliveryBlocker = getReactivationDeliveryBlocker({
+      threadId: lead.threadId,
+      platform: lead.platform,
+      customerPhone: lead.customerPhone ?? null,
+      customerPhoneSubstitute: lead.customerPhoneSubstitute ?? null,
+      thumbtackStatus: lead.thumbtackStatus,
+      platformStatus: lead.platformStatus,
+      conversationState: lead.conversationState ?? null,
+      lastCustomerMessageContent: lead.lastCustomerMessageContent ?? null,
+    });
+    if (deliveryBlocker) {
+      return { enrolled: false, enrollmentId: null, reason: deliveryBlocker };
+    }
+    const id = await this.enrollAsHistoricalReactivation(lead.threadId, lead.id, scheduledAt);
+    if (!id) return { enrolled: false, enrollmentId: null, reason: 'sf_linked_skipped' };
+    return { enrolled: true, enrollmentId: id, reason: null };
   }
 
   /**
