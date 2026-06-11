@@ -270,11 +270,18 @@ export class FollowUpGateService {
 
     // Terminal-state intent on a non-re-engagement sequence — block.
     // Side-effect mapping:
-    //   agreed         → stop_and_booked  (handoff)
+    //   agreed / wants_live_contact / wants_to_schedule → stop_and_booked  (positive handoff)
     //   deferring      → stop_only        (bounded pause; will re-engage later)
     //   terminal_defer → stop_and_lost    (unbounded deflection ≈ soft no)
     //   opt_out / hired_elsewhere → stop_and_lost
-    const sideEffect: GateSideEffect = intent === 'agreed'
+    //
+    // wants_live_contact / wants_to_schedule are POSITIVE conversions — customer
+    // is asking for a call/walkthrough or naming a time slot. Mario Evans
+    // 2026-06-10 incident: "Please schedule a walkthrough. So I can get a quote."
+    // classified as wants_live_contact @ 0.9 and was misrouted into the else
+    // branch (stop_and_lost / lostReason=hired_someone). Treat these as
+    // handoff/booked so the dispatcher is paged instead of flipping the lead lost.
+    const sideEffect: GateSideEffect = intent === 'agreed' || intent === 'wants_live_contact' || intent === 'wants_to_schedule'
       ? 'stop_and_booked'
       : intent === 'deferring'
         ? 'stop_only'
