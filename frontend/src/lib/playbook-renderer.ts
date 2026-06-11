@@ -1,297 +1,92 @@
 /**
- * Frontend mirror of `src/ai/playbook-renderer.ts` — Stage 3.
+ * Frontend mirror of `src/ai/playbook-renderer.ts` — Playbook V2.
  *
- * Same derivation logic, used only for the live preview in the
- * Settings → AI Playbook page. Backend remains the source of truth for what
- * lands in the actual system prompt at reply time; this mirror exists so the
- * user can see what behavior summary they'll get without a network round-trip.
+ * V2 model: Playbook is HOW only. No automation-derived "current behavior"
+ * bullets. Each section card has:
+ *   - Default prompt (collapsible, system-provided)
+ *   - Custom instructions textarea (user-editable)
  *
- * Keep this file in sync with src/ai/playbook-renderer.ts. The full
- * renderPlaybookBlock + previewPlaybookCategories pair has 37 Jest scenarios
- * in playbook-renderer.spec.ts — when changing derivation rules, edit both
- * files and rerun Jest.
+ * Two sections in the UI are NOT in this metadata because they surface
+ * existing data stores instead of contributing to the AI PLAYBOOK block:
+ *   - `faq`                     — uses SavedAccount.faqJson via AccountFaqForm
+ *   - `global_custom_instructions` — uses User.globalAiPrompt via getGlobalAiPrompt
+ *
+ * Keep DEFAULT_PROMPTS in sync with src/ai/section-default-prompts.ts.
  */
 
-export type PlaybookCategoryKey =
-  | 'booking_requests'
-  | 'human_contact'
-  | 'pricing'
-  | 'customer_defers'
-  | 'hired_another'
-  | 'opt_out'
-  | 'key_details'
-  | 'general_behavior';
+export type PlaybookSectionKey =
+  | 'business_information'
+  | 'pricing_guidance'
+  | 'qualification_guidance'
+  | 'booking_guidance'
+  | 'objection_handling'
+  | 'human_handoff_guidance'
+  | 'followup_tone'
+  | 'personality_brand_voice';
 
-export type PlaybookInstructionsBlob = {
-  [K in PlaybookCategoryKey]?: string;
-};
-
-export const CATEGORY_ORDER: readonly PlaybookCategoryKey[] = [
-  'booking_requests',
-  'human_contact',
-  'pricing',
-  'customer_defers',
-  'hired_another',
-  'opt_out',
-  'key_details',
-  'general_behavior',
+export const PLAYBOOK_SECTION_ORDER: readonly PlaybookSectionKey[] = [
+  'business_information',
+  'pricing_guidance',
+  'qualification_guidance',
+  'booking_guidance',
+  'objection_handling',
+  'human_handoff_guidance',
+  'followup_tone',
+  'personality_brand_voice',
 ] as const;
 
-export const CATEGORY_DISPLAY_LABELS: Record<PlaybookCategoryKey, string> = {
-  booking_requests: 'BOOKING REQUESTS',
-  human_contact:    'HUMAN CONTACT REQUESTS',
-  pricing:          'PRICING',
-  customer_defers:  'CUSTOMER DEFERS',
-  hired_another:    'HIRED ANOTHER COMPANY',
-  opt_out:          'OPT-OUT',
-  key_details:      'KEY DETAILS COLLECTED',
-  general_behavior: 'GENERAL AI BEHAVIOR',
+export const PLAYBOOK_SECTION_UI_LABELS: Record<PlaybookSectionKey, string> = {
+  business_information:   'Business Information',
+  pricing_guidance:       'Pricing Guidance',
+  qualification_guidance: 'Qualification Guidance',
+  booking_guidance:       'Booking Guidance',
+  objection_handling:     'Objection Handling',
+  human_handoff_guidance: 'Human Handoff Guidance',
+  followup_tone:          'Follow-up Tone',
+  personality_brand_voice: 'AI Personality & Brand Voice',
 };
 
-// User-friendly labels for the UI page (lowercase, prose) — separate from the
-// CAPS labels we send to the LLM in the prompt block.
-export const CATEGORY_UI_LABELS: Record<PlaybookCategoryKey, string> = {
-  booking_requests: 'Booking requests',
-  human_contact:    'Human contact requests',
-  pricing:          'Pricing',
-  customer_defers:  'Customer defers',
-  hired_another:    'Hired another company',
-  opt_out:          'Opt-out / do not contact',
-  key_details:      'Key details collected',
-  general_behavior: 'General AI behavior',
+/** One-line description shown under each card title in the UI. */
+export const PLAYBOOK_SECTION_SUBTITLES: Record<PlaybookSectionKey, string> = {
+  business_information:   'Company facts AI uses to answer customer questions.',
+  pricing_guidance:       'How AI discusses pricing (not when — that\'s Automation).',
+  qualification_guidance: 'How AI gathers details one or two at a time.',
+  booking_guidance:       'How AI moves toward booking without offering times.',
+  objection_handling:     'How AI responds to hesitation, price pushback, and concerns.',
+  human_handoff_guidance: 'How AI prepares the customer for a human takeover.',
+  followup_tone:          'How follow-up messages should sound (timing is in Follow-ups).',
+  personality_brand_voice: 'Overall communication style.',
 };
 
-export type RawSavedAccount = {
-  aiConversationMode: string | null;
-  followUpSettingsJson: string | null;
-  servicePricingJson: string | null;
+export const SECTION_DEFAULT_PROMPTS: Record<PlaybookSectionKey, string> = {
+  business_information:
+    `Use this section as the source of truth for company facts — service area, team, supplies, pets, guarantees, insurance, payment methods. If the customer asks about a topic covered here, answer from this content verbatim. If a fact isn't here AND isn't in the FAQ, defer to the team rather than invent.`,
+
+  pricing_guidance:
+    `Use the PRICING TABLE for actual numbers — never invent. Present ranges before exact figures when the customer is still exploring. Don't volunteer pricing unless asked or unless qualification is complete. When the customer pushes back on price, explore reduced-scope alternatives before discounting; the table is the floor, not a negotiating start.`,
+
+  qualification_guidance:
+    `Gather only the most decision-relevant details, in this priority: square footage > timing > condition (move-in/move-out, heavy soil) > scope (pets, extras, frequency). Ask 1–2 questions at a time — never more — and prefer one open-ended question over a checklist. After enough info to estimate, transition to confirming the next step rather than asking more.`,
+
+  booking_guidance:
+    `Move toward booking by asking the customer when THEY want service. Don't propose specific times — you have no calendar visibility. Once they name a time, acknowledge and use a holding message ("let me check our timing for [their time] and we'll confirm shortly"). Mention that a team member will reach out to confirm.`,
+
+  objection_handling:
+    `When the customer pushes back, acknowledge their concern before responding. For pricing objections, ask what budget they had in mind before offering anything; consider reduced scope before any discount. For timing objections, offer a near-term alternative or a follow-up window. For trust concerns, surface the FAQ insurance/policy/satisfaction answer if covered. Never argue.`,
+
+  human_handoff_guidance:
+    `When the customer needs a human, ask for the best callback time and phone number. Briefly recap what they've shared so the team can pick up cleanly. Stay warm — don't sound like you're escalating an angry call. The dispatcher will reach out within the configured response window.`,
+
+  followup_tone:
+    `Follow-up messages should feel like a continuation, not a new pitch. Keep it short. Open with something specific to the prior conversation (a detail they mentioned, a slot you said you'd check). Close warmly, no pressure. Avoid generic openers like "just checking in".`,
+
+  personality_brand_voice:
+    `Friendly, professional, and local. Match the customer's energy — formal if formal, casual if casual. Speak as the small-team business, not as an AI. Use the owner's first name in sign-offs if provided. Keep replies under 3 sentences when possible. Reserve exclamation points for genuine excitement (booking confirmed, etc.).`,
 };
 
-type WritingStyle = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
-type PriceQuoteMode = 'range' | 'exact';
-
-type ParsedSettings = {
-  followUpStrategy: WritingStyle;
-  priceQuoteMode: PriceQuoteMode;
-  aiStopOnOptOut: boolean;
-  aiStopOnBooked: boolean;
-  aiStopOnPriceAgreed: boolean;
-  handoffTriggerAgreed: boolean;
-  handoffTriggerWantsLiveContact: boolean;
-  handoffTriggerProvidedPhone: boolean;
-  handoffTriggerProvidedSquareFootage: boolean;
-  handoffTriggerQualificationComplete: boolean;
-  aiDeferralCheckIn: boolean;
-  aiDeferralDelay: string;
-  aiHiredCompetitorReengage: boolean;
-  aiHiredCompetitorDelay: string;
-  instructions: PlaybookInstructionsBlob;
+export type PlaybookV2Storage = {
+  [K in PlaybookSectionKey]?: { customInstructions: string };
 };
-
-const VALID_STYLES: WritingStyle[] = ['auto', 'hybrid', 'price', 'qualify', 'convert', 'phone'];
-
-function parseFollowUpSettings(raw: string | null): ParsedSettings {
-  let s: Record<string, unknown> = {};
-  if (raw) {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') s = parsed as Record<string, unknown>;
-    } catch { /* defaults */ }
-  }
-  const boolish = (v: unknown, def: boolean): boolean => (v === undefined || v === null ? def : !!v);
-
-  const followUpStrategy: WritingStyle =
-    typeof s.followUpStrategy === 'string' && (VALID_STYLES as string[]).includes(s.followUpStrategy)
-      ? (s.followUpStrategy as WritingStyle)
-      : 'auto';
-
-  const instructions: PlaybookInstructionsBlob =
-    s.aiPlaybookInstructions && typeof s.aiPlaybookInstructions === 'object' && !Array.isArray(s.aiPlaybookInstructions)
-      ? (s.aiPlaybookInstructions as PlaybookInstructionsBlob)
-      : {};
-
-  return {
-    followUpStrategy,
-    priceQuoteMode: s.priceQuoteMode === 'exact' ? 'exact' : 'range',
-    aiStopOnOptOut:                      boolish(s.aiStopOnOptOut, true),
-    aiStopOnBooked:                      boolish(s.aiStopOnBooked, true),
-    aiStopOnPriceAgreed:                 boolish(s.aiStopOnPriceAgreed, true),
-    handoffTriggerAgreed:                boolish(s.handoffTriggerAgreed, true),
-    handoffTriggerWantsLiveContact:      boolish(s.handoffTriggerWantsLiveContact, true),
-    handoffTriggerProvidedPhone:         boolish(s.handoffTriggerProvidedPhone, true),
-    handoffTriggerProvidedSquareFootage: boolish(s.handoffTriggerProvidedSquareFootage, true),
-    handoffTriggerQualificationComplete: boolish(s.handoffTriggerQualificationComplete, true),
-    aiDeferralCheckIn:                   boolish(s.aiDeferralCheckIn, true),
-    aiDeferralDelay:                     typeof s.aiDeferralDelay === 'string' ? s.aiDeferralDelay : '3d',
-    aiHiredCompetitorReengage:           boolish(s.aiHiredCompetitorReengage, true),
-    aiHiredCompetitorDelay:              typeof s.aiHiredCompetitorDelay === 'string' ? s.aiHiredCompetitorDelay : '21d',
-    instructions,
-  };
-}
-
-export function humanizeDelay(delay: string): string {
-  const m = /^(\d+)([hdw])$/.exec(delay.trim());
-  if (!m) return delay;
-  const n = parseInt(m[1], 10);
-  const unit = m[2];
-  if (unit === 'h') return n === 1 ? '1 hour' : `${n} hours`;
-  if (unit === 'd') return n === 1 ? '1 day' : `${n} days`;
-  if (unit === 'w') return n === 1 ? '1 week' : `${n} weeks`;
-  return delay;
-}
-
-function countPricingRows(servicePricingJson: string | null): number {
-  if (!servicePricingJson) return 0;
-  try {
-    const p = JSON.parse(servicePricingJson) as { priceTable?: unknown[] };
-    return Array.isArray(p?.priceTable) ? p.priceTable.length : 0;
-  } catch { return 0; }
-}
-
-function renderBehaviorSummary(
-  category: PlaybookCategoryKey,
-  s: ParsedSettings,
-  aiConversationMode: string | null,
-  pricingRowCount: number,
-): string[] {
-  switch (category) {
-    case 'booking_requests': {
-      const b: string[] = [];
-      if (s.handoffTriggerAgreed) b.push('Notify the team when the customer is ready to book.');
-      if (s.aiStopOnPriceAgreed)  b.push('Pause AI when the customer agrees on price or asks to book.');
-      if (s.aiStopOnBooked)       b.push('Stop AI when the job is booked or confirmed.');
-      return b;
-    }
-    case 'human_contact': {
-      const b: string[] = [];
-      if (s.handoffTriggerWantsLiveContact) b.push('Notify the team when the customer asks to speak to a person.');
-      if (s.aiStopOnPriceAgreed)            b.push('Pause AI when the customer asks for a person.');
-      return b;
-    }
-    case 'pricing': {
-      const b: string[] = [];
-      if (s.followUpStrategy === 'price') {
-        b.push('Lead with a price range proactively.');
-      } else if (s.followUpStrategy === 'qualify') {
-        b.push('Never volunteer a price — qualify the lead first.');
-      } else {
-        b.push('Only quote a price when the customer asks about it.');
-      }
-      b.push(s.priceQuoteMode === 'exact'
-        ? 'Quote an exact price when the pricing table has enough information.'
-        : 'Quote a price range; dispatcher confirms the exact number.');
-      b.push('Dispatcher confirms final pricing before booking is locked.');
-      b.push(pricingRowCount > 0
-        ? `Pricing table has ${pricingRowCount} configured size/scope combinations.`
-        : 'No pricing table configured — AI cannot quote concrete numbers.');
-      return b;
-    }
-    case 'customer_defers': {
-      const b: string[] = [];
-      if (s.aiDeferralCheckIn) {
-        b.push(`Pause AI and check in again in ${humanizeDelay(s.aiDeferralDelay)}.`);
-        b.push('Send a re-engagement message at that time.');
-      }
-      return b;
-    }
-    case 'hired_another': {
-      const b: string[] = [];
-      if (s.aiStopOnBooked) b.push('Stop AI when the customer says they hired another company.');
-      b.push('Mark the lead as lost (reason: hired elsewhere).');
-      if (s.aiHiredCompetitorReengage) {
-        b.push(`Try re-engaging in ${humanizeDelay(s.aiHiredCompetitorDelay)} in case the other company doesn't work out.`);
-      }
-      return b;
-    }
-    case 'opt_out': {
-      const b: string[] = [];
-      if (s.aiStopOnOptOut) b.push('Stop AI when the customer asks not to be contacted.');
-      b.push('Mark the lead as lost (reason: opt-out).');
-      b.push('Do not contact again.');
-      return b;
-    }
-    case 'key_details': {
-      const b: string[] = [];
-      if (s.handoffTriggerProvidedPhone)         b.push('Notify the team when the customer shares a phone number.');
-      if (s.handoffTriggerProvidedSquareFootage) b.push('Notify the team when the customer shares the home size (sqft).');
-      if (s.handoffTriggerQualificationComplete) b.push('Notify the team when enough details are collected to quote.');
-      return b;
-    }
-    case 'general_behavior': {
-      const styleLabels: Record<WritingStyle, string> = {
-        auto:    'AI picks the best approach for each reply',
-        hybrid:  'balance qualifying questions, converting, and pricing',
-        price:   'lead with a price range proactively',
-        qualify: 'ask qualifying questions; never volunteer price',
-        convert: 'push toward booking and ask for a preferred time',
-        phone:   'encourage a phone call with the team',
-      };
-      const availability = aiConversationMode === 'always'
-        ? 'Reply at any time of day.'
-        : 'Reply only outside business hours; humans handle daytime.';
-      return [
-        `Writing style: ${styleLabels[s.followUpStrategy]}.`,
-        availability,
-      ];
-    }
-  }
-}
-
-/**
- * Default instructions shipped per category — mirrors
- * src/ai/playbook-renderer.ts:DEFAULT_INSTRUCTIONS. Keep in sync.
- *
- * UI shows these on each Playbook card so users see what the AI is told by
- * default. The backend renderer also falls back to these when the user has
- * NOT customized — so every category contributes guidance to the prompt
- * out-of-the-box.
- */
-export const DEFAULT_INSTRUCTIONS: Record<PlaybookCategoryKey, string> = {
-  booking_requests:
-    'When the customer is ready to book, acknowledge their interest first. Confirm one key detail you need (preferred date/time or service address). Let them know a team member will confirm the appointment shortly.',
-  human_contact:
-    'When the customer asks to speak to a person, acknowledge their request. Ask for the best time and number to reach them at. Keep the message brief and warm — don\'t try to resolve the issue in chat.',
-  pricing:
-    'When discussing price, lead with a clear range based on the pricing table. Note that the dispatcher confirms the exact number before booking. If the customer pushes back on price, ask what budget they had in mind before offering reduced scope. Never discount immediately.',
-  customer_defers:
-    'When the customer asks for more time, acknowledge it and don\'t pressure them. Confirm we\'ll reach out at the time they suggested (or our configured check-in window). Mention they can text back anytime if their timing changes.',
-  hired_another:
-    'When the customer says they hired another company, wish them well sincerely — no passive-aggression, no pushing for the lead. Leave the door open: "If anything doesn\'t go as expected, we\'re happy to help next time."',
-  opt_out:
-    'When the customer opts out, acknowledge their request politely and stop messaging. Do not ask why or try to retain them. Confirm we\'ve removed them from outreach.',
-  key_details:
-    'When the customer shares key details (phone, address, home size, scope), confirm what they\'ve given so they know we received it. Then ask one follow-up question to complete the picture if anything is still missing.',
-  general_behavior:
-    'Reply in a warm, professional tone matching the customer\'s energy. Be concise — under 3 sentences when possible. Use the business owner\'s voice (the AI represents the business, not itself). Don\'t use exclamation points except for genuine excitement (booking confirmed, etc.).',
-};
-
-export type PerCategoryPreview = {
-  category: PlaybookCategoryKey;
-  promptLabel: string;
-  uiLabel: string;
-  behaviorBullets: string[];
-  /** User's saved custom text, or '' when none. Empty means defaults are active. */
-  customInstructions: string;
-  /** Shipped default for this category — always non-empty. */
-  defaultInstructions: string;
-};
-
-export function previewPlaybookCategories(savedAccount: RawSavedAccount): PerCategoryPreview[] {
-  const settings = parseFollowUpSettings(savedAccount.followUpSettingsJson);
-  const pricingRowCount = countPricingRows(savedAccount.servicePricingJson);
-  return CATEGORY_ORDER.map(category => {
-    const raw = settings.instructions[category];
-    const customInstructions = typeof raw === 'string' ? raw.trim() : '';
-    return {
-      category,
-      promptLabel: CATEGORY_DISPLAY_LABELS[category],
-      uiLabel: CATEGORY_UI_LABELS[category],
-      behaviorBullets: renderBehaviorSummary(category, settings, savedAccount.aiConversationMode, pricingRowCount),
-      customInstructions,
-      defaultInstructions: DEFAULT_INSTRUCTIONS[category],
-    };
-  });
-}
 
 /** Threshold values for the soft length warning on the editor. */
 export const INSTRUCTION_LENGTH_SOFT = 3000;
