@@ -110,6 +110,121 @@ describe('activity-bucket — Lead activity badge derivation', () => {
     });
   });
 
+  // 2026-06-11 — Handoff badge audit (Mario Evans incident). Without signals
+  // the legacy state-only mapping projects 'human_handling' → 'human_handoff'
+  // forever. With signals, the badge must represent CURRENT pending operator
+  // action, not historical classifier output.
+  describe('human_handoff freshness + resolution guards (signals provided)', () => {
+    const T = (iso: string) => new Date(iso);
+
+    it('human_handling + no outbound after customer → human_handoff (Mario)', () => {
+      // Customer's TT-relay "Hello" landed at 20:15. Last AI reply was 19:56.
+      // Customer is ahead → badge stays.
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastBusinessMessageAt: null,
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        handoffRequestedAt:    null,
+        handoffResolvedAt:     null,
+      });
+      expect(b).toBe('human_handoff');
+    });
+
+    it('human_handling + business outbound after customer → follow_up (operator already replied)', () => {
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastBusinessMessageAt: T('2026-06-10T20:30:00Z'),
+        lastAiMessageAt:       null,
+        handoffRequestedAt:    null,
+        handoffResolvedAt:     null,
+      });
+      expect(b).toBe('follow_up');
+    });
+
+    it('customer_replied + AI outbound after customer → follow_up (AI already replied)', () => {
+      const b = activityBucketFromThreadContext('customer_replied', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastBusinessMessageAt: null,
+        lastAiMessageAt:       T('2026-06-10T20:16:30Z'),
+        handoffRequestedAt:    null,
+        handoffResolvedAt:     null,
+      });
+      expect(b).toBe('follow_up');
+    });
+
+    it('handoffResolvedAt > handoffRequestedAt → follow_up (handoff resolved)', () => {
+      // Customer is ahead of outbound, BUT handoff was explicitly resolved.
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastBusinessMessageAt: null,
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        handoffRequestedAt:    T('2026-06-10T19:58:00Z'),
+        handoffResolvedAt:     T('2026-06-10T20:00:00Z'),
+      });
+      expect(b).toBe('follow_up');
+    });
+
+    it('handoffResolvedAt == handoffRequestedAt → follow_up (resolved-at-request edge)', () => {
+      const sameTs = T('2026-06-10T20:00:00Z');
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        handoffRequestedAt:    sameTs,
+        handoffResolvedAt:     sameTs,
+      });
+      expect(b).toBe('follow_up');
+    });
+
+    it('handoff re-requested AFTER prior resolution → human_handoff', () => {
+      // requestedAt > resolvedAt → unresolved again.
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T21:30:00Z'),
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        handoffRequestedAt:    T('2026-06-10T21:00:00Z'),
+        handoffResolvedAt:     T('2026-06-10T20:00:00Z'),
+      });
+      expect(b).toBe('human_handoff');
+    });
+
+    it.each(['booked', 'completed', 'lost', 'cancelled', 'no_show', 'archived'])(
+      'terminal Lead.status=%s suppresses badge even with fresh customer message',
+      (s) => {
+        const b = activityBucketFromThreadContext('human_handling', s, {
+          lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+          lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        });
+        expect(b).toBeNull();
+      },
+    );
+
+    it('null lastCustomerMessageAt with any outbound → follow_up (no fresh customer signal)', () => {
+      // Degenerate: TC says human_handling but no message timestamps. Without
+      // a customer-side signal we can't claim pending operator action.
+      const b = activityBucketFromThreadContext('human_handling', 'engaged', {
+        lastCustomerMessageAt: null,
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+      });
+      expect(b).toBe('follow_up');
+    });
+
+    it('non-handoff buckets unaffected by signals (ai_engaging stays ai_conversation)', () => {
+      // Guards should ONLY apply to human_handoff candidates.
+      const b = activityBucketFromThreadContext('ai_engaging', 'engaged', {
+        lastCustomerMessageAt: T('2026-06-10T20:15:06Z'),
+        lastAiMessageAt:       T('2026-06-10T19:56:00Z'),
+        handoffResolvedAt:     T('2026-06-10T20:00:00Z'),
+      });
+      expect(b).toBe('ai_conversation');
+    });
+
+    it('signals omitted → legacy state-only mapping (Mario before this fix)', () => {
+      // Backward-compat: callers without signal data get the old behavior.
+      // Analytics aggregates exercise this path.
+      const b = activityBucketFromThreadContext('human_handling', 'engaged');
+      expect(b).toBe('human_handoff');
+    });
+  });
+
   describe('production sample — Active pool (930 leads) sub-bucket projection', () => {
     // Mirrors §7 of the audit: distribution of active leads by TC.
     // Demonstrates that the derivation produces the expected counts.

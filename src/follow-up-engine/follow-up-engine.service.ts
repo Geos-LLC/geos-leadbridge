@@ -76,8 +76,15 @@ export function mapStopReasonToRuntime(reason: string): {
     };
   }
   if (r === 'classifier_wants_live_contact') {
+    // AI is PAUSED pending human action, not STOPPED because of a booking.
+    // `stopped_booked` is reserved for classifier_agreed and SF service_scheduled,
+    // where the customer actually agreed/booked. wants_live_contact means
+    // "customer asked for a call/walkthrough" — the AI yields to the operator
+    // but the deal isn't booked yet. paused_human matches the runtime
+    // semantics; reason field stays CLASSIFIER_WANTS_LIVE_CONTACT so it's
+    // distinguishable from a MANUAL_REPLY_WINDOW pause.
     return {
-      aiStatus: 'stopped_booked',
+      aiStatus: 'paused_human',
       aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
       conversationState: 'human_handling',
       conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
