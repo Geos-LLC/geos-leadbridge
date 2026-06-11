@@ -1761,12 +1761,23 @@ export class PlatformService {
     });
   }
 
+  /**
+   * "Is another tenant ACTIVELY bound to this business?" — used by the
+   * OAuth duplicate-business guards. Excludes rows where webhookId is null
+   * (the prior owner ran Disconnect but kept their SavedAccount for
+   * later reconnect). Disconnected bindings shouldn't permanently lock a
+   * business out from other tenants — only live ones do.
+   *
+   * The original owner can still reconnect via the same-userId path in
+   * autoSetupWebhooks because that one matches by userId, not webhookId.
+   */
   async getAccountByBusinessIdExcludingUser(platform: string, businessId: string, excludeUserId: string) {
     return this.prisma.savedAccount.findFirst({
       where: {
         platform,
         businessId,
         userId: { not: excludeUserId },
+        webhookId: { not: null },
       },
     });
   }
