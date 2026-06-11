@@ -38,6 +38,7 @@ function buildPrismaMock() {
     lead: {
       findFirst: jest.fn().mockResolvedValue({ businessId: 'biz-1', userId: 'user-1' }),
       findUnique: jest.fn().mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null, userId: 'user-1', businessId: 'biz-1' }),
+      update: jest.fn().mockResolvedValue({}),
     },
     savedAccount: {
       findFirst: jest.fn().mockResolvedValue({ followUpSettingsJson: null, followUpTimezone: 'America/New_York' }),
@@ -1349,6 +1350,214 @@ describe('FollowUpSchedulerService', () => {
       // code path should set bypassActiveHours = true.
       const wireUpCount = (scriptSrc.match(/a\.bypassActiveHours\s*=\s*true/g) ?? []).length;
       expect(wireUpCount).toBe(1); // exactly the --bypass-active-hours CLI handler
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // 404-auto-stop + refund detection. Spotless 2026-06-10/11 incident:
+  // 6 enrollments × 14-72 retries each accumulated because the scheduler
+  // retried every ~15 min on a platform 404. This branch stops the loop
+  // and, for Thumbtack, enriches with chargeState — when 'Refunded' it
+  // marks Lead.refundedAt + budgetVoidedAt so analytics excludes the
+  // lead's cost.
+  // ────────────────────────────────────────────────────────────────────
+  describe('platform 404 auto-stop + refund detection', () => {
+    const ENROLL = {
+      id: ENROLLMENT_ID,
+      conversationId: CONVERSATION_ID,
+      leadId: LEAD_ID,
+      status: 'active',
+      currentStepIndex: 0,
+      createdAt: new Date('2026-06-10T15:00:00Z'),
+      mode: 'auto_send',
+      platform: 'thumbtack',
+      sequenceTemplate: {
+        stepsJson: { steps: [{ stepOrder: 0, delayMinutes: 0, objective: 'quick_check_in' }] },
+        generationMode: 'template',
+        promptTemplateId: null,
+      },
+    };
+    const YELP_ENROLL = { ...ENROLL, platform: 'yelp' };
+
+    beforeEach(() => {
+      // Wire credentialsJson onto savedAccount so the chargeState fetch
+      // can reach the adapter mock. Real path is encrypted but the
+      // decryptObject helper throws and we fall through, which is fine —
+      // tests that want successful enrichment patch decryptObject below.
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        credentialsJson: 'unparseable',
+        followUpSettingsJson: null,
+        followUpTimezone: 'America/New_York',
+        followUpActiveHoursStart: null,
+        followUpActiveHoursEnd: null,
+        followUpsApplyQuietHours: true,
+      });
+      (service as any).businessHours.isInQuietHours.mockResolvedValue(false);
+      // Force the send to throw 404 via the leadsService mock.
+      ((service as any).leadsService.sendMessage as jest.Mock).mockRejectedValue(
+        new Error('Failed to send message: Failed to send message to Thumbtack: Request failed with status code 404'),
+      );
+    });
+
+    it('1. 404 on send → enrollment stopped with platform_thread_unreachable (no +15min retry)', async () => {
+      // Yelp path — no chargeState enrichment, falls to generic reason.
+      await (service as any).processEnrollment({ ...YELP_ENROLL }, new Date());
+
+      const stopUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'stopped',
+      );
+      expect(stopUpdate).toBeDefined();
+      expect(stopUpdate![0].data.stoppedReason).toBe('platform_thread_unreachable');
+      expect(stopUpdate![0].data.completedAt).toBeInstanceOf(Date);
+
+      // Must NOT have scheduled a +15min retry (which writes a single-field
+      // nextStepDueAt update — distinct signature from the completion update above).
+      const retryUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.nextStepDueAt
+            && Object.keys(c[0].data).length === 2
+            && (c[0].data as any).lastExecutedAt,
+      );
+      expect(retryUpdate).toBeUndefined();
+    });
+
+    it('2. TT 404 + chargeState=Refunded → Lead.refundedAt + budgetVoidedAt set, stoppedReason switches', async () => {
+      // Patch the platformFactory adapter mock to return chargeState='Refunded'.
+      const getLead = jest.fn().mockResolvedValue({
+        platformChargeState: 'Refunded',
+      });
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+      // Patch EncryptionUtil so the credentialsJson decrypt succeeds.
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+
+      await (service as any).processEnrollment({ ...ENROLL }, new Date());
+
+      const stopUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'stopped',
+      );
+      expect(stopUpdate).toBeDefined();
+      expect(stopUpdate![0].data.stoppedReason).toBe('platform_lead_removed_refunded');
+
+      const leadUpdate = (prisma.lead.update.mock.calls as any[][]).find(
+        (c) => c[0]?.where?.id === LEAD_ID && c[0]?.data?.refundedAt,
+      );
+      expect(leadUpdate).toBeDefined();
+      expect(leadUpdate![0].data.chargeStateRaw).toBe('Refunded');
+      expect(leadUpdate![0].data.refundedAt).toBeInstanceOf(Date);
+      expect(leadUpdate![0].data.budgetVoidedAt).toBeInstanceOf(Date);
+    });
+
+    it('3. TT 404 + chargeState=Charged (not refunded) → stop but NO Lead.refundedAt write', async () => {
+      const getLead = jest.fn().mockResolvedValue({
+        platformChargeState: 'Charged',
+      });
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+
+      await (service as any).processEnrollment({ ...ENROLL }, new Date());
+
+      const stopUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'stopped',
+      );
+      expect(stopUpdate).toBeDefined();
+      expect(stopUpdate![0].data.stoppedReason).toBe('platform_thread_unreachable');
+      // Critical: Lead must NOT be marked refunded when chargeState != Refunded.
+      const refundWrite = (prisma.lead.update.mock.calls as any[][]).find(
+        (c) => c[0]?.where?.id === LEAD_ID && c[0]?.data?.refundedAt,
+      );
+      expect(refundWrite).toBeUndefined();
+    });
+
+    it('4. TT 404 + chargeState fetch fails → falls back to platform_thread_unreachable (no crash)', async () => {
+      const getLead = jest.fn().mockRejectedValue(new Error('THUMBTACK_WRONG_SCOPE'));
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+
+      await (service as any).processEnrollment({ ...ENROLL }, new Date());
+
+      const stopUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'stopped',
+      );
+      expect(stopUpdate).toBeDefined();
+      expect(stopUpdate![0].data.stoppedReason).toBe('platform_thread_unreachable');
+      const refundWrite = (prisma.lead.update.mock.calls as any[][]).find(
+        (c) => c[0]?.where?.id === LEAD_ID && c[0]?.data?.refundedAt,
+      );
+      expect(refundWrite).toBeUndefined();
+    });
+
+    it('5. non-404 error → existing +15min retry path (no regression)', async () => {
+      ((service as any).leadsService.sendMessage as jest.Mock).mockRejectedValue(
+        new Error('Failed to send message: Connection reset by peer'),
+      );
+
+      await (service as any).processEnrollment({ ...ENROLL }, new Date());
+
+      // No "stopped" update should fire — non-404 errors retry per existing behavior.
+      const stopUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'stopped' && c[0]?.data?.stoppedReason === 'platform_thread_unreachable',
+      );
+      expect(stopUpdate).toBeUndefined();
+      // The +15min retry update should fire (nextStepDueAt + lastExecutedAt).
+      const retryUpdate = (prisma.followUpEnrollment.update.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.nextStepDueAt
+            && (c[0].data as any).lastExecutedAt
+            && !(c[0].data as any).status,
+      );
+      expect(retryUpdate).toBeDefined();
+    });
+
+    it('6. cancelled step execution row written with chargeState in metadata', async () => {
+      const getLead = jest.fn().mockResolvedValue({ platformChargeState: 'Refunded' });
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+
+      await (service as any).processEnrollment({ ...ENROLL }, new Date());
+
+      const stepRow = (prisma.followUpStepExecution.create.mock.calls as any[][]).find(
+        (c) => c[0]?.data?.status === 'cancelled' && c[0]?.data?.metadataJson,
+      );
+      expect(stepRow).toBeDefined();
+      const meta = JSON.parse(stepRow![0].data.metadataJson);
+      expect(meta.stoppedReason).toBe('platform_lead_removed_refunded');
+      expect(meta.platformChargeState).toBe('Refunded');
+      expect(meta.refundDetected).toBe(true);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Analytics — refund-aware aggregations. Source-presence assertions
+  // since the analytics service writes raw SQL and lives in another
+  // suite; we only need to confirm the budget_stats CTE + getAverageLeadPrice
+  // both filter on budgetVoidedAt IS NULL.
+  // ────────────────────────────────────────────────────────────────────
+  describe('analytics refund exclusion', () => {
+    it('budget_stats CTE excludes budget_voided_at rows from leadPrice AVG/SUM', () => {
+      const src = readFileSync(
+        join(__dirname, '..', 'analytics', 'analytics.service.ts'),
+        'utf8',
+      );
+      // The CASE guards inside budget_stats must reference budget_voided_at.
+      const budgetStatsBlock = src.match(/budget_stats AS \([\s\S]*?GROUP BY bucket\s*\)/);
+      expect(budgetStatsBlock).not.toBeNull();
+      expect(budgetStatsBlock![0]).toMatch(/budget_voided_at IS NULL/);
+      // And the raw_leads CTE must select budgetVoidedAt to propagate.
+      expect(src).toMatch(/l\."budgetVoidedAt"\s+AS budget_voided_at/);
+    });
+
+    it('getAverageLeadPrice filters WHERE budgetVoidedAt IS NULL', () => {
+      const src = readFileSync(
+        join(__dirname, '..', 'analytics', 'analytics.service.ts'),
+        'utf8',
+      );
+      // Anchor on the function — there's no need to parse the whole query,
+      // just confirm the budgetVoidedAt filter sits inside it.
+      const fnBlock = src.match(/private async getAverageLeadPrice[\s\S]*?\n  \}/);
+      expect(fnBlock).not.toBeNull();
+      expect(fnBlock![0]).toMatch(/l\."budgetVoidedAt" IS NULL/);
     });
   });
 

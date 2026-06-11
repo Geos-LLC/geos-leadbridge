@@ -369,6 +369,7 @@ export class AnalyticsService {
           l."businessId",
           l."status" AS lead_status,
           l."rawJson",
+          l."budgetVoidedAt"   AS budget_voided_at,
           tli."capturedAt"      AS tli_captured_at,
           l."createdAt"         AS l_created_at,
           CASE
@@ -389,7 +390,7 @@ export class AnalyticsService {
       ),
       lead_dates AS (
         SELECT
-          id, "userId", "businessId", lead_status, "rawJson",
+          id, "userId", "businessId", lead_status, "rawJson", budget_voided_at,
           CASE
             WHEN full_date_str IS NOT NULL
             THEN TO_DATE(full_date_str, 'Mon DD YYYY')::timestamptz
@@ -408,16 +409,26 @@ export class AnalyticsService {
         GROUP BY bucket, job_status
       ),
       budget_stats AS (
+        -- Refund-aware leadPrice aggregation.
+        -- Leads with budget_voided_at IS NOT NULL contribute NULL to both
+        -- AVG and SUM via the CASE guard — that matches the spec
+        -- "void the charge from the lead cost (including analytic)".
+        -- See follow-up-scheduler.service.ts classifyPlatformUnreachable:
+        -- the scheduler writes refundedAt + budgetVoidedAt atomically when
+        -- it observes Thumbtack chargeState='Refunded'. Operator-initiated
+        -- manual voids also set budgetVoidedAt without setting refundedAt.
         SELECT
           DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
           AVG(
             CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+                  AND ld.budget_voided_at IS NULL
               THEN NULLIF(LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric
               ELSE NULL
             END
           ) AS avg_budget,
           SUM(
             CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+                  AND ld.budget_voided_at IS NULL
               THEN NULLIF(LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric
               ELSE NULL
             END
@@ -1158,6 +1169,9 @@ export class AnalyticsService {
     }
 
     const rows = await this.prisma.$queryRawUnsafe<Array<{ avg_price: string | null; cnt: bigint }>>(
+      // Refund-aware AVG: leads with budgetVoidedAt set are excluded from
+      // both the AVG numerator and the COUNT. See spec 2026-06-11
+      // "void the charge from the lead cost (including analytic)".
       `SELECT
          AVG(NULLIF(LTRIM(l."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric) AS avg_price,
          COUNT(NULLIF(LTRIM(l."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric)::bigint AS cnt
@@ -1169,7 +1183,8 @@ export class AnalyticsService {
          AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
          AND l."rawJson" IS NOT NULL
          AND l."rawJson" <> ''
-         AND l."rawJson"::jsonb->>'leadPrice' IS NOT NULL`,
+         AND l."rawJson"::jsonb->>'leadPrice' IS NOT NULL
+         AND l."budgetVoidedAt" IS NULL`,
       userId,
       query.businessId ?? null,
       query.startDate ? new Date(query.startDate) : null,

@@ -366,6 +366,12 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       state: location.state,
       category: request.category?.name,
       status: this.mapThumbtackStatus(negotiation.status, negotiation.chargeState),
+      // Pass platform-side billing state through unchanged. The scheduler's
+      // send-time 404 enrichment reads this to distinguish refund-removals
+      // (mark Lead.refundedAt + budgetVoidedAt + stoppedReason='platform_lead_removed_refunded')
+      // from other unreachable cases (stoppedReason='platform_thread_unreachable').
+      // Thumbtack values: 'Charged' | 'Pending' | 'Refunded'.
+      platformChargeState: negotiation.chargeState ?? undefined,
       threadId: negotiation.negotiationID,
       createdAt: new Date(negotiation.createdAt || Date.now()),
       updatedAt: new Date(negotiation.createdAt || Date.now()),

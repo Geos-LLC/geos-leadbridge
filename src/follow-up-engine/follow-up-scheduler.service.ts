@@ -1074,6 +1074,72 @@ export class FollowUpSchedulerService implements OnModuleInit {
             this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} stopped — lead archived by customer`);
             return;
           }
+          // Platform returned 404 on send — the lead/thread no longer exists
+          // on the platform side. Could be: TT refund + removal, customer
+          // deleted account on Yelp, customer canceled on TT (closes the
+          // thread), pro hired-someone-else with thread now closed. Without
+          // this branch the scheduler retries every 15 min indefinitely —
+          // see Spotless 2026-06-10/11 incident: 6 enrollments × 14-72
+          // retries each, 0 sends.
+          //
+          // For Thumbtack specifically, try to fetch chargeState before
+          // deciding the stop reason. chargeState='Refunded' tells us TT
+          // refunded the lead — we then mark Lead.refundedAt and
+          // budgetVoidedAt so analytics excludes the leadPrice from cost
+          // totals (1 = mark as refunded; 2 = void the charge from the
+          // lead cost including analytic — see operator spec 2026-06-11).
+          //
+          // chargeState fetch is best-effort: if the GET also 404s (the
+          // negotiation is fully gone), or if credentials decrypt fails,
+          // or any adapter exception fires, we fall through to the generic
+          // 'platform_thread_unreachable' reason.
+          if (err.message?.includes('status code 404')) {
+            const { stopReason, refundDetected, chargeState } =
+              await this.classifyPlatformUnreachable(enrollment);
+
+            await this.prisma.followUpStepExecution.create({
+              data: {
+                enrollmentId: enrollment.id,
+                stepIndex: enrollment.currentStepIndex,
+                objective: step.objective,
+                status: 'cancelled',
+                scheduledAt: enrollment.nextStepDueAt || now,
+                executedAt: now,
+                metadataJson: JSON.stringify({
+                  stoppedReason: stopReason,
+                  error: err.message,
+                  platformChargeState: chargeState ?? null,
+                  refundDetected,
+                }),
+              },
+            });
+            await this.prisma.followUpEnrollment.update({
+              where: { id: enrollment.id },
+              data: { status: 'stopped', stoppedReason: stopReason, completedAt: now },
+            });
+
+            // Persist Lead-side refund signal if we observed it. Skip the
+            // write entirely when refund wasn't confirmed — we don't want
+            // to clobber chargeStateRaw with non-refund values mid-investigation.
+            if (refundDetected && enrollment.leadId) {
+              await this.prisma.lead.update({
+                where: { id: enrollment.leadId },
+                data: {
+                  chargeStateRaw: chargeState ?? 'Refunded',
+                  refundedAt: now,
+                  // budgetVoidedAt mirrors refundedAt on automatic detection.
+                  // Analytics queries (getTimeSeries.budget_stats,
+                  // getAverageLeadPrice) filter "WHERE budgetVoidedAt IS NULL"
+                  // so this single write is what voids the charge.
+                  budgetVoidedAt: now,
+                },
+              });
+              this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} stopped — lead refunded; Lead.refundedAt + budgetVoidedAt set`);
+            } else {
+              this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} stopped — ${stopReason}`);
+            }
+            return;
+          }
           sendStatus = 'failed';
         }
       }
@@ -1236,6 +1302,74 @@ export class FollowUpSchedulerService implements OnModuleInit {
    *
    * Pure DB read — no side effects beyond template loading.
    */
+  /**
+   * Classify a platform-side 404 on send-time. Best-effort:
+   *   - For Thumbtack, fetches the negotiation to read `chargeState`.
+   *     If 'Refunded' → returns refund detection + the raw chargeState
+   *     so the caller can persist Lead.refundedAt / budgetVoidedAt and
+   *     stop with `platform_lead_removed_refunded`.
+   *   - For Yelp (no refund concept — subscription billing) or when
+   *     enrichment fails for any reason (credentials decrypt error, GET
+   *     also 404s, network), returns the generic `platform_thread_unreachable`
+   *     reason without touching Lead state.
+   *
+   * Pure read of Lead + SavedAccount + adapter; never writes here.
+   * Caller writes Lead.refundedAt / budgetVoidedAt when refundDetected=true.
+   */
+  private async classifyPlatformUnreachable(
+    enrollment: { id: string; leadId: string | null; platform: string },
+  ): Promise<{ stopReason: string; refundDetected: boolean; chargeState: string | null }> {
+    const FALLBACK = { stopReason: 'platform_thread_unreachable', refundDetected: false, chargeState: null };
+
+    if (enrollment.platform !== 'thumbtack' || !enrollment.leadId) {
+      // Yelp 404s on send mean the lead/conversation was deleted on the
+      // platform side — no chargeState equivalent to inspect.
+      return FALLBACK;
+    }
+
+    try {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { userId: true, businessId: true, externalRequestId: true },
+      });
+      if (!lead) return FALLBACK;
+      const acct = await this.prisma.savedAccount.findFirst({
+        where: {
+          userId: lead.userId,
+          ...(lead.businessId ? { businessId: lead.businessId } : {}),
+          platform: 'thumbtack',
+        },
+        select: { credentialsJson: true },
+      });
+      if (!acct?.credentialsJson) return FALLBACK;
+      const encryptionKey = this.configService.get<string>('encryption.key') || '';
+      let credentials: any;
+      try {
+        credentials = EncryptionUtil.decryptObject(acct.credentialsJson, encryptionKey);
+      } catch {
+        return FALLBACK;
+      }
+      const ttAdapter = this.platformFactory.getAdapter('thumbtack') as any;
+      const normalized = await ttAdapter.getLead(credentials, lead.externalRequestId);
+      const chargeState: string | null = normalized?.platformChargeState ?? null;
+      if (chargeState && chargeState.toLowerCase() === 'refunded') {
+        return {
+          stopReason: 'platform_lead_removed_refunded',
+          refundDetected: true,
+          chargeState,
+        };
+      }
+      // Got chargeState, not refunded — keep the generic stop reason but
+      // still surface chargeState so the step execution metadata records it.
+      return { stopReason: 'platform_thread_unreachable', refundDetected: false, chargeState };
+    } catch (enrichErr: any) {
+      this.logger.warn(
+        `[FollowUpScheduler] chargeState enrichment failed for enrollment ${enrollment.id}: ${enrichErr.message}`,
+      );
+      return FALLBACK;
+    }
+  }
+
   private async resolveHistoricalReactivationMessage(enrollment: any): Promise<string | null> {
     let rawMessage: string | null = null;
     let lead: { userId: string; businessId: string | null; customerName: string | null } | null = null;
