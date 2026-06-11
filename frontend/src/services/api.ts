@@ -1302,7 +1302,43 @@ export const analyticsApi = {
     const { data } = await api.get(`/v1/analytics/timeseries?${queryParams.toString()}`);
     return data;
   },
+
+  // Skipped + refunded leads. Backs the "Skipped & Refunded" tab in the
+  // Analytics page. Returns the list of leads where the follow-up engine
+  // couldn't deliver (TT refund + removal, platform thread closed, etc.)
+  // OR where Lead.refundedAt was set directly. Same query shape as the
+  // other analytics endpoints — JWT auth scopes to the user's leads.
+  getSkippedLeads: async (params: {
+    businessId?: string;
+    platform?: AnalyticsPlatform;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ success: boolean; data: SkippedLeadRow[] }> => {
+    const queryParams = new URLSearchParams();
+    if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.platform) queryParams.append('platform', params.platform);
+    if (params.startDate) queryParams.append('startDate', params.startDate);
+    if (params.endDate) queryParams.append('endDate', params.endDate);
+
+    const { data } = await api.get(`/v1/analytics/skipped?${queryParams.toString()}`);
+    return data;
+  },
 };
+
+export interface SkippedLeadRow {
+  leadId: string;
+  customerName: string;
+  platform: string;
+  businessId: string | null;
+  phone: string | null;
+  createdAt: string;
+  stoppedReason: string | null;
+  stoppedAt: string | null;
+  chargeStateRaw: string | null;
+  refundedAt: string | null;
+  budgetVoidedAt: string | null;
+  enrollmentId: string | null;
+}
 
 // Billing API (Stripe)
 export const billingApi = {

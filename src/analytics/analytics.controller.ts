@@ -54,4 +54,27 @@ export class AnalyticsController {
     const info = await this.analyticsService.getCacheInfo(user.id, businessId);
     return { success: true, data: info };
   }
+
+  /**
+   * Skipped + refunded leads — tenant-facing visibility for leads where
+   * the follow-up engine couldn't deliver (refund, platform-side removal,
+   * thread closed, etc.). Replaces "operator runs the batch-report CLI"
+   * for the day-to-day case.
+   *
+   * Returns one row per Lead where EITHER:
+   *   - Lead.refundedAt IS NOT NULL (regardless of enrollment state), OR
+   *   - any FollowUpEnrollment for the lead was stopped with a platform-
+   *     side stoppedReason (platform_thread_unreachable, etc.)
+   *
+   * Auth: JwtAuthGuard scopes to user.id — tenants can only see their
+   * own leads. Same query shape as other analytics endpoints.
+   */
+  @Get('skipped')
+  async getSkippedLeads(
+    @CurrentUser() user: any,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    const data = await this.analyticsService.getSkippedLeads(user.id, query);
+    return { success: true, data };
+  }
 }

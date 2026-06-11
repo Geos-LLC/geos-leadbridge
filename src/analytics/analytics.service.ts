@@ -548,6 +548,154 @@ export class AnalyticsService {
     return cached ? { calculatedAt: cached.calculatedAt } : null;
   }
 
+  /**
+   * Tenant-facing list of leads where the follow-up engine couldn't
+   * deliver. Surfaces what the operator currently sees only via the
+   * historical-reactivation batch report CLI.
+   *
+   * Returns leads where EITHER:
+   *   - Lead.refundedAt is set (direct refund tracking), OR
+   *   - the lead has any FollowUpEnrollment stopped with a platform-side
+   *     stoppedReason (404, removed, archived, refunded, etc.)
+   *
+   * Each row carries the info a tenant needs to decide whether to
+   * re-engage out-of-band: name, platform, phone, when/why we stopped
+   * trying, and whether the lead was refunded (so the cost-void is
+   * visible alongside the skip).
+   *
+   * Scoped to userId — JwtAuthGuard already enforces that on the
+   * controller; this query trusts the userId arg.
+   */
+  async getSkippedLeads(
+    userId: string,
+    query: AnalyticsQueryDto,
+  ): Promise<Array<{
+    leadId: string;
+    customerName: string;
+    platform: string;
+    businessId: string | null;
+    phone: string | null;
+    createdAt: Date;
+    stoppedReason: string | null;
+    stoppedAt: Date | null;
+    chargeStateRaw: string | null;
+    refundedAt: Date | null;
+    budgetVoidedAt: Date | null;
+    enrollmentId: string | null;
+  }>> {
+    const dateFilter = this.buildDateFilter(query);
+    // Platform-side stoppedReasons. Kept in sync with
+    // scripts/historical-reactivation-batch-report.ts → skipReasons set
+    // and follow-up-scheduler.service.ts → classifyPlatformUnreachable.
+    const PLATFORM_SKIP_REASONS = [
+      'platform_thread_unreachable',
+      'platform_lead_removed_refunded',
+      'platform_thread_closed',
+      'platform_thread_archived',
+      'lead_archived',
+      'no_thread_id',
+      'no_delivery_channel',
+      'awaiting_human_response',
+      'deferral_phrase',
+      'thread_closed',
+      'platform_send_failed',
+      'smoke_v2_delivery_failed_retry_loop',
+    ];
+
+    // Pull leads that match either path. Prisma can't OR across relations
+    // cleanly here, so we do two findMany calls and merge.
+    const baseLeadWhere = {
+      userId,
+      ...(query.businessId && { businessId: query.businessId }),
+      ...(query.platform && { platform: query.platform }),
+      ...dateFilter,
+    };
+
+    const [refundedLeads, leadsWithSkippedEnrollment] = await Promise.all([
+      this.prisma.lead.findMany({
+        where: { ...baseLeadWhere, refundedAt: { not: null } },
+        select: {
+          id: true, customerName: true, platform: true, businessId: true,
+          customerPhone: true, customerPhoneSubstitute: true,
+          createdAt: true,
+          chargeStateRaw: true, refundedAt: true, budgetVoidedAt: true,
+        },
+        take: 500,
+        orderBy: { refundedAt: 'desc' },
+      }),
+      this.prisma.followUpEnrollment.findMany({
+        where: {
+          status: 'stopped',
+          stoppedReason: { in: PLATFORM_SKIP_REASONS },
+          lead: baseLeadWhere,
+        },
+        select: {
+          id: true,
+          stoppedReason: true,
+          completedAt: true,
+          lead: {
+            select: {
+              id: true, customerName: true, platform: true, businessId: true,
+              customerPhone: true, customerPhoneSubstitute: true,
+              createdAt: true,
+              chargeStateRaw: true, refundedAt: true, budgetVoidedAt: true,
+            },
+          },
+        },
+        take: 500,
+        orderBy: { completedAt: 'desc' },
+      }),
+    ]);
+
+    // Merge by leadId. Prefer the enrollment row's stoppedReason/stoppedAt
+    // when both paths produce a row for the same lead.
+    type Row = NonNullable<ReturnType<typeof Map.prototype.get>> extends infer T ? T : never;
+    const map = new Map<string, ReturnType<AnalyticsService['buildSkippedRow']>>();
+    for (const lead of refundedLeads) {
+      map.set(lead.id, this.buildSkippedRow(lead, null, null, null));
+    }
+    for (const enr of leadsWithSkippedEnrollment) {
+      if (!enr.lead) continue;
+      map.set(
+        enr.lead.id,
+        this.buildSkippedRow(enr.lead, enr.id, enr.stoppedReason, enr.completedAt),
+      );
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = a.stoppedAt?.getTime() ?? a.refundedAt?.getTime() ?? 0;
+      const tb = b.stoppedAt?.getTime() ?? b.refundedAt?.getTime() ?? 0;
+      return tb - ta;
+    });
+  }
+
+  private buildSkippedRow(
+    lead: {
+      id: string; customerName: string; platform: string; businessId: string | null;
+      customerPhone: string | null; customerPhoneSubstitute: string | null;
+      createdAt: Date;
+      chargeStateRaw: string | null; refundedAt: Date | null; budgetVoidedAt: Date | null;
+    },
+    enrollmentId: string | null,
+    stoppedReason: string | null,
+    stoppedAt: Date | null,
+  ) {
+    return {
+      leadId: lead.id,
+      customerName: lead.customerName,
+      platform: lead.platform,
+      businessId: lead.businessId,
+      phone: lead.customerPhone ?? lead.customerPhoneSubstitute ?? null,
+      createdAt: lead.createdAt,
+      stoppedReason,
+      stoppedAt,
+      chargeStateRaw: lead.chargeStateRaw,
+      refundedAt: lead.refundedAt,
+      budgetVoidedAt: lead.budgetVoidedAt,
+      enrollmentId,
+    };
+  }
+
   private async computeAnalytics(
     userId: string,
     query: AnalyticsQueryDto,
