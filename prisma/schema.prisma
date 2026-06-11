@@ -315,6 +315,19 @@ model Lead {
   thumbtackStatus        String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
   platformStatus         String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
   platformStatusAt       DateTime? // When platform status was last observed
+  // Refund / billing tracking. Populated by the scheduler when a platform
+  // 404 on send is enriched with Thumbtack chargeState='Refunded', or by
+  // operator action. Yelp doesn't expose a refund concept (subscription
+  // model) so these remain null for Yelp leads.
+  //   - chargeStateRaw : platform's raw value ('Refunded' | 'Charged' | 'Pending')
+  //   - refundedAt     : observed-refunded timestamp; populated atomically with chargeStateRaw='Refunded'
+  //   - budgetVoidedAt : analytics gate — when set, the lead's leadPrice/budget
+  //                      is excluded from cost SUM/AVG queries. Mirrors refundedAt
+  //                      on automatic detection; can be set independently by
+  //                      operator action (manual void) without TT confirmation.
+  chargeStateRaw         String?
+  refundedAt             DateTime?
+  budgetVoidedAt         DateTime?
   threadId               String? // Universal conversation ID
   rawJson                String    @db.Text // Original platform payload
   syncedToCrm            Boolean   @default(false)

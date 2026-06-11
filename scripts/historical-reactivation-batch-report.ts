@@ -79,9 +79,16 @@ async function main() {
     },
     select: {
       id: true, status: true, stoppedReason: true, conversationId: true,
-      leadId: true, createdAt: true, completedAt: true,
+      leadId: true, createdAt: true, completedAt: true, platform: true,
       stepExecutions: { select: { status: true, executedAt: true } },
-      lead: { select: { customerName: true, status: true, lostReason: true, sfJobId: true, sfCustomerId: true, syncStatus: true } },
+      lead: {
+        select: {
+          customerName: true, status: true, lostReason: true,
+          sfJobId: true, sfCustomerId: true, syncStatus: true,
+          customerPhone: true, customerPhoneSubstitute: true,
+          refundedAt: true, budgetVoidedAt: true, chargeStateRaw: true,
+        },
+      },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -263,6 +270,84 @@ async function main() {
     console.log(`    delivered rate ${(deliveredRate * 100).toFixed(1)}% (need ≥85%), active still pending=${active}`);
   }
 
+  // ── Skipped / refunded leads (visibility for operator + tenant) ──
+  // These are leads from this batch the system couldn't deliver to. Each
+  // row shows reason + phone (so the operator can re-engage out-of-band)
+  // + chargeStateRaw (so refunds vs other unreachable cases are clear).
+  // The auto-stop path that produces these rows lives in the scheduler:
+  //   follow-up-scheduler.service.ts → classifyPlatformUnreachable +
+  //   the `err.message?.includes('status code 404')` branch.
+  type SkipRow = {
+    name: string;
+    platform: string;
+    reason: string;
+    phone: string;
+    refunded: boolean;
+    chargeState: string | null;
+    enrollmentId: string;
+  };
+  const skipReasons = new Set([
+    'platform_thread_unreachable',
+    'platform_lead_removed_refunded',
+    'platform_thread_closed',
+    'platform_thread_archived',
+    'lead_archived',
+    'no_thread_id',
+    'no_delivery_channel',
+    'awaiting_human_response',
+    'deferral_phrase',
+    'thread_closed',
+    'platform_send_failed',
+    'smoke_v2_delivery_failed_retry_loop',
+  ]);
+  const skipped: SkipRow[] = [];
+  const refunded: SkipRow[] = [];
+  for (const e of batchEnrollments) {
+    if (e.status !== 'stopped') continue;
+    const r = (e.stoppedReason ?? '').toLowerCase();
+    const isSkipBucket = skipReasons.has(r) || r.startsWith('delivery_') || r.includes('delivery_fail');
+    if (!isSkipBucket) continue;
+    const row: SkipRow = {
+      name: e.lead?.customerName ?? '(no name)',
+      platform: e.platform ?? '?',
+      reason: e.stoppedReason ?? 'unknown',
+      phone: e.lead?.customerPhone ?? e.lead?.customerPhoneSubstitute ?? '(no phone)',
+      refunded: !!e.lead?.refundedAt,
+      chargeState: e.lead?.chargeStateRaw ?? null,
+      enrollmentId: e.id,
+    };
+    skipped.push(row);
+    if (row.refunded || r === 'platform_lead_removed_refunded') refunded.push(row);
+  }
+
+  console.log('\n=== Skipped leads (this batch) ===');
+  if (skipped.length === 0) {
+    console.log('  none — every batch enrollment got a delivery attempt');
+  } else {
+    console.log(`  ${skipped.length} of ${enrolled} batch enrollments were skipped:`);
+    const byReason: Record<string, SkipRow[]> = {};
+    for (const s of skipped) (byReason[s.reason] = byReason[s.reason] ?? []).push(s);
+    for (const [reason, rows] of Object.entries(byReason).sort((a, b) => b[1].length - a[1].length)) {
+      console.log(`\n  [${rows.length}] ${reason}`);
+      for (const r of rows) {
+        console.log(`    - ${r.name.padEnd(24)} platform=${r.platform.padEnd(9)} phone=${r.phone.padEnd(16)} chargeState=${r.chargeState ?? '-'} enroll=${r.enrollmentId}`);
+      }
+    }
+    console.log('\n  Phone numbers are preserved on the Lead row — operator can re-engage out-of-band.');
+    console.log('  Lead.status / SF link are NOT modified by the skip — those rows remain queryable.');
+  }
+
+  console.log('\n=== Refunded leads (this batch) ===');
+  if (refunded.length === 0) {
+    console.log('  none refunded — no Lead.refundedAt / budgetVoidedAt writes from this batch');
+  } else {
+    console.log(`  ${refunded.length} of ${enrolled} batch enrollments had their lead marked refunded:`);
+    for (const r of refunded) {
+      console.log(`    - ${r.name.padEnd(24)} platform=${r.platform.padEnd(9)} chargeState=${r.chargeState ?? '-'}`);
+      console.log(`      Lead.refundedAt + Lead.budgetVoidedAt set; analytics will exclude this lead's cost.`);
+    }
+  }
+
   if (driftedLeads.length > 0) {
     console.log('\n=== Drifted leads (Lead.status changed unexpectedly) ===');
     for (const d of driftedLeads.slice(0, 10)) {
@@ -275,6 +360,8 @@ async function main() {
     enrolled, stepsSent, stepsFailed, repliesAfterEnroll, optOuts, classifierStops,
     deliveryFailures, postFollowups: postFollowups.length, statusDriftCount, sfDriftCount,
     duplicateSendConvs, stuckActive, deliveredRate, deliveryFailureRate, optOutRate,
+    skippedCount: skipped.length,
+    refundedCount: refunded.length,
     healthy: healthy && stopReasons.length === 0,
     halt: stopReasons.length > 0,
     stopReasons,

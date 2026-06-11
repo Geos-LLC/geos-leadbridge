@@ -81,6 +81,16 @@ export class NormalizedLead {
   @IsString()
   thumbtackStatus?: string; // Platform job status (Hired, Scheduled, Done, etc.)
 
+  // Raw platform-side billing state. Thumbtack exposes this on every
+  // negotiation as `chargeState` with values 'Charged' | 'Pending' |
+  // 'Refunded'. The scheduler's send-time 404 enrichment path reads this
+  // to decide whether a vanished thread is a refund (mark Lead.refundedAt
+  // + budgetVoidedAt) vs an unrelated removal. Yelp doesn't expose this
+  // (subscription billing model), so the field is undefined for Yelp.
+  @IsOptional()
+  @IsString()
+  platformChargeState?: string;
+
   @IsOptional()
   @IsString()
   threadId?: string; // Universal conversation ID
