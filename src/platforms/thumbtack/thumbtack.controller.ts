@@ -101,11 +101,18 @@ export class ThumbtackController {
           if (otherUserAccount) {
             if (!isAdmin) {
               console.error(`Business ${business.name} (${business.businessID}) already connected to user ${otherUserAccount.userId}`);
-              throw new BadRequestException(
-                `This Thumbtack business "${business.name}" is already connected to another LeadBridge account. ` +
-                `Each business can only be linked to one account. ` +
-                `If you own this business, please contact support or log in with the original account.`
-              );
+              // Pass structured payload so handleCallback can emit a specific
+              // error code (business_already_connected) for the frontend to
+              // elevate to a blocking modal instead of an easily-missed banner.
+              throw new BadRequestException({
+                code: 'business_already_connected',
+                businessName: business.name,
+                businessId: business.businessID,
+                message:
+                  `This Thumbtack business "${business.name}" is already connected to another LeadBridge account. ` +
+                  `Each business can only be linked to one account. ` +
+                  `If you own this business, please contact support or log in with the original account.`,
+              });
             }
             console.log(`Admin user bypassing ownership conflict for business ${business.name} (${business.businessID})`);
           }
@@ -248,10 +255,28 @@ export class ThumbtackController {
       console.log('[ThumbtackController] Redirecting to:', redirectUrl);
       return res.redirect(redirectUrl);
     } catch (err) {
+      // If the error carries a structured payload (e.g. BadRequestException
+      // thrown by autoSetupWebhooks for the duplicate-business case), surface
+      // its `code` so the frontend can render a blocking modal instead of an
+      // inline banner. The shape comes from `new BadRequestException({code,...})`.
+      let errCode = 'oauth_failed';
+      let errDescription = err?.message || 'Failed to complete OAuth';
+      let claimedBusinessName: string | undefined;
+      try {
+        const response = typeof err?.getResponse === 'function' ? err.getResponse() : err?.response;
+        if (response && typeof response === 'object') {
+          if (typeof response.code === 'string') errCode = response.code;
+          if (typeof response.message === 'string') errDescription = response.message;
+          if (typeof response.businessName === 'string') claimedBusinessName = response.businessName;
+        }
+      } catch {
+        /* ignore — fall through to defaults */
+      }
       const errorParams = new URLSearchParams({
-        error: 'oauth_failed',
-        error_description: err.message || 'Failed to complete OAuth',
+        error: errCode,
+        error_description: errDescription,
       });
+      if (claimedBusinessName) errorParams.set('claimed_business_name', claimedBusinessName);
       return res.redirect(`${this.frontendUrl}/overview?${errorParams.toString()}`);
     }
   }

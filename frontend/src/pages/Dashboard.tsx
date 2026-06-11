@@ -48,6 +48,10 @@ export function Dashboard() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  // Blocking modal for the duplicate-business OAuth case. Inline banners are
+  // easily missed when the page also surfaces "?connected=" success bubbles
+  // and other state — surface this one as a centered dialog instead.
+  const [duplicateBusiness, setDuplicateBusiness] = useState<{ name: string | null; message: string } | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -170,6 +174,15 @@ export function Dashboard() {
       const desc = searchParams.get('error_description') || error;
       if (desc.toLowerCase().includes('consent verifier')) {
         console.log('[Dashboard] Ignoring consent-verifier error (likely double-click):', desc);
+      } else if (
+        error === 'business_already_connected' ||
+        // Backward-compat: pre-error-code deploys land here with the legacy
+        // generic `oauth_failed` code but the recognisable description text.
+        (error === 'oauth_failed' && /already connected to another leadbridge account/i.test(desc))
+      ) {
+        const claimedName = searchParams.get('claimed_business_name');
+        console.log('[Dashboard] Duplicate-business OAuth error:', { claimedName, desc });
+        setDuplicateBusiness({ name: claimedName, message: desc });
       } else {
         console.log('[Dashboard] OAuth error:', error, desc);
         setOauthError(desc);
@@ -872,6 +885,122 @@ export function Dashboard() {
         savedAccounts={savedAccounts}
         onSuccess={handleConnectionSuccess}
       />
+
+      {duplicateBusiness && (
+        <DuplicateBusinessModal
+          businessName={duplicateBusiness.name}
+          message={duplicateBusiness.message}
+          onClose={() => setDuplicateBusiness(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DuplicateBusinessModal({
+  businessName,
+  message,
+  onClose,
+}: {
+  businessName: string | null;
+  message: string;
+  onClose: () => void;
+}) {
+  const displayName = businessName?.trim() || 'This Thumbtack business';
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 19, 26, 0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="duplicate-business-title"
+        style={{
+          background: 'var(--lb-surface, #fff)',
+          borderRadius: 'var(--lb-radius-lg, 12px)',
+          maxWidth: 480,
+          width: '100%',
+          padding: '24px 24px 20px',
+          boxShadow: '0 24px 48px rgba(0,0,0,0.18)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div
+            style={{
+              flexShrink: 0,
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: 'oklch(0.96 0.04 27)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <AlertCircle size={20} style={{ color: 'var(--lb-danger)' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3
+              id="duplicate-business-title"
+              style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}
+            >
+              Thumbtack business already connected
+            </h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)' }}>
+              This business is linked to another LeadBridge account
+            </p>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 14, color: 'var(--lb-ink-2)', lineHeight: 1.55 }}>
+          <p style={{ margin: '0 0 10px' }}>
+            <strong style={{ color: 'var(--lb-ink-1)' }}>{displayName}</strong> is already linked to another
+            LeadBridge account. Each Thumbtack business can only be connected to one LeadBridge tenant at a time.
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            If you own this business, log in with the original LeadBridge account or contact support to transfer
+            it. Otherwise, retry the connection using a different Thumbtack business.
+          </p>
+        </div>
+
+        {message && (
+          <details style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+            <summary style={{ cursor: 'pointer', userSelect: 'none' }}>Technical details</summary>
+            <div style={{ marginTop: 6, padding: 8, background: 'var(--lb-bg-2, #f6f7f9)', borderRadius: 6, fontFamily: 'var(--lb-font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {message}
+            </div>
+          </details>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <Btn
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              window.location.href = 'mailto:support@leadbridge360.com?subject=Duplicate%20Thumbtack%20business%20connection';
+            }}
+          >
+            Contact support
+          </Btn>
+          <Btn variant="accent" size="sm" onClick={onClose}>
+            Got it
+          </Btn>
+        </div>
+      </div>
     </div>
   );
 }
