@@ -2044,14 +2044,13 @@ export class AutomationService implements OnModuleInit {
 
         // PLAYBOOK — behavior summary (generated from settings) + user
         // instructions (followUpSettingsJson.aiPlaybookInstructions). Pure
-        // render; empty string when nothing to show. See playbook-renderer.ts
-        // for the 8-category derivation rules.
+        // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
+        // No automation-derived "current behavior" bullets in V2; Playbook is
+        // HOW only. See src/ai/playbook-renderer.ts.
         const { renderPlaybookBlock } = require('../ai/playbook-renderer');
         const playbookBlock: string = account
           ? renderPlaybookBlock({
-              aiConversationMode: account.aiConversationMode ?? null,
               followUpSettingsJson: account.followUpSettingsJson ?? null,
-              servicePricingJson: account.servicePricingJson ?? null,
             })
           : '';
 
