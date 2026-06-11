@@ -38,6 +38,7 @@ function buildPrismaMock() {
     lead: {
       findFirst: jest.fn().mockResolvedValue({ businessId: 'biz-1', userId: 'user-1' }),
       findUnique: jest.fn().mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null, userId: 'user-1', businessId: 'biz-1' }),
+      findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
     },
     savedAccount: {
@@ -1558,6 +1559,126 @@ describe('FollowUpSchedulerService', () => {
       const fnBlock = src.match(/private async getAverageLeadPrice[\s\S]*?\n  \}/);
       expect(fnBlock).not.toBeNull();
       expect(fnBlock![0]).toMatch(/l\."budgetVoidedAt" IS NULL/);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // sweepThumbtackChargeState — proactive refund detection. Catches
+  // refunds we haven't yet triggered a send-time 404 on. Cron fires
+  // hourly under advisory lock 7005.
+  // ────────────────────────────────────────────────────────────────────
+  describe('sweepThumbtackChargeState', () => {
+    beforeEach(() => {
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+    });
+
+    it('1. lock 7005 held by another instance → no probe', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([{ locked: false }]);
+      await service.sweepThumbtackChargeState();
+      expect(prisma.lead.findMany).not.toHaveBeenCalled();
+    });
+
+    it('2. selects only TT leads with chargeStateRaw=null and recent createdAt', async () => {
+      prisma.lead.findMany.mockResolvedValue([]);
+      await service.sweepThumbtackChargeState();
+      expect(prisma.lead.findMany).toHaveBeenCalled();
+      const callArgs = (prisma.lead.findMany.mock.calls as any[][])[0][0];
+      expect(callArgs.where.platform).toBe('thumbtack');
+      expect(callArgs.where.chargeStateRaw).toBeNull();
+      expect(callArgs.where.createdAt.gte).toBeInstanceOf(Date);
+      expect(callArgs.take).toBe(100);
+    });
+
+    it('3. chargeState=Refunded → Lead.refundedAt + Lead.budgetVoidedAt + chargeStateRaw written', async () => {
+      prisma.lead.findMany.mockResolvedValue([
+        { id: 'lead-1', userId: 'u1', businessId: 'b1', externalRequestId: 'ext-1' },
+      ]);
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'cipher' });
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+      const getLead = jest.fn().mockResolvedValue({ platformChargeState: 'Refunded' });
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+
+      await service.sweepThumbtackChargeState();
+
+      const update = (prisma.lead.update.mock.calls as any[][]).find(
+        c => c[0]?.where?.id === 'lead-1',
+      );
+      expect(update).toBeDefined();
+      expect(update![0].data.chargeStateRaw).toBe('Refunded');
+      expect(update![0].data.refundedAt).toBeInstanceOf(Date);
+      expect(update![0].data.budgetVoidedAt).toBeInstanceOf(Date);
+    });
+
+    it('4. chargeState=Charged → only chargeStateRaw written (no refund marks)', async () => {
+      prisma.lead.findMany.mockResolvedValue([
+        { id: 'lead-2', userId: 'u1', businessId: 'b1', externalRequestId: 'ext-2' },
+      ]);
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'cipher' });
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+      const getLead = jest.fn().mockResolvedValue({ platformChargeState: 'Charged' });
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+
+      await service.sweepThumbtackChargeState();
+
+      const update = (prisma.lead.update.mock.calls as any[][]).find(
+        c => c[0]?.where?.id === 'lead-2',
+      );
+      expect(update).toBeDefined();
+      expect(update![0].data.chargeStateRaw).toBe('Charged');
+      expect(update![0].data.refundedAt).toBeUndefined();
+      expect(update![0].data.budgetVoidedAt).toBeUndefined();
+    });
+
+    it('5. GET 404 → chargeStateRaw=Gone (no retries from sweep, idempotent skip)', async () => {
+      prisma.lead.findMany.mockResolvedValue([
+        { id: 'lead-3', userId: 'u1', businessId: 'b1', externalRequestId: 'ext-3' },
+      ]);
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'cipher' });
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+      const getLead = jest.fn().mockRejectedValue(
+        Object.assign(new Error('Request failed with status code 404'), { response: { status: 404 } }),
+      );
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+
+      await service.sweepThumbtackChargeState();
+
+      const update = (prisma.lead.update.mock.calls as any[][]).find(
+        c => c[0]?.where?.id === 'lead-3',
+      );
+      expect(update).toBeDefined();
+      expect(update![0].data.chargeStateRaw).toBe('Gone');
+      expect(update![0].data.refundedAt).toBeUndefined();
+    });
+
+    it('6. transient error (5xx, scope, decrypt fail) → leaves Lead untouched (next tick retries)', async () => {
+      prisma.lead.findMany.mockResolvedValue([
+        { id: 'lead-4', userId: 'u1', businessId: 'b1', externalRequestId: 'ext-4' },
+      ]);
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'cipher' });
+      const EncryptionUtil = require('../common/utils/encryption.util').EncryptionUtil;
+      jest.spyOn(EncryptionUtil, 'decryptObject').mockReturnValue({ accessToken: 'tok' });
+      const getLead = jest.fn().mockRejectedValue(
+        Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } }),
+      );
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead }) };
+
+      await service.sweepThumbtackChargeState();
+
+      // No update should fire — leave the row for the next sweep tick.
+      const update = (prisma.lead.update.mock.calls as any[][]).find(
+        c => c[0]?.where?.id === 'lead-4',
+      );
+      expect(update).toBeUndefined();
+    });
+
+    it('7. no leads found → no probes (early return)', async () => {
+      prisma.lead.findMany.mockResolvedValue([]);
+      const platformSpy = jest.spyOn((service as any).platformFactory, 'getAdapter');
+      await service.sweepThumbtackChargeState();
+      expect(platformSpy).not.toHaveBeenCalled();
     });
   });
 

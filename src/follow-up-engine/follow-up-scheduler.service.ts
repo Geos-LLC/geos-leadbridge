@@ -369,6 +369,137 @@ export class FollowUpSchedulerService implements OnModuleInit {
    * Fail-open already happened at webhook time — reconciliation is diagnostic:
    * it confirms or reclassifies the original outcome and caps attempts at 5.
    */
+  /**
+   * Retroactive Thumbtack chargeState sweep.
+   *
+   * Catches refunds we haven't yet triggered a send-time 404 on. The
+   * 404 handler (classifyPlatformUnreachable) only learns about refunds
+   * when an enrollment fires and the platform replies 404 — for active
+   * conversations that haven't tried to send recently, the refund signal
+   * sits unread on Thumbtack's side. This sweep proactively polls TT for
+   * Lead.chargeStateRaw so analytics auto-corrects and future enrollments
+   * can be pre-filtered if needed.
+   *
+   * Selection:
+   *   - platform='thumbtack' (Yelp has no chargeState concept)
+   *   - chargeStateRaw IS NULL (idempotent — skip already-fetched leads)
+   *   - createdAt > 90 days ago (TT refunds happen within ~weeks; older
+   *     leads are stable and would waste API calls)
+   *   - externalRequestId IS NOT NULL
+   *   - LIMIT 100 per tick — keeps the tick well under the 60s cron window
+   *     even with TT response times around 200-500ms per call
+   *
+   * Per-lead outcome:
+   *   - GET /v4/negotiations/{id} 200 → write chargeStateRaw
+   *     - 'Refunded' → also write refundedAt + budgetVoidedAt (analytics
+   *       auto-corrects via the existing CASE guard on leadPrice queries)
+   *   - GET 404 → write chargeStateRaw='Gone' so we don't re-attempt and
+   *     to surface this lead in tenant reports
+   *   - Any other error → log and continue (don't mark, leave for next tick)
+   *
+   * No enrollment writes — the runtime auto-stop on send-time 404 still
+   * owns enrollment lifecycle. This sweep only updates Lead.
+   *
+   * Advisory lock 7005 prevents concurrent staging+prod sweeps from
+   * double-hitting TT's API for the same leads.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async sweepThumbtackChargeState(): Promise<void> {
+    if (!this.schedulerEnabled) return;
+
+    await withCronLock(
+      this.prisma,
+      this.logger,
+      7005,
+      'TT_ChargeState_Sweep',
+      async tx => {
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const leads = await tx.lead.findMany({
+          where: {
+            platform: 'thumbtack',
+            chargeStateRaw: null,
+            createdAt: { gte: ninetyDaysAgo },
+            externalRequestId: { not: '' },
+          },
+          select: { id: true, userId: true, businessId: true, externalRequestId: true },
+          take: 100,
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (leads.length === 0) return;
+
+        this.logger.log(`[FollowUpScheduler] TT_ChargeState_Sweep: ${leads.length} leads to probe`);
+
+        let fetched = 0, refunded = 0, gone = 0, errored = 0;
+        for (const lead of leads) {
+          try {
+            const acct = await tx.savedAccount.findFirst({
+              where: {
+                userId: lead.userId,
+                ...(lead.businessId ? { businessId: lead.businessId } : {}),
+                platform: 'thumbtack',
+              },
+              select: { credentialsJson: true },
+            });
+            if (!acct?.credentialsJson) { errored++; continue; }
+            const encryptionKey = this.configService.get<string>('encryption.key') || '';
+            let credentials: any;
+            try {
+              credentials = EncryptionUtil.decryptObject(acct.credentialsJson, encryptionKey);
+            } catch { errored++; continue; }
+
+            const ttAdapter = this.platformFactory.getAdapter('thumbtack') as any;
+            let chargeState: string | null = null;
+            let isGone = false;
+            try {
+              const normalized = await ttAdapter.getLead(credentials, lead.externalRequestId);
+              chargeState = normalized?.platformChargeState ?? null;
+            } catch (e: any) {
+              const status = e?.response?.status ?? e?.status;
+              if (status === 404 || e?.message?.includes('status code 404')) {
+                isGone = true;
+              } else {
+                // Token issues, scope mismatches, transient 5xx — leave the
+                // row untouched so the next tick can re-attempt.
+                errored++;
+                continue;
+              }
+            }
+
+            if (isGone) {
+              await tx.lead.update({
+                where: { id: lead.id },
+                data: { chargeStateRaw: 'Gone' },
+              });
+              gone++;
+            } else if (chargeState) {
+              const isRefunded = chargeState.toLowerCase() === 'refunded';
+              await tx.lead.update({
+                where: { id: lead.id },
+                data: {
+                  chargeStateRaw: chargeState,
+                  ...(isRefunded ? { refundedAt: new Date(), budgetVoidedAt: new Date() } : {}),
+                },
+              });
+              fetched++;
+              if (isRefunded) refunded++;
+            }
+            // Small inter-call pacing to avoid hammering TT's rate limit.
+            await new Promise(r => setTimeout(r, 150));
+          } catch (err: any) {
+            errored++;
+            this.logger.warn(`[FollowUpScheduler] TT_ChargeState_Sweep failed for lead ${lead.id}: ${err.message}`);
+          }
+        }
+
+        this.logger.log(
+          `[FollowUpScheduler] TT_ChargeState_Sweep complete — fetched=${fetched} refunded=${refunded} gone=${gone} errored=${errored} of ${leads.length}`,
+        );
+      },
+      { timeoutMs: 180_000 },
+    );
+  }
+
   @Cron(CronExpression.EVERY_5_MINUTES)
   async reconcileYelpEvents(): Promise<void> {
     if (!this.schedulerEnabled) return;
