@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, Zap, DollarSign,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -13,14 +13,18 @@ import { SettingsAccounts } from './Accounts';
 import { SettingsBilling } from './Billing';
 import { SettingsPartnerNetwork } from './PartnerNetwork';
 import { SettingsAiPlaybook } from './AiPlaybook';
+import { SettingsAi } from './Ai';
+import { SettingsPricing } from './Pricing';
 
-type TabKey = 'general' | 'communication' | 'hours' | 'ai-playbook' | 'team' | 'accounts' | 'billing' | 'partner-network';
+type TabKey = 'general' | 'communication' | 'hours' | 'ai-playbook' | 'ai' | 'pricing' | 'team' | 'accounts' | 'billing' | 'partner-network';
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
   { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
   { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'Business instructions' },
+  { key: 'ai',              label: 'AI',                icon: Zap,           sublabel: 'Prompt & FAQ' },
+  { key: 'pricing',         label: 'Pricing',           icon: DollarSign,    sublabel: 'Service price table' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
   { key: 'billing',         label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
@@ -34,6 +38,8 @@ const SUBTITLES: Record<TabKey, string> = {
   communication: 'Phone numbers, notifications and alert routing.',
   hours: "When you're open, and how Leadbridge behaves outside hours.",
   'ai-playbook': 'Tell AI how to respond in common business situations — pricing, booking, defers, opt-outs.',
+  ai: 'Global AI prompt and per-account FAQ used on every auto-reply.',
+  pricing: 'Service pricing table the AI uses to quote customers.',
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
   billing: 'Plan, payment method, and invoices.',
@@ -57,6 +63,8 @@ export default function SettingsPage() {
     case 'communication':   body = <SettingsCommunication />; break;
     case 'hours':           body = <SettingsHours />; break;
     case 'ai-playbook':     body = <SettingsAiPlaybook />; break;
+    case 'ai':              body = <SettingsAi />; break;
+    case 'pricing':         body = <SettingsPricing />; break;
     case 'team':            body = <SettingsTeam />; break;
     case 'accounts':        body = <SettingsAccounts />; break;
     case 'billing':         body = <SettingsBilling />; break;
