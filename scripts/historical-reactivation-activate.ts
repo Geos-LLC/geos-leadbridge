@@ -63,6 +63,21 @@
  *                                For "fire this batch now" activation passes
  *                                where the operator paces between batches
  *                                (e.g. 15-30 min observation window).
+ *                                NOTE: --immediate only changes the script's
+ *                                pre-staging time. The scheduler's per-account
+ *                                active-hours snap (Gate 3 in processEnrollment)
+ *                                will still bounce sends to the next active-
+ *                                hours window unless --bypass-active-hours is
+ *                                also passed. Without the bypass, --immediate
+ *                                aborts when current time is outside the user's
+ *                                followUpActiveHours window.
+ *   --bypass-active-hours       Write `bypassActiveHours=true` on each
+ *                                enrollment so the scheduler's active-hours
+ *                                snap is skipped at fire time. Does NOT bypass
+ *                                quiet hours (those remain strict). Use only
+ *                                for operator-triggered Immediate Reactivation
+ *                                where the business is willing to send outside
+ *                                the configured active-hours window.
  *   --stagger-seconds=90        Intra-batch stagger in IMMEDIATE mode
  *                                (default 90s = batch 20 spans ~30 min).
  *   --first-lead-seconds=30     Delay before the first lead fires
@@ -103,6 +118,7 @@ interface CliArgs {
   immediate: boolean;
   staggerSeconds: number;
   immediateLeadSeconds: number;
+  bypassActiveHours: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -111,11 +127,13 @@ function parseArgs(argv: string[]): CliArgs {
     batchSize: 20, slotMinutes: 30, startHour: 9, endHour: 18,
     startAfter: null, maxLeads: null, limit: null, offset: 0, includeNonPr4: false,
     immediate: false, staggerSeconds: 90, immediateLeadSeconds: 30,
+    bypassActiveHours: false,
   };
   for (const arg of argv.slice(2)) {
     if (arg === '--apply') a.apply = true;
     else if (arg === '--include-non-pr4') a.includeNonPr4 = true;
     else if (arg === '--immediate') a.immediate = true;
+    else if (arg === '--bypass-active-hours') a.bypassActiveHours = true;
     else if (arg.startsWith('--user-id=')) a.userId = arg.slice('--user-id='.length);
     else if (arg.startsWith('--business-id=')) a.businessId = arg.slice('--business-id='.length);
     else if (arg.startsWith('--platform=')) a.platform = arg.slice('--platform='.length);
@@ -189,6 +207,81 @@ function computeSlotTime(
   // Local midnight on YMD as a UTC timestamp = naive - offsetMs.
   const localMidnightUtc = naive - offsetMs;
   return new Date(localMidnightUtc + minutesIntoDay * 60_000);
+}
+
+/**
+ * Active-hours preflight for --immediate mode.
+ *
+ * Returns null when sending now is allowed (either no account has active-
+ * hours mode enabled, or `now` is inside every relevant account's window).
+ * Returns a message string when the operator should be told to either
+ * wait or pass --bypass-active-hours.
+ *
+ * Strict mode: if ANY scoped SavedAccount has `followUpAvailability='active_hours'`
+ * AND `now` is outside its `[ahStart, ahEnd)` window in `followUpTimezone`,
+ * we abort. The scheduler would re-snap each enrollment anyway — better
+ * to surface that BEFORE writing 20 enrollment rows that would all pile
+ * up at the next opening.
+ */
+async function preflightActiveHours(
+  prisma: PrismaClient,
+  args: { userId: string | null; platform: string | null },
+  now: Date,
+): Promise<{ ok: boolean; reason: string | null }> {
+  if (!args.userId) {
+    // No user-scope — preflight is best-effort and we don't have a deterministic
+    // way to pick the right policy. Default permissive.
+    return { ok: true, reason: null };
+  }
+  const accts = await prisma.savedAccount.findMany({
+    where: {
+      userId: args.userId,
+      ...(args.platform ? { platform: args.platform } : {}),
+    },
+    select: {
+      id: true, businessId: true,
+      followUpSettingsJson: true,
+      followUpTimezone: true,
+      followUpActiveHoursStart: true,
+      followUpActiveHoursEnd: true,
+    },
+  });
+
+  const outsideWindows: string[] = [];
+  for (const acct of accts) {
+    let settings: any = {};
+    try { settings = JSON.parse(acct.followUpSettingsJson || '{}'); } catch {}
+    const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
+    if (!isActiveHoursMode) continue;
+    const ahStart = acct.followUpActiveHoursStart;
+    const ahEnd = acct.followUpActiveHoursEnd;
+    if (!ahStart || !ahEnd) continue;
+    const tz = acct.followUpTimezone ?? 'America/New_York';
+    // Mirror the scheduler's inWindow check (follow-up-scheduler.service.ts:727).
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+    const [h, m] = fmt.format(now).split(':').map(Number);
+    const current = h * 60 + m;
+    const [sh, sm] = ahStart.split(':').map(Number);
+    const [eh, em] = ahEnd.split(':').map(Number);
+    const s = sh * 60 + sm;
+    const e = eh * 60 + em;
+    const inWindow = s > e ? (current >= s || current < e) : (current >= s && current < e);
+    if (!inWindow) {
+      outsideWindows.push(`account=${acct.id} biz=${acct.businessId} hours=${ahStart}-${ahEnd} ${tz} (current ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')})`);
+    }
+  }
+
+  if (outsideWindows.length === 0) {
+    return { ok: true, reason: null };
+  }
+  return {
+    ok: false,
+    reason:
+      'Current time is outside account active hours. ' +
+      'Use --bypass-active-hours to send now, or schedule during active hours.\n' +
+      '  Affected accounts:\n' +
+      outsideWindows.map((w) => `    - ${w}`).join('\n'),
+  };
 }
 
 async function main() {
@@ -422,7 +515,28 @@ async function main() {
     return;
   }
 
+  // ── Active-hours preflight ──
+  // Only runs when --immediate is set. Without --immediate the script uses
+  // the slot grid which schedules into business hours by construction, so
+  // the snap never fires. With --immediate, the scheduler will snap each
+  // row to the next active-hours opening unless --bypass-active-hours is
+  // explicitly set on the enrollment. Surface that BEFORE we write 20 rows.
+  if (args.immediate && !args.bypassActiveHours) {
+    const preflight = await preflightActiveHours(prisma, { userId: args.userId, platform: args.platform }, now);
+    if (!preflight.ok) {
+      console.error('\n=== ABORT — active-hours preflight failed ===');
+      console.error(preflight.reason);
+      console.error('\nNo enrollments written. Re-run during active hours, or pass --bypass-active-hours.');
+      await prisma.$disconnect();
+      process.exit(2);
+    }
+  }
+
   console.log('\n=== APPLYING — writing FollowUpEnrollment rows ===');
+  if (args.bypassActiveHours) {
+    console.log('  ⚠ bypassActiveHours=true — enrollments will fire outside active hours.');
+    console.log('    (Quiet hours still apply — those are customer-protection.)');
+  }
   // NOTE: this script does NOT bootstrap the NestJS app. We replicate the
   // engine's enrollAsHistoricalReactivation logic inline via Prisma calls
   // to keep the script self-contained. The source-of-truth method
@@ -468,6 +582,10 @@ async function main() {
             mode: template.mode || 'auto_send',
             followUpMode: 'short_term',
             modeReason: 'historical_reactivation',
+            // Only set when --bypass-active-hours was explicitly passed.
+            // Default false keeps the scheduler's active-hours snap in
+            // play for normal activations.
+            bypassActiveHours: args.bypassActiveHours,
           },
           select: { id: true },
         });

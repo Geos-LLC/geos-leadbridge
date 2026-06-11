@@ -1424,6 +1424,14 @@ model FollowUpEnrollment {
   followUpMode       String    @default("short_term") // "short_term" | "long_term"
   modeChangedAt      DateTime?
   modeReason         String? // e.g. 'platform_not_hired_engaged' | 'ghost_returned'
+  // Per-enrollment opt-out from the per-account active-hours snap (Gate 3 in
+  // processEnrollment). Default false so normal cadence is unchanged. Set
+  // to true only by operator-triggered Immediate Reactivation paths that
+  // explicitly want to send outside the account's `followUpAvailability=
+  // 'active_hours'` window. Does NOT bypass master quiet hours or legacy
+  // per-account quiet hours — those are customer-protection floors and
+  // remain strict regardless of this flag.
+  bypassActiveHours  Boolean   @default(false)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
