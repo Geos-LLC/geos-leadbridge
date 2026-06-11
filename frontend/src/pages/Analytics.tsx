@@ -35,6 +35,9 @@ import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { Kpi } from '../components/ui';
 import { notify } from '../store/notificationStore';
+import { SkippedRefundedTab } from '../components/analytics/SkippedRefundedTab';
+
+type AnalyticsView = 'overview' | 'skipped';
 
 export function Analytics() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,6 +47,12 @@ export function Analytics() {
   const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<Partial<AnalyticsData> | null>(analyticsCache);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
+
+  // View toggle — keeps filters (businessId, platform, date range) shared
+  // between Overview (existing charts + KPIs) and the Skipped & Refunded
+  // tab. Persisted in the URL so links to ?view=skipped land on the right
+  // tab and refresh-survival works.
+  const view: AnalyticsView = (searchParams.get('view') as AnalyticsView) === 'skipped' ? 'skipped' : 'overview';
 
   // Time-series trends state
   const [tsPeriod, setTsPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
@@ -458,7 +467,65 @@ export function Analytics() {
         </div>
       )}
 
+      {/* ── View tabs: Overview vs Skipped & Refunded ── */}
+      <div
+        style={{
+          display: 'inline-flex',
+          background: 'var(--lb-ink-10)',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 'var(--lb-radius)',
+          padding: 2,
+          gap: 2,
+          alignSelf: 'flex-start',
+        }}
+      >
+        {([
+          { key: 'overview', label: 'Overview' },
+          { key: 'skipped', label: 'Skipped & Refunded' },
+        ] as const).map((tab) => {
+          const active = view === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setFilter('view', tab.key === 'overview' ? '' : tab.key)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 'calc(var(--lb-radius) - 2px)',
+                border: 'none',
+                background: active ? 'var(--lb-surface)' : 'transparent',
+                color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
+                fontSize: 12,
+                fontWeight: active ? 600 : 500,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                boxShadow: active ? 'var(--lb-shadow-1, 0 1px 2px rgba(0,0,0,0.04))' : 'none',
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Skipped & Refunded view */}
+      {view === 'skipped' && (
+        <SkippedRefundedTab
+          businessId={businessId}
+          platform={
+            businessId === 'all_thumbtack'
+              ? 'thumbtack'
+              : businessId === 'all_yelp'
+              ? 'yelp'
+              : undefined
+          }
+          startDate={customStart || undefined}
+          endDate={customEnd || undefined}
+        />
+      )}
+
       {/* ── Trends Over Time ── */}
+      {view === 'overview' && (
+      <>
       <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
@@ -1251,6 +1318,8 @@ export function Analytics() {
           <h3 className="text-xl font-bold text-slate-900 mb-2">No analytics data yet</h3>
           <p className="text-slate-500">Connect an account and receive some leads to see insights here.</p>
         </div>
+      )}
+      </>
       )}
     </div>
   );
