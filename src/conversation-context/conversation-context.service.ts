@@ -28,7 +28,11 @@ export interface RecordMessageInput {
   leadId?: string;
   platform: string;
   sender: 'customer' | 'pro' | 'system';
-  senderType?: 'customer' | 'business' | 'ai' | 'user' | 'system';
+  // 'manual' is the canonical value the TT webhook stamps for external-pro
+  // messages (managers typing on TT, third-party bridges) and the value the
+  // TC freshness fix uses for notification-rule SMS + ad-hoc SMS + Yelp/TT
+  // sync backfills. recordMessage classifies it as business (isAi=false).
+  senderType?: 'customer' | 'business' | 'ai' | 'user' | 'system' | 'manual';
   content: string;
   aiGenerated?: boolean;
   strategyUsed?: string;
@@ -267,7 +271,15 @@ export class ConversationContextService {
         isAutoFollowUp: input.isAutoFollowUp,
         strategyUsed: input.strategyUsed,
         timestamp: sentAt,
-      }).catch(err => this.logger.warn(`ensureMessagePersisted: recordMessage failed for ${input.conversationId}: ${err.message}`));
+      }).catch(err => {
+        // Promoted from warn → error 2026-06-11: silently swallowing this
+        // leaves TC.last…MessageAt stale and demotes the Handoff badge.
+        // Greppable signature `TC_FRESHNESS_RECORDMESSAGE_FAILED` so Grafana
+        // / Loki dashboards can chart it.
+        this.logger.error(
+          `TC_FRESHNESS_RECORDMESSAGE_FAILED conversationId=${input.conversationId} platform=${input.platform} sender=${input.sender} err=${err?.message ?? err}`,
+        );
+      });
     }
 
     return { id: messageId, created };
@@ -340,9 +352,22 @@ export class ConversationContextService {
     }
     // else: pro sending while already awaiting customer — preserve existing waitingSince
 
+    // Monotonic guard on the three "last…MessageAt" timestamps. These fields
+    // drive the Handoff badge freshness derivation (activity-bucket.ts) and the
+    // diagnostics health views — a backwards step here causes a non-terminal
+    // badge demotion. Mario Evans 2026-06-10: a late-arriving TT webhook
+    // retry for an older message rewrote lastCustomerMessageAt back behind a
+    // fresh SMS inbound, demoting Human Handoff → Follow-up incorrectly.
+    //
+    // Counters (`customerMessages` / `businessMessages` / `aiMessages`) stay
+    // unconditional increments — they count how many of each kind we've
+    // observed regardless of order. Only the freshness timestamps need the
+    // GREATEST(existing, now) semantics.
     if (isCustomer) {
       updates.customerMessages = { increment: 1 };
-      updates.lastCustomerMessageAt = now;
+      if (!existing.lastCustomerMessageAt || existing.lastCustomerMessageAt < now) {
+        updates.lastCustomerMessageAt = now;
+      }
       // Customer replied → engagement level at least warm
       if (existing.engagementLevel === 'cold' || existing.engagementLevel === 'unknown') {
         updates.engagementLevel = 'warm';
@@ -350,11 +375,15 @@ export class ConversationContextService {
     }
     if (isBusiness) {
       updates.businessMessages = { increment: 1 };
-      updates.lastBusinessMessageAt = now;
+      if (!existing.lastBusinessMessageAt || existing.lastBusinessMessageAt < now) {
+        updates.lastBusinessMessageAt = now;
+      }
     }
     if (isAi) {
       updates.aiMessages = { increment: 1 };
-      updates.lastAiMessageAt = now;
+      if (!existing.lastAiMessageAt || existing.lastAiMessageAt < now) {
+        updates.lastAiMessageAt = now;
+      }
     }
     if (isAutoFollowUp) {
       updates.followUpCount = { increment: 1 };

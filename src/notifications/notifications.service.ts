@@ -10,6 +10,7 @@ import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -195,6 +196,12 @@ export class NotificationsService {
     private cache: CacheService,
     private trialService: TrialService,
     private businessHours: BusinessHoursService,
+    // Wired 2026-06-11 (TC freshness fix): sendAdHocSms + notification-rule
+    // SMS now flow their Message writes through recordMessage so
+    // TC.lastBusinessMessageAt advances. Without this, the Handoff-badge
+    // freshness guard sees a stale outbound timestamp and the badge stays
+    // red after operator replies via rule SMS.
+    private conversationContext: ConversationContextService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -588,6 +595,7 @@ export class NotificationsService {
       // Store ad-hoc SMS as a Message record in the Conversation
       if (lead.threadId) {
         try {
+          const sentAt = new Date();
           await this.prisma.message.create({
             data: {
               conversationId: lead.threadId,
@@ -597,14 +605,27 @@ export class NotificationsService {
               sender: 'pro',
               content: messageBody,
               isRead: true,
-              sentAt: new Date(),
+              sentAt,
               notificationLogId: logEntry.id,
             },
           });
           await this.prisma.conversation.update({
             where: { id: lead.threadId },
-            data: { lastMessageAt: new Date() },
+            data: { lastMessageAt: sentAt },
           });
+          // TC freshness fix 2026-06-11: ad-hoc operator SMS counts as a
+          // business outbound — bump lastBusinessMessageAt so the Handoff
+          // badge demotes after the operator replies. senderType='manual'
+          // ensures recordMessage treats this as business, not AI.
+          await this.conversationContext.recordMessage({
+            conversationId: lead.threadId,
+            leadId: lead.id,
+            platform: 'sms',
+            sender: 'pro',
+            senderType: 'manual',
+            content: messageBody,
+            timestamp: sentAt,
+          }).catch(err => this.logger.warn(`adhoc-sms recordMessage failed for ${lead.threadId}: ${err.message}`));
         } catch (err: any) {
           this.logger.warn(`Failed to store ad-hoc SMS as Message: ${err.message}`);
         }
@@ -1518,6 +1539,7 @@ export class NotificationsService {
             select: { threadId: true, userId: true },
           });
           if (leadRecord?.threadId) {
+            const sentAt = new Date();
             await this.prisma.message.create({
               data: {
                 conversationId: leadRecord.threadId,
@@ -1527,14 +1549,28 @@ export class NotificationsService {
                 sender: 'pro',
                 content: messageBody,
                 isRead: true,
-                sentAt: new Date(),
+                sentAt,
                 notificationLogId: logEntry.id,
               },
             });
             await this.prisma.conversation.update({
               where: { id: leadRecord.threadId },
-              data: { lastMessageAt: new Date() },
+              data: { lastMessageAt: sentAt },
             });
+            // TC freshness fix 2026-06-11: notification-rule SMS counts as a
+            // business outbound (rule-driven automation, not LLM). senderType
+            // 'manual' → recordMessage treats as business, bumps
+            // lastBusinessMessageAt. This is the path that sent Mario's
+            // 19:55:44 Auto-Reply, which previously left TC stale.
+            await this.conversationContext.recordMessage({
+              conversationId: leadRecord.threadId,
+              leadId,
+              platform: 'sms',
+              sender: 'pro',
+              senderType: 'manual',
+              content: messageBody,
+              timestamp: sentAt,
+            }).catch(err => this.logger.warn(`rule-sms recordMessage failed for ${leadRecord.threadId}: ${err.message}`));
           }
         } catch (err: any) {
           this.logger.warn(`Failed to store customer SMS as Message: ${err.message}`);

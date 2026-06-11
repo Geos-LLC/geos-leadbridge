@@ -97,7 +97,12 @@ describe('NotificationsService', () => {
     };
     service = new NotificationsService(prisma, config, cache, {
       canProcessLead: jest.fn().mockResolvedValue({ allowed: true, via: 'paid' }),
-    } as any, {} as any);
+    } as any, {} as any, {
+      // ConversationContextService stub — wired 2026-06-11 for TC freshness.
+      // Tests don't assert on TC writes in this suite; the freshness contract
+      // is covered in conversation-context.service.spec.ts.
+      recordMessage: jest.fn().mockResolvedValue(undefined),
+    } as any);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls
     jest.spyOn(service as any, 'sendViaSigcore').mockResolvedValue(mockSigcoreResult);
