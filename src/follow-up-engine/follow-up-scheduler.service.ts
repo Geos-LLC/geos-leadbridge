@@ -576,13 +576,16 @@ export class FollowUpSchedulerService implements OnModuleInit {
       };
       try {
         if (decision.sideEffect === 'stop_and_booked') {
-          // Customer agreed on price — handoff to manager. Belt-and-suspenders
+          // Positive handoff to manager. Fires for `agreed` (price accepted) as
+          // well as `wants_live_contact` (customer wants a call/walkthrough)
+          // and `wants_to_schedule` (customer named a slot). Belt-and-suspenders
           // (handleCustomerReply already does this, but the gate is a safety
-          // net for cases the inbound path missed).
+          // net for cases the inbound path missed). Reason field is dynamic so
+          // the audit log reflects WHICH positive intent fired.
           await this.leadStatusService.writeStatus({
             ...baseInput,
             newStatus: 'booked',
-            reason: 'followup_classifier_agreed',
+            reason: `followup_classifier_${intent}`,
           });
         } else if (decision.sideEffect === 'stop_and_lost') {
           // opt_out / hired_elsewhere / completed → lost

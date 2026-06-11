@@ -178,6 +178,28 @@ describe('FollowUpGateService', () => {
       expect(decision.sideEffect).toBe('stop_and_booked');
     });
 
+    // Mario Evans 2026-06-10 incident: "Please schedule a walkthrough. So I can
+    // get a quote." classified as wants_live_contact @ 0.9 and was misrouted
+    // into the else branch (stop_and_lost / lostReason=hired_someone). These
+    // are POSITIVE handoff signals — customer is leaning in, not out.
+    it('wants_live_contact → block_terminal + stop_and_booked (positive handoff)', async () => {
+      const prisma = buildPrisma({ customerMessage: 'Please schedule a walkthrough. So I can get a quote.' });
+      const classifier = buildClassifier({ intent: 'wants_live_contact', confidence: 0.9, reason: 'wants in-person walkthrough', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.intent).toBe('wants_live_contact');
+    });
+
+    it('wants_to_schedule → block_terminal + stop_and_booked (positive handoff)', async () => {
+      const prisma = buildPrisma({ customerMessage: "Friday at 2pm works" });
+      const classifier = buildClassifier({ intent: 'wants_to_schedule', confidence: 0.88, reason: 'naming a slot', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
+      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.intent).toBe('wants_to_schedule');
+    });
+
     it('deferring → block_terminal + stop_only (no status flip)', async () => {
       const prisma = buildPrisma({ customerMessage: "I'll get back to you" });
       const classifier = buildClassifier({ intent: 'deferring', confidence: 0.85, reason: 'pause', fromLlm: true });
