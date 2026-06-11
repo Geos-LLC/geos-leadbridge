@@ -762,10 +762,15 @@ export class FollowUpSchedulerService implements OnModuleInit {
           }
 
           // Per-account active hours (independent of business hours / quiet hours).
+          // Skipped when enrollment.bypassActiveHours=true — set by operator-
+          // triggered Immediate Reactivation paths that explicitly want to send
+          // outside the account's active-hours window. Master quiet hours
+          // (line 740) and legacy quiet hours (line 752) above still ran and
+          // remain authoritative — bypassActiveHours only opts out of THIS gate.
           const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
           const ahStart = acct.followUpActiveHoursStart;
           const ahEnd = acct.followUpActiveHoursEnd;
-          if (isActiveHoursMode && ahStart && ahEnd) {
+          if (!enrollment.bypassActiveHours && isActiveHoursMode && ahStart && ahEnd) {
             if (!inWindow(ahStart, ahEnd)) {
               const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
               await this.prisma.followUpEnrollment.update({
@@ -775,6 +780,10 @@ export class FollowUpSchedulerService implements OnModuleInit {
               this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
               return;
             }
+          } else if (enrollment.bypassActiveHours && isActiveHoursMode && ahStart && ahEnd && !inWindow(ahStart, ahEnd)) {
+            // Audit log — operator override observed firing. Surfaces in Loki
+            // so reviewers can spot if a bypass row fires after-hours.
+            this.logger.log(`[FollowUpScheduler] bypassActiveHours=true — enrollment ${enrollment.id} firing outside active hours (${ahStart}-${ahEnd} ${tz})`);
           }
         }
       }

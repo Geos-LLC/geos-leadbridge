@@ -637,6 +637,7 @@ export class FollowUpEngineService {
     conversationId: string,
     leadId: string,
     scheduledAt: Date,
+    opts: { bypassActiveHours?: boolean } = {},
   ): Promise<string> {
     // 1. SF-link guard — historical reactivation never chases SF customers.
     const lead = await this.prisma.lead.findUnique({
@@ -715,6 +716,10 @@ export class FollowUpEngineService {
             // message fires or stops on customer reply).
             followUpMode: 'short_term',
             modeReason: 'historical_reactivation',
+            // Per-enrollment opt-out from active-hours snap. Default false —
+            // operator scripts only opt in explicitly via --bypass-active-hours.
+            // Quiet hours remain strict regardless of this flag.
+            bypassActiveHours: opts.bypassActiveHours === true,
           },
           select: { id: true },
         });
@@ -776,6 +781,7 @@ export class FollowUpEngineService {
       lastCustomerMessageContent?: string | null;
     },
     scheduledAt: Date,
+    opts: { bypassActiveHours?: boolean } = {},
   ): Promise<{ enrolled: boolean; enrollmentId: string | null; reason: string | null }> {
     if (!lead.threadId) return { enrolled: false, enrollmentId: null, reason: 'no threadId' };
     if (!isHistoricalMarketplaceRecovery(lead)) {
@@ -798,7 +804,7 @@ export class FollowUpEngineService {
     if (deliveryBlocker) {
       return { enrolled: false, enrollmentId: null, reason: deliveryBlocker };
     }
-    const id = await this.enrollAsHistoricalReactivation(lead.threadId, lead.id, scheduledAt);
+    const id = await this.enrollAsHistoricalReactivation(lead.threadId, lead.id, scheduledAt, opts);
     if (!id) return { enrolled: false, enrollmentId: null, reason: 'sf_linked_skipped' };
     return { enrolled: true, enrollmentId: id, reason: null };
   }
