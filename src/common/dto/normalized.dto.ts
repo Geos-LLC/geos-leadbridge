@@ -148,6 +148,15 @@ export class NormalizedLead {
   sfLeadStageName?: string | null;
   sfLeadMatchedAt?: Date | null;
 
+  // Refund / billing state. refundedAt drives the "Refunded" badge on
+  // Messages page lead cards + the new 'refunded' filter option in the
+  // status dropdown. chargeStateRaw carries the raw platform value
+  // ('Refunded' | 'Charged' | 'Pending' | 'Gone' = TT API returned 404).
+  // Yelp leaves these undefined — no per-lead refund concept.
+  refundedAt?: Date | null;
+  chargeStateRaw?: string | null;
+  budgetVoidedAt?: Date | null;
+
   raw?: any; // Original platform payload for debugging
 }
 

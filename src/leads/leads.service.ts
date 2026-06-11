@@ -2144,6 +2144,15 @@ export class LeadsService {
       sfLeadId: lead.sfLeadId ?? null,
       sfLeadStageName: lead.sfLeadStageName ?? null,
       sfLeadMatchedAt: lead.sfLeadMatchedAt ?? null,
+      // Refund / billing state — drives the "Refunded" badge + filter on
+      // the Messages page. Populated by the scheduler's 404 handler and
+      // the hourly sweepThumbtackChargeState cron. Yelp leaves these null
+      // (no per-lead refund concept). Surfaced as plain ISO timestamps;
+      // chargeStateRaw is the raw platform value ('Refunded', 'Charged',
+      // 'Pending', 'Gone') so the UI can show specific labels later.
+      refundedAt: lead.refundedAt ?? null,
+      chargeStateRaw: lead.chargeStateRaw ?? null,
+      budgetVoidedAt: lead.budgetVoidedAt ?? null,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }
