@@ -800,6 +800,14 @@ export class WebhooksService {
             const adapter = this.platformFactory.getAdapter(platform);
             const allMessages = await adapter.getConversation(creds, negotiationId);
             let backfilled = 0;
+            // TC freshness fix 2026-06-11: record the MAX sentAt observed in
+            // this backfill so we can call recordMessage once at the end with
+            // the freshest timestamp. The per-message upsert here bypasses
+            // recordMessage; the monotonic guard in recordMessage means a
+            // single end-of-loop call with the max is equivalent to N calls
+            // and cheaper. lastBusinessMessageAt was previously stale because
+            // of this bypass.
+            let maxBackfilledSentAt: Date | null = null;
             for (const msg of allMessages) {
               if (msg.sender !== 'pro' || !msg.externalMessageId) continue;
               try {
@@ -819,10 +827,27 @@ export class WebhooksService {
                   update: {},
                 });
                 backfilled++;
+                const ts = msg.sentAt ? new Date(msg.sentAt) : new Date();
+                if (!maxBackfilledSentAt || ts > maxBackfilledSentAt) maxBackfilledSentAt = ts;
               } catch { /* duplicate — skip */ }
             }
             if (backfilled > 0) {
               this.logger.log(`Backfilled ${backfilled} pro messages for negotiation ${negotiationId}`);
+              if (maxBackfilledSentAt) {
+                await this.conversationContextService.recordMessage({
+                  conversationId: conversation.id,
+                  leadId: lead?.id,
+                  platform,
+                  sender: 'pro',
+                  // Backfilled pro messages are NOT our own sends — they're
+                  // external (manager typing on TT, third-party bridge, etc.).
+                  // Stamp 'manual' so isBusiness=true and lastBusinessMessageAt
+                  // advances (not lastAiMessageAt).
+                  senderType: 'manual',
+                  content: '[backfill]',
+                  timestamp: maxBackfilledSentAt,
+                }).catch(err => this.logger.warn(`TT pro-backfill recordMessage failed for ${conversation.id}: ${err.message}`));
+              }
             }
           }
         }

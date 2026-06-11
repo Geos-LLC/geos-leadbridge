@@ -1767,8 +1767,15 @@ export class LeadsService {
         });
       }
 
-      // Store each message using upsert to handle race conditions
+      // Store each message using upsert to handle race conditions.
+      // TC freshness fix 2026-06-11: track the MAX sentAt per sender bucket
+      // so we can fan a single recordMessage call per bucket at end-of-loop.
+      // Previously this loop wrote Message rows but bypassed recordMessage,
+      // leaving TC.lastCustomerMessageAt / lastBusinessMessageAt stale on
+      // every Yelp full-thread sync.
       let importedCount = 0;
+      let maxCustomerAt: Date | null = null;
+      let maxBusinessAt: Date | null = null;
       for (const msg of messages) {
         try {
           await this.prisma.message.upsert({
@@ -1795,9 +1802,39 @@ export class LeadsService {
             },
           });
           importedCount++;
+          const ts = new Date(msg.sentAt);
+          const senderLower = msg.sender?.toLowerCase() || 'customer';
+          if (senderLower === 'customer') {
+            if (!maxCustomerAt || ts > maxCustomerAt) maxCustomerAt = ts;
+          } else if (senderLower === 'pro') {
+            if (!maxBusinessAt || ts > maxBusinessAt) maxBusinessAt = ts;
+          }
         } catch (error) {
           console.error(`[LeadsService] Error upserting message ${msg.externalMessageId}:`, error.message);
         }
+      }
+      if (maxCustomerAt) {
+        await this.conversationContext.recordMessage({
+          conversationId: conversation.id,
+          leadId: undefined,
+          platform,
+          sender: 'customer',
+          content: '[yelp-sync]',
+          timestamp: maxCustomerAt,
+        }).catch(err => console.warn(`[LeadsService] yelp-sync recordMessage(customer) failed for ${conversation.id}: ${err.message}`));
+      }
+      if (maxBusinessAt) {
+        await this.conversationContext.recordMessage({
+          conversationId: conversation.id,
+          leadId: undefined,
+          platform,
+          sender: 'pro',
+          // Synced pro messages are external (sent on Yelp by manager/bridge,
+          // not via our send path). Stamp manual so isBusiness=true.
+          senderType: 'manual',
+          content: '[yelp-sync]',
+          timestamp: maxBusinessAt,
+        }).catch(err => console.warn(`[LeadsService] yelp-sync recordMessage(pro) failed for ${conversation.id}: ${err.message}`));
       }
 
       // Update conversation's lastMessageAt

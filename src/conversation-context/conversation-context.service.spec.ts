@@ -336,3 +336,229 @@ describe('ConversationContextService.ensureMessagePersisted', () => {
     expect(prisma.message.findUnique).toHaveBeenCalledTimes(2);
   });
 });
+
+// =============================================================================
+// 2026-06-11 — TC freshness fix (Mario Evans audit)
+//
+// Tests for the monotonic guard on lastCustomerMessageAt / lastBusinessMessageAt
+// / lastAiMessageAt. Out-of-order webhook retries and platform syncs used to
+// blind-overwrite these fields with older timestamps, regressing the Handoff
+// badge demotion guard in activity-bucket.ts.
+// =============================================================================
+
+describe('ConversationContextService.recordMessage — monotonic timestamp guard', () => {
+  function tcExisting(overrides: Partial<{
+    lastCustomerMessageAt: Date | null;
+    lastBusinessMessageAt: Date | null;
+    lastAiMessageAt: Date | null;
+    platform: string;
+    engagementLevel: string;
+  }>) {
+    return {
+      id: 'tc-1',
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'thumbtack',
+      stage: 'qualification',
+      engagementLevel: 'warm',
+      awaitingCustomerReply: false,
+      customerMessages: 1,
+      businessMessages: 0,
+      aiMessages: 0,
+      followUpCount: 0,
+      lastCustomerMessageAt: null,
+      lastBusinessMessageAt: null,
+      lastAiMessageAt: null,
+      ...overrides,
+    };
+  }
+
+  it('advances lastCustomerMessageAt when newer customer message arrives', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(
+      tcExisting({ lastCustomerMessageAt: new Date('2026-06-10T19:54:54Z') }),
+    );
+    const service = makeService(prisma);
+
+    const fresh = new Date('2026-06-10T20:15:06Z');
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'sms',
+      sender: 'customer',
+      content: 'Hello',
+      timestamp: fresh,
+    });
+
+    expect(prisma.threadContext.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { conversationId: 'conv-1' },
+        data: expect.objectContaining({ lastCustomerMessageAt: fresh }),
+      }),
+    );
+  });
+
+  it('does NOT regress lastCustomerMessageAt when an older customer message arrives (Mario case)', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(
+      // TC already advanced to 20:15 by an earlier inbound SMS.
+      tcExisting({ lastCustomerMessageAt: new Date('2026-06-10T20:15:06Z') }),
+    );
+    const service = makeService(prisma);
+
+    // Late TT webhook retry for the original 19:54:54 message arrives.
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'thumbtack',
+      sender: 'customer',
+      content: 'Please schedule a walkthrough. So I can get a quote.',
+      timestamp: new Date('2026-06-10T19:54:54Z'),
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    // Counter still increments — we observed another customer message.
+    expect(call.data.customerMessages).toEqual({ increment: 1 });
+    // But the timestamp must NOT regress.
+    expect(call.data.lastCustomerMessageAt).toBeUndefined();
+  });
+
+  it('does NOT regress lastBusinessMessageAt when older business message arrives', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(
+      tcExisting({ lastBusinessMessageAt: new Date('2026-06-10T21:00:00Z') }),
+    );
+    const service = makeService(prisma);
+
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'sms',
+      sender: 'pro',
+      senderType: 'manual',
+      content: 'older outbound',
+      timestamp: new Date('2026-06-10T20:00:00Z'),
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.businessMessages).toEqual({ increment: 1 });
+    expect(call.data.lastBusinessMessageAt).toBeUndefined();
+  });
+
+  it('does NOT regress lastAiMessageAt when older AI message arrives', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(
+      tcExisting({ lastAiMessageAt: new Date('2026-06-10T22:00:00Z') }),
+    );
+    const service = makeService(prisma);
+
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'thumbtack',
+      sender: 'pro',
+      senderType: 'ai',
+      content: 'older AI reply',
+      timestamp: new Date('2026-06-10T19:56:00Z'),
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.aiMessages).toEqual({ increment: 1 });
+    expect(call.data.lastAiMessageAt).toBeUndefined();
+  });
+
+  it('advances when existing timestamp is null', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(tcExisting({ lastCustomerMessageAt: null }));
+    const service = makeService(prisma);
+
+    const fresh = new Date('2026-06-10T19:54:54Z');
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'thumbtack',
+      sender: 'customer',
+      content: 'first',
+      timestamp: fresh,
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.lastCustomerMessageAt).toEqual(fresh);
+  });
+
+  it('cross-channel: SMS customer message advances TC on a TT conversation', async () => {
+    // Direct simulation of the Mario flow: TT conversation already has a TT
+    // customer message recorded at 19:54. An SMS-channel customer message
+    // attached to the same conversation at 20:15 must advance TC.
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(
+      tcExisting({
+        platform: 'thumbtack',
+        lastCustomerMessageAt: new Date('2026-06-10T19:54:54Z'),
+      }),
+    );
+    const service = makeService(prisma);
+
+    const sms = new Date('2026-06-10T20:15:06Z');
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'sms',          // ← cross-channel
+      sender: 'customer',
+      content: 'Hello',
+      timestamp: sms,
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.lastCustomerMessageAt).toEqual(sms);
+  });
+
+  it('classifies senderType="manual" as business — bumps lastBusinessMessageAt, not lastAiMessageAt', async () => {
+    // Notification-rule + ad-hoc SMS pass senderType='manual'. These must bump
+    // the business timestamp so the Handoff badge demotes when operator replies.
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(tcExisting({}));
+    const service = makeService(prisma);
+
+    const sentAt = new Date('2026-06-11T10:00:00Z');
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'sms',
+      sender: 'pro',
+      senderType: 'manual',
+      content: 'Hi, just checking in',
+      timestamp: sentAt,
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.businessMessages).toEqual({ increment: 1 });
+    expect(call.data.lastBusinessMessageAt).toEqual(sentAt);
+    expect(call.data.aiMessages).toBeUndefined();
+    expect(call.data.lastAiMessageAt).toBeUndefined();
+  });
+
+  it('classifies senderType="ai" as AI — bumps lastAiMessageAt only', async () => {
+    const prisma = buildPrisma();
+    prisma.threadContext.findUnique.mockResolvedValue(tcExisting({}));
+    const service = makeService(prisma);
+
+    const sentAt = new Date('2026-06-11T10:00:00Z');
+    await service.recordMessage({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      platform: 'thumbtack',
+      sender: 'pro',
+      senderType: 'ai',
+      content: 'I can help with that',
+      timestamp: sentAt,
+    });
+
+    const call = prisma.threadContext.update.mock.calls[0]?.[0];
+    expect(call.data.aiMessages).toEqual({ increment: 1 });
+    expect(call.data.lastAiMessageAt).toEqual(sentAt);
+    expect(call.data.businessMessages).toBeUndefined();
+    expect(call.data.lastBusinessMessageAt).toBeUndefined();
+  });
+});
