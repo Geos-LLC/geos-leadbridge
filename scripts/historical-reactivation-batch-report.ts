@@ -337,16 +337,11 @@ async function main() {
     console.log('  Lead.status / SF link are NOT modified by the skip — those rows remain queryable.');
   }
 
-  console.log('\n=== Refunded leads (this batch) ===');
-  if (refunded.length === 0) {
-    console.log('  none refunded — no Lead.refundedAt / budgetVoidedAt writes from this batch');
-  } else {
-    console.log(`  ${refunded.length} of ${enrolled} batch enrollments had their lead marked refunded:`);
-    for (const r of refunded) {
-      console.log(`    - ${r.name.padEnd(24)} platform=${r.platform.padEnd(9)} chargeState=${r.chargeState ?? '-'}`);
-      console.log(`      Lead.refundedAt + Lead.budgetVoidedAt set; analytics will exclude this lead's cost.`);
-    }
-  }
+  // Refunded leads are tracked via Lead.refundedAt + Lead.budgetVoidedAt
+  // for analytics (cost-void) — they are NOT pre-filtered from future
+  // outreach. If the operator wants to attempt out-of-band contact
+  // (e.g., phone), the Lead row + phone numbers remain queryable.
+  // Refund count is still in REPORT_JSON for tooling.
 
   if (driftedLeads.length > 0) {
     console.log('\n=== Drifted leads (Lead.status changed unexpectedly) ===');
