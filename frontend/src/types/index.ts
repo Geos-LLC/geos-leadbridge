@@ -137,6 +137,13 @@ export interface Lead {
   sfLeadId?: string | null;
   sfLeadStageName?: string | null;
   sfLeadMatchedAt?: string | null;
+  // Refund / billing state. Populated by the scheduler's 404 handler and
+  // the hourly chargeState sweep. `refundedAt` drives the "Refunded" badge
+  // + filter on the Messages page. Yelp leaves these null (no per-lead
+  // refund concept on that platform).
+  refundedAt?: string | null;
+  chargeStateRaw?: string | null;
+  budgetVoidedAt?: string | null;
   raw?: any;
 }
 

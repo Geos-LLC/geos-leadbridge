@@ -24,6 +24,7 @@ export type StatusGroupId =
   | 'booked'        // id stays 'booked' (canonical Lead.status value); label is "Scheduled"
   | 'completed'     // id stays 'completed' (canonical); label is "Done"
   | 'lost'
+  | 'refunded'      // NOT a Lead.status — Lead.refundedAt-driven. See FILTER_PSEUDO_GROUPS.
   | 'unknown';
 
 export interface StatusGroup {
@@ -43,6 +44,22 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
   { id: 'completed', label: 'Done',      statuses: ['completed'] },
   // archived/no_show fold into Lost — see leadStatus.ts header.
   { id: 'lost',      label: 'Lost',      statuses: ['lost', 'cancelled', 'no_show', 'archived'] },
+];
+
+/**
+ * "Pseudo-group" filter ids that don't match Lead.status — they match
+ * a different Lead field. Listed in STATUS_FILTER_OPTIONS so users can
+ * filter on them, but excluded from STATUS_GROUPS / displayGroup() so
+ * a refunded lead still renders its real status badge ("Lost", "Active",
+ * etc.) AND a separate refund pill.
+ *
+ * Current pseudo-groups:
+ *   - 'refunded': Lead.refundedAt is set (or chargeStateRaw === 'Refunded').
+ *                 See follow-up-scheduler.service.ts → classifyPlatformUnreachable
+ *                 + the hourly sweepThumbtackChargeState cron.
+ */
+export const FILTER_PSEUDO_GROUPS: readonly { id: StatusGroupId; label: string }[] = [
+  { id: 'refunded', label: 'Refunded' },
 ];
 
 /**
@@ -112,16 +129,45 @@ export type StatusPillKind =
 
 export function displayPillKind(status: string | null | undefined): StatusPillKind {
   const id = displayGroup(status);
-  return id === 'unknown' ? 'neutral' : id;
+  // 'refunded' is a filter pseudo-group, not a status-derived bucket — it
+  // can't actually be returned by displayGroup() since STATUS_TO_GROUP_ID is
+  // built from STATUS_GROUPS only. The explicit narrowing satisfies TS and
+  // future-proofs against any drift.
+  if (id === 'unknown' || id === 'refunded') return 'neutral';
+  return id;
 }
 
 /**
  * Filter dropdown options. The "all" option is added by the consumer.
+ * Status groups come first; pseudo-groups (Refunded) follow so they
+ * appear after the canonical status pipeline in the dropdown.
  */
-export const STATUS_FILTER_OPTIONS: readonly { id: StatusGroupId; label: string }[] =
-  STATUS_GROUPS.map((g) => ({ id: g.id, label: g.label }));
+export const STATUS_FILTER_OPTIONS: readonly { id: StatusGroupId; label: string }[] = [
+  ...STATUS_GROUPS.map((g) => ({ id: g.id, label: g.label })),
+  ...FILTER_PSEUDO_GROUPS,
+];
 
 /** Predicate: does the lead's raw status match the group filter id. */
 export function matchesGroupFilter(status: string | null | undefined, group: StatusGroupId): boolean {
   return displayGroup(status) === group;
+}
+
+/**
+ * Predicate for the 'refunded' pseudo-filter. True when either:
+ *   - Lead.refundedAt is set (the canonical "we observed a refund" signal), OR
+ *   - Lead.chargeStateRaw === 'Refunded' (transient state where sweep
+ *     captured chargeState but hadn't yet flipped refundedAt in the same
+ *     write — defense-in-depth, real-world both ship together).
+ *
+ * Caller (Messages.tsx filter chain) routes the 'refunded' filter through
+ * this helper instead of matchesGroupFilter, since Lead.status alone never
+ * tells you if a lead was refunded.
+ */
+export function matchesRefundedFilter(lead: {
+  refundedAt?: string | null;
+  chargeStateRaw?: string | null;
+}): boolean {
+  if (lead.refundedAt) return true;
+  if ((lead.chargeStateRaw ?? '').toLowerCase() === 'refunded') return true;
+  return false;
 }

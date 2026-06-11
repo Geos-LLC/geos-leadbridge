@@ -33,7 +33,7 @@ import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { PlatformBadge, StatusPill } from '../components/ui';
-import { displayLabel, displayPillKind, STATUS_FILTER_OPTIONS, matchesGroupFilter, type StatusGroupId } from '../lib/leadStatus';
+import { displayLabel, displayPillKind, STATUS_FILTER_OPTIONS, matchesGroupFilter, matchesRefundedFilter, type StatusGroupId } from '../lib/leadStatus';
 import { LeadActivityTimeline } from '../components/LeadActivityTimeline';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
@@ -1519,9 +1519,15 @@ export function Messages() {
       const leadMonth = leadDate.getMonth();
       matchesDate = leadYear === parsedDateFilter.year && leadMonth === parsedDateFilter.month;
     }
-    // Status group filter
+    // Status group filter. 'refunded' is a pseudo-group that matches
+    // Lead.refundedAt / chargeStateRaw instead of Lead.status — refunded
+    // leads keep their real status pill (Lost, Active, etc.).
     const matchesStatus =
-      statusFilter === 'all' || matchesGroupFilter(lead.status, statusFilter);
+      statusFilter === 'all'
+        ? true
+        : statusFilter === 'refunded'
+          ? matchesRefundedFilter(lead)
+          : matchesGroupFilter(lead.status, statusFilter);
     // Activity sub-bucket filter — only applies when the primary status
     // group is 'active'. activityBucket is null on terminal leads so this
     // naturally excludes them.
@@ -2002,6 +2008,31 @@ export function Messages() {
                           </span>
                         );
                       })()}
+                      {/* Refunded badge — surfaces leads where the platform
+                          (currently only Thumbtack) reported chargeState='Refunded',
+                          which auto-sets Lead.refundedAt + Lead.budgetVoidedAt
+                          via the scheduler's 404 handler + the hourly chargeState
+                          sweep. The lead row + phone numbers remain queryable;
+                          this is informational + drives the analytics cost-void
+                          (budgetVoidedAt filters leadPrice AVG/SUM). */}
+                      {matchesRefundedFilter(lead) && (
+                        <span
+                          title={`Refunded by platform${lead.chargeStateRaw ? ` — chargeState=${lead.chargeStateRaw}` : ''}`}
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#fef2f2',
+                            color: '#991b1b',
+                            border: '1px solid #fecaca',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Refunded
+                        </span>
+                      )}
                       {/* SF identity tag — keeps the inbox scannable. Priority
                           is structural (`if/else if`) so we never render both:
                           SF Customer (isSfLinked, indigo, primary) takes
