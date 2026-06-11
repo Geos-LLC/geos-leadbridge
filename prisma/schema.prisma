@@ -292,6 +292,12 @@ model Lead {
   externalRequestId      String // Platform's unique lead/request ID
   customerName           String
   customerPhone          String?
+  // Separate column for the Thumbtack-API "request_user_phone" digit string
+  // that the customer typed into the body of a lead. Populated by
+  // backfill-thumbtack-real-phone.ts and the live GET /negotiations adapter
+  // path (POST webhook keeps customerPhone — see commit 2d59772f for the
+  // routing rationale). Surface in NormalizedLead + frontend Messages page.
+  customerPhoneSubstitute String?
   customerEmail          String?
   message                String    @db.Text
   budget                 Decimal?  @db.Decimal(10, 2)
