@@ -300,12 +300,10 @@ export class FollowUpGeneratorService {
         else urgencyContext += ' Do NOT imply urgent availability. Offer next available slot.';
       }
 
-      // PLAYBOOK — behavior summary (generated from settings) + user
-      // instructions. Pure render; empty string when nothing to show.
+      // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
+      // No automation-derived behavior bullets in V2; Playbook is HOW only.
       playbookBlock = renderPlaybookBlock({
-        aiConversationMode: account?.aiConversationMode ?? null,
         followUpSettingsJson: account?.followUpSettingsJson ?? null,
-        servicePricingJson: account?.servicePricingJson ?? null,
       });
     }
 
