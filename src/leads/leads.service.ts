@@ -232,14 +232,30 @@ export class LeadsService {
 
         const normalized = this.convertToNormalizedLead(lead);
         // Single-lead path: resolve activityBucket via a focused TC lookup.
+        // Loads the same signal fields as the batched list path so the badge
+        // freshness/handoff guards apply consistently.
         if (lead.threadId) {
           const tc = await this.prisma.threadContext.findUnique({
             where: { conversationId: lead.threadId },
-            select: { conversationState: true },
+            select: {
+              conversationState: true,
+              lastCustomerMessageAt: true,
+              lastBusinessMessageAt: true,
+              lastAiMessageAt: true,
+              handoffRequestedAt: true,
+              handoffResolvedAt: true,
+            },
           });
           normalized.activityBucket = activityBucketFromThreadContext(
             tc?.conversationState ?? null,
             lead.status,
+            tc ? {
+              lastCustomerMessageAt: tc.lastCustomerMessageAt,
+              lastBusinessMessageAt: tc.lastBusinessMessageAt,
+              lastAiMessageAt: tc.lastAiMessageAt,
+              handoffRequestedAt: tc.handoffRequestedAt,
+              handoffResolvedAt: tc.handoffResolvedAt,
+            } : undefined,
           );
         } else {
           normalized.activityBucket = activityBucketFromThreadContext(null, lead.status);
@@ -306,18 +322,27 @@ export class LeadsService {
       // of (sender, senderType) tuples that exist per conversation.
       const autoHandledByConv = await this.computeAutoHandledFlags(convIds);
 
-      // Batched ThreadContext.conversationState lookup for activity-bucket
-      // derivation. Done as a separate query (not Prisma include) so the
-      // existing leads-list cache contract stays unchanged.
-      const tcStateByConvId = await this.loadTcStateByConvId(convIds);
+      // Batched ThreadContext lookup for activity-bucket derivation. Loads
+      // conversationState + freshness/handoff signal fields. Done as a separate
+      // query (not Prisma include) so the existing leads-list cache contract
+      // stays unchanged.
+      const tcSignalsByConvId = await this.loadTcSignalsByConvId(convIds);
 
       return leads.map((lead: any) => {
         const normalized = this.convertToNormalizedLead(lead);
         const convId = lead.conversation?.id;
         normalized.isAutoHandled = convId ? autoHandledByConv.get(convId) ?? false : false;
+        const tcSignals = convId ? tcSignalsByConvId.get(convId) : undefined;
         normalized.activityBucket = activityBucketFromThreadContext(
-          convId ? tcStateByConvId.get(convId) ?? null : null,
+          tcSignals?.conversationState ?? null,
           lead.status,
+          tcSignals ? {
+            lastCustomerMessageAt: tcSignals.lastCustomerMessageAt,
+            lastBusinessMessageAt: tcSignals.lastBusinessMessageAt,
+            lastAiMessageAt: tcSignals.lastAiMessageAt,
+            handoffRequestedAt: tcSignals.handoffRequestedAt,
+            handoffResolvedAt: tcSignals.handoffResolvedAt,
+          } : undefined,
         );
         return normalized;
       });
@@ -1919,20 +1944,58 @@ export class LeadsService {
   // The earlier presence-based rule hid almost nothing because every TT/Yelp
   // lead has a customer initial-inquiry message that disqualified it.
   /**
-   * Batched lookup of ThreadContext.conversationState keyed by conversationId.
-   * Used by getCachedLeads to derive Lead.activityBucket without expanding
-   * the Prisma include (which would pollute the leads-list cache shape).
+   * Batched lookup of ThreadContext fields needed for activity-bucket derivation,
+   * keyed by conversationId. Returns `conversationState` plus the freshness +
+   * handoff signals the new (2026-06-11) human_handoff guards consume:
+   *   - lastCustomerMessageAt vs lastBusinessMessageAt/lastAiMessageAt:
+   *     suppress the Handoff badge once an outbound passes the customer's
+   *     last message.
+   *   - handoffRequestedAt vs handoffResolvedAt: suppress when resolved.
+   *
+   * Done as a separate query (not a Prisma include) so the existing leads-list
+   * cache contract stays unchanged.
    */
-  private async loadTcStateByConvId(
+  private async loadTcSignalsByConvId(
     conversationIds: string[],
-  ): Promise<Map<string, string | null>> {
-    const map = new Map<string, string | null>();
+  ): Promise<Map<string, {
+    conversationState: string | null;
+    lastCustomerMessageAt: Date | null;
+    lastBusinessMessageAt: Date | null;
+    lastAiMessageAt: Date | null;
+    handoffRequestedAt: Date | null;
+    handoffResolvedAt: Date | null;
+  }>> {
+    const map = new Map<string, {
+      conversationState: string | null;
+      lastCustomerMessageAt: Date | null;
+      lastBusinessMessageAt: Date | null;
+      lastAiMessageAt: Date | null;
+      handoffRequestedAt: Date | null;
+      handoffResolvedAt: Date | null;
+    }>();
     if (conversationIds.length === 0) return map;
     const rows = await this.prisma.threadContext.findMany({
       where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, conversationState: true },
+      select: {
+        conversationId: true,
+        conversationState: true,
+        lastCustomerMessageAt: true,
+        lastBusinessMessageAt: true,
+        lastAiMessageAt: true,
+        handoffRequestedAt: true,
+        handoffResolvedAt: true,
+      },
     });
-    for (const r of rows) map.set(r.conversationId, r.conversationState ?? null);
+    for (const r of rows) {
+      map.set(r.conversationId, {
+        conversationState: r.conversationState ?? null,
+        lastCustomerMessageAt: r.lastCustomerMessageAt ?? null,
+        lastBusinessMessageAt: r.lastBusinessMessageAt ?? null,
+        lastAiMessageAt: r.lastAiMessageAt ?? null,
+        handoffRequestedAt: r.handoffRequestedAt ?? null,
+        handoffResolvedAt: r.handoffResolvedAt ?? null,
+      });
+    }
     return map;
   }
 

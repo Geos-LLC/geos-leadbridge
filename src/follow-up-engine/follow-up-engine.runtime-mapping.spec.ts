@@ -6,7 +6,10 @@ describe('mapStopReasonToRuntime', () => {
     ['classifier_hired_elsewhere',   { aiStatus: 'stopped_terminal',  conversationState: 'hired_elsewhere' }],
     ['classifier_completed',         { aiStatus: 'stopped_terminal',  conversationState: 'hired_elsewhere' }],
     ['classifier_agreed',            { aiStatus: 'stopped_booked',    conversationState: 'booked_in_lb' }],
-    ['classifier_wants_live_contact',{ aiStatus: 'stopped_booked',    conversationState: 'human_handling' }],
+    // wants_live_contact pauses the AI (handoff pending) — does NOT stop it as
+    // "booked" (no booking happened yet). stopped_booked stays reserved for
+    // classifier_agreed and SF service_scheduled. Fixed 2026-06-11.
+    ['classifier_wants_live_contact',{ aiStatus: 'paused_human',      conversationState: 'human_handling' }],
     ['classifier_deferring',         { aiStatus: 'paused_deferral',   conversationState: 'deferred' }],
     // 'manual' = operator/dispatcher reply happened. After their reply we
     // are waiting for the CUSTOMER, hence awaiting_customer. Reserved
