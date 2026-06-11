@@ -22,9 +22,13 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; be
   { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
-  { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'Business instructions' },
-  { key: 'ai',              label: 'AI',                icon: Zap,           sublabel: 'Prompt & FAQ' },
-  { key: 'pricing',         label: 'Pricing',           icon: DollarSign,    sublabel: 'Service price table' },
+  { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'How AI communicates' },
+  // Legacy tabs — kept in place until Playbook V2 is verified on staging.
+  // The AI and Pricing tabs duplicate FAQ + Pricing + Global Prompt editing
+  // now available inside Playbook. Once verification passes, these tabs are
+  // removed in a follow-up commit (see Playbook V2 PR description).
+  { key: 'ai',              label: 'AI',                icon: Zap,           sublabel: 'Prompt & FAQ (legacy)' },
+  { key: 'pricing',         label: 'Pricing',           icon: DollarSign,    sublabel: 'Service price table (legacy)' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
   { key: 'billing',         label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
@@ -37,9 +41,9 @@ const SUBTITLES: Record<TabKey, string> = {
   general: 'Your business profile and basic preferences.',
   communication: 'Phone numbers, notifications and alert routing.',
   hours: "When you're open, and how Leadbridge behaves outside hours.",
-  'ai-playbook': 'Tell AI how to respond in common business situations — pricing, booking, defers, opt-outs.',
-  ai: 'Global AI prompt and per-account FAQ used on every auto-reply.',
-  pricing: 'Service pricing table the AI uses to quote customers.',
+  'ai-playbook': 'Define how AI communicates with customers. Timing, automation, follow-ups, stop rules, and notifications are configured in Automation settings.',
+  ai: 'Legacy editor for Global AI prompt and per-account FAQ. Both now also live inside AI Playbook.',
+  pricing: 'Legacy editor for the service pricing table. Now also lives inside AI Playbook → Pricing Guidance.',
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
   billing: 'Plan, payment method, and invoices.',
