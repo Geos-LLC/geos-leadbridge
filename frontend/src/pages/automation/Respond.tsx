@@ -3,13 +3,10 @@ import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
   Clipboard, Sparkles, User, ArrowRight, PhoneCall,
-  CircleDollarSign, UserCheck,
-  type LucideIcon,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
-  type IconTone,
 } from '../../components/automation/ui';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
@@ -23,18 +20,13 @@ import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../li
 // render the "AI Strategy" tile below with the actual saved strategy for the
 // account instead of a hardcoded "Auto" label. Keep these keys/labels in
 // sync with [Conversation.tsx](Conversation.tsx).
+// Strategy key (followUpStrategy in JSON) is preserved on save but no
+// longer shown in this page's UI per the Automation Simplification:
+// AI-first surfaces (Respond + Followups) don't expose Goal selection.
+// Goals live only on AI Conversation.
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
-const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
-  auto:    { title: 'Auto',    body: 'AI picks the best goal based on conversation context.',     icon: Sparkles,         iconTone: 'violet' },
-  hybrid:  { title: 'Auto',    body: 'AI picks the best goal based on conversation context.',     icon: Sparkles,         iconTone: 'violet' },
-  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
-  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  convert: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
-};
-// Accept legacy 'hybrid' and 'convert' as valid saved values for back-compat;
-// STRATEGY_META above remaps them to Auto / Qualify for DISPLAY only. Runtime
-// continues to honour them via STRATEGY_PROMPTS (no DB write from this page).
+// Accept legacy 'hybrid' and 'convert' as valid saved values for
+// back-compat. Runtime continues to honour them via STRATEGY_PROMPTS.
 const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
@@ -487,9 +479,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
   const _textBizMix   = getMixed('textBizHours', v => v ? 'Only during business hours' : 'Anytime');
   const _callBizMix   = getMixed('callBizHours', v => v ? 'Only during business hours' : 'Anytime');
-  const _strategyMix  = getMixed('followUpStrategy', v => STRATEGY_META[v as StrategyKey]?.title || String(v));
-  const mixedStrategy = _strategyMix.mixed;
-  const tipStrategy   = _strategyMix.tooltip;
+  // followUpStrategy mixed detection removed with the Conversation Goal
+  // tile. Per-account strategy still persists in followUpSettingsJson; it's
+  // just no longer surfaced on this AI-first page.
   const mixedTextBizHours = _textBizMix.mixed;
   const mixedCallBizHours = _callBizMix.mixed;
   const tipTextBizHours   = _textBizMix.tooltip;
@@ -509,7 +501,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // step or expose it for a future feature.
   void perAccount;
 
-  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  // goAiSettings was used by the now-removed Conversation Goal tile. AI
+  // Conversation is still reachable via the sidebar.
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
   // Deep-link to Templates with a specific row highlighted + tab preselected.
   // Filter values match TemplateFilter on the Templates page; 'prompts' is
@@ -596,51 +589,28 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="Reply type" align="top">
+        <FieldRow label="Message generation" align="top">
           <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={replyType === 'template'}
-              onClick={() => onReplyType('template')}
-              title="Use template"
-              body="Send a pre-written reply."
-              icon={Clipboard}
-              mixed={mixedReplyType && replyType === 'template'}
-              mixedTooltip={tipReplyType}
-            />
+            {/* AI first — AI-first is the product default. */}
             <OptionCard
               selected={replyType === 'ai'}
               onClick={() => onReplyType('ai')}
-              title="Let AI write it"
-              body="AI will write a personalized first reply."
+              title="AI"
+              body="AI writes a personalized first reply using your Business Information, FAQ, Pricing Table, and AI Playbook."
               icon={Sparkles}
               mixed={mixedReplyType && replyType === 'ai'}
               mixedTooltip={tipReplyType}
             />
+            <OptionCard
+              selected={replyType === 'template'}
+              onClick={() => onReplyType('template')}
+              title="Custom template"
+              body="Send a fixed, pre-written reply."
+              icon={Clipboard}
+              mixed={mixedReplyType && replyType === 'template'}
+              mixedTooltip={tipReplyType}
+            />
           </div>
-        </FieldRow>
-
-        <FieldRow
-          label={
-            mixedStrategy ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Conversation Goal <MixedBadge tooltip={tipStrategy} />
-              </span>
-            ) : 'Conversation Goal'
-          }
-        >
-          {(() => {
-            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
-            return (
-              <InfoTile
-                icon={meta.icon}
-                iconTone={meta.iconTone}
-                title={meta.title}
-                body={meta.body}
-                actionLabel="Edit AI Settings"
-                onAction={goAiSettings}
-              />
-            );
-          })()}
         </FieldRow>
 
         {/* First Reply Instructions —
@@ -679,24 +649,34 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             />
           ) : (
             <div style={{
-              padding: '12px 14px',
+              padding: '14px 16px',
               background: '#f8fafc',
               border: '1px solid var(--lb-line-soft)',
               borderRadius: 10,
               fontSize: 13, color: 'var(--lb-ink-3)',
               lineHeight: 1.55,
             }}>
-              First replies use your <strong>Conversation Goal</strong>, <strong>AI Playbook</strong>, <strong>Pricing Table</strong>, and <strong>FAQ</strong>.
-              <div style={{ marginTop: 10, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12.5 }}>
+              <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 8 }}>AI uses:</div>
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+                {[
+                  'Business Information',
+                  'FAQ',
+                  'Pricing Table',
+                  'AI Playbook',
+                  'Conversation history',
+                  'Automatic goal routing',
+                ].map(item => (
+                  <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ marginTop: 12, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12.5 }}>
                 <a
                   href="/settings?tab=ai-playbook"
                   style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
                 >Edit AI Playbook</a>
-                <span style={{ color: 'var(--lb-line)' }}>·</span>
-                <a
-                  href="/automation/convert"
-                  style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
-                >Edit Conversation Goal</a>
                 <span style={{ color: 'var(--lb-line)' }}>·</span>
                 <a
                   href={location.pathname + (location.search ? location.search + '&advanced=1' : '?advanced=1')}

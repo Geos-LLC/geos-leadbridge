@@ -3,10 +3,9 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
   RefreshCw, Clock, UserX, Info, Power,
-  Scale, CircleDollarSign, UserCheck, Calendar, Phone,
 } from 'lucide-react';
 import {
-  SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
+  SettingCard, SectionCard, FieldRow, OptionCard,
   Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedBadge,
   type IconTone,
 } from '../../components/automation/ui';
@@ -17,18 +16,16 @@ import { useAuthStore } from '../../store/authStore';
 import { formatQuietHoursSummary } from '../../lib/businessHours';
 
 // Strategy meta — mirrors the picker on AutomationConversation. Used to
-// render the AI Strategy tile below with the actual saved strategy for the
-// account instead of a hardcoded "Auto" label. Keep in sync with
-// [Conversation.tsx](Conversation.tsx) and [Respond.tsx](Respond.tsx).
+// Strategy key (followUpStrategy in JSON) is preserved on save but no longer
+// shown in this page's UI per the Automation Simplification: AI-first
+// surfaces (Respond + Followups) don't expose Goal selection — Goals live
+// only on AI Conversation. The type stays for the save-merge logic that
+// reads/writes followUpStrategy from cachedAccount.
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
-const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
-  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
-  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
-  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
-  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
-  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
-};
+// Accept legacy 'hybrid' and 'convert' as valid saved values for back-compat.
+// The backend runtime continues to honour them via STRATEGY_PROMPTS — no DB
+// write happens from this page (Followups preserves prev.followUpStrategy
+// on save).
 const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
@@ -436,7 +433,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 
-  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  // goAiSettings was used by the now-removed Conversation Goal tile. AI
+  // Conversation is still reachable via the sidebar; we don't need a
+  // per-card link from here anymore.
   const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
   const resetPlan = () => setPlan(DEFAULT_FOLLOWUP_PLAN);
   const addStep = () => setPlan(p => [...p, { val: 1, unit: 'month' }]);
@@ -529,41 +528,54 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow label="Message mode" sublabel="How follow-up messages are composed." align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={messageMode === 'template'}
-              onClick={() => onMessageMode('template')}
-              title="Use custom template"
-              body="Use your saved template for all follow-up messages."
-              mixed={mixedMessage.mixed && messageMode === 'template'}
-              mixedTooltip={mixedMessage.tooltip}
-            />
-            <OptionCard
-              selected={messageMode === 'ai'}
-              onClick={() => onMessageMode('ai')}
-              title="AI (auto)"
-              body="AI writes each message based on the conversation using your strategy."
-              mixed={mixedMessage.mixed && messageMode === 'ai'}
-              mixedTooltip={mixedMessage.tooltip}
-            />
-          </div>
-        </FieldRow>
-
-        <FieldRow label="AI Strategy" sublabel="Used when AI is composing messages." noBorder>
-          {(() => {
-            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
-            return (
-              <InfoTile
-                icon={meta.icon}
-                iconTone={meta.iconTone}
-                title={meta.title}
-                body={meta.body}
-                actionLabel="Edit AI Settings"
-                onAction={goAiSettings}
+        <FieldRow label="Message generation" sublabel="How follow-up messages are composed." align="top" noBorder>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 12 }}>
+              {/* AI first — AI-first is the product default. */}
+              <OptionCard
+                selected={messageMode === 'ai'}
+                onClick={() => onMessageMode('ai')}
+                title="AI"
+                body="AI writes each follow-up from the live conversation."
+                mixed={mixedMessage.mixed && messageMode === 'ai'}
+                mixedTooltip={mixedMessage.tooltip}
               />
-            );
-          })()}
+              <OptionCard
+                selected={messageMode === 'template'}
+                onClick={() => onMessageMode('template')}
+                title="Custom template"
+                body="Use your saved template for all follow-up messages."
+                mixed={mixedMessage.mixed && messageMode === 'template'}
+                mixedTooltip={mixedMessage.tooltip}
+              />
+            </div>
+            {messageMode === 'ai' && (
+              <div style={{
+                padding: '12px 14px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 10,
+                fontSize: 13, color: 'var(--lb-ink-3)',
+                lineHeight: 1.55,
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>AI follow-ups use:</div>
+                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+                  {[
+                    'Conversation history',
+                    'Business Information',
+                    'FAQ',
+                    'Pricing Guidance',
+                    'AI Playbook',
+                  ].map(item => (
+                    <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </FieldRow>
       </SectionCard>
 
@@ -655,7 +667,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           tipIcon={Sparkles}
-          tip="AI generates this check-in from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this check-in from the conversation using your Conversation Goal. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedDeferral.mixed}
           mixedTooltip={mixedDeferral.tooltip}
         />
@@ -669,7 +681,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           tipIcon={Sparkles}
-          tip="AI generates this re-engage from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this re-engage from the conversation using your Conversation Goal. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedHired.mixed}
           mixedTooltip={mixedHired.tooltip}
           noBorder
