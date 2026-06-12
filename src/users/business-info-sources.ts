@@ -128,15 +128,21 @@ export async function fetchYelpBusinessInfo(args: {
       return undefined;
     }
 
-    const creds = await args.platformService.getAccountCredentials(args.userId, args.savedAccountId);
-    if (!creds?.accessToken) {
-      logger.warn(`[fetchYelpBusinessInfo] no access token for account ${args.savedAccountId}`);
+    // Call /v3/businesses/{id} with the APP-LEVEL Yelp Fusion API key
+    // (YELP_API_KEY env var), not the per-account OAuth Partner token.
+    // The Fusion endpoint is documented for API-key auth, and we already
+    // use the same path in yelp.adapter.ts:getClaimedBusinesses. Using
+    // the app key removes per-account OAuth-state coupling — pull works
+    // even if a tenant's OAuth refresh hiccupped that day.
+    const apiKey = process.env.YELP_API_KEY || '';
+    if (!apiKey) {
+      logger.warn(`[fetchYelpBusinessInfo] YELP_API_KEY not configured; cannot call Fusion`);
       return undefined;
     }
 
     const url = `https://api.yelp.com/v3/businesses/${encodeURIComponent(account.businessId)}`;
     const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${creds.accessToken}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       timeout: 15000,
     });
     const b: any = response.data || {};
@@ -153,6 +159,13 @@ export async function fetchYelpBusinessInfo(args: {
       out.officeLocations = [loc.display_address.join(', ')];
     }
 
+    // Categories — Yelp returns an array of `{ alias, title }` pairs.
+    // We can't shoehorn services into the BizInfo shape directly (no
+    // `services` field), but the title list is useful context. Stuff
+    // it into `guarantees` only as a last resort — no, let it ride in
+    // serviceArea suffix. Actually skip for now; categories often
+    // duplicate what the website summary already extracts.
+
     // Payment methods from Yelp's free-form `attributes` block. The shape
     // varies wildly per business type — we hunt for the common keys.
     const attrs = b.attributes || {};
@@ -166,10 +179,19 @@ export async function fetchYelpBusinessInfo(args: {
     checkBool('business_accepts_google_pay', 'google_pay');
     if (methods.length > 0) out.paymentMethods = methods;
 
-    // Yelp's review_count / rating are kept in the website summary
-    // (objectionHandling.trustSignals) when present on the site itself,
-    // not here — businessInformation is for facts about the business,
-    // not for social proof. Skipping.
+    // Trust-signal-ish facts: Yelp's `is_claimed` + `rating` + `review_count`.
+    // The Playbook V2.5 spec moves rating-style facts into Business
+    // Information as a single "Trust signals: …" line via the seed
+    // applier. We can't add that here (BizInfo has no free-form field),
+    // but we surface what fits: if the business is claimed and has a
+    // reasonable rating, mention it as a guarantee-style trust fact.
+    if (b.is_claimed && typeof b.rating === 'number' && typeof b.review_count === 'number' && b.review_count >= 5) {
+      // Pack into `guarantees` which the BI applier emits as
+      // "Guarantee: …" — close enough semantically (claimed business
+      // with X.X-star rating is a trust signal).
+      const stars = b.rating.toFixed(1);
+      out.guarantees = `Yelp-claimed business, ${stars}★ over ${b.review_count} reviews`;
+    }
 
     return Object.keys(out).length === 0 ? undefined : out;
   } catch (err: any) {

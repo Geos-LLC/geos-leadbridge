@@ -22,6 +22,51 @@ export function SettingsGeneral() {
   const yelpAccountId = savedAccounts.find(a => a.platform === 'yelp')?.id;
   const [pullingFrom, setPullingFrom] = useState<'thumbtack' | 'yelp' | null>(null);
 
+  // Public Thumbtack profile URL — pasted by the user so the pull flow
+  // can scrape the rich public profile page instead of the API (which
+  // returns only businessID + name + phone + image). Persisted at
+  // SavedAccount.followUpSettingsJson.publicProfileUrl via a dedicated
+  // PATCH endpoint. Saves on blur when the value changes.
+  const [ttProfileUrl, setTtProfileUrl] = useState<string>('');
+  const ttProfileUrlInitialRef = useRef<string>('');
+  // Hydrate from backend on mount + whenever the TT account id changes.
+  // The URL lives in SavedAccount.followUpSettingsJson.publicProfileUrl
+  // so it isn't on the cached savedAccounts list — fetch it explicitly.
+  useEffect(() => {
+    if (!ttAccountId) {
+      setTtProfileUrl('');
+      ttProfileUrlInitialRef.current = '';
+      return;
+    }
+    let alive = true;
+    usersApi.getThumbtackProfileUrl(ttAccountId)
+      .then(res => {
+        if (!alive) return;
+        const next = res.url ?? '';
+        setTtProfileUrl(next);
+        ttProfileUrlInitialRef.current = next;
+      })
+      .catch(() => { /* non-fatal — leave field empty */ });
+    return () => { alive = false; };
+  }, [ttAccountId]);
+
+  const saveTtProfileUrl = async () => {
+    if (!ttAccountId) return;
+    const next = ttProfileUrl.trim();
+    if (next === ttProfileUrlInitialRef.current.trim()) return;
+    try {
+      const res = await usersApi.saveThumbtackProfileUrl(ttAccountId, next || null);
+      if (!res.success) {
+        notify.warning('Could not save URL', res.warning || 'Try again.');
+        return;
+      }
+      ttProfileUrlInitialRef.current = next;
+      notify.success('Thumbtack profile URL saved', 'Pull from Thumbtack will now use it.', 3000);
+    } catch (e: any) {
+      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
+    }
+  };
+
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
   const [industry, setIndustry] = useState<string>('Cleaning & home services');
@@ -317,6 +362,34 @@ export function SettingsGeneral() {
             background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
             fontSize: 12, fontWeight: 600,
           }}>{verifyError}</div>
+        )}
+        {ttAccountId && (
+          <div style={{ padding: '0 24px 10px' }}>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: 'var(--lb-ink-3)',
+              marginBottom: 4, letterSpacing: 0.02,
+            }}>
+              Thumbtack profile URL <span style={{ color: 'var(--lb-ink-5)', fontWeight: 400 }}>(optional)</span>
+            </div>
+            <input
+              type="url"
+              value={ttProfileUrl}
+              onChange={e => setTtProfileUrl(e.target.value)}
+              onBlur={() => void saveTtProfileUrl()}
+              placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                padding: '8px 12px',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 8,
+                fontSize: 13, fontFamily: 'inherit',
+                color: 'var(--lb-ink-1)', background: 'white',
+              }}
+            />
+            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.4 }}>
+              Paste your public Thumbtack profile URL so <em>Pull from Thumbtack</em> can extract services, address, insurance, and pricing. Thumbtack's API alone returns only name + phone.
+            </div>
+          </div>
         )}
         {(ttAccountId || yelpAccountId) && (
           <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>

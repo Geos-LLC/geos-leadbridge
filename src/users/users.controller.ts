@@ -135,6 +135,46 @@ export class UsersController {
   }
 
   /**
+   * Save the tenant's public Thumbtack profile URL onto a SavedAccount.
+   * Used to enable the website-scrape path for Thumbtack pulls — the
+   * Partner API alone returns only minimal data, but the public profile
+   * page has the full picture (services, address, insurance, pricing).
+   *
+   * PATCH /v1/users/me/saved-accounts/:savedAccountId/thumbtack-profile-url
+   *   body: { url: string | null }
+   *     - url=null clears the saved value
+   *     - url must be a thumbtack.com URL; rejected otherwise with a
+   *       structured warning so the frontend can surface a clean error
+   */
+  @Patch('me/saved-accounts/:savedAccountId/thumbtack-profile-url')
+  async saveThumbtackProfileUrl(
+    @Request() req: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: { url?: string | null },
+  ) {
+    return this.usersService.saveThumbtackProfileUrl(
+      req.user.id,
+      savedAccountId,
+      body?.url ?? null,
+    );
+  }
+
+  /**
+   * Read the saved Thumbtack profile URL for a SavedAccount. Used by
+   * Settings → General to hydrate the input field on page mount.
+   *
+   * GET /v1/users/me/saved-accounts/:savedAccountId/thumbtack-profile-url
+   *   response: { url: string | null }
+   */
+  @Get('me/saved-accounts/:savedAccountId/thumbtack-profile-url')
+  async getThumbtackProfileUrl(
+    @Request() req: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    return this.usersService.getThumbtackProfileUrl(req.user.id, savedAccountId);
+  }
+
+  /**
    * Get the user's global AI prompt
    * GET /v1/users/me/ai-prompt
    */

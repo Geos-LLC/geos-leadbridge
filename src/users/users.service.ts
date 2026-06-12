@@ -227,11 +227,11 @@ export class UsersService {
       .map((a) => a.businessId as string);
     for (const businessId of ttBusinessIds) {
       try {
-        await this.platformService.registerAgentPhoneWithThumbtack(userId, businessId);
+        // Registers both the owner phone (just changed) and the LB number
+        // (substitute sender). ensureAssociatePhone skips no-op POSTs.
+        await this.platformService.syncAccountPhonesToThumbtack(userId, businessId);
       } catch (err: any) {
         // Profile save must not break if TT registration fails — log and move on.
-        // ensureAssociatePhone already skips when the number is already on the
-        // business, so this only surfaces real failures (auth, network, 4xx).
         console.error(
           `[UsersService] TT associate-phone sync failed user=${userId} business=${businessId}: ${err?.message ?? err}`,
         );
@@ -1124,13 +1124,36 @@ export class UsersService {
   }> {
     let patch: Partial<NonNullable<PlaybookSeed['businessInformation']>> | undefined;
     if (source === 'thumbtack') {
-      patch = await fetchThumbtackBusinessInfo({
-        userId,
-        savedAccountId,
-        platformService: this.platformService,
-        platformFactory: this.platformFactory,
-        prisma: this.prisma,
-      });
+      // V2.5 — if the tenant has pasted their public Thumbtack profile URL
+      // into Settings → General, prefer scraping that page (the Partner API
+      // returns only businessID + name + phone + image, which is useless
+      // for business-info seeding). The public profile page has the full
+      // picture: services, address, insurance, bonding, pricing, etc.
+      const ttProfileUrl = await this.readThumbtackProfileUrl(userId, savedAccountId);
+      if (ttProfileUrl) {
+        try {
+          const verify = await this.verifyWebsite(ttProfileUrl);
+          if (verify.reachable && verify.metadata?.playbookSeed?.businessInformation) {
+            patch = verify.metadata.playbookSeed.businessInformation;
+            this.logger.log(`[seedBusinessInfoFromAccount] scraped TT profile url=${ttProfileUrl} fields=${Object.keys(patch).join(',')}`);
+          } else {
+            this.logger.warn(`[seedBusinessInfoFromAccount] TT profile scrape returned no playbookSeed for ${ttProfileUrl}`);
+          }
+        } catch (err: any) {
+          this.logger.warn(`[seedBusinessInfoFromAccount] TT profile scrape failed for ${ttProfileUrl}: ${err?.message || err}`);
+        }
+      }
+      // Fall through to the Partner-API fetcher when scrape didn't yield
+      // anything. The API path is preserved as a safety net.
+      if (!patch || Object.keys(patch).length === 0) {
+        patch = await fetchThumbtackBusinessInfo({
+          userId,
+          savedAccountId,
+          platformService: this.platformService,
+          platformFactory: this.platformFactory,
+          prisma: this.prisma,
+        });
+      }
     } else if (source === 'yelp') {
       patch = await fetchYelpBusinessInfo({
         userId,
@@ -1172,6 +1195,92 @@ export class UsersService {
       fieldsApplied: Math.max(0, fieldsApplied),
       conflictsRaised: newConflicts.length,
     };
+  }
+
+  /**
+   * Read the tenant's pasted public Thumbtack profile URL (stored on
+   * `SavedAccount.followUpSettingsJson.publicProfileUrl`). Falls back to
+   * undefined when not set; the caller then drops to the Partner API path.
+   *
+   * Stored under the existing JSON blob to avoid a schema migration —
+   * the field shape is `{ publicProfileUrl?: string }` alongside any
+   * other follow-up / AI settings on the account.
+   */
+  private async readThumbtackProfileUrl(userId: string, savedAccountId: string): Promise<string | undefined> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId, platform: 'thumbtack' },
+      select: { followUpSettingsJson: true },
+    });
+    if (!account?.followUpSettingsJson) return undefined;
+    try {
+      const settings = JSON.parse(account.followUpSettingsJson) || {};
+      const url = settings.publicProfileUrl;
+      return typeof url === 'string' && url.trim().length > 0 ? url.trim() : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Public getter — used by the Settings → General page to hydrate the
+   * URL input field on mount. Delegates to the same private reader the
+   * pull flow uses.
+   */
+  async getThumbtackProfileUrl(userId: string, savedAccountId: string): Promise<{ url: string | null }> {
+    const url = await this.readThumbtackProfileUrl(userId, savedAccountId);
+    return { url: url ?? null };
+  }
+
+  /**
+   * Persist a tenant-provided public Thumbtack profile URL onto the
+   * SavedAccount. Stored inside `followUpSettingsJson.publicProfileUrl`
+   * to avoid a schema migration. Used by Settings → General "Thumbtack
+   * profile URL" input.
+   */
+  async saveThumbtackProfileUrl(
+    userId: string,
+    savedAccountId: string,
+    rawUrl: string | null,
+  ): Promise<{ success: boolean; url: string | null; warning?: string }> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId, platform: 'thumbtack' },
+      select: { id: true, followUpSettingsJson: true },
+    });
+    if (!account) {
+      return { success: false, url: null, warning: 'Thumbtack account not found.' };
+    }
+
+    let cleaned: string | null = null;
+    if (typeof rawUrl === 'string' && rawUrl.trim().length > 0) {
+      try {
+        const u = new URL(rawUrl.trim());
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('non-http url');
+        if (!u.hostname.endsWith('thumbtack.com')) {
+          return { success: false, url: null, warning: 'Please paste a thumbtack.com URL.' };
+        }
+        cleaned = u.toString();
+      } catch {
+        return { success: false, url: null, warning: 'That doesn\'t look like a valid URL.' };
+      }
+    }
+
+    let settings: Record<string, any> = {};
+    if (account.followUpSettingsJson) {
+      try { settings = JSON.parse(account.followUpSettingsJson) || {}; } catch { settings = {}; }
+    }
+    if (cleaned === null) {
+      delete settings.publicProfileUrl;
+    } else {
+      settings.publicProfileUrl = cleaned;
+    }
+
+    await this.prisma.savedAccount.update({
+      where: { id: account.id },
+      data: { followUpSettingsJson: JSON.stringify(settings) },
+    });
+
+    this.logger.log(`[saveThumbtackProfileUrl] userId=${userId} acct=${savedAccountId} url=${cleaned ? cleaned.slice(0, 60) + '...' : '(cleared)'}`);
+    return { success: true, url: cleaned };
   }
 
   // ---------------------------------------------------------------------

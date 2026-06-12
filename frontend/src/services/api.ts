@@ -1528,6 +1528,28 @@ export const usersApi = {
     const { data } = await api.post(`/v1/users/me/business-info/pull-from/${platform}/${savedAccountId}`);
     return data;
   },
+  /** Save the tenant's public Thumbtack profile URL on a SavedAccount.
+   *  Enables the website-scrape path for TT pulls — the Partner API alone
+   *  only returns businessID/name/phone/image. Pass `url=null` to clear. */
+  saveThumbtackProfileUrl: async (
+    savedAccountId: string,
+    url: string | null,
+  ): Promise<{ success: boolean; url: string | null; warning?: string }> => {
+    const { data } = await api.patch(
+      `/v1/users/me/saved-accounts/${savedAccountId}/thumbtack-profile-url`,
+      { url },
+    );
+    return data;
+  },
+  /** Read the saved public Thumbtack profile URL for hydrating the input. */
+  getThumbtackProfileUrl: async (
+    savedAccountId: string,
+  ): Promise<{ url: string | null }> => {
+    const { data } = await api.get(
+      `/v1/users/me/saved-accounts/${savedAccountId}/thumbtack-profile-url`,
+    );
+    return data;
+  },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
     const { data } = await api.delete('/v1/users/me');
     return data;
