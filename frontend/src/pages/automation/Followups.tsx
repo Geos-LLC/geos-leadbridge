@@ -579,6 +579,37 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
                 </ul>
               </div>
             )}
+            {messageMode === 'template' && (
+              // Bug fix (2026-06-12): Custom template mode previously showed
+              // no path to manage the underlying templates. Linking to the
+              // Templates library filtered to auto-reply (the bucket the
+              // follow-up step templates land in — see MessageSettings.tsx
+              // getTemplateFilter).
+              <div style={{
+                padding: '12px 14px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 10,
+                fontSize: 13, color: 'var(--lb-ink-3)',
+                lineHeight: 1.55,
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+                  Follow-up templates
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  Each follow-up step uses a saved template. Manage which templates run for which step in your library.
+                </div>
+                <Link
+                  to="/templates?filter=auto-reply"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    color: 'var(--lb-accent)', fontWeight: 600, textDecoration: 'none',
+                  }}
+                >
+                  Manage templates →
+                </Link>
+              </div>
+            )}
           </div>
         </FieldRow>
       </SectionCard>
