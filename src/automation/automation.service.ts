@@ -1181,30 +1181,91 @@ export class AutomationService implements OnModuleInit {
           }
           return;
         }
-        // `agreed` and `wants_live_contact` are handoff intents:
-        // maybeFireHandoffAlert above just paged the operator. The AI must
-        // stop so the human takes over cleanly — having both reply at once
-        // is the Savanna 2026-05-13 regression: customer said "Yes, I
-        // believe I already confirmed the cleaning for 5/21 at 10am" and
-        // the AI followed with "Thanks for confirming, all set!" because
-        // `aiStopOnPriceAgreed` defaulted falsy. Switched to `!== false` to
-        // match every other terminal-intent stop (aiStopOnOptOut,
-        // aiStopOnBooked, aiStopOnDeferral), and folded wants_live_contact
-        // into the same gate — both are "human takes over now" signals.
-        if ((intent === 'agreed' || intent === 'wants_live_contact')
-            && aiRules.aiStopOnPriceAgreed !== false) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — classifier=${intent} conf=${classification.confidence.toFixed(2)} (manager paged)`);
+        // SYSTEM EVENT — customer explicitly requested live contact.
+        // Always stops the AI + always notifies (handoff alert SMS already
+        // fired via maybeFireHandoffAlert above). NOT gated by any
+        // per-goal Continue/Stop toggle — the customer asked for a human
+        // and muting that signal would be hostile.
+        //
+        // Split from the `agreed` path in V2 (2026-06-12). Previously
+        // these two intents shared the `aiStopOnPriceAgreed !== false`
+        // gate, which meant Price="Continue AI + Notify Team" silently
+        // disabled the wants_live_contact stop too. That coupling
+        // contradicted the V2 spec where wants_live_contact is a
+        // non-configurable system event.
+        if (intent === 'wants_live_contact') {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — system event: wants_live_contact (conf=${classification.confidence.toFixed(2)})`);
           if (lead?.threadId) {
-            const isWantsLive = intent === 'wants_live_contact';
             await this.conversationRuntime.setState(lead.threadId, {
               aiStatus: 'stopped_booked',
-              aiStatusReason: isWantsLive
-                ? AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
-                : AI_STATUS_REASONS.CLASSIFIER_AGREED,
-              conversationState: isWantsLive ? 'human_handling' : 'booked_in_lb',
-              conversationStateReason: isWantsLive
-                ? CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
-                : CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+            });
+          }
+          return;
+        }
+
+        // PRICE GOAL COMPLETION — customer agrees on price. Stop is
+        // gated by `aiStopOnPriceAgreed` (the Price goal's Continue/Stop
+        // radio in V2). Default true preserves the Savanna 2026-05-13
+        // regression fix: customer said "Yes, I already confirmed the
+        // cleaning for 5/21 at 10am" and the AI followed up with
+        // "Thanks for confirming, all set!" because the field defaulted
+        // falsy. `!== false` matches every other terminal-intent stop.
+        if (intent === 'agreed' && aiRules.aiStopOnPriceAgreed !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — Price goal complete (agreed) conf=${classification.confidence.toFixed(2)}`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_AGREED,
+              conversationState: 'booked_in_lb',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+            });
+          }
+          return;
+        }
+        // V2 goal completion stops (2026-06-12).
+        //
+        // The Conversation Goals V2 model gives each per-goal completion
+        // its own "Continue AI + Notify Team" vs "Stop AI + Notify Team"
+        // choice. Price already had this via `aiStopOnPriceAgreed` above.
+        // Qualify and Phone get the same shape via two new JSON keys:
+        //
+        //   goalQualifyStopOnComplete  — stop after handoff.reason='qualification_complete'
+        //   goalPhoneStopOnComplete    — stop after handoff.reason='provided_phone_number'
+        //
+        // Both default to undefined/false — existing tenants whose
+        // followUpSettingsJson doesn't carry the keys see no behavior
+        // change. The handoff alert SMS fires independently via
+        // maybeFireHandoffAlert earlier; these gates only decide whether
+        // the AI ALSO falls silent after that event.
+        const isQualifyComplete = classification.handoff?.shouldHandoff
+          && classification.handoff.reason === 'qualification_complete'
+          && (aiRules as any).goalQualifyStopOnComplete === true;
+        if (isQualifyComplete) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.GOAL_QUALIFY_COMPLETE,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_QUALIFY_COMPLETE,
+            });
+          }
+          return;
+        }
+        const isPhoneComplete = classification.handoff?.shouldHandoff
+          && classification.handoff.reason === 'provided_phone_number'
+          && (aiRules as any).goalPhoneStopOnComplete === true;
+        if (isPhoneComplete) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Phone goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.GOAL_PHONE_COMPLETE,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_PHONE_COMPLETE,
             });
           }
           return;
@@ -1928,36 +1989,34 @@ export class AutomationService implements OnModuleInit {
           } catch { /* invalid JSON */ }
         }
 
-        // PRIMARY INSTRUCTION — strategy prompt resolution.
-        // Priority (highest to lowest):
-        //   1. rule.replyMode='price' → force Price strategy (legacy Instant
-        //      Reply override; future UI no longer sets this but old rows still might)
-        //   2. rule.promptTemplate.content → explicit per-rule template (e.g. user
-        //      edits the First Reply prompt for this specific automation)
-        //   3. accountFollowUpStrategyPrompt → user's customized text for the
-        //      central strategy (when they edited the AI Strategy preview)
-        //   4. STRATEGY_PROMPTS[accountFollowUpStrategy] → central strategy default
-        //   5. rule.aiSystemPrompt → legacy free-form prompt on the rule
-        //   6. STRATEGY_PROMPTS.hybrid → ultimate fallback
-        const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
+        // PRIMARY INSTRUCTION — delegated to the shared goal resolver so
+        // Lead Arrives + AI Conversation share one priority chain with the
+        // follow-up generator. The resolver also auto-routes when the
+        // account goal is `auto` (calls suggestStrategy on the thread).
+        const { resolveActiveGoal } = require('../ai/goal-resolver');
         const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
-        let strategyPrompt: string;
-        let effectiveStrategyKey: string | undefined;
-        if (ruleReplyMode === 'price') {
-          strategyPrompt = STRATEGY_PROMPTS.price;
-          effectiveStrategyKey = 'price';
-        } else if (rule.promptTemplate?.content) {
-          strategyPrompt = rule.promptTemplate.content;
-        } else if (accountFollowUpStrategyPrompt) {
-          strategyPrompt = accountFollowUpStrategyPrompt;
-          effectiveStrategyKey = accountFollowUpStrategy;
-        } else if (accountFollowUpStrategy && accountFollowUpStrategy !== 'auto' && STRATEGY_PROMPTS[accountFollowUpStrategy]) {
-          strategyPrompt = STRATEGY_PROMPTS[accountFollowUpStrategy];
-          effectiveStrategyKey = accountFollowUpStrategy;
-        } else {
-          strategyPrompt = rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
-          if (!rule.aiSystemPrompt) effectiveStrategyKey = 'hybrid';
-        }
+        const resolvedGoal = await resolveActiveGoal(
+          {
+            ruleForcePrice: ruleReplyMode === 'price',
+            rulePromptOverride: rule.promptTemplate?.content ?? null,
+            ruleLegacyPrompt: rule.aiSystemPrompt ?? null,
+            threadActiveStrategy: threadCtx?.threadState?.activeStrategy ?? null,
+            accountFollowUpStrategy,
+            accountFollowUpStrategyPrompt,
+            conversationId: lead.threadId ?? null,
+          },
+          {
+            suggestStrategy: (id: string) =>
+              this.conversationContext.suggestStrategy(id),
+          },
+        );
+        const strategyPrompt: string = resolvedGoal.strategyPrompt;
+        const effectiveStrategyKey: string | undefined =
+          resolvedGoal.goalKey ?? undefined;
+        this.logger.log(
+          `[AI] Goal resolved for ${pendingId}: ${effectiveStrategyKey ?? '(rule prompt)'} ` +
+          `via ${resolvedGoal.source} — ${resolvedGoal.reason}`,
+        );
         // Qualify never quotes — suppress the pricing REFERENCE so the model
         // isn't tempted to volunteer a number after the customer answers a
         // qualifying question.

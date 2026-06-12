@@ -99,7 +99,7 @@ function GlobalAiPromptCard() {
       {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p style={{ fontSize: 12, color: 'var(--lb-ink-5)', margin: 0 }}>
-            Applied to all AI auto-replies. Strategy prompts (Hybrid, Price-Anchor, etc.) are added on top.
+            Applied to all AI auto-replies. The active Conversation Goal prompt is added on top.
           </p>
           <textarea
             value={prompt}

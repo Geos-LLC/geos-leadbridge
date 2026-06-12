@@ -359,7 +359,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                   value={opts.aiDeferralDelay}
                   options={DEFERRAL_DELAY_OPTIONS}
                   onChange={v => setOpts(o => ({ ...o, aiDeferralDelay: v }))}
-                  hint="AI generates this check-in from the conversation using your strategy."
+                  hint="AI generates this check-in from the conversation using your Conversation Goal."
                 />
               )}
             </FinetuneCard>
@@ -381,7 +381,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                   value={opts.aiHiredCompetitorDelay}
                   options={HIRED_DELAY_OPTIONS}
                   onChange={v => setOpts(o => ({ ...o, aiHiredCompetitorDelay: v }))}
-                  hint="AI generates this re-engage from the conversation using your strategy."
+                  hint="AI generates this re-engage from the conversation using your Conversation Goal."
                 />
               )}
             </FinetuneCard>

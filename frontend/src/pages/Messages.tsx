@@ -2933,7 +2933,7 @@ export function Messages() {
             {/* AI Strategy Details — shown when a strategy button is clicked */}
             {activeStrategyKey && strategySuggestion && (
               <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Strategy</h4>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Conversation Goal</h4>
                 <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 space-y-2">
                   {/* Active strategy header */}
                   <div className="flex items-center gap-2">

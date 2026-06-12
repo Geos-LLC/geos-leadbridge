@@ -70,6 +70,7 @@ function buildSvc() {
       setHandoffRequested: jest.fn().mockResolvedValue(undefined),
       resolveHandoff: jest.fn().mockResolvedValue(undefined),
     } as any,
+    /* bookingOrchestrator */ {} as any,
   );
 
   return { svc, writeStatus };
@@ -306,6 +307,7 @@ describe('AutomationService.maybeFireHandoffAlert', () => {
         setHandoffRequested: jest.fn().mockResolvedValue(undefined),
         resolveHandoff: jest.fn().mockResolvedValue(undefined),
       } as any,
+      /* bookingOrchestrator */ {} as any,
     );
     return { svc, sendHandoffAlert, prisma };
   }

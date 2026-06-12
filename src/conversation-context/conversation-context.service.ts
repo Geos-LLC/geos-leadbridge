@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import OpenAI from 'openai';
 import { findBackfillCandidate } from './content-match.util';
+import { routeFromCustomerMessage } from './goal-router';
 
 /** Input when recording a new message in the thread */
 export interface RecordMessageInput {
@@ -631,8 +632,23 @@ export class ConversationContextService {
   }
 
   /**
-   * Suggest the best strategy based on thread state (rule-based v1).
-   * Returns suggested strategy key, reason, and confidence.
+   * Suggest the Conversation Goal Auto should resolve to for this thread.
+   *
+   * Rewritten 2026-06-12 to match the 4-goal user-facing model
+   * (auto / price / qualify / phone). The previous score-based router had
+   * three audited defects: ~89% of outputs landed on hidden legacy goals
+   * (hybrid / convert), Phone was unreachable, and the
+   * `customerIntent === 'price_shopping'` branch was dead code. Empirical
+   * data also showed the `priceDiscussed` sticky branch helped 0/532 and
+   * hurt 0/532 — only rotating outputs between hidden goals — so it was
+   * dropped. See goal-router.ts for the new pure routing function and
+   * the audit reports for full empirical justification.
+   *
+   * Returns `null` when the conversation has no ThreadContext (matches the
+   * pre-rewrite contract). Otherwise routes via `routeFromCustomerMessage`
+   * — which only ever emits 'phone' | 'price' | 'qualify'. The resolver
+   * (`resolveActiveGoal`) still normalizes any legacy 'hybrid' / 'convert'
+   * leaks from any other source as a belt-and-suspenders safety net.
    */
   async suggestStrategy(conversationId: string): Promise<{
     suggested: string;
@@ -641,92 +657,42 @@ export class ConversationContextService {
     scores: Record<string, number>;
     threadState: Record<string, any>;
   } | null> {
-    const ctx = await this.getContext(conversationId, 3);
+    // Pull a bit more history than the old `3` so the latest customer
+    // message is reliably included even when the AI has just sent a couple
+    // of follow-ups. The router itself only reads one message — the most
+    // recent customer one — but we need it to be present in the window.
+    const ctx = await this.getContext(conversationId, 10);
     if (!ctx) return null;
 
-    const state = {
-      stage: ctx.stage,
-      customerIntent: ctx.customerIntent,
-      engagementLevel: ctx.engagementLevel,
-      priceDiscussed: ctx.priceDiscussed,
-      priceRange: ctx.priceRange,
-      missingFields: ctx.missingFields,
-      lastQuestionAsked: ctx.lastQuestionAsked,
-      awaitingCustomerReply: ctx.awaitingCustomerReply,
-      followUpCount: ctx.followUpCount,
-      totalMessages: ctx.totalMessages,
-      activeStrategy: ctx.activeStrategy,
-    };
+    // Find the most recent customer message in the loaded window. Falls
+    // through to empty when none exists (silent follow-up scenario) — the
+    // pure router defaults to 'qualify' in that case, which matches the
+    // post-narrow user-facing default.
+    const recentCustomerMessages = (ctx.recentMessages ?? []).filter(m => m.sender === 'customer');
+    const latestCustomerMessage = recentCustomerMessages.length > 0
+      ? recentCustomerMessages[recentCustomerMessages.length - 1].content
+      : '';
 
-    // Score each strategy based on thread state
-    const scores: Record<string, number> = { hybrid: 0.5, price: 0.3, qualify: 0.3, convert: 0.2, phone: 0.15 };
-
-    // Engagement signals
-    if (ctx.engagementLevel === 'hot') {
-      scores.convert = 0.85;
-      scores.hybrid = 0.5;
-      scores.price = 0.4;
-      scores.qualify = 0.25;
-    } else if (ctx.engagementLevel === 'cold') {
-      scores.price = 0.6;
-      scores.hybrid = 0.45;
-      scores.convert = 0.15;
-      scores.qualify = 0.3;
-    }
-
-    // Price shopping + no price discussed
-    if (ctx.customerIntent === 'price_shopping' && !ctx.priceDiscussed) {
-      scores.price = Math.max(scores.price, 0.8);
-      scores.hybrid = Math.max(scores.hybrid, 0.55);
-    }
-
-    // Missing fields boost qualify
-    if (ctx.missingFields.length >= 2) {
-      scores.qualify = Math.max(scores.qualify, 0.75);
-      scores.hybrid = Math.max(scores.hybrid, 0.5);
-    } else if (ctx.missingFields.length === 1) {
-      scores.qualify = Math.max(scores.qualify, 0.5);
-    }
-
-    // Price already discussed → convert
-    if (ctx.stage === 'quoting' || ctx.priceDiscussed) {
-      scores.convert = Math.max(scores.convert, 0.7);
-      scores.price = Math.min(scores.price, 0.35);
-    }
-
-    // Phone escalation: high intent + many messages or complex conversation
-    if (ctx.engagementLevel === 'hot' && ctx.totalMessages >= 6) {
-      scores.phone = Math.max(scores.phone, 0.65);
-    }
-    if (ctx.missingFields.length >= 3) {
-      scores.phone = Math.max(scores.phone, 0.55);
-    }
-
-    // Find the best strategy
-    const suggested = Object.entries(scores).reduce((best, [key, score]) =>
-      score > best.score ? { key, score } : best,
-      { key: 'hybrid', score: 0 },
-    ).key;
-
-    // Generate reason for the top suggestion
-    const reasons: Record<string, string> = {
-      convert: ctx.engagementLevel === 'hot'
-        ? 'Customer shows strong buying signals — focus on booking or next step.'
-        : 'Pricing already discussed — shift focus toward booking.',
-      price: ctx.customerIntent === 'price_shopping'
-        ? 'Customer is comparing prices and no pricing has been shared yet.'
-        : 'Lead with value/pricing to engage the customer.',
-      qualify: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
-      hybrid: 'Balanced approach with pricing and qualification.',
-      phone: 'Complex job or high-intent lead — escalate to phone for accurate quoting.',
-    };
+    const routed = routeFromCustomerMessage(latestCustomerMessage);
 
     return {
-      suggested,
-      reason: reasons[suggested] || reasons.hybrid,
-      confidence: scores[suggested],
-      scores,
-      threadState: state,
+      suggested: routed.suggested,
+      reason: routed.reason,
+      confidence: routed.confidence,
+      scores: routed.scores,
+      threadState: {
+        stage: ctx.stage,
+        customerIntent: ctx.customerIntent,
+        engagementLevel: ctx.engagementLevel,
+        priceDiscussed: ctx.priceDiscussed,
+        priceRange: ctx.priceRange,
+        missingFields: ctx.missingFields,
+        lastQuestionAsked: ctx.lastQuestionAsked,
+        awaitingCustomerReply: ctx.awaitingCustomerReply,
+        followUpCount: ctx.followUpCount,
+        totalMessages: ctx.totalMessages,
+        activeStrategy: ctx.activeStrategy,
+      },
     };
   }
 

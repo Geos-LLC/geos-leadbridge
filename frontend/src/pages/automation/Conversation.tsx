@@ -29,6 +29,14 @@ type CachedConvSettings = {
   stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
   qualificationRequiredFields: string[];
+  // V2 per-goal completion stops (2026-06-12). Each Conversation Goal
+  // owns its own "Stop AI + Notify Team" choice. Price reuses the
+  // existing `aiStopOnPriceAgreed` field (stopRules.price_agreed here).
+  // Qualify + Phone get their own new JSON keys
+  // (`goalQualifyStopOnComplete` / `goalPhoneStopOnComplete`) — both
+  // default false so existing tenants behave identically.
+  qualifyStopOnComplete: boolean;
+  phoneStopOnComplete: boolean;
 };
 const convCache = new Map<string, CachedConvSettings>();
 
@@ -120,6 +128,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [qualificationRequiredFields, setQualificationRequiredFields] =
     useState<string[]>(QUALIFICATION_DEFAULT_FIELDS);
 
+  // V2 per-goal completion stops. Default false: existing tenants
+  // unaffected. Backend gates in automation.service treat undefined as
+  // false too (no behavior change for accounts without the key).
+  const [qualifyStopOnComplete, setQualifyStopOnComplete] = useState(false);
+  const [phoneStopOnComplete, setPhoneStopOnComplete] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -138,7 +152,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'strategy' | 'priceMode' | 'availability'
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
-    | 'qualificationRequiredFields';
+    | 'qualificationRequiredFields'
+    | 'qualifyStopOnComplete' | 'phoneStopOnComplete';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
   useEffect(() => {
@@ -214,6 +229,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
       },
       qualificationRequiredFields: requiredFields,
+      // V2 goal completion stops. Missing key → default false. The new
+      // backend gates in automation.service.ts check `=== true` strictly,
+      // so undefined or false both mean "Continue AI + Notify Team".
+      qualifyStopOnComplete: !!s?.goalQualifyStopOnComplete,
+      phoneStopOnComplete:   !!s?.goalPhoneStopOnComplete,
     };
   };
 
@@ -229,6 +249,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(first.stopRules);
         setTakeover(first.takeover);
         setQualificationRequiredFields(first.qualificationRequiredFields);
+        setQualifyStopOnComplete(first.qualifyStopOnComplete);
+        setPhoneStopOnComplete(first.phoneStopOnComplete);
       }
     } else {
       const cached = convCache.get(accountId);
@@ -239,6 +261,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(cached.stopRules);
         setTakeover(cached.takeover);
         setQualificationRequiredFields(cached.qualificationRequiredFields);
+        setQualifyStopOnComplete(cached.qualifyStopOnComplete);
+        setPhoneStopOnComplete(cached.phoneStopOnComplete);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -267,6 +291,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setStopRules(parsed.stopRules);
             setTakeover(parsed.takeover);
             setQualificationRequiredFields(parsed.qualificationRequiredFields);
+            setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
+            setPhoneStopOnComplete(parsed.phoneStopOnComplete);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
@@ -286,6 +312,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setStopRules(parsed.stopRules);
               setTakeover(parsed.takeover);
               setQualificationRequiredFields(parsed.qualificationRequiredFields);
+              setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
+              setPhoneStopOnComplete(parsed.phoneStopOnComplete);
             }
           }
         })
@@ -323,6 +351,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     if (fields.has('qualificationRequiredFields')) {
       payload.qualificationV2 = { requiredFields: qualificationRequiredFields };
     }
+    // V2 goal completion stops — Qualify + Phone goals each carry their
+    // own "Stop AI + Notify Team" choice as a new top-level JSON key.
+    // Backend reads these via aiRules.goalQualifyStopOnComplete /
+    // .goalPhoneStopOnComplete (see automation.service handleCustomerReply).
+    // Price keeps writing aiStopOnPriceAgreed via stopRules.price_agreed.
+    if (fields.has('qualifyStopOnComplete')) payload.goalQualifyStopOnComplete = qualifyStopOnComplete;
+    if (fields.has('phoneStopOnComplete'))   payload.goalPhoneStopOnComplete   = phoneStopOnComplete;
 
     // Optimistic cache update — merge ONLY the changed fields onto each
     // account's existing cached values. Don't replace the whole object, or
@@ -331,7 +366,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     targets.forEach(id => {
       const prev = convCache.get(id);
       if (!prev) {
-        convCache.set(id, { strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields });
+        convCache.set(id, {
+          strategy, priceMode, availability,
+          stopRules, takeover, qualificationRequiredFields,
+          qualifyStopOnComplete, phoneStopOnComplete,
+        });
         return;
       }
       const next: CachedConvSettings = { ...prev };
@@ -354,6 +393,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (fields.has('qualificationRequiredFields')) {
         next.qualificationRequiredFields = qualificationRequiredFields;
       }
+      if (fields.has('qualifyStopOnComplete')) next.qualifyStopOnComplete = qualifyStopOnComplete;
+      if (fields.has('phoneStopOnComplete'))   next.phoneStopOnComplete   = phoneStopOnComplete;
       convCache.set(id, next);
     });
 
@@ -448,7 +489,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields]);
+  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields, qualifyStopOnComplete, phoneStopOnComplete]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -488,24 +529,26 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setQualificationRequiredFields([...catalogPart, ...preservedPart]);
   };
 
-  // Batch setters — used by the simplified "When goal is reached" radio so
-  // one click can flip multiple underlying toggles in a single auto-save.
-  // The radio mode preserves: not_contacted (opt-out compliance, ALWAYS on),
-  // done (terminal-status stop, ALWAYS on), and all 5 takeover triggers
-  // (always notify). It only differs aiStopOnBooked + aiStopOnPriceAgreed.
-  const setStopBatch = (next: Partial<typeof stopRules>) => {
+  // V2 per-goal "Stop AI on completion" setters. Each goal owns ONE field
+  // — no global fan-out — so picking Stop on Phone doesn't accidentally
+  // flip Price's behavior. Price still wires through stopRules.price_agreed
+  // (aiStopOnPriceAgreed) — see GoalSetupCard for the per-goal radio prop.
+  const onQualifyStop = (v: boolean) => {
     dirtyRef.current = true;
-    (Object.keys(next) as (keyof typeof stopRules)[]).forEach(k => {
-      if (next[k] !== stopRules[k]) dirtyFieldsRef.current.add(`stopRules.${k}` as DirtyField);
-    });
-    setStopRules({ ...stopRules, ...next });
+    dirtyFieldsRef.current.add('qualifyStopOnComplete');
+    setQualifyStopOnComplete(v);
   };
-  const setTakeoverBatch = (next: Partial<typeof takeover>) => {
+  const onPhoneStop = (v: boolean) => {
     dirtyRef.current = true;
-    (Object.keys(next) as (keyof typeof takeover)[]).forEach(k => {
-      if (next[k] !== takeover[k]) dirtyFieldsRef.current.add(`takeover.${k}` as DirtyField);
-    });
-    setTakeover({ ...takeover, ...next });
+    dirtyFieldsRef.current.add('phoneStopOnComplete');
+    setPhoneStopOnComplete(v);
+  };
+  // Price still flips the existing aiStopOnPriceAgreed via stopRules.
+  // Wrapper here so the per-goal radio prop signature stays uniform.
+  const onPriceStop = (v: boolean) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('stopRules.price_agreed');
+    setStopRules({ ...stopRules, price_agreed: v });
   };
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
@@ -609,12 +652,16 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         priceMode={priceMode}
         onPriceMode={onPriceMode}
         mixedPriceMode={mixedPriceMode}
-        stopRules={stopRules}
-        takeover={takeover}
-        setStopBatch={setStopBatch}
-        setTakeoverBatch={setTakeoverBatch}
         qualificationRequiredFields={qualificationRequiredFields}
         toggleQualificationField={toggleQualificationField}
+        // V2 per-goal completion stops. Each goal radio writes ONE field
+        // (no global fan-out). Auto has no completion radio at all.
+        priceStop={stopRules.price_agreed}
+        qualifyStop={qualifyStopOnComplete}
+        phoneStop={phoneStopOnComplete}
+        onPriceStop={onPriceStop}
+        onQualifyStop={onQualifyStop}
+        onPhoneStop={onPhoneStop}
       />
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
@@ -795,21 +842,26 @@ function FlowArrow() {
 
 function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
-  stopRules, takeover, setStopBatch, setTakeoverBatch,
   qualificationRequiredFields, toggleQualificationField,
+  priceStop, qualifyStop, phoneStop,
+  onPriceStop, onQualifyStop, onPhoneStop,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
   onPriceMode: (v: 'range' | 'exact') => void;
   mixedPriceMode: { mixed: boolean; tooltip?: string };
-  stopRules: StopRulesState;
-  takeover: TakeoverState;
-  setStopBatch: (next: Partial<StopRulesState>) => void;
-  setTakeoverBatch: (next: Partial<TakeoverState>) => void;
   /** Sanitized list of selected snake_case field keys, in catalog order. */
   qualificationRequiredFields: string[];
   /** Single-field toggle. Owns dirty-tracking + canonical sort. */
   toggleQualificationField: (key: string) => void;
+  /** V2 per-goal Stop-on-completion booleans. true = Stop AI, false = Continue. */
+  priceStop: boolean;
+  qualifyStop: boolean;
+  phoneStop: boolean;
+  /** Each setter writes ONLY that goal's underlying field. */
+  onPriceStop: (v: boolean) => void;
+  onQualifyStop: (v: boolean) => void;
+  onPhoneStop: (v: boolean) => void;
 }) {
 
   // Display metadata for the 4 visible goals. Legacy 'hybrid' / 'convert'
@@ -838,12 +890,12 @@ function GoalSetupCard({
   // Backend gate in qualification-context.ts mirrors this: only qualify
   // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
   const showRequiredInfo = strategy === 'qualify';
-  // When-Goal-Is-Reached radio appears on every goal. Auto inherits the
-  // completion event of whichever sub-goal AI picks (price quote, all
-  // qualification fields collected, phone number provided), and the radio
-  // still controls whether AI keeps replying after that event or hands
-  // off to the team. Writes to the same global stop/handoff fields.
-  const showWhenReached = strategy === 'auto' || strategy === 'price' || strategy === 'qualify' || strategy === 'phone';
+  // V2: When-Goal-Is-Reached radio appears on the 3 concrete goals only.
+  // Auto has NO completion criteria (per spec) — AI inherits whichever
+  // sub-goal it picks each turn, so a single Continue/Stop choice
+  // wouldn't apply cleanly. Per-goal completion semantics are owned by
+  // each goal individually.
+  const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'phone';
 
   return (
     <SectionCard padding="22px 24px 24px">
@@ -992,15 +1044,25 @@ function GoalSetupCard({
         </>
       )}
 
-      {/* Per-goal "When Goal Is Reached" radio. Writes the same global
-          stop/handoff fields under the hood; fine-grained tuning lives in
-          Advanced Rules below. */}
+      {/* Per-goal "When Goal Is Reached" radio. V2: each goal owns ONE
+          field — no global fan-out. Price → aiStopOnPriceAgreed.
+          Qualify → goalQualifyStopOnComplete (new). Phone →
+          goalPhoneStopOnComplete (new). Backend gates honor each
+          independently; the Notify-Team side is implicit (handoff alert
+          fires on classifier signal regardless of this choice). */}
       {showWhenReached && (
         <PerGoalWhenReachedRadio
-          stopRules={stopRules}
-          takeover={takeover}
-          setStopBatch={setStopBatch}
-          setTakeoverBatch={setTakeoverBatch}
+          goalKey={strategy as 'price' | 'qualify' | 'phone'}
+          stopValue={
+            strategy === 'price'   ? priceStop :
+            strategy === 'qualify' ? qualifyStop :
+            phoneStop
+          }
+          setStopValue={
+            strategy === 'price'   ? onPriceStop :
+            strategy === 'qualify' ? onQualifyStop :
+            onPhoneStop
+          }
         />
       )}
     </SectionCard>
@@ -1008,69 +1070,52 @@ function GoalSetupCard({
 }
 
 // ─── Per-goal When-Goal-Is-Reached radio ──────────────────────────────────
-// Inline two-option radio embedded inside GoalSetupCard. Mirrors the same
-// preset detection used by AdvancedRulesCard so the two surfaces stay in
-// agreement (and switching modes from either surface flips the same global
-// fields).
+// V2: each Conversation Goal owns ONE backend stop flag — no global toggle
+// fan-out. Caller picks which goal this radio represents and passes the
+// corresponding boolean + setter. Notify-Team is implicit: the handoff
+// alert SMS fires on the classifier signal regardless of this choice.
 function PerGoalWhenReachedRadio({
-  stopRules, takeover, setStopBatch, setTakeoverBatch,
+  goalKey,
+  stopValue,
+  setStopValue,
 }: {
-  stopRules: StopRulesState;
-  takeover: TakeoverState;
-  setStopBatch: (next: Partial<StopRulesState>) => void;
-  setTakeoverBatch: (next: Partial<TakeoverState>) => void;
+  goalKey: 'price' | 'qualify' | 'phone';
+  /** true = "Stop AI + Notify Team", false = "Continue AI + Notify Team". */
+  stopValue: boolean;
+  setStopValue: (v: boolean) => void;
 }) {
-  const allTakeoverOn = takeover.ready && takeover.live && takeover.phone && takeover.sqft && takeover.qualified;
-  const isContinueMode = !stopRules.booked && !stopRules.price_agreed && allTakeoverOn;
-  const isStopMode     =  stopRules.booked &&  stopRules.price_agreed && allTakeoverOn;
-  const isCustom = !isContinueMode && !isStopMode;
-
-  const applyContinue = () => {
-    setStopBatch({ booked: false, price_agreed: false });
-    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
-  };
-  const applyStop = () => {
-    setStopBatch({ booked: true, price_agreed: true });
-    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
+  const completionLabel: Record<'price' | 'qualify' | 'phone', string> = {
+    price:   'When the customer agrees with the price',
+    qualify: 'When all required fields are collected',
+    phone:   'When the customer provides a phone number',
   };
 
   return (
     <div>
       <div style={{
         fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
-        letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10,
+        letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 6,
         fontFamily: 'var(--lb-font-mono)',
       }}>
         When Goal Is Reached
       </div>
+      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginBottom: 10 }}>
+        {completionLabel[goalKey]}:
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <OptionCard
-          selected={isContinueMode}
-          onClick={applyContinue}
+          selected={!stopValue}
+          onClick={() => setStopValue(false)}
           title="Continue AI + Notify Team"
           body="AI keeps replying after the goal is reached. Your team is notified."
         />
         <OptionCard
-          selected={isStopMode}
-          onClick={applyStop}
+          selected={stopValue}
+          onClick={() => setStopValue(true)}
           title="Stop AI + Notify Team"
           body="AI stops once the goal is reached. Your team takes over."
         />
       </div>
-      {isCustom && (
-        <div style={{
-          marginTop: 10,
-          padding: '8px 12px',
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          borderRadius: 8,
-          fontSize: 12, color: '#92400e',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <AlertTriangle size={13} />
-          <span><strong>Custom Configuration</strong> — your current toggle mix doesn't match either preset. Adjust under Advanced Rules below.</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -1133,18 +1178,18 @@ function AdvancedRulesCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Advanced legacy controls
+              Legacy compatibility settings
             </div>
             <span style={{
               fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
               background: '#fef3c7', color: '#92400e',
               letterSpacing: 0.05, textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
             }}>
-              Advanced
+              Legacy
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            These settings are preserved for compatibility and support. Most users should manage AI behavior through Conversation Goals above. Toggles below back the simplified <em>When Goal Is Reached</em> radio on each Goal — flipping individual rows here produces a Custom Configuration.
+            These settings are preserved for compatibility. Most users should configure Conversation Goals above. The raw toggles below back the legacy Stop Rules + Human Takeover behavior and remain reachable for support and power users via <code>?advanced=1</code>.
           </div>
         </div>
       </div>
