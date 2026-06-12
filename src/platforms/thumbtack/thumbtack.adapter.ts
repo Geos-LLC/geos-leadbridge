@@ -25,6 +25,16 @@ import {
   QuoteStatus,
 } from '../../common/dto/normalized.dto';
 
+function normalizeE164(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (digits.length > 10) return `+${digits}`;
+  return null;
+}
+
 @Injectable()
 export class ThumbtackAdapter implements IPlatformAdapter {
   private readonly logger = new Logger(ThumbtackAdapter.name);
@@ -661,12 +671,15 @@ export class ThumbtackAdapter implements IPlatformAdapter {
    * Register a phone number as an associate phone for a Thumbtack business.
    * This allows the phone owner to call customers through Thumbtack's proxy
    * number without needing an access code.
+   *
+   * Prefer `ensureAssociatePhone` for idempotent registration — it skips the
+   * POST when the number is already on the business.
    */
   async registerAssociatePhone(
     credentials: PlatformCredentials,
     businessId: string,
     phoneNumber: string,
-    label?: string,
+    name?: string,
   ): Promise<{ phoneNumberId: string }> {
     try {
       this.logger.log(`Registering associate phone ${phoneNumber} for business ${businessId}`);
@@ -674,7 +687,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         `/businesses/${businessId}/associate-phone-numbers`,
         {
           phoneNumber,
-          label: label || 'LeadBridge Agent',
+          name: name || 'LeadBridge Agent',
         },
         {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
@@ -695,6 +708,38 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       this.logger.error(`Error registering associate phone — status=${status} data=${JSON.stringify(data)}`);
       throw new Error(`Failed to register associate phone: ${data?.detail || error.message}`);
     }
+  }
+
+  /**
+   * Register `phoneNumber` as an associate on the business only if it isn't
+   * already there. Lists first, E.164-normalizes for comparison, then POSTs.
+   * Safe to call repeatedly — duplicates and rate-limited POSTs are avoided.
+   */
+  async ensureAssociatePhone(
+    credentials: PlatformCredentials,
+    businessId: string,
+    phoneNumber: string,
+    name?: string,
+  ): Promise<{ phoneNumberId: string; registered: boolean }> {
+    const target = normalizeE164(phoneNumber);
+    if (!target) {
+      throw new Error(`Invalid phone for associate registration: ${phoneNumber}`);
+    }
+
+    const existing = await this.listAssociatePhones(credentials, businessId);
+    const match = existing.find((p: any) => {
+      const candidate = p?.phoneNumber ?? p?.phone_number ?? p?.phone;
+      return normalizeE164(candidate) === target && !p?.isDeleted;
+    });
+
+    if (match) {
+      const id = match.phoneNumberID || match.phoneNumberId || match.id;
+      this.logger.log(`Associate phone ${target} already on business ${businessId} (id=${id}) — skip POST`);
+      return { phoneNumberId: id, registered: false };
+    }
+
+    const { phoneNumberId } = await this.registerAssociatePhone(credentials, businessId, target, name);
+    return { phoneNumberId, registered: true };
   }
 
   /**

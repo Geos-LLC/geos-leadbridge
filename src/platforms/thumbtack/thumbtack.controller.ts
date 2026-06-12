@@ -838,8 +838,8 @@ export class ThumbtackController {
     if (!account) {
       throw new BadRequestException('Thumbtack account not found');
     }
-    await this.platformService.registerAgentPhoneWithThumbtack(user.id, account.businessId);
-    return { success: true, message: 'Phone registered with Thumbtack' };
+    await this.platformService.syncAccountPhonesToThumbtack(user.id, account.businessId);
+    return { success: true, message: 'Phones registered with Thumbtack' };
   }
 
   /**
