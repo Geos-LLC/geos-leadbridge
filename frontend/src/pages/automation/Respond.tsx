@@ -3,6 +3,7 @@ import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
   Clipboard, Sparkles, User, ArrowRight, PhoneCall,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -729,16 +730,31 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow icon={FileText} iconTone="green" label="SMS Template" noBorder>
-          <InfoTile
-            title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
-            body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
-            badge={{ label: 'Template', tone: 'green' }}
-            tooltip={ctTpl?.content || customerTextRule?.template || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(ctTpl, 'auto-reply')}
-          />
-        </FieldRow>
+        {/* Advanced message template — hidden by default per the Automation
+            Simplification (2026-06-12). Normal users don't need to see or
+            edit the raw SMS template; we send the saved Custom Template at
+            runtime as before. AI SMS generation isn't wired on the backend
+            (NotificationRule has no useAi field — only AutomationRule does),
+            so we don't expose an AI option that would silently fall back to
+            the template. TODO(backend): when NotificationRule gains useAi
+            or the customer-text path goes through AutomationRule, restore
+            the AI/Custom Template radio above this expand and default to AI. */}
+        <AdvancedExpand
+          title="Advanced message template"
+          helper="The pre-written SMS sent when a lead arrives. Most teams don't need to change this."
+          defaultOpen={advancedMode}
+        >
+          <FieldRow icon={FileText} iconTone="green" label="SMS Template" noBorder>
+            <InfoTile
+              title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
+              body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+              badge={{ label: 'Template', tone: 'green' }}
+              tooltip={ctTpl?.content || customerTextRule?.template || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(ctTpl, 'auto-reply')}
+            />
+          </FieldRow>
+        </AdvancedExpand>
       </SettingCard>
 
       {/* Instant Call */}
@@ -807,27 +823,39 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
-          <InfoTile
-            title={whisperTpl?.name || 'CC - Agent Whisper'}
-            body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
-            badge={{ label: 'Template', tone: 'violet' }}
-            tooltip={callSettings?.agentWhisperMessage || whisperTpl?.content || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(whisperTpl, 'call-connect')}
-          />
-        </FieldRow>
+        {/* Advanced call messages — Agent Whisper + Voicemail editors hidden
+            by default per the Automation Simplification (2026-06-12). The
+            default templates work for most teams; power users + support
+            reach the editors here. Runtime is unchanged: the saved
+            template values are still read from callSettings on every
+            call-connect, regardless of whether this section is open. */}
+        <AdvancedExpand
+          title="Advanced call messages"
+          helper="Default call messages work for most teams. Edit only if you need custom wording for the agent whisper or voicemail."
+          defaultOpen={advancedMode}
+        >
+          <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
+            <InfoTile
+              title={whisperTpl?.name || 'CC - Agent Whisper'}
+              body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
+              badge={{ label: 'Template', tone: 'violet' }}
+              tooltip={callSettings?.agentWhisperMessage || whisperTpl?.content || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(whisperTpl, 'call-connect')}
+            />
+          </FieldRow>
 
-        <FieldRow icon={Mic} iconTone="violet" label="Voicemail Message" noBorder>
-          <InfoTile
-            title={voicemailTpl?.name || 'CC - Voicemail TTS'}
-            body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
-            badge={{ label: 'Template', tone: 'violet' }}
-            tooltip={callSettings?.leadVoicemailMessage || voicemailTpl?.content || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(voicemailTpl, 'call-connect')}
-          />
-        </FieldRow>
+          <FieldRow icon={Mic} iconTone="violet" label="Voicemail Message" noBorder>
+            <InfoTile
+              title={voicemailTpl?.name || 'CC - Voicemail TTS'}
+              body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
+              badge={{ label: 'Template', tone: 'violet' }}
+              tooltip={callSettings?.leadVoicemailMessage || voicemailTpl?.content || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(voicemailTpl, 'call-connect')}
+            />
+          </FieldRow>
+        </AdvancedExpand>
       </SettingCard>
 
       <FooterBanner
@@ -864,6 +892,58 @@ function ConnDiagram({ kind }: { kind: 'serial' | 'parallel' }) {
       <User size={14} />
       <ArrowRight size={12} style={{ color: 'var(--lb-ink-6)' }} />
       <User size={14} />
+    </div>
+  );
+}
+
+/**
+ * Collapsible "Advanced" section for Instant Text + Instant Call.
+ *
+ * The Automation Simplification (2026-06-12) hides the SMS template tile
+ * and the Agent Whisper + Voicemail editors from the normal First Reply
+ * page. Power users + support reach them via this expand. Auto-opens when
+ * ?advanced=1 or ?debug=1 is in the URL (driven by the parent `defaultOpen`).
+ *
+ * Local React state controls open/close so a user who manually expanded
+ * the section in a normal session keeps it open while they edit, without
+ * needing the URL param.
+ */
+function AdvancedExpand({
+  title, helper, defaultOpen, children,
+}: {
+  title: string;
+  helper: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState<boolean>(!!defaultOpen);
+  return (
+    <div style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%',
+          padding: '12px 0',
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-2)' }}>{title}</div>
+          {helper && (
+            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.5 }}>
+              {helper}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'inline-flex', color: 'var(--lb-ink-5)', flexShrink: 0, marginLeft: 12 }}>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </div>
+      </button>
+      {open && <div style={{ paddingBottom: 4 }}>{children}</div>}
     </div>
   );
 }
