@@ -2054,6 +2054,25 @@ export class AutomationService implements OnModuleInit {
             })
           : '';
 
+        // REFERENCE: Qualification required fields (Price / Qualify only).
+        // Read from followUpSettingsJson.qualificationV2.requiredFields. The
+        // helper returns '' when the strategy doesn't warrant it OR when the
+        // tenant has no saved fields — both cases preserve legacy behavior
+        // (the qualify-strategy prompt's hardcoded priority continues to drive
+        // the conversation). See src/ai/qualification-context.ts.
+        const { buildQualificationBlockForStrategy } = require('../ai/qualification-context');
+        let qualificationRequiredFields: unknown = undefined;
+        if (account?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(account.followUpSettingsJson);
+            qualificationRequiredFields = s?.qualificationV2?.requiredFields;
+          } catch { /* invalid JSON */ }
+        }
+        const qualificationBlock: string = buildQualificationBlockForStrategy(
+          effectiveStrategyKey,
+          qualificationRequiredFields,
+        );
+
         // Generate reply via OpenAI. Pass current time + timezone so the model
         // knows whether previously offered slots have passed and how big the
         // gaps between messages are.
@@ -2072,6 +2091,7 @@ export class AutomationService implements OnModuleInit {
           pricingBlock,
           faqBlock,
           playbookBlock: playbookBlock || undefined,
+          qualificationBlock: qualificationBlock || undefined,
           conversationHistory,
           leadDetails,
           currentTime: new Date(),

@@ -60,6 +60,16 @@ export interface AiReplyContext {
    * user has no instructions AND no toggles produce bullets.
    */
   playbookBlock?: string;
+  /**
+   * REFERENCE — Qualification required fields (Price/Qualify goals only).
+   * Pre-formatted block listing the snake_case field keys the tenant has
+   * marked as required for qualification. Built by the caller from
+   * `followUpSettingsJson.qualificationV2.requiredFields` — only set when
+   * strategy is 'price' or 'qualify' AND the array is non-empty.
+   * Existing accounts without saved fields leave this undefined and AI
+   * keeps the legacy hardcoded priority order from STRATEGY_PROMPTS.
+   */
+  qualificationBlock?: string;
   conversationHistory?: ConversationMessage[];
   leadDetails?: Record<string, string>;
   /** "Now" — defaults to new Date() at generation time. */
@@ -114,6 +124,9 @@ export class AiService {
     }
     if (ctx.urgencyBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: URGENCY ===\n${ctx.urgencyBlock.trim()}`);
+    }
+    if (ctx.qualificationBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===\n${ctx.qualificationBlock.trim()}`);
     }
 
     // Assemble the system prompt with explicit section labels so the model

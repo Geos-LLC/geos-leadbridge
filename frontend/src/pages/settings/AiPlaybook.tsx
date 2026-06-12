@@ -135,22 +135,26 @@ export function SettingsAiPlaybook() {
         </SectionCard>
       )}
 
-      {/* === Cards rendered in Playbook V2.2 order — HOW only ===
-            Workflow-logic sections (Qualification, Booking, Handoff, Phone
-            Call) moved to Automation → AI Conversation → Goal Setup.
-            Their underlying `aiPlaybookV2` keys and BACKEND default prompts
-            are UNCHANGED — the renderer still emits them at runtime, so
-            existing saved customInstructions for the hidden sections keep
-            working. Only the UI cards are removed; data is preserved.
+      {/* === Cards rendered in Playbook V2.3 order — HOW only ===
+            All 8 HOW sections are now visible, since each one's default
+            prompt is still emitted at runtime by the backend renderer.
+            Sections whose WHEN/WHAT is now configured at the Goal level
+            (Qualification, Booking, Human Handoff) carry a
+            "Managed with Conversation Goals, still used by AI." badge so
+            users know where the trigger logic lives — but the HOW textarea
+            below is fully editable because the wording still takes effect.
 
-            Cards rendered (7 total):
+            Cards rendered (10 total):
               1. Business Information
               2. FAQ
               3. Pricing Guidance (with embedded Pricing Table)
-              4. Objection Handling
-              5. Follow-up Tone
-              6. AI Personality & Brand Voice
-              7. Global Custom Instructions */}
+              4. Qualification Guidance     (managed badge)
+              5. Booking Guidance           (managed badge)
+              6. Human Handoff Guidance     (managed badge)
+              7. Objection Handling
+              8. Follow-up Tone
+              9. AI Personality & Brand Voice
+             10. Global Custom Instructions */}
 
       {accounts.length > 0 && <>
         {/* 1. Business Information */}
@@ -176,28 +180,52 @@ export function SettingsAiPlaybook() {
           accountIds={accounts.map(a => a.id)}
         />
 
-        {/* 4. Objection Handling */}
+        {/* 4. Qualification Guidance — Managed by Conversation Goals */}
+        <HowSectionCard
+          section="qualification_guidance"
+          value={v2.qualification_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('qualification_guidance', v)}
+          managedByGoals
+        />
+
+        {/* 5. Booking Guidance — Managed by Conversation Goals */}
+        <HowSectionCard
+          section="booking_guidance"
+          value={v2.booking_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('booking_guidance', v)}
+          managedByGoals
+        />
+
+        {/* 6. Human Handoff Guidance — Managed by Conversation Goals */}
+        <HowSectionCard
+          section="human_handoff_guidance"
+          value={v2.human_handoff_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('human_handoff_guidance', v)}
+          managedByGoals
+        />
+
+        {/* 7. Objection Handling */}
         <HowSectionCard
           section="objection_handling"
           value={v2.objection_handling?.customInstructions ?? ''}
           onChange={v => onSectionChange('objection_handling', v)}
         />
 
-        {/* 5. Follow-up Tone */}
+        {/* 8. Follow-up Tone */}
         <HowSectionCard
           section="followup_tone"
           value={v2.followup_tone?.customInstructions ?? ''}
           onChange={v => onSectionChange('followup_tone', v)}
         />
 
-        {/* 6. AI Personality & Brand Voice */}
+        {/* 9. AI Personality & Brand Voice */}
         <HowSectionCard
           section="personality_brand_voice"
           value={v2.personality_brand_voice?.customInstructions ?? ''}
           onChange={v => onSectionChange('personality_brand_voice', v)}
         />
 
-        {/* 7. Global Custom Instructions — surfaces User.globalAiPrompt */}
+        {/* 10. Global Custom Instructions — surfaces User.globalAiPrompt */}
         <GlobalCustomInstructionsCard />
       </>}
 
@@ -255,11 +283,16 @@ function HelpBlock() {
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange,
+  section, value, onChange, managedByGoals,
 }: {
   section: PlaybookSectionKey;
   value: string;
   onChange: (v: string) => void;
+  /** When true, render a "Managed with Conversation Goals, still used by AI."
+   *  badge at the top of the card. The customInstructions textarea remains
+   *  editable since these prompts continue to take effect at runtime — the
+   *  Goal-level setup in Automation just controls WHEN/WHAT, not HOW. */
+  managedByGoals?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -268,6 +301,7 @@ function HowSectionCard({
       title={PLAYBOOK_SECTION_UI_LABELS[section]}
       subtitle={PLAYBOOK_SECTION_SUBTITLES[section]}
     >
+      {managedByGoals && <ManagedByGoalsBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS[section]} />
       <CustomInstructionsEditor
         value={value}
@@ -276,6 +310,24 @@ function HowSectionCard({
         onRevertToDefault={() => onChange('')}
       />
     </PlaybookSectionShell>
+  );
+}
+
+function ManagedByGoalsBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#eff6ff',
+      border: '1px solid #c3d4ff',
+      borderRadius: 8,
+      fontSize: 12, color: 'var(--lb-accent)',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Info size={13} style={{ flexShrink: 0 }} />
+      <span><strong>Managed with Conversation Goals</strong>, still used by AI. The WHEN/WHAT for this scenario is configured in <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation</a>. The HOW (wording / tone) below still takes effect at runtime.</span>
+    </div>
   );
 }
 

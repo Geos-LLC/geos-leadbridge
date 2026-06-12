@@ -28,10 +28,32 @@ type CachedConvSettings = {
   availability: 'always' | 'hours';
   stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
+  qualificationRequiredFields: string[];
 };
 const convCache = new Map<string, CachedConvSettings>();
 
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+
+// Qualification required-fields catalog. The 3 cleaning defaults are
+// pre-checked when an account has no saved qualificationV2.requiredFields;
+// the user can flip any of the 10 on/off. Snake_case keys match the
+// backend prompt-injection format. Order here = display order in the UI.
+const QUALIFICATION_FIELDS = [
+  { key: 'square_footage', label: 'Square Footage', defaultChecked: true },
+  { key: 'service_date',   label: 'Service Date',   defaultChecked: true },
+  { key: 'phone_number',   label: 'Phone Number',   defaultChecked: true },
+  { key: 'bedrooms',       label: 'Bedrooms',       defaultChecked: false },
+  { key: 'bathrooms',      label: 'Bathrooms',      defaultChecked: false },
+  { key: 'zip_code',       label: 'Zip Code',       defaultChecked: false },
+  { key: 'address',        label: 'Address',        defaultChecked: false },
+  { key: 'frequency',      label: 'Frequency',      defaultChecked: false },
+  { key: 'condition',      label: 'Condition',      defaultChecked: false },
+  { key: 'scope_extras',   label: 'Scope Extras',   defaultChecked: false },
+] as const;
+const QUALIFICATION_DEFAULT_FIELDS = QUALIFICATION_FIELDS
+  .filter(f => f.defaultChecked)
+  .map(f => f.key) as string[];
+const QUALIFICATION_VALID_KEYS: Set<string> = new Set(QUALIFICATION_FIELDS.map(f => f.key));
 
 const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title: string; body: string }[] = [
   { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',    body: 'AI chooses the best goal based on the customer conversation.' },
@@ -69,6 +91,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [takeover, setTakeover] = useState({
     ready: true, live: true, phone: true, sqft: true, qualified: true,
   });
+  // Qualification required fields — stored as a flat array of snake_case
+  // keys at `followUpSettingsJson.qualificationV2.requiredFields`. Used by
+  // Price + Qualify goals; ignored otherwise. When an account has nothing
+  // saved (existing tenants), the runtime falls back to the historical
+  // hardcoded behavior and the UI pre-checks the 3 cleaning defaults.
+  const [qualificationRequiredFields, setQualificationRequiredFields] =
+    useState<string[]>(QUALIFICATION_DEFAULT_FIELDS);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -87,7 +116,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   type DirtyField =
     | 'strategy' | 'priceMode' | 'availability'
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
-    | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified';
+    | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
+    | 'qualificationRequiredFields';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
   useEffect(() => {
@@ -118,26 +148,42 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   }, []);
 
   // Helper: parse a settings payload into our local shape.
-  const parseSettings = (s: any): CachedConvSettings => ({
-    strategy: (s?.followUpStrategy && STRATEGIES.some(x => x.k === s.followUpStrategy))
-      ? s.followUpStrategy
-      : 'auto',
-    priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
-    availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
-    stopRules: {
-      not_contacted: s?.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
-      booked:        s?.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
-      price_agreed:  s?.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
-      done:          true,
-    },
-    takeover: {
-      ready:     s?.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
-      live:      s?.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
-      phone:     s?.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
-      sqft:      s?.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
-      qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
-    },
-  });
+  const parseSettings = (s: any): CachedConvSettings => {
+    // qualificationV2.requiredFields — array of snake_case field keys.
+    // Sanitize: filter to known keys (forward-compatible with new fields
+    // by ignoring unknown ones). When the key is missing entirely, fall
+    // back to the 3 cleaning defaults so the UI matches the "pre-checked"
+    // state — but the runtime still treats "no saved value" as legacy
+    // behavior (no qualificationBlock injected). The runtime cares about
+    // the persisted DB value; the UI default is just an affordance.
+    const savedFields: unknown = s?.qualificationV2?.requiredFields;
+    const requiredFields = Array.isArray(savedFields)
+      ? (savedFields as unknown[])
+          .filter(k => typeof k === 'string' && QUALIFICATION_VALID_KEYS.has(k as string))
+          .map(k => k as string)
+      : QUALIFICATION_DEFAULT_FIELDS;
+    return {
+      strategy: (s?.followUpStrategy && STRATEGIES.some(x => x.k === s.followUpStrategy))
+        ? s.followUpStrategy
+        : 'auto',
+      priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
+      availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
+      stopRules: {
+        not_contacted: s?.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
+        booked:        s?.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
+        price_agreed:  s?.aiStopOnPriceAgreed !== undefined ? !!s.aiStopOnPriceAgreed : true,
+        done:          true,
+      },
+      takeover: {
+        ready:     s?.handoffTriggerAgreed !== undefined ? !!s.handoffTriggerAgreed : true,
+        live:      s?.handoffTriggerWantsLiveContact !== undefined ? !!s.handoffTriggerWantsLiveContact : true,
+        phone:     s?.handoffTriggerProvidedPhone !== undefined ? !!s.handoffTriggerProvidedPhone : true,
+        sqft:      s?.handoffTriggerProvidedSquareFootage !== undefined ? !!s.handoffTriggerProvidedSquareFootage : true,
+        qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
+      },
+      qualificationRequiredFields: requiredFields,
+    };
+  };
 
   // Hydrate from cache on scope change for instant display.
   useEffect(() => {
@@ -150,6 +196,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setAvailability(first.availability);
         setStopRules(first.stopRules);
         setTakeover(first.takeover);
+        setQualificationRequiredFields(first.qualificationRequiredFields);
       }
     } else {
       const cached = convCache.get(accountId);
@@ -159,6 +206,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setAvailability(cached.availability);
         setStopRules(cached.stopRules);
         setTakeover(cached.takeover);
+        setQualificationRequiredFields(cached.qualificationRequiredFields);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,6 +234,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setAvailability(parsed.availability);
             setStopRules(parsed.stopRules);
             setTakeover(parsed.takeover);
+            setQualificationRequiredFields(parsed.qualificationRequiredFields);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
@@ -204,6 +253,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setAvailability(parsed.availability);
               setStopRules(parsed.stopRules);
               setTakeover(parsed.takeover);
+              setQualificationRequiredFields(parsed.qualificationRequiredFields);
             }
           }
         })
@@ -234,6 +284,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     if (fields.has('takeover.phone'))     payload.handoffTriggerProvidedPhone         = takeover.phone;
     if (fields.has('takeover.sqft'))      payload.handoffTriggerProvidedSquareFootage = takeover.sqft;
     if (fields.has('takeover.qualified')) payload.handoffTriggerQualificationComplete = takeover.qualified;
+    // qualificationV2 is a nested JSON object. The backend save handler
+    // writes `extendedSettings.qualificationV2 = body.qualificationV2`,
+    // which preserves any future sibling keys (e.g. completionAction)
+    // alongside requiredFields without a payload-shape change.
+    if (fields.has('qualificationRequiredFields')) {
+      payload.qualificationV2 = { requiredFields: qualificationRequiredFields };
+    }
 
     // Optimistic cache update — merge ONLY the changed fields onto each
     // account's existing cached values. Don't replace the whole object, or
@@ -242,7 +299,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     targets.forEach(id => {
       const prev = convCache.get(id);
       if (!prev) {
-        convCache.set(id, { strategy, priceMode, availability, stopRules, takeover });
+        convCache.set(id, { strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields });
         return;
       }
       const next: CachedConvSettings = { ...prev };
@@ -262,6 +319,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (fields.has('takeover.sqft'))      nextTake.sqft      = takeover.sqft;
       if (fields.has('takeover.qualified')) nextTake.qualified = takeover.qualified;
       next.takeover = nextTake;
+      if (fields.has('qualificationRequiredFields')) {
+        next.qualificationRequiredFields = qualificationRequiredFields;
+      }
       convCache.set(id, next);
     });
 
@@ -356,7 +416,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, stopRules, takeover]);
+  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -374,6 +434,22 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     dirtyRef.current = true;
     dirtyFieldsRef.current.add(`takeover.${k}` as DirtyField);
     setTakeover({ ...takeover, [k]: !takeover[k] });
+  };
+
+  // Toggle a single qualification field on/off. The full array of selected
+  // keys is what gets persisted at `qualificationV2.requiredFields`; we
+  // recompute it from the local state each time so the payload is always
+  // canonical (sorted by the catalog's display order).
+  const toggleQualificationField = (key: string) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('qualificationRequiredFields');
+    const has = qualificationRequiredFields.includes(key);
+    const next = has
+      ? qualificationRequiredFields.filter(k => k !== key)
+      : [...qualificationRequiredFields, key];
+    // Re-sort by catalog order for canonical storage.
+    const ordered = QUALIFICATION_FIELDS.map(f => f.key).filter(k => next.includes(k));
+    setQualificationRequiredFields(ordered);
   };
 
   // Batch setters — used by the simplified "When goal is reached" radio so
@@ -500,6 +576,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         takeover={takeover}
         setStopBatch={setStopBatch}
         setTakeoverBatch={setTakeoverBatch}
+        qualificationRequiredFields={qualificationRequiredFields}
+        toggleQualificationField={toggleQualificationField}
       />
 
       {/* ───── 3. Advanced Rules (the 9 original toggles + Custom banner) ─── */}
@@ -658,12 +736,10 @@ function FlowArrow() {
 // handoffTrigger*) — it's presented inside the goal panel for clarity
 // since only the active goal can reach its completion criterion at a time.
 
-const REQUIRED_INFO_LABELS = ['Bedrooms', 'Bathrooms', 'Zip Code', 'Square Footage'] as const;
-type RequiredInfoLabel = typeof REQUIRED_INFO_LABELS[number];
-
 function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
   stopRules, takeover, setStopBatch, setTakeoverBatch,
+  qualificationRequiredFields, toggleQualificationField,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
@@ -673,14 +749,11 @@ function GoalSetupCard({
   takeover: TakeoverState;
   setStopBatch: (next: Partial<StopRulesState>) => void;
   setTakeoverBatch: (next: Partial<TakeoverState>) => void;
+  /** Sanitized list of selected snake_case field keys, in catalog order. */
+  qualificationRequiredFields: string[];
+  /** Single-field toggle. Owns dirty-tracking + canonical sort. */
+  toggleQualificationField: (key: string) => void;
 }) {
-  // UI-only checkbox state for Required Information. Per spec these
-  // are not persisted yet — they only describe intent.
-  const [requiredInfo, setRequiredInfo] = useState<Record<RequiredInfoLabel, boolean>>({
-    'Bedrooms': false, 'Bathrooms': false, 'Zip Code': false, 'Square Footage': false,
-  });
-  const toggleRequired = (k: RequiredInfoLabel) =>
-    setRequiredInfo(prev => ({ ...prev, [k]: !prev[k] }));
 
   const titleByStrategy: Record<StrategyKey, string> = {
     auto:    'Auto',
@@ -748,7 +821,11 @@ function GoalSetupCard({
         </div>
       </div>
 
-      {/* Required Information — Price + Qualify only (UI-only checkboxes) */}
+      {/* Required Information — Price + Qualify only. Wired to
+          followUpSettingsJson.qualificationV2.requiredFields. Selected
+          keys are injected into the AI prompt for Price and Qualify
+          goals; existing tenants without saved values fall through to
+          legacy hardcoded priorities. */}
       {showRequiredInfo && (
         <div style={{
           marginBottom: 16,
@@ -765,23 +842,26 @@ function GoalSetupCard({
             Required Information
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 10 }}>
-            {REQUIRED_INFO_LABELS.map(label => (
-              <label key={label} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: 13.5, color: 'var(--lb-ink-2)', cursor: 'pointer',
-              }}>
-                <input
-                  type="checkbox"
-                  checked={requiredInfo[label]}
-                  onChange={() => toggleRequired(label)}
-                  style={{ accentColor: 'var(--lb-accent)' }}
-                />
-                {label}
-              </label>
-            ))}
+            {QUALIFICATION_FIELDS.map(field => {
+              const checked = qualificationRequiredFields.includes(field.key);
+              return (
+                <label key={field.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 13.5, color: 'var(--lb-ink-2)', cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleQualificationField(field.key)}
+                    style={{ accentColor: 'var(--lb-accent)' }}
+                  />
+                  {field.label}
+                </label>
+              );
+            })}
           </div>
           <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-            These fields determine when {strategy === 'price' ? 'pricing' : 'qualification'} is considered complete. <em>(Settings preview — backend persistence coming in a later release.)</em>
+            These fields determine when {strategy === 'price' ? 'pricing' : 'qualification'} is considered complete. AI will prioritize collecting them before transitioning to other goals.
           </div>
         </div>
       )}

@@ -676,6 +676,20 @@ export class FollowUpEngineController {
     if (body.handoffTriggerProvidedSquareFootage !== undefined) extendedSettings.handoffTriggerProvidedSquareFootage = body.handoffTriggerProvidedSquareFootage;
     if (body.handoffTriggerQualificationComplete !== undefined) extendedSettings.handoffTriggerQualificationComplete = body.handoffTriggerQualificationComplete;
 
+    // Qualification V2 — per-goal required-fields list for the Price and
+    // Qualify Conversation Goals. Shape:
+    //   qualificationV2: { requiredFields: ['square_footage', 'service_date', ...] }
+    //
+    // Stored as a sub-object so future siblings (e.g. completionAction)
+    // can land here without a payload-shape change. The runtime
+    // (automation.service.ts + follow-up-generator.service.ts) reads
+    // `s.qualificationV2?.requiredFields` and only injects the
+    // QUALIFICATION REQUIRED FIELDS reference block when the active
+    // strategy is 'price' or 'qualify' AND the array is non-empty.
+    // Existing accounts without qualificationV2 keep their legacy
+    // hardcoded-priority behavior — no migration required.
+    if (body.qualificationV2 !== undefined) extendedSettings.qualificationV2 = body.qualificationV2;
+
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset
     // unrelated columns to defaults.

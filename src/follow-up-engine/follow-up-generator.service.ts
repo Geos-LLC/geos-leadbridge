@@ -26,6 +26,7 @@ import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -195,6 +196,14 @@ export class FollowUpGeneratorService {
     let businessContext = '';
     let urgencyContext = '';
     let playbookBlock = '';
+    // Qualification REFERENCE block. Only emitted when the resolved strategy
+    // is 'price' or 'qualify' AND the tenant has saved a non-empty
+    // `qualificationV2.requiredFields` array. Existing accounts without
+    // that key keep the legacy hardcoded priority order from STRATEGY_PROMPTS.qualify.
+    const qualificationBlockBody: string = buildQualificationBlockForStrategy(
+      strategyKey,
+      accountSettings?.qualificationV2?.requiredFields,
+    );
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
@@ -385,6 +394,14 @@ export class FollowUpGeneratorService {
 
     if (urgencyContext) {
       systemParts.push('', '=== REFERENCE: URGENCY ===', urgencyContext);
+    }
+
+    if (qualificationBlockBody) {
+      systemParts.push(
+        '',
+        '=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===',
+        qualificationBlockBody,
+      );
     }
 
     if (context?.systemContext) {
