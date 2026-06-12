@@ -621,54 +621,65 @@ export function Layout() {
                 role="dialog"
                 aria-label="AI assistant chat"
                 style={{
-                  bottom: 16,
-                  right: 16,
-                  height: '33vh',
-                  minHeight: 280,
-                  width: 'min(420px, calc(100vw - 32px))',
+                  bottom: 20,
+                  right: 20,
+                  height: 'min(620px, calc(100vh - 40px))',
+                  width: 'min(440px, calc(100vw - 40px))',
                   background: 'var(--lb-surface)',
                   border: '1px solid var(--lb-line)',
-                  borderRadius: 16,
-                  boxShadow: 'var(--lb-shadow-lg)',
+                  borderRadius: 18,
+                  boxShadow: '0 24px 60px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.06)',
                   overflow: 'hidden',
                 }}
               >
+                {/* Header */}
                 <div
                   className="flex items-center justify-between"
                   style={{
-                    padding: '14px 16px',
+                    padding: '12px 14px',
                     borderBottom: '1px solid var(--lb-line)',
                   }}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <div
                       className="flex items-center justify-center"
                       style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
+                        width: 30,
+                        height: 30,
+                        borderRadius: 10,
                         background: 'var(--lb-accent)',
                         color: 'var(--lb-accent-fg)',
                       }}
                     >
                       <Sparkles size={15} />
                     </div>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', lineHeight: 1.1 }}>
+                    <div className="flex items-center gap-2">
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
                         AI Assistant
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--lb-ink-4)', marginTop: 2 }}>
-                        Preview · Coming soon
-                      </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          color: 'var(--lb-accent)',
+                          background: 'var(--lb-ink-10)',
+                          padding: '2px 6px',
+                          borderRadius: 999,
+                        }}
+                      >
+                        Beta
+                      </span>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setAiChatOpen(false)}
-                    className="flex items-center justify-center"
+                    className="flex items-center justify-center hover:bg-[var(--lb-ink-10)] transition-colors"
                     style={{
-                      width: 28,
-                      height: 28,
+                      width: 30,
+                      height: 30,
                       borderRadius: 8,
                       background: 'transparent',
                       color: 'var(--lb-ink-4)',
@@ -681,61 +692,105 @@ export function Layout() {
                   </button>
                 </div>
 
+                {/* Conversation area (empty state with suggested prompts) */}
                 <div
-                  className="flex-1 flex flex-col items-center justify-center"
-                  style={{ padding: 24, textAlign: 'center', color: 'var(--lb-ink-4)' }}
+                  className="flex-1"
+                  style={{
+                    overflowY: 'auto',
+                    padding: '20px 16px 8px',
+                  }}
                 >
-                  <div
-                    className="flex items-center justify-center"
-                    style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 999,
-                      background: 'var(--lb-ink-10)',
-                      color: 'var(--lb-accent)',
-                      marginBottom: 12,
-                    }}
-                  >
-                    <Sparkles size={22} />
+                  <div className="flex flex-col items-center" style={{ textAlign: 'center', marginBottom: 18 }}>
+                    <div
+                      className="flex items-center justify-center"
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        background: 'var(--lb-ink-10)',
+                        color: 'var(--lb-accent)',
+                        marginBottom: 10,
+                      }}
+                    >
+                      <Sparkles size={18} />
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                      How can I help?
+                    </div>
+                    <div style={{ fontSize: 12.5, color: 'var(--lb-ink-4)', marginTop: 4, maxWidth: 300, lineHeight: 1.45 }}>
+                      Ask about your account, paste a screenshot, or describe what you want to do.
+                    </div>
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--lb-ink-2)' }}>
-                    Ask anything about LeadBridge
+
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', letterSpacing: '0.04em', textTransform: 'uppercase', padding: '0 2px 8px' }}>
+                    Try asking
                   </div>
-                  <div style={{ fontSize: 12, marginTop: 6, maxWidth: 280 }}>
-                    Describe what you want to do, or attach a screenshot. Your message goes here.
+                  <div className="flex flex-col gap-1.5">
+                    {[
+                      'How do I connect a new account?',
+                      'Why did AI stop replying to this lead?',
+                      'Draft a follow-up for unresponsive leads',
+                    ].map((q, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setAiChatInput(q)}
+                        className="text-left hover:border-[var(--lb-accent)] transition-colors"
+                        style={{
+                          fontSize: 13,
+                          color: 'var(--lb-ink-2)',
+                          background: 'var(--lb-surface)',
+                          border: '1px solid var(--lb-line)',
+                          borderRadius: 10,
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
+                {/* Composer */}
                 <div
                   style={{
-                    padding: 12,
+                    padding: '10px 12px 12px',
                     borderTop: '1px solid var(--lb-line)',
                     background: 'var(--lb-surface)',
                   }}
                 >
                   {aiChatFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-2" style={{ marginBottom: 8 }}>
+                    <div className="flex flex-wrap gap-1.5" style={{ marginBottom: 8 }}>
                       {aiChatFiles.map((f, i) => (
                         <div
                           key={i}
-                          className="flex items-center gap-1"
+                          className="flex items-center gap-1.5"
                           style={{
                             fontSize: 12,
-                            padding: '4px 8px',
-                            borderRadius: 999,
+                            padding: '4px 8px 4px 6px',
+                            borderRadius: 8,
                             background: 'var(--lb-ink-10)',
                             color: 'var(--lb-ink-2)',
                             border: '1px solid var(--lb-line)',
                           }}
                         >
-                          <Paperclip size={12} />
-                          <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Paperclip size={11} style={{ color: 'var(--lb-ink-4)' }} />
+                          <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {f.name}
                           </span>
                           <button
                             type="button"
                             onClick={() => setAiChatFiles(prev => prev.filter((_, idx) => idx !== i))}
-                            style={{ background: 'transparent', border: 0, padding: 0, marginLeft: 2, cursor: 'pointer', color: 'var(--lb-ink-4)' }}
+                            style={{
+                              background: 'transparent',
+                              border: 0,
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--lb-ink-4)',
+                              display: 'inline-flex',
+                            }}
                             aria-label={`Remove ${f.name}`}
                           >
                             <X size={12} />
@@ -746,46 +801,30 @@ export function Layout() {
                   )}
 
                   <div
-                    className="flex items-end gap-2"
+                    className="flex flex-col"
                     style={{
-                      background: 'var(--lb-ink-10)',
+                      background: 'var(--lb-surface)',
                       border: '1px solid var(--lb-line)',
-                      borderRadius: 12,
-                      padding: 8,
+                      borderRadius: 14,
+                      padding: '6px 8px 6px 10px',
+                      transition: 'border-color 120ms, box-shadow 120ms',
+                    }}
+                    onFocusCapture={e => {
+                      e.currentTarget.style.borderColor = 'var(--lb-accent)';
+                      e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+                    }}
+                    onBlurCapture={e => {
+                      e.currentTarget.style.borderColor = 'var(--lb-line)';
+                      e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    <label
-                      className="flex items-center justify-center"
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 8,
-                        color: 'var(--lb-ink-3)',
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                      }}
-                      title="Attach files"
-                    >
-                      <Paperclip size={16} />
-                      <input
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={e => {
-                          const list = e.target.files;
-                          if (!list) return;
-                          setAiChatFiles(prev => [...prev, ...Array.from(list)]);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
                     <textarea
                       value={aiChatInput}
                       onChange={e => setAiChatInput(e.target.value)}
                       placeholder="Message AI assistant…"
                       rows={1}
                       style={{
-                        flex: 1,
+                        width: '100%',
                         resize: 'none',
                         background: 'transparent',
                         border: 0,
@@ -793,29 +832,59 @@ export function Layout() {
                         fontSize: 14,
                         color: 'var(--lb-ink-1)',
                         fontFamily: 'inherit',
-                        padding: '6px 4px',
-                        maxHeight: 120,
-                        lineHeight: 1.4,
+                        padding: '6px 2px',
+                        maxHeight: 140,
+                        lineHeight: 1.5,
                       }}
                     />
-                    <button
-                      type="button"
-                      disabled={!aiChatInput.trim() && aiChatFiles.length === 0}
-                      className="flex items-center justify-center"
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 8,
-                        background: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
-                        color: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent-fg)' : 'var(--lb-ink-5)',
-                        border: 0,
-                        cursor: aiChatInput.trim() || aiChatFiles.length > 0 ? 'pointer' : 'not-allowed',
-                        flexShrink: 0,
-                      }}
-                      aria-label="Send message"
-                    >
-                      <Send size={15} />
-                    </button>
+                    <div className="flex items-center justify-between" style={{ marginTop: 2 }}>
+                      <label
+                        className="flex items-center justify-center hover:bg-[var(--lb-ink-10)] transition-colors"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
+                          color: 'var(--lb-ink-4)',
+                          cursor: 'pointer',
+                        }}
+                        title="Attach files"
+                        aria-label="Attach files"
+                      >
+                        <Paperclip size={15} />
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={e => {
+                            const list = e.target.files;
+                            if (!list) return;
+                            setAiChatFiles(prev => [...prev, ...Array.from(list)]);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!aiChatInput.trim() && aiChatFiles.length === 0}
+                        className="flex items-center justify-center transition-all"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
+                          background: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
+                          color: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent-fg)' : 'var(--lb-ink-5)',
+                          border: 0,
+                          cursor: aiChatInput.trim() || aiChatFiles.length > 0 ? 'pointer' : 'not-allowed',
+                        }}
+                        aria-label="Send message"
+                      >
+                        <Send size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 10.5, color: 'var(--lb-ink-5)', textAlign: 'center', marginTop: 8 }}>
+                    AI Assistant is in beta — answers may be incomplete.
                   </div>
                 </div>
               </div>
