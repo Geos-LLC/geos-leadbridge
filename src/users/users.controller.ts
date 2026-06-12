@@ -60,7 +60,10 @@ export class UsersController {
       businessPhone?: string;
       website?: string | null;
       websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
-      additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
+      // additionalAssociatePhones moved to PATCH /v1/thumbtack/saved-accounts/:id
+      // (per-business, stored on SavedAccount.followUpSettingsJson). The legacy
+      // User.additionalAssociatePhonesJson column stays in schema for backfill /
+      // archival reads but accepts no new writes from this endpoint.
     },
   ) {
     return this.usersService.updateProfile(req.user.id, body);

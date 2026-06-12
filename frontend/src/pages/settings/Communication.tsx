@@ -394,6 +394,8 @@ export function SettingsCommunication() {
             const lbShared = !!assignedPhone && assignedPhone.savedAccountId !== acct.id;
             const alertPhone = acct.agentPhoneOverride || businessPhone;
             const usingOverride = !!acct.agentPhoneOverride;
+            const isThumbtack = acct.platform === 'thumbtack';
+            const additionalPhones = isThumbtack ? readAdditionalAssociatePhones(acct.followUpSettingsJson) : null;
             return (
               <FieldRow
                 key={acct.id}
@@ -404,37 +406,68 @@ export function SettingsCommunication() {
                 align="top"
                 noBorder={idx === accounts.length - 1}
               >
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <PerBusinessTile
-                    icon={PhoneCall}
-                    label="LeadBridge number"
-                    value={assignedPhone ? formatPhone(assignedPhone.phoneNumber) : 'Not assigned'}
-                    badge={!assignedPhone ? null : lbShared ? { text: 'Shared', tone: 'slate' } : { text: 'Dedicated', tone: 'blue' }}
-                    muted={!assignedPhone}
-                  />
-                  {editingOverrideId === acct.id ? (
-                    <AlertPhoneEditor
-                      value={overrideValue}
-                      onChange={setOverrideValue}
-                      onSave={() => handleSaveOverride(acct.id)}
-                      onCancel={() => { setEditingOverrideId(null); setOverrideValue(''); setOverrideError(null); }}
-                      saving={savingOverrideId === acct.id}
-                      placeholder={businessPhone || '+12125550100'}
-                      error={overrideError}
-                    />
-                  ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <PerBusinessTile
-                      icon={Phone}
-                      label="Alert phone"
-                      value={alertPhone ? formatPhone(alertPhone) : 'Not set'}
-                      badge={!alertPhone ? null : usingOverride ? { text: 'Override', tone: 'amber' } : { text: 'Default', tone: 'slate' }}
-                      muted={!alertPhone}
-                      onEdit={() => {
-                        setOverrideValue(acct.agentPhoneOverride || '');
-                        setEditingOverrideId(acct.id);
-                        setOverrideError(null);
-                      }}
+                      icon={PhoneCall}
+                      label="LeadBridge number"
+                      value={assignedPhone ? formatPhone(assignedPhone.phoneNumber) : 'Not assigned'}
+                      badge={!assignedPhone ? null : lbShared ? { text: 'Shared', tone: 'slate' } : { text: 'Dedicated', tone: 'blue' }}
+                      muted={!assignedPhone}
                     />
+                    {editingOverrideId === acct.id ? (
+                      <AlertPhoneEditor
+                        value={overrideValue}
+                        onChange={setOverrideValue}
+                        onSave={() => handleSaveOverride(acct.id)}
+                        onCancel={() => { setEditingOverrideId(null); setOverrideValue(''); setOverrideError(null); }}
+                        saving={savingOverrideId === acct.id}
+                        placeholder={businessPhone || '+12125550100'}
+                        error={overrideError}
+                      />
+                    ) : (
+                      <PerBusinessTile
+                        icon={Phone}
+                        label="Alert phone"
+                        value={alertPhone ? formatPhone(alertPhone) : 'Not set'}
+                        badge={!alertPhone ? null : usingOverride ? { text: 'Override', tone: 'amber' } : { text: 'Default', tone: 'slate' }}
+                        muted={!alertPhone}
+                        onEdit={() => {
+                          setOverrideValue(acct.agentPhoneOverride || '');
+                          setEditingOverrideId(acct.id);
+                          setOverrideError(null);
+                        }}
+                      />
+                    )}
+                  </div>
+                  {isThumbtack && (
+                    <div>
+                      <div style={{
+                        fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                        letterSpacing: 0.3, color: 'var(--lb-ink-5, #64748b)',
+                        marginBottom: 6,
+                      }}>
+                        Additional associate numbers
+                      </div>
+                      <AdditionalAssociatePhonesEditor
+                        savedAccountId={acct.id}
+                        initialValue={additionalPhones}
+                        onSaved={(next) => {
+                          // Write the new list back into followUpSettingsJson on the
+                          // cached account so re-renders show the saved state
+                          // without a full re-fetch.
+                          setAccounts(prev => prev.map(a => {
+                            if (a.id !== acct.id) return a;
+                            let parsed: Record<string, any> = {};
+                            try {
+                              parsed = a.followUpSettingsJson ? JSON.parse(a.followUpSettingsJson) : {};
+                            } catch { parsed = {}; }
+                            parsed.additionalAssociatePhones = next;
+                            return { ...a, followUpSettingsJson: JSON.stringify(parsed) };
+                          }));
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
               </FieldRow>
@@ -530,18 +563,25 @@ export function SettingsCommunication() {
           );
         })()}
       </SettingCard>
-
-      <SettingCard
-        icon={Phone}
-        iconTone="teal"
-        title="Additional associate numbers"
-        subtitle="Extra team / callback numbers to register on connected Thumbtack businesses. Optional. Removing a number here stops re-syncing — existing TT entries are kept."
-        contentPad="8px 24px 24px"
-      >
-        <AdditionalAssociatePhonesEditor />
-      </SettingCard>
     </div>
   );
+}
+
+/**
+ * Parse the per-account `additionalAssociatePhones` array out of a
+ * SavedAccount's followUpSettingsJson string. Tolerates malformed JSON.
+ */
+function readAdditionalAssociatePhones(
+  followUpSettingsJson: string | null | undefined,
+): Array<{ id: string; phoneNumber: string; label?: string }> | null {
+  if (!followUpSettingsJson) return null;
+  try {
+    const parsed = JSON.parse(followUpSettingsJson);
+    const raw = parsed?.additionalAssociatePhones;
+    return Array.isArray(raw) ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 function BusinessAlertRow({

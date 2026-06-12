@@ -187,6 +187,11 @@ export interface SavedAccount {
   imageUrl?: string;
   webhookId?: string | null; // Webhook subscription ID (null = disconnected)
   agentPhoneOverride?: string | null; // Per-business agent phone; null = inherit User.businessPhone
+  // Serialized JSON for per-account follow-up + AI settings. Today the only
+  // field the new associate-phones UI reads from here is `additionalAssociatePhones`;
+  // other keys (followUpStrategy, qualificationV2, instantTextMode, etc) are
+  // managed by other UI surfaces.
+  followUpSettingsJson?: string | null;
   tokenDead?: boolean; // Token refresh failed — account needs reconnection
   lastUsedAt: string;
   createdAt: string;
