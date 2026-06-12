@@ -70,12 +70,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
 
-  // Plan check — Convert tier (or active trial) unlocks AI message mode.
-  // Toggling master ON snaps to AI when allowed, otherwise stays on templates.
+  // AI follow-ups are available on every plan as of the AI-First
+  // Simplification (June 2026). Paywalls remain on AI Conversation
+  // (per-goal control on /automation/convert) and other advanced features,
+  // but the AI message-mode itself is free so users can experience AI
+  // before paying for it. canUseAi is kept as `true` here so the existing
+  // call sites keep working without further wiring; the useAuthStore
+  // import remains because other future logic may still need it.
   const user = useAuthStore(s => s.user);
-  const canUseAi =
-    !!user?.trialActive ||
-    user?.subscriptionTier === 'ENTERPRISE';
+  void user; // satisfy unused-locals lint while preserving the import
+  const canUseAi = true;
 
   // Master ON/OFF — single source of truth for follow-ups being active.
   // DB column followUpMode has three states: 'off' | 'suggest' | 'auto_send'.
@@ -667,7 +671,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           tipIcon={Sparkles}
-          tip="AI generates this check-in from the conversation using your Conversation Goal. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedDeferral.mixed}
           mixedTooltip={mixedDeferral.tooltip}
         />
@@ -681,7 +685,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           tipIcon={Sparkles}
-          tip="AI generates this re-engage from the conversation using your Conversation Goal. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedHired.mixed}
           mixedTooltip={mixedHired.tooltip}
           noBorder

@@ -221,7 +221,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               instantReplyOn: !!nl?.enabled,
               instantTextOn: !!ct?.enabled,
               instantCallOn: !!ccRes.settings?.enabled,
-              replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+              // AI-first default per the Automation Simplification: when no
+              // rule exists yet (fresh tenant) or useAi is unset, default to
+              // 'ai'. Existing rules with useAi=false explicitly opt out and
+              // keep their 'template' choice.
+              replyType: (nl?.useAi === false ? 'template' : 'ai') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,

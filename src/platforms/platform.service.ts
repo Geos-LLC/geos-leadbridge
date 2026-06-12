@@ -1251,6 +1251,11 @@ export class PlatformService {
         name: 'Auto-Reply to Customer',
         triggerType: 'new_lead',
         sendToCustomer: true,
+        // `useAi` lives on AutomationRule, not NotificationRule. The
+        // AI-first default for First Reply is enforced in the frontend
+        // fallback (frontend/.../automation/Respond.tsx) — when no
+        // AutomationRule exists for a fresh account, the page defaults
+        // replyType to 'ai' instead of 'template'.
         template: customerTemplate,
         delayMinutes: 0,
         enabled: true,
