@@ -5,7 +5,7 @@ import {
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
   MessageSquareText, AlertTriangle, Power,
-  ChevronDown, ChevronUp, Shield, Settings2, Target, Lock,
+  ChevronDown, ChevronUp, Shield, Settings2, Target,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -490,14 +490,38 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
+      {/* ───── 2. Goal-specific setup (includes per-goal When-Reached radio) ── */}
       <GoalSetupCard
         strategy={strategy}
         priceMode={priceMode}
         onPriceMode={onPriceMode}
         mixedPriceMode={mixedPriceMode}
+        stopRules={stopRules}
+        takeover={takeover}
+        setStopBatch={setStopBatch}
+        setTakeoverBatch={setTakeoverBatch}
       />
 
+      {/* ───── 3. Advanced Rules (the 9 original toggles + Custom banner) ─── */}
+      <AdvancedRulesCard
+        stopRules={stopRules}
+        takeover={takeover}
+        toggleStop={toggleStop}
+        toggleTakeover={toggleTakeover}
+        mxStopNotContacted={mxStopNotContacted}
+        mxStopBooked={mxStopBooked}
+        mxStopPriceAgreed={mxStopPriceAgreed}
+        mxStopDone={mxStopDone}
+        mxTakeReady={mxTakeReady}
+        mxTakeLive={mxTakeLive}
+        mxTakePhone={mxTakePhone}
+        mxTakeSqft={mxTakeSqft}
+        mxTakeQualified={mxTakeQualified}
+        goAlerts={goAlerts}
+        goFollowups={goFollowups}
+      />
+
+      {/* ───── 4. Auto Reply Availability ─────────────────────────────────── */}
       <SettingCard
         icon={Clock}
         iconTone="violet"
@@ -525,27 +549,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             />
           </div>
         }
-      />
-
-      {/* ───── 3. When the goal is reached ────────────────────────────────── */}
-      <WhenGoalReachedCard
-        stopRules={stopRules}
-        takeover={takeover}
-        toggleStop={toggleStop}
-        toggleTakeover={toggleTakeover}
-        setStopBatch={setStopBatch}
-        setTakeoverBatch={setTakeoverBatch}
-        mxStopNotContacted={mxStopNotContacted}
-        mxStopBooked={mxStopBooked}
-        mxStopPriceAgreed={mxStopPriceAgreed}
-        mxStopDone={mxStopDone}
-        mxTakeReady={mxTakeReady}
-        mxTakeLive={mxTakeLive}
-        mxTakePhone={mxTakePhone}
-        mxTakeSqft={mxTakeSqft}
-        mxTakeQualified={mxTakeQualified}
-        goAlerts={goAlerts}
-        goFollowups={goFollowups}
       />
 
       {/* ───── 5. How it works ────────────────────────────────────────────── */}
@@ -645,22 +648,43 @@ function FlowArrow() {
 }
 
 // ─── Goal-specific setup card ──────────────────────────────────────────────
-// Surfaces settings relevant to the currently selected Conversation Goal.
-// Backend fields are UNCHANGED — this is presentation only. priceQuoteMode
-// only renders for Price; the other goals get explanatory text pointing at
-// Playbook (HOW) and Advanced rules (the protected toggles).
+// Renders the per-goal configuration: Required Information (Price/Qualify,
+// UI-only checkboxes), Goal Completion description (Convert/Phone), the
+// price-quote-mode picker (Price), AND the per-goal "When Goal Is Reached"
+// radio (Price/Qualify/Convert/Phone). Auto and Hybrid have no extras.
+//
+// Backend fields are UNCHANGED. The When-Goal-Is-Reached radio writes to
+// the SAME global fields (aiStopOnBooked, aiStopOnPriceAgreed, all 5
+// handoffTrigger*) — it's presented inside the goal panel for clarity
+// since only the active goal can reach its completion criterion at a time.
+
+const REQUIRED_INFO_LABELS = ['Bedrooms', 'Bathrooms', 'Zip Code', 'Square Footage'] as const;
+type RequiredInfoLabel = typeof REQUIRED_INFO_LABELS[number];
 
 function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
+  stopRules, takeover, setStopBatch, setTakeoverBatch,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
   onPriceMode: (v: 'range' | 'exact') => void;
   mixedPriceMode: { mixed: boolean; tooltip?: string };
+  stopRules: StopRulesState;
+  takeover: TakeoverState;
+  setStopBatch: (next: Partial<StopRulesState>) => void;
+  setTakeoverBatch: (next: Partial<TakeoverState>) => void;
 }) {
+  // UI-only checkbox state for Required Information. Per spec these
+  // are not persisted yet — they only describe intent.
+  const [requiredInfo, setRequiredInfo] = useState<Record<RequiredInfoLabel, boolean>>({
+    'Bedrooms': false, 'Bathrooms': false, 'Zip Code': false, 'Square Footage': false,
+  });
+  const toggleRequired = (k: RequiredInfoLabel) =>
+    setRequiredInfo(prev => ({ ...prev, [k]: !prev[k] }));
+
   const titleByStrategy: Record<StrategyKey, string> = {
-    auto:    'Auto Goal Setup',
-    hybrid:  'Hybrid Goal Setup',
+    auto:    'Auto',
+    hybrid:  'Hybrid',
     price:   'Price Goal Setup',
     qualify: 'Qualify Goal Setup',
     convert: 'Convert Goal Setup',
@@ -674,129 +698,209 @@ function GoalSetupCard({
   };
   const Icon = iconByStrategy[strategy];
 
+  const showRequiredInfo = strategy === 'price' || strategy === 'qualify';
+  const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'convert' || strategy === 'phone';
+
   return (
     <SectionCard padding="22px 24px 24px">
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
+      {/* Goal header + description */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
         <IconTile icon={Icon} tone={toneByStrategy[strategy]} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
             {titleByStrategy[strategy]}
           </div>
-          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            {strategy === 'auto' && <>AI inspects each turn and picks the most relevant goal (Price, Qualify, Convert, or Phone) based on the customer's last message and conversation history. No further setup needed here.</>}
-            {strategy === 'hybrid' && <>AI acknowledges the customer's message, gently qualifies if needed, and moves toward booking — balanced behavior, not specialized to one outcome. No further setup needed here.</>}
-            {strategy === 'price' && <>AI volunteers a price from the Pricing Table when the customer's message is about pricing. Choose how AI presents that number below.</>}
-            {strategy === 'qualify' && <>AI collects required information before quoting or booking. Required fields (square footage, timing, condition, scope) are coming as a configurable list — see preview below.</>}
-            {strategy === 'convert' && <>AI focuses on getting the customer to name a service time. Completion behavior (Continue vs Stop after the customer agrees) is controlled in <em>When the goal is reached</em> below.</>}
-            {strategy === 'phone' && <>AI works toward getting the customer onto a live call. Completion behavior (after the customer provides a number or asks to call) is controlled in <em>When the goal is reached</em> below.</>}
+          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.6 }}>
+            {strategy === 'auto' && (
+              <>
+                AI chooses the most appropriate goal based on the conversation.
+                <div style={{ marginTop: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                  Examples:
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+                    <li>Customer asks for pricing → <strong>Price</strong></li>
+                    <li>Customer wants a call → <strong>Phone</strong></li>
+                    <li>Customer is ready to schedule → <strong>Convert</strong></li>
+                    <li>Customer is exploring options → <strong>Qualify</strong></li>
+                  </ul>
+                </div>
+              </>
+            )}
+            {strategy === 'hybrid' && (
+              <>Balanced approach. AI acknowledges the customer, gathers information if needed, and moves toward booking.</>
+            )}
+            {strategy === 'price' && (
+              <>AI volunteers a price from the Pricing Table when the customer's message is about pricing. Configure the required information AI should collect and how it presents the number below.</>
+            )}
+            {strategy === 'qualify' && (
+              <>AI collects required information before quoting or booking. Pick the fields AI must gather below.</>
+            )}
+            {strategy === 'convert' && (
+              <>
+                <strong>Goal completion:</strong> Customer indicates intent to book or schedule service.
+              </>
+            )}
+            {strategy === 'phone' && (
+              <>
+                <strong>Goal completion:</strong> Customer provides a phone number or requests a call.
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Price-specific: priceQuoteMode (Range / Exact) */}
-      {strategy === 'price' && (
-        <FieldRow
-          label={
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              How AI quotes price <Info size={12} style={{ color: 'var(--lb-ink-6)' }} />
-            </span>
-          }
-          sublabel="Choose how AI presents pricing when it volunteers a price."
-          align="top"
-          noBorder
-        >
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={priceMode === 'range'}
-              onClick={() => onPriceMode('range')}
-              title="Range"
-              body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
-              mixed={mixedPriceMode.mixed && priceMode === 'range'}
-              mixedTooltip={mixedPriceMode.tooltip}
-            />
-            <OptionCard
-              selected={priceMode === 'exact'}
-              onClick={() => onPriceMode('exact')}
-              title="Exact"
-              body="AI gives an exact price when it has enough information."
-              mixed={mixedPriceMode.mixed && priceMode === 'exact'}
-              mixedTooltip={mixedPriceMode.tooltip}
-            />
-          </div>
-        </FieldRow>
-      )}
-
-      {/* Qualify-specific: Required Information preview (no backend yet) */}
-      {strategy === 'qualify' && (
+      {/* Required Information — Price + Qualify only (UI-only checkboxes) */}
+      {showRequiredInfo && (
         <div style={{
-          marginTop: 4,
+          marginBottom: 16,
           padding: '14px 16px',
           background: '#f8fafc',
-          border: '1px dashed var(--lb-line)',
+          border: '1px solid var(--lb-line-soft)',
           borderRadius: 10,
         }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
             fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
             letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10,
             fontFamily: 'var(--lb-font-mono)',
           }}>
-            <Lock size={12} /> Required Information — Preview (Coming Soon)
+            Required Information
           </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55, marginBottom: 12 }}>
-            In a coming release this card lets you pick exactly which fields AI must collect before considering the lead qualified. Today AI uses a smart default priority (square footage → timing → condition → scope).
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            {[
-              'Square footage',
-              'Service date / preferred time',
-              'Condition (move-in/out, heavy soil)',
-              'Scope extras (pets, frequency)',
-              'Address (when zip not on the lead)',
-              'Phone number',
-            ].map(label => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 10 }}>
+            {REQUIRED_INFO_LABELS.map(label => (
               <label key={label} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: 13, color: 'var(--lb-ink-3)', cursor: 'not-allowed', opacity: 0.7,
+                fontSize: 13.5, color: 'var(--lb-ink-2)', cursor: 'pointer',
               }}>
-                <input type="checkbox" disabled defaultChecked style={{ accentColor: 'var(--lb-accent)' }} />
+                <input
+                  type="checkbox"
+                  checked={requiredInfo[label]}
+                  onChange={() => toggleRequired(label)}
+                  style={{ accentColor: 'var(--lb-accent)' }}
+                />
                 {label}
               </label>
             ))}
           </div>
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
+            These fields determine when {strategy === 'price' ? 'pricing' : 'qualification'} is considered complete. <em>(Settings preview — backend persistence coming in a later release.)</em>
+          </div>
         </div>
       )}
 
-      {/* Convert-specific: explanatory + reference to advanced rules */}
-      {strategy === 'convert' && (
-        <div style={{
-          padding: '12px 14px',
-          background: '#eff6ff',
-          border: '1px solid #c3d4ff',
-          borderRadius: 10,
-          fontSize: 12.5, color: 'var(--lb-accent)',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <Info size={14} />
-          Booking acceptance, manager-handoff-on-price-agreed, and dispatcher-notify-on-booked are all configured in <strong>When the goal is reached</strong> below — including the protected toggles under Advanced rules.
+      {/* Price-specific: priceQuoteMode (Range / Exact) */}
+      {strategy === 'price' && (
+        <div style={{ marginBottom: 16 }}>
+          <FieldRow
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                How AI quotes price <Info size={12} style={{ color: 'var(--lb-ink-6)' }} />
+              </span>
+            }
+            sublabel="Choose how AI presents pricing when it volunteers a price."
+            align="top"
+            noBorder
+          >
+            <div style={{ display: 'flex', gap: 12 }}>
+              <OptionCard
+                selected={priceMode === 'range'}
+                onClick={() => onPriceMode('range')}
+                title="Range"
+                body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
+                mixed={mixedPriceMode.mixed && priceMode === 'range'}
+                mixedTooltip={mixedPriceMode.tooltip}
+              />
+              <OptionCard
+                selected={priceMode === 'exact'}
+                onClick={() => onPriceMode('exact')}
+                title="Exact"
+                body="AI gives an exact price when it has enough information."
+                mixed={mixedPriceMode.mixed && priceMode === 'exact'}
+                mixedTooltip={mixedPriceMode.tooltip}
+              />
+            </div>
+          </FieldRow>
         </div>
       )}
 
-      {/* Phone-specific: explanatory */}
-      {strategy === 'phone' && (
-        <div style={{
-          padding: '12px 14px',
-          background: '#fdf4ff',
-          border: '1px solid #f5d0fe',
-          borderRadius: 10,
-          fontSize: 12.5, color: '#86198f',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <Info size={14} />
-          Dispatcher notifications fire when the customer provides a phone number or explicitly asks to be called. Adjust under <strong>When the goal is reached → Advanced rules</strong> below.
-        </div>
+      {/* Per-goal "When Goal Is Reached" radio. Writes the same global
+          stop/handoff fields under the hood; fine-grained tuning lives in
+          Advanced Rules below. */}
+      {showWhenReached && (
+        <PerGoalWhenReachedRadio
+          stopRules={stopRules}
+          takeover={takeover}
+          setStopBatch={setStopBatch}
+          setTakeoverBatch={setTakeoverBatch}
+        />
       )}
     </SectionCard>
+  );
+}
+
+// ─── Per-goal When-Goal-Is-Reached radio ──────────────────────────────────
+// Inline two-option radio embedded inside GoalSetupCard. Mirrors the same
+// preset detection used by AdvancedRulesCard so the two surfaces stay in
+// agreement (and switching modes from either surface flips the same global
+// fields).
+function PerGoalWhenReachedRadio({
+  stopRules, takeover, setStopBatch, setTakeoverBatch,
+}: {
+  stopRules: StopRulesState;
+  takeover: TakeoverState;
+  setStopBatch: (next: Partial<StopRulesState>) => void;
+  setTakeoverBatch: (next: Partial<TakeoverState>) => void;
+}) {
+  const allTakeoverOn = takeover.ready && takeover.live && takeover.phone && takeover.sqft && takeover.qualified;
+  const isContinueMode = !stopRules.booked && !stopRules.price_agreed && allTakeoverOn;
+  const isStopMode     =  stopRules.booked &&  stopRules.price_agreed && allTakeoverOn;
+  const isCustom = !isContinueMode && !isStopMode;
+
+  const applyContinue = () => {
+    setStopBatch({ booked: false, price_agreed: false });
+    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
+  };
+  const applyStop = () => {
+    setStopBatch({ booked: true, price_agreed: true });
+    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
+  };
+
+  return (
+    <div>
+      <div style={{
+        fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
+        letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10,
+        fontFamily: 'var(--lb-font-mono)',
+      }}>
+        When Goal Is Reached
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <OptionCard
+          selected={isContinueMode}
+          onClick={applyContinue}
+          title="Continue AI + Notify Team"
+          body="AI keeps replying after the goal is reached. Your team is notified."
+        />
+        <OptionCard
+          selected={isStopMode}
+          onClick={applyStop}
+          title="Stop AI + Notify Team"
+          body="AI stops once the goal is reached. Your team takes over."
+        />
+      </div>
+      {isCustom && (
+        <div style={{
+          marginTop: 10,
+          padding: '8px 12px',
+          background: '#fffbeb',
+          border: '1px solid #fde68a',
+          borderRadius: 8,
+          fontSize: 12, color: '#92400e',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <AlertTriangle size={13} />
+          <span><strong>Custom Configuration</strong> — your current toggle mix doesn't match either preset. Adjust under Advanced Rules below.</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -818,10 +922,9 @@ function GoalSetupCard({
 type StopRulesState = { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
 type TakeoverState  = { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
 
-function WhenGoalReachedCard({
+function AdvancedRulesCard({
   stopRules, takeover,
   toggleStop, toggleTakeover,
-  setStopBatch, setTakeoverBatch,
   mxStopNotContacted, mxStopBooked, mxStopPriceAgreed, mxStopDone,
   mxTakeReady, mxTakeLive, mxTakePhone, mxTakeSqft, mxTakeQualified,
   goAlerts, goFollowups,
@@ -830,8 +933,6 @@ function WhenGoalReachedCard({
   takeover: TakeoverState;
   toggleStop: (k: keyof StopRulesState) => void;
   toggleTakeover: (k: keyof TakeoverState) => void;
-  setStopBatch: (next: Partial<StopRulesState>) => void;
-  setTakeoverBatch: (next: Partial<TakeoverState>) => void;
   mxStopNotContacted: { mixed: boolean; tooltip?: string };
   mxStopBooked: { mixed: boolean; tooltip?: string };
   mxStopPriceAgreed: { mixed: boolean; tooltip?: string };
@@ -844,53 +945,28 @@ function WhenGoalReachedCard({
   goAlerts: () => void;
   goFollowups: () => void;
 }) {
-  // Derive simplified mode from underlying state.
+  // Derive Custom Configuration banner + auto-expand from underlying state.
   // Continue = stopOnBooked=false AND stopOnPriceAgreed=false AND all takeover ON
   // Stop     = stopOnBooked=true  AND stopOnPriceAgreed=true  AND all takeover ON
-  // Otherwise = 'custom' (open Advanced).
+  // Otherwise = 'custom' (open Advanced automatically).
   const allTakeoverOn = takeover.ready && takeover.live && takeover.phone && takeover.sqft && takeover.qualified;
   const isContinueMode = !stopRules.booked && !stopRules.price_agreed && allTakeoverOn;
   const isStopMode     =  stopRules.booked &&  stopRules.price_agreed && allTakeoverOn;
   const isCustom = !isContinueMode && !isStopMode;
   const [advancedOpen, setAdvancedOpen] = useState<boolean>(isCustom);
 
-  const applyContinue = () => {
-    setStopBatch({ booked: false, price_agreed: false });
-    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
-  };
-  const applyStop = () => {
-    setStopBatch({ booked: true, price_agreed: true });
-    setTakeoverBatch({ ready: true, live: true, phone: true, sqft: true, qualified: true });
-  };
-
   return (
     <SectionCard padding="22px 24px 8px">
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-        <IconTile icon={Hand} tone="rose" size="lg" />
+        <IconTile icon={Settings2} tone="gray" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-            When the goal is reached
+            Advanced Rules
           </div>
           <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            What happens after AI achieves the Conversation Goal — does it keep replying, or stop and let your team take over? Either way the team is notified.
+            Fine-grained control over every Stop Rule and Human Takeover trigger. These toggles back the simplified <em>When Goal Is Reached</em> radio on each Goal — flipping individual rows here is what produces a Custom Configuration.
           </div>
         </div>
-      </div>
-
-      {/* Two-option radio */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
-        <OptionCard
-          selected={isContinueMode}
-          onClick={applyContinue}
-          title="Continue AI + Notify Team"
-          body="AI keeps replying after the goal is reached. Your team is notified so they can jump in when ready."
-        />
-        <OptionCard
-          selected={isStopMode}
-          onClick={applyStop}
-          title="Stop AI + Notify Team"
-          body="AI stops replying once the goal is reached. Your team takes over the conversation."
-        />
       </div>
 
       {/* Custom-state banner */}
@@ -905,7 +981,7 @@ function WhenGoalReachedCard({
           display: 'flex', alignItems: 'center', gap: 8,
         }}>
           <AlertTriangle size={14} />
-          Your current settings don't match either preset. The original toggles are available under <strong>Advanced rules</strong> below.
+          <strong>Custom Configuration</strong>&nbsp;— your saved toggles don't match either standard preset. The full toggle list is expanded below.
         </div>
       )}
 
@@ -925,7 +1001,7 @@ function WhenGoalReachedCard({
         </div>
       </div>
 
-      {/* Advanced rules accordion — exposes the original 9 toggles for full control. */}
+      {/* Accordion — exposes the original 9 toggles for full control. */}
       <div style={{ marginTop: 14, borderTop: '1px solid var(--lb-line-soft)', paddingTop: 12 }}>
         <button
           type="button"
