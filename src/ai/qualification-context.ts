@@ -9,8 +9,12 @@
  *   { qualificationV2: { requiredFields: ['square_footage', 'service_date'] } }
  *
  * Callers (automation.service.ts + follow-up-generator.service.ts) only
- * invoke `buildQualificationBlock` when the active strategy is `price` or
- * `qualify`. Existing accounts with no `qualificationV2` entry skip the
+ * invoke `buildQualificationBlock` when the active strategy is `qualify`.
+ * Price uses the Pricing Table + Pricing Guidance (Playbook) for its
+ * "ask only what's needed to quote accurately" behavior, so its prompt
+ * deliberately does NOT receive the QUALIFICATION REQUIRED FIELDS block —
+ * letting the two surfaces stay clean (Price = pricing rules, Qualify =
+ * info collection). Accounts with no `qualificationV2` entry skip the
  * block entirely — the AI then falls back to the legacy hardcoded priority
  * order defined in STRATEGY_PROMPTS.qualify. No migration is required.
  *
@@ -72,8 +76,17 @@ export function buildQualificationBlock(requiredFields: unknown): string {
   return lines.join('\n');
 }
 
-/** Strategy keys for which qualificationBlock injection is appropriate. */
-const QUALIFICATION_STRATEGIES = new Set(['price', 'qualify']);
+/**
+ * Strategy keys for which qualificationBlock injection is appropriate.
+ *
+ * Tightened to `qualify` only (was `price` | `qualify` previously). Rationale:
+ * the Price goal's behavior is governed by the Pricing Table + Pricing
+ * Guidance (Playbook), not by a required-fields list. Mirroring that split
+ * on the prompt side keeps the two surfaces semantically clean — Price never
+ * receives a QUALIFICATION REQUIRED FIELDS block, so it can't accidentally
+ * lead with "I need square footage" before quoting from the table.
+ */
+const QUALIFICATION_STRATEGIES = new Set(['qualify']);
 
 /** Convenience: returns the block ONLY when the strategy warrants it. */
 export function buildQualificationBlockForStrategy(

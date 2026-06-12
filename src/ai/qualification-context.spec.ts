@@ -79,14 +79,16 @@ describe('buildQualificationBlock', () => {
 });
 
 describe('buildQualificationBlockForStrategy', () => {
-  it('emits block when strategy is price', () => {
-    const out = buildQualificationBlockForStrategy('price', ['square_footage']);
-    expect(out).toContain('Square Footage');
-  });
-
   it('emits block when strategy is qualify', () => {
     const out = buildQualificationBlockForStrategy('qualify', ['phone_number']);
     expect(out).toContain('Phone Number');
+  });
+
+  // Price was previously gated for injection alongside Qualify; tightened
+  // to qualify-only when Price moved to Pricing-Table-driven behavior.
+  // See qualification-context.ts header for the rationale.
+  it('returns empty string for price strategy (handled by Pricing Table + Guidance)', () => {
+    expect(buildQualificationBlockForStrategy('price', ['square_footage'])).toBe('');
   });
 
   it('returns empty string for auto strategy', () => {
@@ -109,8 +111,8 @@ describe('buildQualificationBlockForStrategy', () => {
     expect(buildQualificationBlockForStrategy(undefined, ['square_footage'])).toBe('');
   });
 
-  it('returns empty string when required fields is missing even for price/qualify', () => {
-    expect(buildQualificationBlockForStrategy('price', undefined)).toBe('');
+  it('returns empty string when required fields is missing even for qualify', () => {
+    expect(buildQualificationBlockForStrategy('qualify', undefined)).toBe('');
     expect(buildQualificationBlockForStrategy('qualify', null)).toBe('');
   });
 });

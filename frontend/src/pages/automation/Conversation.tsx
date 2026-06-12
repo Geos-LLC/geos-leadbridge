@@ -771,7 +771,12 @@ function GoalSetupCard({
   };
   const Icon = iconByStrategy[strategy];
 
-  const showRequiredInfo = strategy === 'price' || strategy === 'qualify';
+  // Required Information is QUALIFY-only. Price uses the Pricing Table +
+  // Pricing Guidance (Playbook) — its qualification logic is "ask only what's
+  // needed to quote accurately," not a configurable required-fields list.
+  // Backend gate in qualification-context.ts mirrors this: only qualify
+  // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
+  const showRequiredInfo = strategy === 'qualify';
   const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'convert' || strategy === 'phone';
 
   return (
@@ -802,7 +807,7 @@ function GoalSetupCard({
               <>Balanced approach. AI acknowledges the customer, gathers information if needed, and moves toward booking.</>
             )}
             {strategy === 'price' && (
-              <>AI volunteers a price from the Pricing Table when the customer's message is about pricing. Configure the required information AI should collect and how it presents the number below.</>
+              <>AI volunteers a price from the Pricing Table when the customer's message is about pricing. Choose how AI presents the number below.</>
             )}
             {strategy === 'qualify' && (
               <>AI collects required information before quoting or booking. Pick the fields AI must gather below.</>
@@ -861,44 +866,68 @@ function GoalSetupCard({
             })}
           </div>
           <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-            These fields determine when {strategy === 'price' ? 'pricing' : 'qualification'} is considered complete. AI will prioritize collecting them before transitioning to other goals.
+            These fields determine when qualification is considered complete. AI will prioritize collecting them before transitioning to other goals.
           </div>
         </div>
       )}
 
-      {/* Price-specific: priceQuoteMode (Range / Exact) */}
+      {/* Price-specific: Pricing Table + Pricing Guidance note +
+          priceQuoteMode (Range / Exact). The Price goal has no Required
+          Information list — pricing behavior is driven by the Pricing Table
+          (in AI Playbook → Pricing Guidance) plus the Range/Exact mode below.
+          See backlog note in the commit history for the planned Advanced
+          Pricing Rules section (sqft calc, recurring discount, minimum,
+          trainee tier, dispatcher-confirm rules). */}
       {strategy === 'price' && (
-        <div style={{ marginBottom: 16 }}>
-          <FieldRow
-            label={
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                How AI quotes price <Info size={12} style={{ color: 'var(--lb-ink-6)' }} />
-              </span>
-            }
-            sublabel="Choose how AI presents pricing when it volunteers a price."
-            align="top"
-            noBorder
-          >
-            <div style={{ display: 'flex', gap: 12 }}>
-              <OptionCard
-                selected={priceMode === 'range'}
-                onClick={() => onPriceMode('range')}
-                title="Range"
-                body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
-                mixed={mixedPriceMode.mixed && priceMode === 'range'}
-                mixedTooltip={mixedPriceMode.tooltip}
-              />
-              <OptionCard
-                selected={priceMode === 'exact'}
-                onClick={() => onPriceMode('exact')}
-                title="Exact"
-                body="AI gives an exact price when it has enough information."
-                mixed={mixedPriceMode.mixed && priceMode === 'exact'}
-                mixedTooltip={mixedPriceMode.tooltip}
-              />
+        <>
+          <div style={{
+            marginBottom: 16,
+            padding: '12px 14px',
+            background: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            borderRadius: 10,
+            fontSize: 12.5, color: '#065f46',
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            lineHeight: 1.55,
+          }}>
+            <Info size={14} style={{ color: '#059669', flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong>AI uses your <a href="/settings?tab=ai-playbook" style={{ color: '#047857', fontWeight: 600 }}>Pricing Table and Pricing Guidance from AI Playbook</a>.</strong> If details are missing, AI asks only what is needed to quote accurately.
             </div>
-          </FieldRow>
-        </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <FieldRow
+              label={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  How AI quotes price <Info size={12} style={{ color: 'var(--lb-ink-6)' }} />
+                </span>
+              }
+              sublabel="Choose how AI presents pricing when it volunteers a price."
+              align="top"
+              noBorder
+            >
+              <div style={{ display: 'flex', gap: 12 }}>
+                <OptionCard
+                  selected={priceMode === 'range'}
+                  onClick={() => onPriceMode('range')}
+                  title="Range"
+                  body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
+                  mixed={mixedPriceMode.mixed && priceMode === 'range'}
+                  mixedTooltip={mixedPriceMode.tooltip}
+                />
+                <OptionCard
+                  selected={priceMode === 'exact'}
+                  onClick={() => onPriceMode('exact')}
+                  title="Exact"
+                  body="AI gives an exact price when it has enough information."
+                  mixed={mixedPriceMode.mixed && priceMode === 'exact'}
+                  mixedTooltip={mixedPriceMode.tooltip}
+                />
+              </div>
+            </FieldRow>
+          </div>
+        </>
       )}
 
       {/* Per-goal "When Goal Is Reached" radio. Writes the same global
