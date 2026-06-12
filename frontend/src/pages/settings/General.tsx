@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building, Globe, Info, Loader2, Sparkles } from 'lucide-react';
+import { Building, Globe, Info, Loader2, Phone, Sparkles } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
 } from '../../components/automation/ui';
@@ -9,6 +9,7 @@ import { usersApi, authApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
+import { AdditionalAssociatePhonesEditor } from '../../components/AdditionalAssociatePhonesEditor';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -74,6 +75,10 @@ export function SettingsGeneral() {
   const [websiteMetadata, setWebsiteMetadata] = useState<any>((user as any)?.websiteMetadataJson ?? null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone || '');
+  const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
+  const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
+  const [businessPhoneSavedAt, setBusinessPhoneSavedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later.
   const [_saving, setSaving] = useState(false);
@@ -215,6 +220,47 @@ export function SettingsGeneral() {
       setVerifyError(e?.response?.data?.message || e?.message || 'Failed to verify');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // Pre-fill business phone from the user object (set during registration or
+  // by Settings → Communication). Re-runs when the auth store user updates.
+  useEffect(() => {
+    setBusinessPhone((user as any)?.businessPhone || '');
+  }, [(user as any)?.id, (user as any)?.businessPhone]);
+
+  useEffect(() => {
+    if (!businessPhoneSavedAt) return;
+    const t = setTimeout(() => setBusinessPhoneSavedAt(null), 2200);
+    return () => clearTimeout(t);
+  }, [businessPhoneSavedAt]);
+
+  const handleSaveBusinessPhone = async () => {
+    setBusinessPhoneError(null);
+    const trimmed = businessPhone.trim();
+    if (trimmed) {
+      const digits = trimmed.replace(/\D/g, '');
+      const valid = digits.length === 10 || (digits.length === 11 && digits.startsWith('1')) || digits.length > 10;
+      if (!valid) {
+        setBusinessPhoneError('Enter a valid phone number');
+        return;
+      }
+    }
+    setSavingBusinessPhone(true);
+    try {
+      await usersApi.updateProfile({ businessPhone: trimmed || undefined });
+      if (token) {
+        try {
+          const fresh: any = await authApi.getProfile();
+          const u = fresh?.user ?? fresh;
+          if (u?.id) setAuth(u, token);
+        } catch { /* silent */ }
+      }
+      setBusinessPhoneSavedAt(Date.now());
+    } catch (e: any) {
+      setBusinessPhoneError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSavingBusinessPhone(false);
     }
   };
 
@@ -418,6 +464,74 @@ export function SettingsGeneral() {
             />
           </div>
         )}
+      </SettingCard>
+
+      <SettingCard
+        icon={Phone}
+        iconTone="blue"
+        title="Business phone"
+        subtitle="Your primary owner / company number. Used for owner alerts and auto-registered on connected Thumbtack businesses as an associate phone."
+        contentPad="8px 24px 24px"
+      >
+        <FieldRow label="Phone number" noBorder>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              value={businessPhone}
+              onChange={e => setBusinessPhone(e.target.value)}
+              placeholder="+1 (555) 010-1234"
+              style={{
+                flex: '1 1 auto', minWidth: 0,
+                padding: '9px 12px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                fontSize: 13, fontFamily: 'inherit',
+                background: 'white', color: 'var(--lb-ink-1)',
+                outline: 'none',
+              }}
+            />
+            {businessPhoneSavedAt && !businessPhoneError && (
+              <span style={{ color: 'var(--lb-success, #059669)', fontSize: 12, fontWeight: 600 }}>Saved</span>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveBusinessPhone}
+              disabled={savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '9px 14px', borderRadius: 8,
+                border: 'none',
+                background: savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))
+                  ? 'var(--lb-ink-tint, #e2e8f0)' : '#2563eb',
+                color: savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))
+                  ? 'var(--lb-ink-5, #64748b)' : 'white',
+                fontSize: 13, fontWeight: 600,
+                cursor: savingBusinessPhone ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {savingBusinessPhone && <Loader2 size={14} className="animate-spin" />}
+              {savingBusinessPhone ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+          {businessPhoneError && (
+            <div style={{
+              marginTop: 8, padding: '8px 12px', borderRadius: 8,
+              background: 'var(--lb-danger-tint, #fee2e2)',
+              color: 'var(--lb-danger, #dc2626)',
+              fontSize: 12, fontWeight: 600,
+            }}>
+              {businessPhoneError}
+            </div>
+          )}
+        </FieldRow>
+      </SettingCard>
+
+      <SettingCard
+        icon={Phone}
+        iconTone="teal"
+        title="Additional associate numbers"
+        subtitle="Extra team / callback numbers to register on connected Thumbtack businesses. Optional. Removing a number here stops re-syncing — existing TT entries are kept."
+        contentPad="8px 24px 24px"
+      >
+        <AdditionalAssociatePhonesEditor />
       </SettingCard>
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />

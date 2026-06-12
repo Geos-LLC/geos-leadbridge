@@ -791,6 +791,59 @@ export class PlatformService {
     } catch (err: any) {
       console.warn(`[PlatformService] LB-number TT registration failed (business ${businessId}): ${err?.message ?? err}`);
     }
+    try {
+      await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      console.warn(`[PlatformService] Additional-associate-phones TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Register every entry in User.additionalAssociatePhonesJson as a Thumbtack
+   * associate phone on the given business. Idempotent via ensureAssociatePhone.
+   * Skips silently when the user has no additional phones configured.
+   */
+  async registerAdditionalAssociatePhonesWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { additionalAssociatePhonesJson: true },
+    });
+    const raw = user?.additionalAssociatePhonesJson as
+      | Array<{ id?: string; phoneNumber: string; label?: string }>
+      | null
+      | undefined;
+    if (!Array.isArray(raw) || raw.length === 0) return;
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    for (const entry of raw) {
+      if (!entry || typeof entry.phoneNumber !== 'string') continue;
+      const phone = entry.phoneNumber;
+      const name = (entry.label && entry.label.trim()) || 'LeadBridge Associate';
+      try {
+        const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, phone, name);
+        console.log(
+          `[PlatformService] Additional associate ${phone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+        );
+      } catch (err: any) {
+        // One bad entry shouldn't stop the rest of the list.
+        console.warn(
+          `[PlatformService] Additional associate ${phone} registration on ${businessId} failed: ${err?.message ?? err}`,
+        );
+      }
+    }
   }
 
   /**

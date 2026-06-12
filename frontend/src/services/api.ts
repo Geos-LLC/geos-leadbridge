@@ -1479,6 +1479,7 @@ export const usersApi = {
       businessPhone?: string;
       website?: string | null;
       websiteMetadata?: WebsiteMetadataPayload | null;
+      additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
     },
   ): Promise<{
     success: boolean;
@@ -1489,6 +1490,7 @@ export const usersApi = {
       businessPhone?: string | null;
       website?: string | null;
       websiteMetadataJson?: WebsiteMetadataPayload | null;
+      additionalAssociatePhonesJson?: Array<{ id: string; phoneNumber: string; label?: string }> | null;
     };
   }> => {
     const { data } = await api.patch('/v1/users/me', updates);
