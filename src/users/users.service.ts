@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 import axios from 'axios';
 import OpenAI from 'openai';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -9,7 +10,18 @@ import { StripeService } from '../stripe/stripe.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { PlatformService } from '../platforms/platform.service';
+import { PlatformFactory } from '../platforms/platform.factory';
 import type { SupportedPlaybookSectionKey } from './playbook-seed-applier';
+import {
+  mergeBusinessInfo,
+  type BusinessInfoSource,
+  type BusinessInfoConflict,
+  type SourceMeta,
+} from './business-info-merger';
+import {
+  fetchThumbtackBusinessInfo,
+  fetchYelpBusinessInfo,
+} from './business-info-sources';
 
 /**
  * Structured facts extracted from the homepage, organized by the 8 Playbook
@@ -99,6 +111,8 @@ export class UsersService {
     @Inject(forwardRef(() => PlatformService))
     private platformService: PlatformService,
     private configService: ConfigService,
+    @Inject(forwardRef(() => PlatformFactory))
+    private platformFactory: PlatformFactory,
   ) {}
 
   private get openai(): OpenAI | null {
@@ -136,7 +150,42 @@ export class UsersService {
       if (trimmed.length === 0) data.websiteMetadataJson = null;
     }
     if (updates.websiteMetadata !== undefined) {
-      data.websiteMetadataJson = updates.websiteMetadata ?? null;
+      if (updates.websiteMetadata === null) {
+        data.websiteMetadataJson = null;
+      } else {
+        // Route businessInformation through the merger so TT / Yelp seeds
+        // already on file are preserved and conflicts get queued instead
+        // of silently overwritten. Other metadata fields (title, summary,
+        // imageUrl, etc.) overwrite as before — they're per-fetch, not
+        // multi-source.
+        const incoming = updates.websiteMetadata;
+        const incomingBiz = (incoming.playbookSeed as any)?.businessInformation;
+        const state = await this.loadBusinessInfoState(userId);
+        let mergedSeed = incoming.playbookSeed || ({} as any);
+        let nextSources = state.sources;
+        let nextConflicts = state.pendingConflicts;
+        if (incomingBiz && typeof incomingBiz === 'object') {
+          const result = mergeBusinessInfo({
+            existing: state.bizInfo,
+            existingSources: state.sources,
+            newPatch: incomingBiz,
+            newSource: 'website',
+          });
+          mergedSeed = { ...mergedSeed, businessInformation: result.merged };
+          nextSources = result.sources;
+          // Dedupe conflicts by field — re-running verify shouldn't pile up
+          // duplicate rows for the same field across consecutive runs.
+          const existingFields = new Set(state.pendingConflicts.map(c => c.field));
+          const fresh = result.conflicts.filter(c => !existingFields.has(c.field));
+          nextConflicts = [...state.pendingConflicts, ...fresh];
+        }
+        data.websiteMetadataJson = {
+          ...incoming,
+          playbookSeed: mergedSeed,
+          sources: nextSources,
+          pendingConflicts: nextConflicts,
+        };
+      }
     }
 
     const user = await this.prisma.user.update({
@@ -160,7 +209,7 @@ export class UsersService {
   private async syncBusinessPhoneToAccounts(userId: string, phone: string) {
     const accounts = await this.prisma.savedAccount.findMany({
       where: { userId },
-      select: { id: true },
+      select: { id: true, platform: true, businessId: true },
     });
     for (const account of accounts) {
       await this.prisma.notificationSettings.updateMany({
@@ -171,6 +220,22 @@ export class UsersService {
         where: { savedAccountId: account.id },
         data: { agentPhoneE164: phone },
       });
+    }
+
+    const ttBusinessIds = accounts
+      .filter((a) => a.platform === 'thumbtack' && a.businessId)
+      .map((a) => a.businessId as string);
+    for (const businessId of ttBusinessIds) {
+      try {
+        await this.platformService.registerAgentPhoneWithThumbtack(userId, businessId);
+      } catch (err: any) {
+        // Profile save must not break if TT registration fails — log and move on.
+        // ensureAssociatePhone already skips when the number is already on the
+        // business, so this only surfaces real failures (auth, network, 4xx).
+        console.error(
+          `[UsersService] TT associate-phone sync failed user=${userId} business=${businessId}: ${err?.message ?? err}`,
+        );
+      }
     }
   }
 
@@ -957,6 +1022,156 @@ export class UsersService {
     );
 
     return { success: true, accountsAffected, filled, skipped };
+  }
+
+  /**
+   * Internal: read the user's websiteMetadataJson and return the parts the
+   * business-info merger needs. Tolerates a missing record (returns empty
+   * defaults) and ensures the source/conflict slots exist so callers don't
+   * have to undefined-guard everything downstream.
+   */
+  private async loadBusinessInfoState(userId: string): Promise<{
+    metadata: any;
+    bizInfo: NonNullable<PlaybookSeed['businessInformation']>;
+    sources: Record<string, SourceMeta>;
+    pendingConflicts: BusinessInfoConflict[];
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { websiteMetadataJson: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const metadata = (user.websiteMetadataJson as any) || {};
+    const seed = (metadata.playbookSeed ||= {}) as PlaybookSeed;
+    const bizInfo = (seed.businessInformation || {}) as NonNullable<PlaybookSeed['businessInformation']>;
+    const sources: Record<string, SourceMeta> = metadata.sources || {};
+    const pendingConflicts: BusinessInfoConflict[] = Array.isArray(metadata.pendingConflicts)
+      ? metadata.pendingConflicts
+      : [];
+    return { metadata, bizInfo, sources, pendingConflicts };
+  }
+
+  /**
+   * Internal: persist the updated business-info state back to
+   * `User.websiteMetadataJson`. We re-fetch right before the write so a
+   * concurrent verifyWebsite save doesn't clobber the keys we're not
+   * touching. Returns the persisted state.
+   */
+  private async persistBusinessInfoState(
+    userId: string,
+    next: {
+      bizInfo: NonNullable<PlaybookSeed['businessInformation']>;
+      sources: Record<string, SourceMeta>;
+      pendingConflicts: BusinessInfoConflict[];
+    },
+  ): Promise<void> {
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { websiteMetadataJson: true },
+    });
+    const metadata = (current?.websiteMetadataJson as any) || {};
+    const seed = metadata.playbookSeed || {};
+    seed.businessInformation = next.bizInfo;
+    metadata.playbookSeed = seed;
+    metadata.sources = next.sources;
+    metadata.pendingConflicts = next.pendingConflicts;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { websiteMetadataJson: metadata },
+    });
+    await this.cache.del(CacheKeys.me(userId));
+  }
+
+  /**
+   * Pull business-info from a connected SavedAccount and silently merge
+   * what's mergeable (rules 1/2/3/5/arrays). New conflicts (rule 4) are
+   * appended to `pendingConflicts` for later review — never written
+   * destructively.
+   *
+   * Public entry point used by:
+   *   - The platform-connect hook (silent seed on connect)
+   *   - The Settings → General "Pull from Thumbtack / Yelp" buttons
+   */
+  /**
+   * Event listener — fires whenever PlatformService.saveAccount completes
+   * for a new SavedAccount. Silently seeds businessInformation from the
+   * just-connected source. Errors are swallowed; the apply method
+   * already returns success=false on no-data.
+   */
+  @OnEvent('platform.account.connected', { async: true })
+  async onPlatformAccountConnected(payload: { userId: string; savedAccountId: string; platform: string }) {
+    const source = payload.platform === 'thumbtack' ? 'thumbtack'
+      : payload.platform === 'yelp' ? 'yelp'
+      : null;
+    if (!source) return;
+    try {
+      await this.seedBusinessInfoFromAccount(payload.userId, payload.savedAccountId, source);
+    } catch (err: any) {
+      this.logger.warn(`[onPlatformAccountConnected] seed failed for ${payload.savedAccountId}: ${err?.message || err}`);
+    }
+  }
+
+  async seedBusinessInfoFromAccount(
+    userId: string,
+    savedAccountId: string,
+    source: BusinessInfoSource,
+  ): Promise<{
+    success: boolean;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    warning?: string;
+  }> {
+    let patch: Partial<NonNullable<PlaybookSeed['businessInformation']>> | undefined;
+    if (source === 'thumbtack') {
+      patch = await fetchThumbtackBusinessInfo({
+        userId,
+        savedAccountId,
+        platformService: this.platformService,
+        platformFactory: this.platformFactory,
+        prisma: this.prisma,
+      });
+    } else if (source === 'yelp') {
+      patch = await fetchYelpBusinessInfo({
+        userId,
+        savedAccountId,
+        platformService: this.platformService,
+        prisma: this.prisma,
+      });
+    }
+    if (!patch || Object.keys(patch).length === 0) {
+      return { success: false, fieldsApplied: 0, conflictsRaised: 0, warning: 'No data returned from ' + source };
+    }
+
+    const state = await this.loadBusinessInfoState(userId);
+    const result = mergeBusinessInfo({
+      existing: state.bizInfo,
+      existingSources: state.sources,
+      newPatch: patch,
+      newSource: source,
+    });
+
+    // Dedupe conflicts against the existing list — re-running the pull
+    // shouldn't double-raise the same field.
+    const existingByField = new Set(state.pendingConflicts.map(c => c.field));
+    const newConflicts = result.conflicts.filter(c => !existingByField.has(c.field));
+
+    await this.persistBusinessInfoState(userId, {
+      bizInfo: result.merged,
+      sources: result.sources,
+      pendingConflicts: [...state.pendingConflicts, ...newConflicts],
+    });
+
+    const fieldsApplied = Object.keys(result.merged).length - Object.keys(state.bizInfo).length;
+    this.logger.log(
+      `[seedBusinessInfoFromAccount] userId=${userId} source=${source} ` +
+      `fieldsApplied=${Math.max(0, fieldsApplied)} conflictsRaised=${newConflicts.length}`,
+    );
+    return {
+      success: true,
+      fieldsApplied: Math.max(0, fieldsApplied),
+      conflictsRaised: newConflicts.length,
+    };
   }
 
   // ---------------------------------------------------------------------

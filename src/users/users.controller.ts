@@ -115,6 +115,26 @@ export class UsersController {
   }
 
   /**
+   * Pull business-info from a connected SavedAccount and merge into the
+   * canonical seed. Used by the "Pull from Thumbtack / Pull from Yelp"
+   * buttons on Settings → General and called automatically when a new
+   * platform is connected.
+   *
+   * POST /v1/users/me/business-info/pull-from/:platform/:savedAccountId
+   *   platform = 'thumbtack' | 'yelp'
+   */
+  @Post('me/business-info/pull-from/:platform/:savedAccountId')
+  async pullBusinessInfoFromAccount(
+    @Request() req: any,
+    @Param('platform') platform: string,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const normalized = platform === 'yelp' ? 'yelp' : platform === 'thumbtack' ? 'thumbtack' : null;
+    if (!normalized) throw new BadRequestException(`Unsupported platform: ${platform}`);
+    return this.usersService.seedBusinessInfoFromAccount(req.user.id, savedAccountId, normalized);
+  }
+
+  /**
    * Get the user's global AI prompt
    * GET /v1/users/me/ai-prompt
    */

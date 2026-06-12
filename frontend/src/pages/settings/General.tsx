@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building, Globe, Info, Loader2 } from 'lucide-react';
+import { Building, Globe, Info, Loader2, Sparkles } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
 } from '../../components/automation/ui';
 import { useAuthStore } from '../../store/authStore';
+import { useAppStore } from '../../store/appStore';
 import { usersApi, authApi } from '../../services/api';
+import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
 
@@ -12,6 +14,13 @@ export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
   const token = useAuthStore(s => s.token);
   const setAuth = useAuthStore(s => s.setAuth);
+  const savedAccounts = useAppStore(s => s.savedAccounts);
+
+  // First TT / Yelp account ids for the "Pull from..." buttons. Buttons
+  // are hidden when the user has no account of that platform connected.
+  const ttAccountId = savedAccounts.find(a => a.platform === 'thumbtack')?.id;
+  const yelpAccountId = savedAccounts.find(a => a.platform === 'yelp')?.id;
+  const [pullingFrom, setPullingFrom] = useState<'thumbtack' | 'yelp' | null>(null);
 
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
@@ -83,6 +92,42 @@ export function SettingsGeneral() {
     }).catch(() => { /* non-fatal */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const pullFromAccount = async (platform: 'thumbtack' | 'yelp', accountId: string) => {
+    setPullingFrom(platform);
+    try {
+      const res = await usersApi.pullBusinessInfoFromAccount(platform, accountId);
+      if (!res.success) {
+        notify.warning(`No ${platform === 'thumbtack' ? 'Thumbtack' : 'Yelp'} data`, res.warning || 'Nothing new to pull.');
+        return;
+      }
+      const label = platform === 'thumbtack' ? 'Thumbtack' : 'Yelp';
+      const parts: string[] = [];
+      if (res.fieldsApplied > 0) parts.push(`${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'} added`);
+      if (res.conflictsRaised > 0) parts.push(`${res.conflictsRaised} conflict${res.conflictsRaised === 1 ? '' : 's'} queued for review`);
+      notify.success(
+        `Pulled from ${label}`,
+        parts.length > 0 ? parts.join(', ') + '.' : 'Already up to date.',
+        4500,
+      );
+      // Refresh auth user so the preview card re-renders with the new
+      // businessInformation values.
+      if (token) {
+        try {
+          const fresh: any = await authApi.getProfile();
+          const u = fresh?.user ?? fresh;
+          if (u?.id) {
+            setAuth(u, token);
+            setWebsiteMetadata((u as any).websiteMetadataJson ?? null);
+          }
+        } catch { /* silent */ }
+      }
+    } catch (e: any) {
+      notify.error('Pull failed', e?.response?.data?.message || e?.message || 'Try again later.');
+    } finally {
+      setPullingFrom(null);
+    }
+  };
 
   const verifyAndSaveWebsite = async () => {
     setVerifying(true);
@@ -273,6 +318,24 @@ export function SettingsGeneral() {
             fontSize: 12, fontWeight: 600,
           }}>{verifyError}</div>
         )}
+        {(ttAccountId || yelpAccountId) && (
+          <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {ttAccountId && (
+              <PullButton
+                label="Pull from Thumbtack"
+                busy={pullingFrom === 'thumbtack'}
+                onClick={() => void pullFromAccount('thumbtack', ttAccountId)}
+              />
+            )}
+            {yelpAccountId && (
+              <PullButton
+                label="Pull from Yelp"
+                busy={pullingFrom === 'yelp'}
+                onClick={() => void pullFromAccount('yelp', yelpAccountId)}
+              />
+            )}
+          </div>
+        )}
         {(user?.website || websiteMetadata) && (
           <div style={{ padding: '0 24px 12px' }}>
             <WebsitePreviewCard
@@ -286,6 +349,30 @@ export function SettingsGeneral() {
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />
     </div>
+  );
+}
+
+function PullButton({ label, busy, onClick }: { label: string; busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      style={{
+        padding: '9px 14px',
+        fontSize: 13, fontWeight: 600,
+        color: 'var(--lb-ink-2)',
+        background: 'white',
+        border: '1px solid var(--lb-line)', borderRadius: 8,
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+      {busy ? 'Pulling…' : label}
+    </button>
   );
 }
 

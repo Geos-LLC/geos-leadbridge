@@ -1512,6 +1512,22 @@ export const usersApi = {
     const { data } = await api.post('/v1/users/me/website/apply-faq');
     return data;
   },
+  /** Pull business-info from a connected SavedAccount and merge into the
+   *  canonical seed. Non-destructive — conflicting fields (existing != new
+   *  on a non-website-only field) are queued in `pendingConflicts` for the
+   *  Resolve modal to surface; nothing is overwritten silently. */
+  pullBusinessInfoFromAccount: async (
+    platform: 'thumbtack' | 'yelp',
+    savedAccountId: string,
+  ): Promise<{
+    success: boolean;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post(`/v1/users/me/business-info/pull-from/${platform}/${savedAccountId}`);
+    return data;
+  },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
     const { data } = await api.delete('/v1/users/me');
     return data;

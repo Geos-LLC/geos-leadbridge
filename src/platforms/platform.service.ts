@@ -5,6 +5,7 @@
 
 import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
 import { withCronLock } from '../common/utils/cron-lock';
@@ -102,6 +103,7 @@ export class PlatformService {
     private trialService: TrialService,
     private cache: CacheService,
     private leadCache: LeadCacheService,
+    private eventEmitter: EventEmitter2,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -718,8 +720,10 @@ export class PlatformService {
       credentials = creds;
     }
 
-    console.log(`[PlatformService] Registering agent phone ${agentPhone} as Thumbtack associate for business ${businessId}`);
-    await adapter.registerAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
+    const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
+    console.log(
+      `[PlatformService] Associate phone ${agentPhone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+    );
   }
 
   /**
@@ -1009,6 +1013,16 @@ export class PlatformService {
     // Initialize/upgrade adaptive trial based on connected platforms
     this.trialService.onPlatformConnected(userId, platform).catch((err) => {
       this.logger.warn(`[saveAccount] Trial init failed for ${userId}: ${err.message}`);
+    });
+
+    // Emit a domain event so UsersService can silently seed
+    // businessInformation from the freshly-connected account. Decoupled to
+    // avoid a Users <-> Platforms circular dep. Listener is async / fire-
+    // and-forget; failures are non-fatal — the account is saved either way.
+    this.eventEmitter.emit('platform.account.connected', {
+      userId,
+      savedAccountId: savedAccount.id,
+      platform,
     });
 
     // Invalidate AFTER commit so a concurrent reader cannot repopulate the cache
