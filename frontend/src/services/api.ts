@@ -1499,6 +1499,19 @@ export const usersApi = {
     const { data } = await api.post('/v1/users/me/website/apply-playbook', { mode });
     return data;
   },
+  // Apply the website seed's businessInformation block into each connected
+  // SavedAccount's FAQ (insuredAndBonded, bringsSupplies, petPolicy,
+  // paymentMethods). Always fill-empty; never overwrites a user-typed FAQ.
+  applyFaqFromWebsiteSeed: async (): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/website/apply-faq');
+    return data;
+  },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
     const { data } = await api.delete('/v1/users/me');
     return data;

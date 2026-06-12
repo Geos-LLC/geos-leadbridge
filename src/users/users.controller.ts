@@ -101,6 +101,20 @@ export class UsersController {
   }
 
   /**
+   * Apply the website seed's businessInformation fields into each
+   * connected SavedAccount's `faqJson`. Always fill-empty — never
+   * overwrites a user-typed FAQ answer. Targets the 4 FAQ fields
+   * derivable from a marketing site: insuredAndBonded, bringsSupplies,
+   * petPolicy, paymentMethods.
+   *
+   * POST /v1/users/me/website/apply-faq
+   */
+  @Post('me/website/apply-faq')
+  async applyFaqFromSeed(@Request() req: any) {
+    return this.usersService.applyFaqFromWebsiteSeed(req.user.id);
+  }
+
+  /**
    * Get the user's global AI prompt
    * GET /v1/users/me/ai-prompt
    */

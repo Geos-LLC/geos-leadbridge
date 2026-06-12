@@ -676,17 +676,25 @@ export class UsersService {
    */
   async applyPlaybookSeedToAccounts(
     userId: string,
-    mode: 'fill_empty' | 'replace',
+    // Mode parameter preserved for controller back-compat (callers still
+    // send 'fill_empty' / 'replace') but IGNORED. V2.4 apply is always
+    // additive line-level: existing customInstructions text is never
+    // erased, new fact-lines are appended only when not already present.
+    _mode: 'fill_empty' | 'replace',
   ): Promise<{
     success: boolean;
     accountsAffected: number;
-    filled: number;
-    skipped: number;
-    overwritten: number;
-    perSection: Partial<Record<SupportedPlaybookSectionKey, { filled: number; skipped: number; overwritten: number }>>;
+    /** Total lines added across all sections × all accounts. */
+    linesAdded: number;
+    /** Total seed lines skipped because they were already present. */
+    linesDuplicate: number;
+    /** Section keys that received at least one new line on any account. */
+    sectionsTouched: SupportedPlaybookSectionKey[];
+    /** Per-section line counts aggregated across accounts. */
+    perSection: Partial<Record<SupportedPlaybookSectionKey, { linesAdded: number; linesDuplicate: number }>>;
     warning?: string;
   }> {
-    const { seedToCustomInstructions, SUPPORTED_SECTIONS } = await import('./playbook-seed-applier');
+    const { seedToSectionLines, SUPPORTED_SECTIONS } = await import('./playbook-seed-applier');
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -700,24 +708,23 @@ export class UsersService {
       return {
         success: false,
         accountsAffected: 0,
-        filled: 0,
-        skipped: 0,
-        overwritten: 0,
+        linesAdded: 0,
+        linesDuplicate: 0,
+        sectionsTouched: [],
         perSection: {},
         warning: 'No playbook seed on file. Verify your website first.',
       };
     }
 
-    const instructionsBySection = seedToCustomInstructions(seed);
-    const sectionsWithContent = (Object.keys(instructionsBySection) as SupportedPlaybookSectionKey[])
-      .filter((k) => !!instructionsBySection[k]);
+    const linesBySection = seedToSectionLines(seed);
+    const sectionsWithContent = SUPPORTED_SECTIONS.filter(k => linesBySection[k].length > 0);
     if (sectionsWithContent.length === 0) {
       return {
         success: false,
         accountsAffected: 0,
-        filled: 0,
-        skipped: 0,
-        overwritten: 0,
+        linesAdded: 0,
+        linesDuplicate: 0,
+        sectionsTouched: [],
         perSection: {},
         warning: 'Playbook seed has no fields to apply.',
       };
@@ -731,25 +738,31 @@ export class UsersService {
       return {
         success: false,
         accountsAffected: 0,
-        filled: 0,
-        skipped: 0,
-        overwritten: 0,
+        linesAdded: 0,
+        linesDuplicate: 0,
+        sectionsTouched: [],
         perSection: {},
         warning: 'Connect an account first — the Playbook is stored per account.',
       };
     }
 
-    const perSection: Partial<Record<SupportedPlaybookSectionKey, { filled: number; skipped: number; overwritten: number }>> = {};
-    for (const k of SUPPORTED_SECTIONS) perSection[k] = { filled: 0, skipped: 0, overwritten: 0 };
+    const perSection: Partial<Record<SupportedPlaybookSectionKey, { linesAdded: number; linesDuplicate: number }>> = {};
+    for (const k of SUPPORTED_SECTIONS) perSection[k] = { linesAdded: 0, linesDuplicate: 0 };
 
-    let totalFilled = 0;
-    let totalSkipped = 0;
-    let totalOverwritten = 0;
+    let totalLinesAdded = 0;
+    let totalLinesDuplicate = 0;
     let accountsAffected = 0;
+    const sectionsTouched = new Set<SupportedPlaybookSectionKey>();
 
-    // One transaction per account — cheaper than one global transaction
-    // (account writes are independent) and any single account failure
-    // doesn't roll back the others.
+    /**
+     * Line-level dedup. Normalize each line (trim, lowercase, strip
+     * trailing punctuation) before comparing — so "Service area: Tampa."
+     * and "service area: tampa" collide as duplicates. The user's typing
+     * varies; the seed's phrasing is deterministic.
+     */
+    const normalizeLine = (s: string): string =>
+      s.trim().toLowerCase().replace(/[\s.;:!?]+$/, '');
+
     for (const account of accounts) {
       const existing = (account.followUpSettingsJson as any) || {};
       const aiPlaybookV2: Record<string, { customInstructions?: string }> = existing.aiPlaybookV2 || {};
@@ -757,31 +770,53 @@ export class UsersService {
       let changedThisAccount = false;
 
       for (const sectionKey of sectionsWithContent) {
-        const text = instructionsBySection[sectionKey]!;
+        const seedLines = linesBySection[sectionKey];
         const current = aiPlaybookV2[sectionKey]?.customInstructions;
-        const hasExisting = typeof current === 'string' && current.trim().length > 0;
+        const existingText = typeof current === 'string' ? current : '';
 
-        if (mode === 'fill_empty' && hasExisting) {
-          perSection[sectionKey]!.skipped++;
-          totalSkipped++;
-          continue;
+        // Build set of normalized lines already present in user text.
+        const existingNormalized = new Set<string>();
+        for (const raw of existingText.split(/\r?\n/)) {
+          const norm = normalizeLine(raw);
+          if (norm.length > 0) existingNormalized.add(norm);
         }
 
-        if (hasExisting) {
-          perSection[sectionKey]!.overwritten++;
-          totalOverwritten++;
-        } else {
-          perSection[sectionKey]!.filled++;
-          totalFilled++;
+        // Dedup new lines AGAINST EXISTING and AGAINST EACH OTHER (in case
+        // the seed itself somehow produced duplicates).
+        const linesToAppend: string[] = [];
+        const seenThisRound = new Set<string>(existingNormalized);
+        let duplicateCount = 0;
+        for (const line of seedLines) {
+          const norm = normalizeLine(line);
+          if (norm.length === 0) continue;
+          if (seenThisRound.has(norm)) {
+            duplicateCount++;
+            continue;
+          }
+          seenThisRound.add(norm);
+          linesToAppend.push(line);
         }
+
+        perSection[sectionKey]!.linesDuplicate += duplicateCount;
+        totalLinesDuplicate += duplicateCount;
+
+        if (linesToAppend.length === 0) continue;
+
+        perSection[sectionKey]!.linesAdded += linesToAppend.length;
+        totalLinesAdded += linesToAppend.length;
+        sectionsTouched.add(sectionKey);
+
+        const appended = linesToAppend.join('\n');
+        const merged = existingText.trim().length > 0
+          ? `${existingText.trimEnd()}\n${appended}`
+          : appended;
 
         aiPlaybookV2[sectionKey] = {
           ...(aiPlaybookV2[sectionKey] || {}),
-          customInstructions: text,
-          // Flag lets the AI Playbook UI render a "Suggested from website"
-          // badge above the section. Cleared the moment the user edits the
-          // text (frontend strips it from the section's section state on
-          // first onChange).
+          customInstructions: merged,
+          // Lets the Playbook UI flag "Suggested from website" so the
+          // user knows where the new lines came from. The frontend clears
+          // the flag on first manual edit (handled by AiPlaybook.tsx).
           suggestedFromWebsite: true,
         } as any;
         changedThisAccount = true;
@@ -799,18 +834,118 @@ export class UsersService {
     }
 
     this.logger.log(
-      `[applyPlaybookSeed] userId=${userId} mode=${mode} accounts=${accountsAffected}/${accounts.length} ` +
-      `filled=${totalFilled} skipped=${totalSkipped} overwritten=${totalOverwritten}`,
+      `[applyPlaybookSeed] userId=${userId} accounts=${accountsAffected}/${accounts.length} ` +
+      `linesAdded=${totalLinesAdded} linesDuplicate=${totalLinesDuplicate} ` +
+      `sectionsTouched=[${[...sectionsTouched].join(',')}]`,
     );
 
     return {
       success: true,
       accountsAffected,
-      filled: totalFilled,
-      skipped: totalSkipped,
-      overwritten: totalOverwritten,
+      linesAdded: totalLinesAdded,
+      linesDuplicate: totalLinesDuplicate,
+      sectionsTouched: [...sectionsTouched],
       perSection,
     };
+  }
+
+  /**
+   * Apply the structured Playbook seed's businessInformation fields into
+   * every connected SavedAccount's `faqJson`. The FAQ has typed enums
+   * (yes/no/unset, pet_friendly/extra_charge/no_pets) so we run a parsing
+   * pass via `seedToFaqPatch`. Always fill-empty mode: a field is only
+   * written when the current FAQ value is missing or `unset` — never
+   * clobbers user-typed answers.
+   *
+   * Targets these FAQ fields: insuredAndBonded, bringsSupplies, petPolicy,
+   * paymentMethods. The rest of the FAQ (customQA, scopes, labor rate,
+   * crew sizing, customerMustBeHome, sameCleanerForRecurring) is not
+   * derivable from a marketing site so we don't touch it.
+   */
+  async applyFaqFromWebsiteSeed(userId: string): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    warning?: string;
+  }> {
+    const { seedToFaqPatch } = await import('./playbook-seed-applier');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { websiteMetadataJson: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const metadata = (user.websiteMetadataJson as any) || null;
+    const seed = metadata?.playbookSeed as PlaybookSeed | undefined;
+    if (!seed) {
+      return { success: false, accountsAffected: 0, filled: 0, skipped: 0, warning: 'No playbook seed on file.' };
+    }
+
+    const patch = seedToFaqPatch(seed);
+    const patchKeys = Object.keys(patch) as (keyof typeof patch)[];
+    if (patchKeys.length === 0) {
+      return { success: false, accountsAffected: 0, filled: 0, skipped: 0, warning: 'Seed had no FAQ-eligible fields.' };
+    }
+
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: { id: true, faqJson: true },
+    });
+    if (accounts.length === 0) {
+      return { success: false, accountsAffected: 0, filled: 0, skipped: 0, warning: 'Connect an account first.' };
+    }
+
+    // Field is "empty" when it's missing, empty string, empty array, or an
+    // object whose only meaningful field (value) is undefined / "unset".
+    const isFaqFieldEmpty = (cur: any): boolean => {
+      if (cur == null) return true;
+      if (typeof cur === 'string') return cur.trim().length === 0;
+      if (Array.isArray(cur)) return cur.length === 0;
+      if (typeof cur === 'object') {
+        const v = cur.value;
+        if (v === undefined || v === null || v === 'unset' || v === '') return true;
+      }
+      return false;
+    };
+
+    let filled = 0;
+    let skipped = 0;
+    let accountsAffected = 0;
+
+    for (const account of accounts) {
+      const existing = (account.faqJson as any) || {};
+      const next: Record<string, any> = { ...existing };
+      let changed = false;
+
+      for (const key of patchKeys) {
+        const newVal = (patch as any)[key];
+        if (newVal === undefined) continue;
+        const cur = existing[key];
+        if (isFaqFieldEmpty(cur)) {
+          next[key] = newVal;
+          filled++;
+          changed = true;
+        } else {
+          skipped++;
+        }
+      }
+
+      if (changed) {
+        await this.prisma.savedAccount.update({
+          where: { id: account.id },
+          data: { faqJson: next },
+        });
+        accountsAffected++;
+      }
+    }
+
+    this.logger.log(
+      `[applyFaqFromSeed] userId=${userId} accounts=${accountsAffected}/${accounts.length} filled=${filled} skipped=${skipped}`,
+    );
+
+    return { success: true, accountsAffected, filled, skipped };
   }
 
   // ---------------------------------------------------------------------

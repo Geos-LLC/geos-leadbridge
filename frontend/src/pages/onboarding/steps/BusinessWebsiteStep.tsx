@@ -157,25 +157,34 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         );
       }
 
-      // Auto-apply to AI Playbook inside the wizard. The user already
-      // committed to "use AI" by getting this far; making them click an
-      // extra button after the spinner just adds friction. Failure here
-      // is silent (toast only) — we don't block the wizard advance on
-      // playbook apply since the data is already saved on the user.
+      // Auto-apply to AI Playbook + FAQ inside the wizard. Both are
+      // best-effort: the data is already saved on the user, so a failure
+      // here doesn't block the wizard. The two applies are independent —
+      // either succeeding is useful — so we run them in parallel and
+      // report a combined toast.
       if (outcome.metadata?.playbookSeed) {
         setVerifyState({ kind: 'applying' });
-        try {
-          const applyRes = await usersApi.applyPlaybookSeed('fill_empty');
-          if (applyRes.success && applyRes.filled > 0) {
-            notify.success(
-              'Applied to AI Playbook',
-              `${applyRes.filled} section${applyRes.filled === 1 ? '' : 's'} filled from your website. Review later in Settings → AI Playbook.`,
-              5000,
-            );
-          }
-        } catch (e: any) {
-          // Non-fatal — the user can re-apply later from Settings.
-          console.warn('[BusinessWebsiteStep] auto-apply failed:', e?.message || e);
+        const [playbookRes, faqRes] = await Promise.all([
+          usersApi.applyPlaybookSeed('fill_empty').catch((e: any) => {
+            console.warn('[BusinessWebsiteStep] playbook apply failed:', e?.message || e);
+            return null;
+          }),
+          usersApi.applyFaqFromWebsiteSeed().catch((e: any) => {
+            console.warn('[BusinessWebsiteStep] faq apply failed:', e?.message || e);
+            return null;
+          }),
+        ]);
+        const playbookFilled = playbookRes?.success ? playbookRes.filled : 0;
+        const faqFilled = faqRes?.success ? faqRes.filled : 0;
+        if (playbookFilled > 0 || faqFilled > 0) {
+          const parts: string[] = [];
+          if (playbookFilled > 0) parts.push(`${playbookFilled} AI Playbook section${playbookFilled === 1 ? '' : 's'}`);
+          if (faqFilled > 0) parts.push(`${faqFilled} FAQ field${faqFilled === 1 ? '' : 's'}`);
+          notify.success(
+            'Applied from your website',
+            `Filled ${parts.join(' and ')}. Review on the next step or in Settings → AI Playbook.`,
+            5000,
+          );
         }
       }
 
