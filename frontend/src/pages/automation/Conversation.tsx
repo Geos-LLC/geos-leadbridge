@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Sparkles, Scale, CircleDollarSign, UserCheck, Calendar, Phone,
+  Sparkles, CircleDollarSign, UserCheck, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
   MessageSquareText, AlertTriangle, Power,
@@ -34,34 +34,43 @@ const convCache = new Map<string, CachedConvSettings>();
 
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
 
-// Qualification required-fields catalog. The 3 cleaning defaults are
-// pre-checked when an account has no saved qualificationV2.requiredFields;
-// the user can flip any of the 10 on/off. Snake_case keys match the
-// backend prompt-injection format. Order here = display order in the UI.
+// Qualification required-fields catalog (6 fields). Zip code + Phone number
+// are platform-driven defaults (TT usually has zip, Yelp usually needs both).
+// The other 4 (bedrooms, bathrooms, square footage, frequency) are unchecked
+// by default — users opt in per business. Snake_case keys match the backend
+// prompt-injection format. Catalog order = display order in the UI.
+//
+// Future fields (not in UI yet, captured here for context): move_in_out,
+// pets, deep_cleaning, extras. They map onto existing legacy backend keys
+// (condition / scope_extras) which the prompt builder still understands —
+// so a saved value of `condition` or `scope_extras` on an account that
+// pre-dates this catalog narrowing stays in `qualificationRequiredFields`
+// and continues to inject into the AI prompt at runtime even though the
+// UI no longer renders a checkbox for it. See toggleQualificationField
+// for the preserve-unknown-keys logic.
 const QUALIFICATION_FIELDS = [
-  { key: 'square_footage', label: 'Square Footage', defaultChecked: true },
-  { key: 'service_date',   label: 'Service Date',   defaultChecked: true },
-  { key: 'phone_number',   label: 'Phone Number',   defaultChecked: true },
   { key: 'bedrooms',       label: 'Bedrooms',       defaultChecked: false },
   { key: 'bathrooms',      label: 'Bathrooms',      defaultChecked: false },
-  { key: 'zip_code',       label: 'Zip Code',       defaultChecked: false },
-  { key: 'address',        label: 'Address',        defaultChecked: false },
+  { key: 'square_footage', label: 'Square Footage', defaultChecked: false },
   { key: 'frequency',      label: 'Frequency',      defaultChecked: false },
-  { key: 'condition',      label: 'Condition',      defaultChecked: false },
-  { key: 'scope_extras',   label: 'Scope Extras',   defaultChecked: false },
+  { key: 'zip_code',       label: 'Zip Code',       defaultChecked: true },
+  { key: 'phone_number',   label: 'Phone Number',   defaultChecked: true },
 ] as const;
 const QUALIFICATION_DEFAULT_FIELDS = QUALIFICATION_FIELDS
   .filter(f => f.defaultChecked)
   .map(f => f.key) as string[];
-const QUALIFICATION_VALID_KEYS: Set<string> = new Set(QUALIFICATION_FIELDS.map(f => f.key));
+const QUALIFICATION_CATALOG_KEYS: Set<string> = new Set(QUALIFICATION_FIELDS.map(f => f.key));
 
-const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title: string; body: string }[] = [
-  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',    body: 'AI chooses the best goal based on the customer conversation.' },
-  { k: 'hybrid',  icon: Scale,            iconTone: 'gray',   title: 'Hybrid',  body: 'Balanced approach: acknowledge the customer, qualify, and move toward booking.' },
-  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',   body: 'Focus on providing pricing information.' },
-  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify', body: 'Focus on collecting required information.' },
-  { k: 'convert', icon: Calendar,         iconTone: 'blue',   title: 'Convert', body: 'Focus on moving the customer toward booking.' },
-  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Phone',   body: 'Focus on getting the customer onto a call.' },
+// 4 goals only — Hybrid and Convert collapsed into Auto and Qualify
+// respectively (UI only). Saved backend values 'hybrid' and 'convert' are
+// remapped for DISPLAY in parseSettings and the runtime continues to honor
+// them via STRATEGY_PROMPTS.hybrid / .convert. No DB writes — legacy values
+// stay in followUpSettingsJson until the user explicitly picks a new goal.
+const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title: string; body: string; recommended?: boolean }[] = [
+  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',    body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
+  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',   body: 'Provide pricing information as quickly and accurately as possible.' },
+  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify', body: 'Collect the information needed before quoting or booking.' },
+  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Phone',   body: 'Get the customer onto a phone call.' },
 ];
 
 export function AutomationConversation({ accountId }: { accountId: string }) {
@@ -150,22 +159,33 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // Helper: parse a settings payload into our local shape.
   const parseSettings = (s: any): CachedConvSettings => {
     // qualificationV2.requiredFields — array of snake_case field keys.
-    // Sanitize: filter to known keys (forward-compatible with new fields
-    // by ignoring unknown ones). When the key is missing entirely, fall
-    // back to the 3 cleaning defaults so the UI matches the "pre-checked"
-    // state — but the runtime still treats "no saved value" as legacy
-    // behavior (no qualificationBlock injected). The runtime cares about
-    // the persisted DB value; the UI default is just an affordance.
+    // Accept ANY string key (not just catalog ones) so values saved by an
+    // older UI version, or future-field keys, round-trip without loss.
+    // The runtime helper (src/ai/qualification-context.ts) does the final
+    // filtering — only known keys reach the AI prompt block.
+    // When the key is missing entirely, fall back to the new defaults
+    // (zip_code + phone_number) so the UI shows a sensible pre-checked
+    // state — but the RUNTIME still treats "no saved value" as legacy
+    // behavior (no qualificationBlock injected at all).
     const savedFields: unknown = s?.qualificationV2?.requiredFields;
     const requiredFields = Array.isArray(savedFields)
       ? (savedFields as unknown[])
-          .filter(k => typeof k === 'string' && QUALIFICATION_VALID_KEYS.has(k as string))
-          .map(k => k as string)
+          .filter((k): k is string => typeof k === 'string')
       : QUALIFICATION_DEFAULT_FIELDS;
+
+    // Strategy DISPLAY remap: hide Hybrid + Convert from the picker but
+    // remap their saved DB values to a visible card so users see SOMETHING
+    // selected. No DB write — the legacy value persists in
+    // followUpSettingsJson until the user explicitly picks a new goal.
+    // Runtime continues to honor 'hybrid' / 'convert' via STRATEGY_PROMPTS.
+    let displayStrategy: StrategyKey = 'auto';
+    const saved = typeof s?.followUpStrategy === 'string' ? s.followUpStrategy : null;
+    if (saved === 'hybrid') displayStrategy = 'auto';
+    else if (saved === 'convert') displayStrategy = 'qualify';
+    else if (saved && STRATEGIES.some(x => x.k === saved)) displayStrategy = saved as StrategyKey;
+
     return {
-      strategy: (s?.followUpStrategy && STRATEGIES.some(x => x.k === s.followUpStrategy))
-        ? s.followUpStrategy
-        : 'auto',
+      strategy: displayStrategy,
       priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
       availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
       stopRules: {
@@ -437,9 +457,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   };
 
   // Toggle a single qualification field on/off. The full array of selected
-  // keys is what gets persisted at `qualificationV2.requiredFields`; we
-  // recompute it from the local state each time so the payload is always
-  // canonical (sorted by the catalog's display order).
+  // keys is what gets persisted at `qualificationV2.requiredFields`. Catalog
+  // keys are emitted first in canonical display order; any *unknown* keys
+  // already in the saved list (e.g. `service_date`, `address`, or future
+  // fields from a different UI build) are PRESERVED and appended after the
+  // catalog keys. That way round-tripping never loses data — a user editing
+  // bedrooms/zip from a fresh build still keeps their pre-existing
+  // service_date selection intact.
   const toggleQualificationField = (key: string) => {
     dirtyRef.current = true;
     dirtyFieldsRef.current.add('qualificationRequiredFields');
@@ -447,9 +471,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     const next = has
       ? qualificationRequiredFields.filter(k => k !== key)
       : [...qualificationRequiredFields, key];
-    // Re-sort by catalog order for canonical storage.
-    const ordered = QUALIFICATION_FIELDS.map(f => f.key).filter(k => next.includes(k));
-    setQualificationRequiredFields(ordered);
+    const catalogPart = QUALIFICATION_FIELDS.map(f => f.key).filter(k => next.includes(k));
+    const preservedPart = next.filter(k => !QUALIFICATION_CATALOG_KEYS.has(k));
+    setQualificationRequiredFields([...catalogPart, ...preservedPart]);
   };
 
   // Batch setters — used by the simplified "When goal is reached" radio so
@@ -546,8 +570,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             </div>
           </div>
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10,
-            flex: '0 0 720px',
+            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
+            flex: '0 0 560px',
           }}>
             {STRATEGIES.map(s => (
               <StrategyCard
@@ -558,6 +582,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
                 iconTone={s.iconTone}
                 title={s.title}
                 body={s.body}
+                recommended={s.recommended}
                 mixed={mixedStrategy.mixed && strategy === s.k}
                 mixedTooltip={mixedStrategy.tooltip}
               />
@@ -661,7 +686,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 }
 
 function StrategyCard({
-  selected, onClick, icon, iconTone, title, body, mixed, mixedTooltip,
+  selected, onClick, icon, iconTone, title, body, recommended, mixed, mixedTooltip,
 }: {
   selected: boolean;
   onClick: () => void;
@@ -669,6 +694,8 @@ function StrategyCard({
   iconTone: IconTone;
   title: string;
   body: string;
+  /** Show a small "Recommended" pill above the title. Used on Auto. */
+  recommended?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
 }) {
@@ -692,6 +719,17 @@ function StrategyCard({
       <div style={{ position: 'absolute', top: 8, left: 8 }}>
         <Radio selected={selected} />
       </div>
+      {recommended && !mixed && (
+        <div style={{
+          position: 'absolute', top: 6, right: 6,
+          fontSize: 9, fontWeight: 700, letterSpacing: 0.05,
+          padding: '2px 6px', borderRadius: 999,
+          background: '#ede9fe', color: '#6d28d9',
+          textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+        }}>
+          Recommended
+        </div>
+      )}
       {mixed && (
         <div style={{ position: 'absolute', top: 6, right: 6, color: '#d97706' }}>
           <AlertTriangle size={12} />
@@ -755,19 +793,23 @@ function GoalSetupCard({
   toggleQualificationField: (key: string) => void;
 }) {
 
+  // Display metadata for the 4 visible goals. Legacy 'hybrid' / 'convert'
+  // never reach this card because parseSettings remaps them to 'auto' /
+  // 'qualify' for display. The Record entries below cover all 6 keys for
+  // type completeness, but only auto/price/qualify/phone are reachable.
   const titleByStrategy: Record<StrategyKey, string> = {
     auto:    'Auto',
-    hybrid:  'Hybrid',
+    hybrid:  'Auto',           // unreachable — remapped in parseSettings
     price:   'Price Goal Setup',
     qualify: 'Qualify Goal Setup',
-    convert: 'Convert Goal Setup',
+    convert: 'Qualify Goal Setup', // unreachable — remapped in parseSettings
     phone:   'Phone Goal Setup',
   };
   const iconByStrategy: Record<StrategyKey, LucideIcon> = {
-    auto: Sparkles, hybrid: Scale, price: CircleDollarSign, qualify: UserCheck, convert: Calendar, phone: Phone,
+    auto: Sparkles, hybrid: Sparkles, price: CircleDollarSign, qualify: UserCheck, convert: UserCheck, phone: Phone,
   };
   const toneByStrategy: Record<StrategyKey, IconTone> = {
-    auto: 'violet', hybrid: 'gray', price: 'green', qualify: 'orange', convert: 'blue', phone: 'rose',
+    auto: 'violet', hybrid: 'violet', price: 'green', qualify: 'orange', convert: 'orange', phone: 'rose',
   };
   const Icon = iconByStrategy[strategy];
 
@@ -777,7 +819,10 @@ function GoalSetupCard({
   // Backend gate in qualification-context.ts mirrors this: only qualify
   // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
   const showRequiredInfo = strategy === 'qualify';
-  const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'convert' || strategy === 'phone';
+  // When-Goal-Is-Reached radio appears only on Qualify and Phone per the
+  // simplification spec. Price has no separate completion action — once AI
+  // quotes, the conversation flows on; Auto has no setup at all.
+  const showWhenReached = strategy === 'qualify' || strategy === 'phone';
 
   return (
     <SectionCard padding="22px 24px 24px">
@@ -791,35 +836,34 @@ function GoalSetupCard({
           <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.6 }}>
             {strategy === 'auto' && (
               <>
-                AI chooses the most appropriate goal based on the conversation.
+                AI automatically chooses the best approach based on the conversation.
                 <div style={{ marginTop: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
                   Examples:
                   <ul style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-                    <li>Customer asks for pricing → <strong>Price</strong></li>
-                    <li>Customer wants a call → <strong>Phone</strong></li>
-                    <li>Customer is ready to schedule → <strong>Convert</strong></li>
-                    <li>Customer is exploring options → <strong>Qualify</strong></li>
+                    <li>Customer asks about price → <strong>Price behavior</strong></li>
+                    <li>Customer explores options → <strong>Qualify behavior</strong></li>
+                    <li>Customer requests a call → <strong>Phone behavior</strong></li>
                   </ul>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--lb-ink-5)', fontStyle: 'italic' }}>
+                  No setup. No completion rules.
                 </div>
               </>
             )}
-            {strategy === 'hybrid' && (
-              <>Balanced approach. AI acknowledges the customer, gathers information if needed, and moves toward booking.</>
-            )}
             {strategy === 'price' && (
-              <>AI volunteers a price from the Pricing Table when the customer's message is about pricing. Choose how AI presents the number below.</>
+              <>Focus on providing pricing information as quickly and accurately as possible.</>
             )}
             {strategy === 'qualify' && (
-              <>AI collects required information before quoting or booking. Pick the fields AI must gather below.</>
-            )}
-            {strategy === 'convert' && (
               <>
-                <strong>Goal completion:</strong> Customer indicates intent to book or schedule service.
+                Focus on collecting the information needed before quoting or booking. This goal naturally moves the customer toward booking.
               </>
             )}
             {strategy === 'phone' && (
               <>
-                <strong>Goal completion:</strong> Customer provides a phone number or requests a call.
+                Focus on getting the customer onto a phone call.
+                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                  <strong>Goal completion:</strong> customer requests a call, or provides a phone number.
+                </div>
               </>
             )}
           </div>
