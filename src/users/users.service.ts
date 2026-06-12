@@ -775,7 +775,15 @@ export class UsersService {
           totalFilled++;
         }
 
-        aiPlaybookV2[sectionKey] = { ...(aiPlaybookV2[sectionKey] || {}), customInstructions: text };
+        aiPlaybookV2[sectionKey] = {
+          ...(aiPlaybookV2[sectionKey] || {}),
+          customInstructions: text,
+          // Flag lets the AI Playbook UI render a "Suggested from website"
+          // badge above the section. Cleared the moment the user edits the
+          // text (frontend strips it from the section's section state on
+          // first onChange).
+          suggestedFromWebsite: true,
+        } as any;
         changedThisAccount = true;
       }
 

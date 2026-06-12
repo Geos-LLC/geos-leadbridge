@@ -95,7 +95,11 @@ export function SettingsAiPlaybook() {
 
   const onSectionChange = (section: PlaybookSectionKey, value: string) => {
     dirtyRef.current.add(section);
-    setV2(prev => ({ ...prev, [section]: { customInstructions: value } }));
+    // Editing implicitly clears `suggestedFromWebsite` — the user is taking
+    // ownership of this section. The badge above the card disappears as
+    // soon as `suggestedFromWebsite` flips to false in local state, and the
+    // save fan-out writes the cleared flag back to every account.
+    setV2(prev => ({ ...prev, [section]: { customInstructions: value, suggestedFromWebsite: false } }));
   };
 
   const handleSave = async () => {
@@ -162,6 +166,7 @@ export function SettingsAiPlaybook() {
           section="business_information"
           value={v2.business_information?.customInstructions ?? ''}
           onChange={v => onSectionChange('business_information', v)}
+          isSuggested={!!v2.business_information?.suggestedFromWebsite}
         />
 
         {/* 2. FAQ */}
@@ -178,6 +183,7 @@ export function SettingsAiPlaybook() {
           accountId={accounts[0].id}
           accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
           accountIds={accounts.map(a => a.id)}
+          isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
         />
 
         {/* 4. Qualification Guidance — Managed by Conversation Goals */}
@@ -194,6 +200,7 @@ export function SettingsAiPlaybook() {
           value={v2.booking_guidance?.customInstructions ?? ''}
           onChange={v => onSectionChange('booking_guidance', v)}
           managedByGoals
+          isSuggested={!!v2.booking_guidance?.suggestedFromWebsite}
         />
 
         {/* 6. Human Handoff Guidance — Managed by Conversation Goals */}
@@ -202,6 +209,7 @@ export function SettingsAiPlaybook() {
           value={v2.human_handoff_guidance?.customInstructions ?? ''}
           onChange={v => onSectionChange('human_handoff_guidance', v)}
           managedByGoals
+          isSuggested={!!v2.human_handoff_guidance?.suggestedFromWebsite}
         />
 
         {/* 7. Objection Handling */}
@@ -209,6 +217,7 @@ export function SettingsAiPlaybook() {
           section="objection_handling"
           value={v2.objection_handling?.customInstructions ?? ''}
           onChange={v => onSectionChange('objection_handling', v)}
+          isSuggested={!!v2.objection_handling?.suggestedFromWebsite}
         />
 
         {/* 8. Follow-up Tone */}
@@ -223,6 +232,7 @@ export function SettingsAiPlaybook() {
           section="personality_brand_voice"
           value={v2.personality_brand_voice?.customInstructions ?? ''}
           onChange={v => onSectionChange('personality_brand_voice', v)}
+          isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
         />
 
         {/* 10. Global Custom Instructions — surfaces User.globalAiPrompt */}
@@ -283,7 +293,7 @@ function HelpBlock() {
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange, managedByGoals,
+  section, value, onChange, managedByGoals, isSuggested,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -293,6 +303,9 @@ function HowSectionCard({
    *  editable since these prompts continue to take effect at runtime — the
    *  Goal-level setup in Automation just controls WHEN/WHAT, not HOW. */
   managedByGoals?: boolean;
+  /** Set by the website Apply-to-Playbook flow. Shows the "Suggested from
+   *  website" pill. Goes away on first edit (parent clears the flag). */
+  isSuggested?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -301,6 +314,7 @@ function HowSectionCard({
       title={PLAYBOOK_SECTION_UI_LABELS[section]}
       subtitle={PLAYBOOK_SECTION_SUBTITLES[section]}
     >
+      {isSuggested && <SuggestedFromWebsiteBadge />}
       {managedByGoals && <ManagedByGoalsBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS[section]} />
       <CustomInstructionsEditor
@@ -310,6 +324,24 @@ function HowSectionCard({
         onRevertToDefault={() => onChange('')}
       />
     </PlaybookSectionShell>
+  );
+}
+
+function SuggestedFromWebsiteBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#fef7f0',
+      border: '1px solid #fde0c8',
+      borderRadius: 8,
+      fontSize: 12, color: '#9a5b1e',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Sparkles size={13} style={{ flexShrink: 0, color: '#c8771b' }} />
+      <span><strong>✨ Suggested from website</strong> — review and edit. Your changes replace this suggestion.</span>
+    </div>
   );
 }
 
@@ -334,13 +366,14 @@ function ManagedByGoalsBadge() {
 // ─── Pricing Guidance — HOW textarea + ServicePricingForm embed ──────────
 
 function PricingGuidanceCard({
-  value, onChange, accountId, accountName, accountIds,
+  value, onChange, accountId, accountName, accountIds, isSuggested,
 }: {
   value: string;
   onChange: (v: string) => void;
   accountId: string;
   accountName: string;
   accountIds: string[];
+  isSuggested?: boolean;
 }) {
   return (
     <PlaybookSectionShell
@@ -348,6 +381,7 @@ function PricingGuidanceCard({
       title={PLAYBOOK_SECTION_UI_LABELS.pricing_guidance}
       subtitle={PLAYBOOK_SECTION_SUBTITLES.pricing_guidance}
     >
+      {isSuggested && <SuggestedFromWebsiteBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS.pricing_guidance} />
       <CustomInstructionsEditor
         value={value}

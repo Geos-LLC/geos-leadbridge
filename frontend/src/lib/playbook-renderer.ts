@@ -85,7 +85,13 @@ export const SECTION_DEFAULT_PROMPTS: Record<PlaybookSectionKey, string> = {
 };
 
 export type PlaybookV2Storage = {
-  [K in PlaybookSectionKey]?: { customInstructions: string };
+  [K in PlaybookSectionKey]?: {
+    customInstructions: string;
+    /** Set by the website Apply-to-Playbook flow. Cleared the moment the
+     *  user edits the section's textarea. Drives the "Suggested from
+     *  website" pill in the AI Playbook page. */
+    suggestedFromWebsite?: boolean;
+  };
 };
 
 /** Threshold values for the soft length warning on the editor. */

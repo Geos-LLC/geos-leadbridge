@@ -215,8 +215,8 @@ export function SettingsGeneral() {
         contentPad="8px 24px 24px"
       >
         <FieldRow label="Website URL">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-            <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
               <SettingsInput
                 value={website}
                 onChange={setWebsite}
@@ -242,6 +242,13 @@ export function SettingsGeneral() {
               {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
               {verifying ? 'Checking…' : 'Verify & save'}
             </button>
+            {/* Apply-to-Playbook sits on the same row as Verify & save so
+                the two-button flow the user expects is one glance. Disabled
+                until the verification produces a playbookSeed. */}
+            <ApplyToPlaybookButton
+              hasSeed={!!websiteMetadata?.playbookSeed}
+              tone="settings"
+            />
           </div>
         </FieldRow>
         {verifyError && (
@@ -252,17 +259,10 @@ export function SettingsGeneral() {
           }}>{verifyError}</div>
         )}
         {(user?.website || websiteMetadata) && (
-          <div style={{ padding: '0 24px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: '0 24px 12px' }}>
             <WebsitePreviewCard
               url={user?.website || website || null}
               metadata={websiteMetadata}
-              tone="settings"
-            />
-            {/* Apply-to-Playbook is the bridge between the extracted seed
-                and the AI Playbook page. Shown here so users who add their
-                site after onboarding can still feed the Playbook from it. */}
-            <ApplyToPlaybookButton
-              hasSeed={!!websiteMetadata?.playbookSeed}
               tone="settings"
             />
           </div>
