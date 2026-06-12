@@ -736,7 +736,9 @@ export class PlatformService {
 
     const agentPhone = account?.agentPhoneOverride || user?.businessPhone;
     if (!agentPhone) {
-      console.log(`[PlatformService] No agent phone set for user ${userId}, skipping Thumbtack associate phone registration`);
+      this.logger.log(
+        `[tt.associate-phone] skip-owner reason=no_agent_phone userId=${userId} businessId=${businessId}`,
+      );
       return;
     }
 
@@ -750,8 +752,8 @@ export class PlatformService {
     }
 
     const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
-    console.log(
-      `[PlatformService] Associate phone ${agentPhone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+    this.logger.log(
+      `[tt.associate-phone] owner ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${agentPhone} name="LeadBridge Agent"`,
     );
   }
 
@@ -780,8 +782,8 @@ export class PlatformService {
 
     const lbPhone = await this.notificationsService.resolveBotPhone(userId, account.id);
     if (!lbPhone) {
-      console.log(
-        `[PlatformService] No LeadBridge number for user ${userId} (account ${account.id}), skipping LB-number associate registration on business ${businessId}`,
+      this.logger.log(
+        `[tt.associate-phone] skip-lb reason=no_lb_number userId=${userId} businessId=${businessId} savedAccountId=${account.id}`,
       );
       return;
     }
@@ -796,8 +798,8 @@ export class PlatformService {
     }
 
     const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, lbPhone, 'LeadBridge Number');
-    console.log(
-      `[PlatformService] LB number ${lbPhone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+    this.logger.log(
+      `[tt.associate-phone] lb ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${lbPhone} name="LeadBridge Number"`,
     );
   }
 
@@ -815,17 +817,23 @@ export class PlatformService {
     try {
       await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
-      console.warn(`[PlatformService] Agent-phone TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+      this.logger.warn(
+        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
     }
     try {
       await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
-      console.warn(`[PlatformService] LB-number TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+      this.logger.warn(
+        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
     }
     try {
       await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
-      console.warn(`[PlatformService] Additional-associate-phones TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+      this.logger.warn(
+        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
     }
   }
 
@@ -880,13 +888,13 @@ export class PlatformService {
       const name = (entry.label && entry.label.trim()) || 'LeadBridge Associate';
       try {
         const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, phone, name);
-        console.log(
-          `[PlatformService] Additional associate ${phone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+        this.logger.log(
+          `[tt.associate-phone] additional ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${phone} name="${name}"`,
         );
       } catch (err: any) {
         // One bad entry shouldn't stop the rest of the list.
-        console.warn(
-          `[PlatformService] Additional associate ${phone} registration on ${businessId} failed: ${err?.message ?? err}`,
+        this.logger.warn(
+          `[tt.associate-phone] additional failed businessId=${businessId} phone=${phone} name="${name}" message="${err?.message ?? err}"`,
         );
       }
     }
@@ -908,8 +916,8 @@ export class PlatformService {
       try {
         await this.registerLeadBridgeNumberWithThumbtack(userId, account.businessId);
       } catch (err: any) {
-        console.warn(
-          `[PlatformService] LB-number sync to TT business ${account.businessId} failed: ${err?.message ?? err}`,
+        this.logger.warn(
+          `[tt.associate-phone] lb sync-all-failed businessId=${account.businessId} userId=${userId} message="${err?.message ?? err}"`,
         );
       }
     }
@@ -1870,8 +1878,10 @@ export class PlatformService {
     // overlapping triggers don't duplicate POSTs. Non-blocking — TT failures
     // log but don't break the profile save.
     if (ttBusinessId && (updates.agentPhoneOverride || updates.additionalAssociatePhones !== undefined)) {
-      this.syncAccountPhonesToThumbtack(userId, ttBusinessId, null, null).catch(err =>
-        console.warn(`[PlatformService] Associate phone update failed (non-blocking): ${err.message}`),
+      this.syncAccountPhonesToThumbtack(userId, ttBusinessId, null, null).catch((err) =>
+        this.logger.warn(
+          `[tt.associate-phone] post-save sync-failed businessId=${ttBusinessId} userId=${userId} message="${err?.message ?? err}"`,
+        ),
       );
     }
 
