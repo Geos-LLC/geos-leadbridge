@@ -14,7 +14,6 @@ import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
 import { HoursCard } from '../components/HoursCard';
 import { SettingsCommunicationSection } from './SettingsCommunication';
-import { MessageSettings } from './MessageSettings';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Respond',
@@ -58,7 +57,7 @@ export default function SettingsPage() {
   // UI-only category split. Each section is gated by activeTab; backend state
   // and load paths are unchanged. URL hash drives the selected tab so deep
   // links and back-compat anchors (e.g. #communication-alerts) keep working.
-  type SettingsTab = 'general' | 'communication' | 'marketplace' | 'ai' | 'pricing' | 'templates' | 'billing' | 'team';
+  type SettingsTab = 'general' | 'communication' | 'marketplace' | 'ai' | 'pricing' | 'billing' | 'team';
   const hashToTab = (h: string): SettingsTab => {
     const raw = (h || '').replace(/^#/, '').toLowerCase();
     if (!raw) return 'general';
@@ -67,7 +66,6 @@ export default function SettingsPage() {
     if (raw.startsWith('marketplace')) return 'general';
     if (raw.startsWith('ai')) return 'ai';
     if (raw.startsWith('pricing')) return 'pricing';
-    if (raw.startsWith('templates')) return 'templates';
     if (raw.startsWith('billing') || raw === 'invoices' || raw === 'subscription') return 'billing';
     if (raw.startsWith('team')) return 'team';
     if (raw.startsWith('general') || raw === 'profile' || raw === 'danger') return 'general';
@@ -693,7 +691,6 @@ export default function SettingsPage() {
           { key: 'communication', label: 'Communication' },
           { key: 'ai',            label: 'AI' },
           { key: 'pricing',       label: 'Pricing' },
-          { key: 'templates',     label: 'Templates' },
           { key: 'billing',       label: 'Billing' },
           { key: 'team',          label: 'Team' },
         ] as Array<{ key: SettingsTab; label: string }>).map(t => (
@@ -1629,16 +1626,6 @@ export default function SettingsPage() {
       </div>
 
       </>)}
-
-      {activeTab === 'templates' && (
-        // Templates tab embeds the MessageSettings page inline so users
-        // stay on /settings#templates. The /templates standalone route
-        // remains for direct-access deep links + every "Edit Template"
-        // button across the Automation pages — see SettingsPage tab nav.
-        <div className="-mx-6 lg:-mx-10">
-          <MessageSettings />
-        </div>
-      )}
 
       {activeTab === 'billing' && (
       <>
