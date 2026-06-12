@@ -9,7 +9,6 @@ import { usersApi, authApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
-import { AdditionalAssociatePhonesEditor } from '../../components/AdditionalAssociatePhonesEditor';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -522,16 +521,6 @@ export function SettingsGeneral() {
             </div>
           )}
         </FieldRow>
-      </SettingCard>
-
-      <SettingCard
-        icon={Phone}
-        iconTone="teal"
-        title="Additional associate numbers"
-        subtitle="Extra team / callback numbers to register on connected Thumbtack businesses. Optional. Removing a number here stops re-syncing — existing TT entries are kept."
-        contentPad="8px 24px 24px"
-      >
-        <AdditionalAssociatePhonesEditor />
       </SettingCard>
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />

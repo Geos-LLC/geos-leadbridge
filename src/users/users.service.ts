@@ -72,37 +72,6 @@ export interface PlaybookSeed {
   };
 }
 
-function normalizeE164(raw: string): string | null {
-  const digits = raw.replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  if (digits.length > 10) return `+${digits}`;
-  return null;
-}
-
-function normalizeAdditionalAssociatePhones(
-  raw: Array<{ id?: string; phoneNumber: string; label?: string }> | undefined,
-): Array<{ id: string; phoneNumber: string; label?: string }> {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: Array<{ id: string; phoneNumber: string; label?: string }> = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry.phoneNumber !== 'string') continue;
-    const phone = normalizeE164(entry.phoneNumber);
-    if (!phone) continue;
-    if (seen.has(phone)) continue; // de-dup by phone
-    seen.add(phone);
-    const id =
-      typeof entry.id === 'string' && entry.id.length > 0
-        ? entry.id
-        : `aap_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-    const label = typeof entry.label === 'string' ? entry.label.trim().slice(0, 80) : undefined;
-    out.push(label ? { id, phoneNumber: phone, label } : { id, phoneNumber: phone });
-  }
-  return out;
-}
-
 export interface VerifyWebsiteResult {
   reachable: boolean;
   normalizedUrl: string;
@@ -159,7 +128,9 @@ export class UsersService {
     businessPhone?: string;
     website?: string | null;
     websiteMetadata?: VerifyWebsiteResult['metadata'] | null;
-    additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
+    // additionalAssociatePhones is no longer accepted here. Per-business
+    // storage moved to SavedAccount.followUpSettingsJson.additionalAssociatePhones;
+    // write via PATCH /v1/thumbtack/saved-accounts/:id.
   }) {
     const data: Record<string, any> = {};
     if (updates.name !== undefined) data.name = updates.name;
@@ -220,12 +191,6 @@ export class UsersService {
       }
     }
 
-    let normalizedAdditional: Array<{ id: string; phoneNumber: string; label?: string }> | undefined;
-    if (updates.additionalAssociatePhones !== undefined) {
-      normalizedAdditional = normalizeAdditionalAssociatePhones(updates.additionalAssociatePhones);
-      data.additionalAssociatePhonesJson = normalizedAdditional;
-    }
-
     const user = await this.prisma.user.update({
       where: { id: userId },
       select: {
@@ -245,37 +210,11 @@ export class UsersService {
       await this.syncBusinessPhoneToAccounts(userId, data.businessPhone);
     }
 
-    // If the additional-associate-phones list was touched, re-sync to every
-    // connected TT business so newly-added entries land on TT. Existing
-    // entries are skipped by ensureAssociatePhone; removed entries are
-    // intentionally NOT deleted from TT (per spec — no destructive ops).
-    if (normalizedAdditional !== undefined) {
-      await this.syncAdditionalAssociatePhonesToThumbtack(userId);
-    }
-
     // Invalidate cached /auth/me AFTER the DB write commits so readers cannot
     // repopulate the cache from pre-commit state.
     await this.cache.del(CacheKeys.me(userId));
 
     return { success: true, user };
-  }
-
-  private async syncAdditionalAssociatePhonesToThumbtack(userId: string) {
-    const accounts = await this.prisma.savedAccount.findMany({
-      where: { userId, platform: 'thumbtack' },
-      select: { businessId: true },
-    });
-    for (const account of accounts) {
-      if (!account.businessId) continue;
-      try {
-        await this.platformService.registerAdditionalAssociatePhonesWithThumbtack(userId, account.businessId);
-      } catch (err: any) {
-        // Non-blocking — TT-side failure logs but doesn't break the save.
-        console.error(
-          `[UsersService] Additional-associate-phones TT sync failed user=${userId} business=${account.businessId}: ${err?.message ?? err}`,
-        );
-      }
-    }
   }
 
   private async syncBusinessPhoneToAccounts(userId: string, phone: string) {
