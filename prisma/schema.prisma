@@ -292,10 +292,11 @@ model Lead {
   externalRequestId      String // Platform's unique lead/request ID
   customerName           String
   customerPhone          String?
-  // Substitute/forwarding phone from the Thumbtack GET /negotiations/{id} endpoint.
-  // Per TT support (2026-04): the LEADS_V4 webhook delivers the REAL customer phone;
-  // the GET endpoint still returns a substitute. Webhook → customerPhone, GET → here.
-  // Never overwrite customerPhone with a GET-endpoint value.
+  // Separate column for the Thumbtack-API "request_user_phone" digit string
+  // that the customer typed into the body of a lead. Populated by
+  // backfill-thumbtack-real-phone.ts and the live GET /negotiations adapter
+  // path (POST webhook keeps customerPhone — see commit 2d59772f for the
+  // routing rationale). Surface in NormalizedLead + frontend Messages page.
   customerPhoneSubstitute String?
   customerEmail          String?
   message                String    @db.Text
