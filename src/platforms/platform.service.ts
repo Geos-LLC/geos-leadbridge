@@ -671,12 +671,10 @@ export class PlatformService {
 
     await this.invalidateSavedAccountsCache(userId);
 
-    // Auto-register agent phone as Thumbtack associate phone (allows calling without access code)
-    try {
-      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
-    } catch (err: any) {
-      console.warn(`[PlatformService] Associate phone registration failed (non-blocking): ${err.message}`);
-    }
+    // Auto-register agent phone + LB number as Thumbtack associate phones
+    // (allows calling without access code, and lets the LB number act as a
+    // fallback sender when the customer's real phone isn't available).
+    await this.syncAccountPhonesToThumbtack(userId, businessId, credentials, adapter);
 
     return {
       webhookId: result.webhookId,
@@ -724,6 +722,151 @@ export class PlatformService {
     console.log(
       `[PlatformService] Associate phone ${agentPhone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
     );
+  }
+
+  /**
+   * Register the user's LeadBridge dedicated number (TenantPhoneNumber) as a
+   * Thumbtack associate phone for this business. This is the substitute /
+   * fallback number used when the customer's real phone isn't available — TT
+   * needs it whitelisted on the business for the proxy call/text path to honor
+   * it as a legitimate pro-side sender.
+   *
+   * Per-account fallback chain: account-scoped TPN → unassigned → any-active
+   * (matches `resolveBotPhone`). Skips silently if the user has no LB number
+   * provisioned yet.
+   */
+  async registerLeadBridgeNumberWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true },
+    });
+    if (!account) return;
+
+    const lbPhone = await this.notificationsService.resolveBotPhone(userId, account.id);
+    if (!lbPhone) {
+      console.log(
+        `[PlatformService] No LeadBridge number for user ${userId} (account ${account.id}), skipping LB-number associate registration on business ${businessId}`,
+      );
+      return;
+    }
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, lbPhone, 'LeadBridge Number');
+    console.log(
+      `[PlatformService] LB number ${lbPhone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+    );
+  }
+
+  /**
+   * Register both the agent's business phone and the LeadBridge dedicated
+   * number as Thumbtack associate phones for this business. Each call is
+   * independent — a failure of one does not block the other.
+   */
+  async syncAccountPhonesToThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    try {
+      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      console.warn(`[PlatformService] Agent-phone TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+    }
+    try {
+      await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      console.warn(`[PlatformService] LB-number TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+    }
+    try {
+      await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      console.warn(`[PlatformService] Additional-associate-phones TT registration failed (business ${businessId}): ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Register every entry in User.additionalAssociatePhonesJson as a Thumbtack
+   * associate phone on the given business. Idempotent via ensureAssociatePhone.
+   * Skips silently when the user has no additional phones configured.
+   */
+  async registerAdditionalAssociatePhonesWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { additionalAssociatePhonesJson: true },
+    });
+    const raw = user?.additionalAssociatePhonesJson as
+      | Array<{ id?: string; phoneNumber: string; label?: string }>
+      | null
+      | undefined;
+    if (!Array.isArray(raw) || raw.length === 0) return;
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    for (const entry of raw) {
+      if (!entry || typeof entry.phoneNumber !== 'string') continue;
+      const phone = entry.phoneNumber;
+      const name = (entry.label && entry.label.trim()) || 'LeadBridge Associate';
+      try {
+        const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, phone, name);
+        console.log(
+          `[PlatformService] Additional associate ${phone} on business ${businessId}: ${registered ? 'registered' : 'already present'}`,
+        );
+      } catch (err: any) {
+        // One bad entry shouldn't stop the rest of the list.
+        console.warn(
+          `[PlatformService] Additional associate ${phone} registration on ${businessId} failed: ${err?.message ?? err}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Register the user's LeadBridge dedicated number on every connected
+   * Thumbtack business. Used when the LB number is provisioned, reassigned,
+   * or restored — at those moments the TPN row changed and we want every
+   * TT business to pick up the new resolveBotPhone() result.
+   */
+  async syncLeadBridgeNumberToAllThumbtack(userId: string): Promise<void> {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId, platform: 'thumbtack' },
+      select: { businessId: true },
+    });
+    for (const account of accounts) {
+      if (!account.businessId) continue;
+      try {
+        await this.registerLeadBridgeNumberWithThumbtack(userId, account.businessId);
+      } catch (err: any) {
+        console.warn(
+          `[PlatformService] LB-number sync to TT business ${account.businessId} failed: ${err?.message ?? err}`,
+        );
+      }
+    }
   }
 
   /**
@@ -1643,7 +1786,7 @@ export class PlatformService {
         select: { businessId: true },
       });
       if (account?.businessId) {
-        this.registerAgentPhoneWithThumbtack(userId, account.businessId, null, null).catch(err =>
+        this.syncAccountPhonesToThumbtack(userId, account.businessId, null, null).catch(err =>
           console.warn(`[PlatformService] Associate phone update failed (non-blocking): ${err.message}`),
         );
       }

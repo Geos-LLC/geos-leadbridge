@@ -111,6 +111,15 @@ model User {
   // Business phone (agent's personal phone for receiving forwarded calls/SMS)
   businessPhone String?
 
+  // Additional associate phone numbers — team members / extra callbacks the
+  // pro wants Thumbtack to recognize as legitimate pro-side senders. Each
+  // entry is `{ id, phoneNumber (E.164), label }`. On save, every entry is
+  // registered as a Thumbtack associate phone on every connected TT business
+  // via PlatformService.ensureAdditionalAssociatePhonesWithThumbtack. Never
+  // deletes existing TT phones — removing an entry locally just stops
+  // re-syncing it.
+  additionalAssociatePhonesJson Json? @map("additional_associate_phones_json")
+
   // Business website. Captured during the onboarding wizard's Business
   // step (PR 2). Free-text, nullable.
   website String?
@@ -297,24 +306,24 @@ model Lead {
   // the GET endpoint still returns a substitute. Webhook → customerPhone, GET → here.
   // Never overwrite customerPhone with a GET-endpoint value.
   customerPhoneSubstitute String?
-  customerEmail          String?
-  message                String    @db.Text
-  budget                 Decimal?  @db.Decimal(10, 2)
-  postcode               String?
-  city                   String?
-  state                  String?
-  category               String? // Service category
+  customerEmail           String?
+  message                 String    @db.Text
+  budget                  Decimal?  @db.Decimal(10, 2)
+  postcode                String?
+  city                    String?
+  state                   String?
+  category                String? // Service category
   // Canonical LB pipeline status. See src/leads/canonical-status.ts.
   // Pipeline: new -> contacted -> engaged -> quoted -> booked -> scheduled -> in_progress -> completed
   // Terminals: lost, cancelled, no_show, archived
-  status                 String    @default("new")
+  status                  String    @default("new")
   // Set when status='lost'. Values: 'opt_out' | 'hired_someone' | 'no_response' | 'manual'
-  lostReason             String?
+  lostReason              String?
   // When this lead becomes a re-engage candidate (e.g. lost+hired_someone -> +75d).
-  reengageAt             DateTime?
-  thumbtackStatus        String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
-  platformStatus         String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
-  platformStatusAt       DateTime? // When platform status was last observed
+  reengageAt              DateTime?
+  thumbtackStatus         String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
+  platformStatus          String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
+  platformStatusAt        DateTime? // When platform status was last observed
   // Refund / billing tracking. Populated by the scheduler when a platform
   // 404 on send is enriched with Thumbtack chargeState='Refunded', or by
   // operator action. Yelp doesn't expose a refund concept (subscription
@@ -325,16 +334,16 @@ model Lead {
   //                      is excluded from cost SUM/AVG queries. Mirrors refundedAt
   //                      on automatic detection; can be set independently by
   //                      operator action (manual void) without TT confirmation.
-  chargeStateRaw         String?
-  refundedAt             DateTime?
-  budgetVoidedAt         DateTime?
-  threadId               String? // Universal conversation ID
-  rawJson                String    @db.Text // Original platform payload
-  syncedToCrm            Boolean   @default(false)
+  chargeStateRaw          String?
+  refundedAt              DateTime?
+  budgetVoidedAt          DateTime?
+  threadId                String? // Universal conversation ID
+  rawJson                 String    @db.Text // Original platform payload
+  syncedToCrm             Boolean   @default(false)
   // Service Flow sync fields (see plans/2026-04-17-job-sync-sf-lb.md)
-  sfJobId                String? // SF jobs.id — sticky mapping
-  sfJobMappedAt          DateTime?
-  sfLastEventAt          DateTime? // Last accepted SF event occurred_at
+  sfJobId                 String? // SF jobs.id — sticky mapping
+  sfJobMappedAt           DateTime?
+  sfLastEventAt           DateTime? // Last accepted SF event occurred_at
   // ─── Phase 1 — SF operational lifecycle mirror (additive) ───────────
   // SF owns operational job lifecycle (pending/in_progress/completed/...).
   // Today that lifecycle lands in Lead.status, which conflates it with
@@ -344,20 +353,20 @@ model Lead {
   // of whether the canonical Lead.status write succeeds — carve-out /
   // dedup / downgrade guards may block that). Stale-protected by
   // sfJobOutcomeAt comparison.
-  sfJobOutcome           String?
-  sfJobOutcomeAt         DateTime?
-  statusSource           String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
-  statusUpdatedAt        DateTime? // When Lead.status last changed; used for ordering
+  sfJobOutcome            String?
+  sfJobOutcomeAt          DateTime?
+  statusSource            String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
+  statusUpdatedAt         DateTime? // When Lead.status last changed; used for ordering
   // Last time a customer message arrived on this lead. Provider-agnostic
   // signal read by the follow-up scheduler self-heal to stop enrollments
   // even when a provider failed to persist a Message row.
-  lastCustomerActivityAt DateTime?
+  lastCustomerActivityAt  DateTime?
   // Trial meter idempotency flag. Set true when this Lead has been counted
   // toward User.trialLeadsHandled via TrialService.consumeLead. Single-shot
   // per Lead — webhook retries, late re-deliveries, and the daily Yelp
   // reconciliation never double-count. Backfills/imports and synthetic test
   // leads never set this flag and so don't burn trial quota.
-  trialCounted           Boolean   @default(false)
+  trialCounted            Boolean   @default(false)
   // ─── SF historical sync metadata (additive) ─────────────────────────
   // Tracks the LB→SF reconciliation lifecycle for each lead. Written by
   // src/integrations/sf-historical-sync/. NOT used by the live SF inbound
@@ -389,22 +398,22 @@ model Lead {
   //                 stage update subscription. Promotion to 'linked' happens
   //                 organically when SF later sends a customer_job match
   //                 for the same lb_lead_id — sfLeadId stays additive.
-  sfCustomerId           String?
-  syncStatus             String?
-  syncAttemptedAt        DateTime?
-  syncReason             String?
-  sfLeadId               String?   @map("sf_lead_id")
-  sfLeadStageName        String?   @map("sf_lead_stage_name")
-  sfLeadMatchedAt        DateTime? @map("sf_lead_matched_at")
+  sfCustomerId            String?
+  syncStatus              String?
+  syncAttemptedAt         DateTime?
+  syncReason              String?
+  sfLeadId                String?   @map("sf_lead_id")
+  sfLeadStageName         String?   @map("sf_lead_stage_name")
+  sfLeadMatchedAt         DateTime? @map("sf_lead_matched_at")
   // ─── Thin Account layer (Phase A, additive plumbing) ────────────────
   // FK to SF accounts.id (uuid). Populated by backfill (PR C) and by
   // ingestion (future PR). NULL until backfill runs. Does NOT affect any
   // live LB behavior — LB matcher, follow-up scheduler, classifier, and
   // syncStatus lifecycle are unchanged. See SF migration 065 for the
   // counterpart tables (public.accounts, public.account_identifiers).
-  accountId              String?   @map("account_id") @db.Uuid
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  accountId               String?   @map("account_id") @db.Uuid
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   // Relationships
   user                    User                         @relation(fields: [userId], references: [id], onDelete: Cascade)

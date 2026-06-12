@@ -12,6 +12,7 @@ import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
 import { LeadBridgeNumberManager } from '../../components/LeadBridgeNumberManager';
 import { LeadBridgeNumberLock } from '../../components/LeadBridgeNumberLock';
+import { AdditionalAssociatePhonesEditor } from '../../components/AdditionalAssociatePhonesEditor';
 
 function formatPhone(e164: string | null): string {
   if (!e164) return '—';
@@ -528,6 +529,16 @@ export function SettingsCommunication() {
             </>
           );
         })()}
+      </SettingCard>
+
+      <SettingCard
+        icon={Phone}
+        iconTone="teal"
+        title="Additional associate numbers"
+        subtitle="Extra team / callback numbers to register on connected Thumbtack businesses. Optional. Removing a number here stops re-syncing — existing TT entries are kept."
+        contentPad="8px 24px 24px"
+      >
+        <AdditionalAssociatePhonesEditor />
       </SettingCard>
     </div>
   );

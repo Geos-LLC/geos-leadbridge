@@ -60,6 +60,7 @@ export class UsersController {
       businessPhone?: string;
       website?: string | null;
       websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+      additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
     },
   ) {
     return this.usersService.updateProfile(req.user.id, body);

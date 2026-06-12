@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
@@ -12,6 +12,7 @@ import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { InstantTextAiService } from './instant-text-ai.service';
+import { PlatformService } from '../platforms/platform.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -209,6 +210,12 @@ export class NotificationsService {
     // Failures fall back to the existing template path with a
     // INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker.
     private instantTextAi: InstantTextAiService,
+    // forwardRef: PlatformService → NotificationsService (resolveBotPhone)
+    // already exists, so this back-edge needs lazy resolution. Used by
+    // TenantPhoneNumber purchase/assign/restore to re-sync the LB number
+    // as a TT associate phone after the resolveBotPhone() result changes.
+    @Inject(forwardRef(() => PlatformService))
+    private platformService: PlatformService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -2946,7 +2953,7 @@ export class NotificationsService {
    * Resolve the bot phone (dedicated TenantPhoneNumber) for sending SMS.
    * Fallback chain: account-scoped → unassigned (null savedAccountId) → any active number for user.
    */
-  private async resolveBotPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
+  async resolveBotPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
     // 1. Account-scoped number
     if (savedAccountId) {
       const scoped = await this.prisma.tenantPhoneNumber.findFirst({
@@ -3324,6 +3331,15 @@ export class NotificationsService {
     });
 
     this.logger.log(`[purchaseTenantPhone] Created tenant phone: ${tenantPhone.id} — ${phoneNumber}`);
+
+    // Register the new LB number as an associate phone on every connected
+    // Thumbtack business so TT honors it as a legitimate pro-side sender
+    // for the customer-phone-missing fallback flow. Non-blocking — if TT is
+    // down or the user has no TT accounts, the provisioning still succeeds.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(userId).catch((err) =>
+      this.logger.warn(`[purchaseTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone };
   }
 
@@ -3464,6 +3480,14 @@ export class NotificationsService {
     });
 
     this.logger.log(`[assignTenantPhone] ${tenantPhone.phoneNumber} → account=${savedAccountId ?? 'unassigned'}`);
+
+    // Reassignment changes what resolveBotPhone() returns for at least one
+    // TT business. Re-sync the LB number on every TT account so each picks up
+    // the new account-scoped / shared resolution.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(tenantPhone.userId).catch((err) =>
+      this.logger.warn(`[assignTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone: updated };
   }
 
@@ -3528,6 +3552,14 @@ export class NotificationsService {
     });
 
     this.logger.log(`[restoreTenantPhone] ${tenantPhone.phoneNumber} → ACTIVE`);
+
+    // Restoring a number from grace period puts it back in resolveBotPhone()'s
+    // pool. Re-sync the LB number on every TT account so the restored number
+    // is again whitelisted as a substitute sender.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(tenantPhone.userId).catch((err) =>
+      this.logger.warn(`[restoreTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone: updated };
   }
 }
