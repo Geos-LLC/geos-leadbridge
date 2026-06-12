@@ -78,10 +78,9 @@ export function Layout() {
       label: 'Automation',
       path: '/automation',
       children: [
-        { label: 'When a Lead Arrives', path: '/automation/respond',  hint: 'Respond',  tone: 'green' },
-        { label: 'Follow-ups',          path: '/automation/engage',   hint: 'Engage',   tone: 'purple' },
-        { label: 'AI Playbook',         path: '/automation/playbook', hint: 'Playbook', tone: 'blue' },
-        { label: 'AI Conversation',     path: '/automation/convert',  hint: 'Advanced', tone: 'gray' },
+        { label: 'When a Lead Arrives', path: '/automation/respond', hint: 'Respond',  tone: 'green' },
+        { label: 'Follow-ups',          path: '/automation/engage',  hint: 'Engage',   tone: 'purple' },
+        { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert',  tone: 'blue' },
       ],
     },
     { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
@@ -116,7 +115,6 @@ export function Layout() {
   const backLabelFor = (path: string): string => {
     if (path.startsWith('/automation/respond')) return 'When a Lead Arrives';
     if (path.startsWith('/automation/engage')) return 'Follow-ups';
-    if (path.startsWith('/automation/playbook')) return 'AI Playbook';
     if (path.startsWith('/automation/convert')) return 'AI Conversation';
     if (path.startsWith('/automation')) return 'Automation';
     if (path.startsWith('/settings/communication')) return 'Communication';
