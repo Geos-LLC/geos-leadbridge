@@ -3,10 +3,10 @@ import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
   Clipboard, Sparkles, User, ArrowRight, PhoneCall,
-  Scale, CircleDollarSign, UserCheck, Calendar,
+  CircleDollarSign, UserCheck,
   type LucideIcon,
 } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
   type IconTone,
@@ -25,13 +25,16 @@ import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../li
 // sync with [Conversation.tsx](Conversation.tsx).
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
 const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
-  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
-  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
+  auto:    { title: 'Auto',    body: 'AI picks the best goal based on conversation context.',     icon: Sparkles,         iconTone: 'violet' },
+  hybrid:  { title: 'Auto',    body: 'AI picks the best goal based on conversation context.',     icon: Sparkles,         iconTone: 'violet' },
   price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
   qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
+  convert: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
   phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
 };
+// Accept legacy 'hybrid' and 'convert' as valid saved values for back-compat;
+// STRATEGY_META above remaps them to Auto / Qualify for DISPLAY only. Runtime
+// continues to honour them via STRATEGY_PROMPTS (no DB write from this page).
 const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
@@ -61,6 +64,17 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const location = useLocation();
   const fromState = { from: location.pathname + location.search, fromLabel: 'When a Lead Arrives' };
   const accounts = useAppStore(s => s.savedAccounts);
+
+  // Advanced/legacy mode — same gate used by the Advanced Rules card on
+  // AI Conversation. When OFF, the "First Reply Instructions / AI Prompt"
+  // editor is replaced with a helper note (because the prompt now flows
+  // from Conversation Goal + AI Playbook + Pricing Table + FAQ). When
+  // ON via ?advanced=1 or ?debug=1, the editor is restored so support /
+  // power users can still tune the per-rule template directly.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
 
   // Visual + state
   const [instantReplyOn, setInstantReplyOn] = useState(true);
@@ -609,9 +623,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           label={
             mixedStrategy ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                AI Strategy <MixedBadge tooltip={tipStrategy} />
+                Conversation Goal <MixedBadge tooltip={tipStrategy} />
               </span>
-            ) : 'AI Strategy'
+            ) : 'Conversation Goal'
           }
         >
           {(() => {
@@ -629,32 +643,68 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           })()}
         </FieldRow>
 
+        {/* First Reply Instructions —
+              - Template mode: always show the template tile (templates are
+                still the primary user-editable surface for canned replies).
+              - AI mode (normal):  helper copy explaining where behavior
+                comes from + optional advanced-mode link. The custom AI
+                prompt template still saves + still drives runtime — it's
+                just not the recommended editing surface anymore because
+                AI Playbook + Pricing + FAQ now own that content.
+              - AI mode (advanced=1): original prompt-editor tile, exactly
+                as before. Support / power users tuning a per-rule prompt
+                land here. */}
         <FieldRow label="First Reply Instructions" noBorder>
-          <InfoTile
-            icon={FileText}
-            iconTone="violet"
-            title={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.name || 'Default first-reply instructions')
-                : (firstReplyMessageTpl?.name || 'Default first-reply template')
-            }
-            body={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
-                : (firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.')
-            }
-            badge={replyType === 'ai' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
-            tooltip={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined)
-                : (firstReplyMessageTpl?.content || undefined)
-            }
-            actionLabel={replyType === 'ai' ? 'Edit Prompt' : 'Edit Template'}
-            onAction={() => goTemplate(
-              replyType === 'ai' ? firstReplyPromptTpl : firstReplyMessageTpl,
-              replyType === 'ai' ? 'prompts' : 'auto-reply',
-            )}
-          />
+          {replyType === 'template' ? (
+            <InfoTile
+              icon={FileText}
+              iconTone="violet"
+              title={firstReplyMessageTpl?.name || 'Default first-reply template'}
+              body={firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.'}
+              badge={{ label: 'Template', tone: 'blue' }}
+              tooltip={firstReplyMessageTpl?.content || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
+            />
+          ) : advancedMode ? (
+            <InfoTile
+              icon={FileText}
+              iconTone="violet"
+              title={firstReplyPromptTpl?.name || 'Default first-reply instructions'}
+              body={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.'}
+              badge={{ label: 'AI Prompt — Advanced', tone: 'violet' }}
+              tooltip={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined}
+              actionLabel="Edit Prompt"
+              onAction={() => goTemplate(firstReplyPromptTpl, 'prompts')}
+            />
+          ) : (
+            <div style={{
+              padding: '12px 14px',
+              background: '#f8fafc',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 10,
+              fontSize: 13, color: 'var(--lb-ink-3)',
+              lineHeight: 1.55,
+            }}>
+              First replies use your <strong>Conversation Goal</strong>, <strong>AI Playbook</strong>, <strong>Pricing Table</strong>, and <strong>FAQ</strong>.
+              <div style={{ marginTop: 10, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12.5 }}>
+                <a
+                  href="/settings?tab=ai-playbook"
+                  style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+                >Edit AI Playbook</a>
+                <span style={{ color: 'var(--lb-line)' }}>·</span>
+                <a
+                  href="/automation/convert"
+                  style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+                >Edit Conversation Goal</a>
+                <span style={{ color: 'var(--lb-line)' }}>·</span>
+                <a
+                  href={location.pathname + (location.search ? location.search + '&advanced=1' : '?advanced=1')}
+                  style={{ color: 'var(--lb-ink-5)', textDecoration: 'underline' }}
+                >Advanced: edit first-reply prompt</a>
+              </div>
+            </div>
+          )}
         </FieldRow>
       </SettingCard>
 
