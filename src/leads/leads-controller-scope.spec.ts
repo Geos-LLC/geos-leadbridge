@@ -42,6 +42,7 @@ function buildController(opts: {
     /* eventEmitter */ {} as any,
     /* prisma */ {} as any,
     /* crmWebhookService */ {} as any,
+    /* conversationRuntime */ {} as any,
   );
 
   return { controller, leadsService, calls };

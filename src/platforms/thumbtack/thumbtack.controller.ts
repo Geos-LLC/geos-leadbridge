@@ -31,6 +31,7 @@ import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { parseAccountScope } from '../../common/account-scope/account-scope.util';
+import { ConversationRuntimeService } from '../../conversation-context/conversation-runtime.service';
 
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
@@ -44,6 +45,7 @@ export class ThumbtackController {
     private leadsService: LeadsService,
     private configService: ConfigService,
     private prisma: PrismaService,
+    private conversationRuntime: ConversationRuntimeService,
   ) {
     // Sanitize frontendUrl - remove trailing slashes and whitespace
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
@@ -555,11 +557,36 @@ export class ThumbtackController {
       const messages = await this.leadsService.getMessages(user.id, id, skipCache);
       console.log(`[ThumbtackController] getMessages success - ${messages.length} messages`);
 
+      // V2 Review Mode (2026-06-12): piggyback the pending AI suggestion on the
+      // existing messages payload so Lead Activity does not need a second RTT
+      // per thread open. Cost is one ThreadContext.findUnique on the per-lead
+      // hot path — negligible vs the messages list assembly. Returns null when
+      // the lead has no thread yet or no draft is parked.
+      let pendingAiSuggestion: Awaited<
+        ReturnType<ConversationRuntimeService['getAiSuggestion']>
+      > = null;
+      try {
+        const leadRow = await this.prisma.lead.findFirst({
+          where: { id, userId: user.id },
+          select: { threadId: true },
+        });
+        if (leadRow?.threadId) {
+          pendingAiSuggestion = await this.conversationRuntime.getAiSuggestion(
+            leadRow.threadId,
+          );
+        }
+      } catch (e: any) {
+        // Suggestion lookup never blocks the messages payload — Lead Activity
+        // can still render the thread, the banner just won't appear this paint.
+        console.warn(`[ThumbtackController] pendingAiSuggestion lookup failed for lead ${id}: ${e?.message ?? e}`);
+      }
+
       return {
         platform: PlatformName.THUMBTACK,
         leadId: id,
         count: messages.length,
         messages,
+        pendingAiSuggestion,
       };
     } catch (error) {
       console.error(`[ThumbtackController] getMessages error:`, error.message);

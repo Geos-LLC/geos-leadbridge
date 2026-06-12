@@ -1419,6 +1419,29 @@ export class AutomationService implements OnModuleInit {
       // A separate reply-count cap was unused (no UI), redundant, and
       // surfaced no clear use case the existing stop paths don't cover.
 
+      // V2 Review Mode (2026-06-12): per-account
+      // followUpSettingsJson.aiConversationDeliveryMode. 'suggest' parks
+      // the generated reply as a pending AI suggestion on
+      // ThreadContext.stateJson instead of dispatching. Missing key or
+      // any other value → 'auto_send' (existing behavior).
+      const aiConversationDeliveryMode: 'suggest' | 'auto_send' =
+        (aiRules as any).aiConversationDeliveryMode === 'suggest' ? 'suggest' : 'auto_send';
+
+      // Dedup gate: skip generation entirely when a pending AI
+      // suggestion already exists for this conversation. The operator
+      // must approve (sends + clears) or discard (just clears) before
+      // AI generates again. Without this, every burst of customer
+      // follow-up messages would queue duplicate suggestions.
+      if (aiConversationDeliveryMode === 'suggest' && lead?.threadId) {
+        const existing = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+        if (existing) {
+          this.logger.log(
+            `[AI_SUGGEST] dedup — suggestion ${existing.id} already pending for thread ${lead.threadId}`,
+          );
+          return;
+        }
+      }
+
       // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage.
       // When `aiDeferredSendAt` was set by the OBH gate above, translate it
       // to `delayMinutes` so scheduleAutomatedMessage writes a persistent
@@ -1445,6 +1468,9 @@ export class AutomationService implements OnModuleInit {
         activeHoursTimezone: savedAccount.followUpTimezone,
         stopOnCustomerReply: true,
         replyTriggerMode: 'every_reply' as const,
+        // Propagated to executePendingMessage — see the suggest-mode
+        // fork right before leadsService.sendMessage().
+        deliveryMode: aiConversationDeliveryMode,
       };
 
       await this.scheduleAutomatedMessage(syntheticRule, enrichedContext);
@@ -1903,6 +1929,10 @@ export class AutomationService implements OnModuleInit {
       }
 
       let messageToSend: string;
+      // Hoisted so the V2 Review-Mode suggest fork (below) can tag the
+      // parked suggestion with the goal that was actually used. Only the
+      // AI branch assigns it; template branch leaves it undefined.
+      let effectiveStrategyKeyOuter: string | undefined;
 
       if (rule.useAi) {
         // Try thread context first (summary + state + recent messages).
@@ -2013,6 +2043,7 @@ export class AutomationService implements OnModuleInit {
         const strategyPrompt: string = resolvedGoal.strategyPrompt;
         const effectiveStrategyKey: string | undefined =
           resolvedGoal.goalKey ?? undefined;
+        effectiveStrategyKeyOuter = effectiveStrategyKey;
         this.logger.log(
           `[AI] Goal resolved for ${pendingId}: ${effectiveStrategyKey ?? '(rule prompt)'} ` +
           `via ${resolvedGoal.source} — ${resolvedGoal.reason}`,
@@ -2190,6 +2221,53 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(`[executePendingMessage] skip — pending=${pendingId} already claimed (status != 'pending')`);
           return;
         }
+      }
+
+      // V2 Review Mode (2026-06-12): when the synthetic AI rule carries
+      // `deliveryMode='suggest'` (set in handleCustomerReply when the
+      // account opted into Review mode), park the body as a pending
+      // suggestion on ThreadContext.stateJson instead of dispatching.
+      // Operator approves via /v1/leads/:id/ai-suggestion/{send,discard} —
+      // the send endpoint calls leadsService.sendMessage with the same
+      // body, so the outbound write path is byte-identical to auto-send.
+      //
+      // Dedup: handleCustomerReply already checked for an existing
+      // pending suggestion + skipped scheduling if one existed. We
+      // re-check here defensively to handle the race where a sibling
+      // runner arrived between the handleCustomerReply check and this
+      // point.
+      if ((rule as any).deliveryMode === 'suggest' && lead.threadId) {
+        const existingSuggestion = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+        if (existingSuggestion) {
+          this.logger.log(
+            `[AI_SUGGEST] race-skip — pending suggestion ${existingSuggestion.id} already exists for thread ${lead.threadId}`,
+          );
+          return;
+        }
+        const { randomUUID } = require('crypto');
+        const suggestionId = randomUUID();
+        // Resolve the latest customer message id for dedup-by-source.
+        let sourceMessageId: string | null = null;
+        try {
+          const latest = await this.prisma.message.findFirst({
+            where: { conversationId: lead.threadId, sender: 'customer' },
+            orderBy: { sentAt: 'desc' },
+            select: { id: true },
+          });
+          sourceMessageId = latest?.id ?? null;
+        } catch { /* best-effort — dedup falls through */ }
+        await this.conversationRuntime.setAiSuggestion(lead.threadId, {
+          id: suggestionId,
+          message: messageToSend,
+          goal: effectiveStrategyKeyOuter ?? null,
+          reason: 'customer_reply',
+          sourceMessageId,
+        });
+        this.logger.log(
+          `[AI_SUGGEST] parked suggestion ${suggestionId} for thread ${lead.threadId} ` +
+          `(${messageToSend.length} chars, sourceMessageId=${sourceMessageId ?? 'null'})`,
+        );
+        return;
       }
 
       // Send the message

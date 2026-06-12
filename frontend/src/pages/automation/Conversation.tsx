@@ -59,6 +59,11 @@ type CachedConvSettings = {
   strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
   priceMode: 'range' | 'exact';
   availability: 'always' | 'hours';
+  // V2 Review Mode (2026-06-12). 'suggest' parks AI replies as pending
+  // drafts; 'auto_send' dispatches them according to `availability`.
+  // Existing tenants whose followUpSettingsJson predates this key default
+  // to 'auto_send' so behavior is unchanged on first paint.
+  aiConversationDeliveryMode: 'suggest' | 'auto_send';
   stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
   qualificationRequiredFields: string[];
@@ -148,6 +153,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
   const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
   const [availability, setAvailability] = useState<'always' | 'hours'>('always');
+  const [aiConversationDeliveryMode, setAiConversationDeliveryMode] = useState<'suggest' | 'auto_send'>('auto_send');
   const [stopRules, setStopRules] = useState({
     not_contacted: true, booked: true, price_agreed: true, done: true,
   });
@@ -191,6 +197,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // account, wiping out per-account values the user never touched.
   type DirtyField =
     | 'strategy' | 'priceMode' | 'availability'
+    | 'aiConversationDeliveryMode'
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
     | 'qualificationRequiredFields' | 'qualificationCustomFields'
@@ -278,6 +285,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       strategy: displayStrategy,
       priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
       availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
+      // Default to 'auto_send' when missing so pre-V2 tenants keep firing
+      // AI replies automatically. Only explicit 'suggest' parks them.
+      aiConversationDeliveryMode: s?.aiConversationDeliveryMode === 'suggest' ? 'suggest' : 'auto_send',
       stopRules: {
         not_contacted: s?.aiStopOnOptOut !== undefined ? !!s.aiStopOnOptOut : true,
         booked:        s?.aiStopOnBooked !== undefined ? !!s.aiStopOnBooked : true,
@@ -310,6 +320,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStrategy(first.strategy);
         setPriceMode(first.priceMode);
         setAvailability(first.availability);
+        setAiConversationDeliveryMode(first.aiConversationDeliveryMode);
         setStopRules(first.stopRules);
         setTakeover(first.takeover);
         setQualificationRequiredFields(first.qualificationRequiredFields);
@@ -323,6 +334,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStrategy(cached.strategy);
         setPriceMode(cached.priceMode);
         setAvailability(cached.availability);
+        setAiConversationDeliveryMode(cached.aiConversationDeliveryMode);
         setStopRules(cached.stopRules);
         setTakeover(cached.takeover);
         setQualificationRequiredFields(cached.qualificationRequiredFields);
@@ -354,6 +366,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setStrategy(parsed.strategy);
             setPriceMode(parsed.priceMode);
             setAvailability(parsed.availability);
+            setAiConversationDeliveryMode(parsed.aiConversationDeliveryMode);
             setStopRules(parsed.stopRules);
             setTakeover(parsed.takeover);
             setQualificationRequiredFields(parsed.qualificationRequiredFields);
@@ -376,6 +389,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setStrategy(parsed.strategy);
               setPriceMode(parsed.priceMode);
               setAvailability(parsed.availability);
+              setAiConversationDeliveryMode(parsed.aiConversationDeliveryMode);
               setStopRules(parsed.stopRules);
               setTakeover(parsed.takeover);
               setQualificationRequiredFields(parsed.qualificationRequiredFields);
@@ -403,6 +417,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     if (fields.has('strategy'))     payload.followUpStrategy     = strategy;
     if (fields.has('priceMode'))    payload.priceQuoteMode       = priceMode;
     if (fields.has('availability')) payload.followUpAvailability = availability === 'hours' ? 'active_hours' : 'always';
+    if (fields.has('aiConversationDeliveryMode')) payload.aiConversationDeliveryMode = aiConversationDeliveryMode;
     if (fields.has('stopRules.not_contacted')) payload.aiStopOnOptOut      = stopRules.not_contacted;
     if (fields.has('stopRules.booked'))        payload.aiStopOnBooked      = stopRules.booked;
     if (fields.has('stopRules.price_agreed'))  payload.aiStopOnPriceAgreed = stopRules.price_agreed;
@@ -441,7 +456,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       const prev = convCache.get(id);
       if (!prev) {
         convCache.set(id, {
-          strategy, priceMode, availability,
+          strategy, priceMode, availability, aiConversationDeliveryMode,
           stopRules, takeover,
           qualificationRequiredFields, qualificationCustomFields,
           qualifyStopOnComplete, phoneStopOnComplete,
@@ -452,6 +467,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (fields.has('strategy'))     next.strategy     = strategy;
       if (fields.has('priceMode'))    next.priceMode    = priceMode;
       if (fields.has('availability')) next.availability = availability;
+      if (fields.has('aiConversationDeliveryMode')) next.aiConversationDeliveryMode = aiConversationDeliveryMode;
       const nextStop = { ...prev.stopRules };
       if (fields.has('stopRules.not_contacted')) nextStop.not_contacted = stopRules.not_contacted;
       if (fields.has('stopRules.booked'))        nextStop.booked        = stopRules.booked;
@@ -567,14 +583,32 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete]);
+  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
   // only write what the user actually changed.
   const onStrategy     = (v: StrategyKey)            => { dirtyRef.current = true; dirtyFieldsRef.current.add('strategy');     setStrategy(v); };
   const onPriceMode    = (v: 'range' | 'exact')      => { dirtyRef.current = true; dirtyFieldsRef.current.add('priceMode');    setPriceMode(v); };
-  const onAvailability = (v: 'always' | 'hours')     => { dirtyRef.current = true; dirtyFieldsRef.current.add('availability'); setAvailability(v); };
+  // AI Response Mode picker. Three tiles map to two underlying fields:
+  //   Review before sending → deliveryMode='suggest' (availability irrelevant
+  //                            in runtime; we leave it untouched so existing
+  //                            value survives a future tile flip back).
+  //   Assist when unavailable → deliveryMode='auto_send' + availability='hours'
+  //   Full autopilot          → deliveryMode='auto_send' + availability='always'
+  const onResponseMode = (mode: 'review' | 'assist' | 'autopilot') => {
+    dirtyRef.current = true;
+    if (mode === 'review') {
+      dirtyFieldsRef.current.add('aiConversationDeliveryMode');
+      setAiConversationDeliveryMode('suggest');
+      return;
+    }
+    // Both non-review modes are auto-send with different availability windows.
+    dirtyFieldsRef.current.add('aiConversationDeliveryMode');
+    dirtyFieldsRef.current.add('availability');
+    setAiConversationDeliveryMode('auto_send');
+    setAvailability(mode === 'assist' ? 'hours' : 'always');
+  };
 
   const toggleStop = (k: keyof typeof stopRules) => {
     dirtyRef.current = true;
@@ -805,20 +839,16 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             has different customer expectations than mid-conversation reply.
             See spec section 3.
 
-            Internal mapping (no backend change):
-              "Review before sending" → DISABLED (no backend support today —
-                see TODO below).
-              "Assist when unavailable" → availability='hours'
-                (followUpAvailability='active_hours' on save).
-              "Full autopilot"        → availability='always'
-                (followUpAvailability='always' on save).
-
-            TODO(backend): "Review before sending" needs an AI-Conversation
-            suggestion path equivalent to FollowUpEnrollment.status='suggested'
-            — drafts a reply, parks it as a pending suggestion, alerts the
-            operator, and only sends after approval. Until that's wired, the
-            tile is rendered disabled with a "Coming soon" badge per the
-            spec's "Do NOT add fake UI" rule. */}
+            Internal mapping (V2 Review Mode shipped 2026-06-12):
+              "Review before sending" → aiConversationDeliveryMode='suggest'
+                AI generates a draft on customer reply but parks it on
+                ThreadContext.stateJson.pendingAiSuggestion instead of
+                dispatching. Operator approves/discards from Lead Activity.
+              "Assist when unavailable" → deliveryMode='auto_send'
+                + followUpAvailability='active_hours' (sends only outside
+                business hours).
+              "Full autopilot"        → deliveryMode='auto_send'
+                + followUpAvailability='always' (sends any time). */}
       <SectionCard padding="22px 24px 24px">
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
           <IconTile icon={Clock} tone="violet" size="lg" />
@@ -834,26 +864,25 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <ResponseModeOption
-            selected={false}
-            disabled={true}
+            selected={aiConversationDeliveryMode === 'suggest'}
+            onClick={() => onResponseMode('review')}
             title="Review before sending"
-            body="AI drafts replies for approval before they are sent."
-            badge="Coming soon"
+            body="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
           />
           <ResponseModeOption
-            selected={availability === 'hours'}
-            onClick={() => onAvailability('hours')}
+            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
+            onClick={() => onResponseMode('assist')}
             title="Assist when unavailable"
             body="AI responds automatically outside your business hours."
-            mixed={mixedAvailability.mixed && availability === 'hours'}
+            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
             mixedTooltip={mixedAvailability.tooltip}
           />
           <ResponseModeOption
-            selected={availability === 'always'}
-            onClick={() => onAvailability('always')}
+            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
+            onClick={() => onResponseMode('autopilot')}
             title="Full autopilot"
             body="AI responds automatically at any time."
-            mixed={mixedAvailability.mixed && availability === 'always'}
+            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
             mixedTooltip={mixedAvailability.tooltip}
           />
         </div>
