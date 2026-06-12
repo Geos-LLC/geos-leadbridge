@@ -691,12 +691,22 @@ export default function SettingsPage() {
           { key: 'communication', label: 'Communication' },
           { key: 'ai',            label: 'AI' },
           { key: 'pricing',       label: 'Pricing' },
+          { key: 'templates',     label: 'Templates' },
           { key: 'billing',       label: 'Billing' },
           { key: 'team',          label: 'Team' },
-        ] as Array<{ key: SettingsTab; label: string }>).map(t => (
+        ] as Array<{ key: SettingsTab | 'templates'; label: string }>).map(t => (
           <button
             key={t.key}
-            onClick={() => selectTab(t.key)}
+            onClick={() => {
+              // Templates lives at its own route — preserve the existing
+              // /templates URL + every "Edit Template" deep link by
+              // navigating instead of switching the inline tab.
+              if (t.key === 'templates') {
+                navigate('/templates');
+                return;
+              }
+              selectTab(t.key as SettingsTab);
+            }}
             className={`px-4 py-2 text-sm font-semibold transition-colors border-b-2 -mb-px ${
               activeTab === t.key
                 ? 'text-blue-600 border-blue-600'

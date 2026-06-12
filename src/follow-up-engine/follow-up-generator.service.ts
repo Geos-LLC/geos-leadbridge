@@ -199,6 +199,7 @@ export class FollowUpGeneratorService {
     const qualificationBlockBody: string = buildQualificationBlockForStrategy(
       strategyKey,
       accountSettings?.qualificationV2?.requiredFields,
+      accountSettings?.qualificationV2?.customFields,
     );
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({

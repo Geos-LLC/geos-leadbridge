@@ -78,6 +78,86 @@ describe('buildQualificationBlock', () => {
   });
 });
 
+describe('buildQualificationBlock — customFields', () => {
+  it('returns empty when no built-ins and no custom fields', () => {
+    expect(buildQualificationBlock([], [])).toBe('');
+    expect(buildQualificationBlock(undefined, undefined)).toBe('');
+  });
+
+  it('emits a custom field row without question when question is empty', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: 'Pets', question: '', required: true },
+    ]);
+    expect(out).toContain('- Pets');
+    expect(out).not.toContain('ask:');
+  });
+
+  it('emits a custom field row with quoted question when question is provided', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: 'Gate code', question: 'What is the gate code for entry?', required: true },
+    ]);
+    expect(out).toContain('- Gate code — ask: "What is the gate code for entry?"');
+  });
+
+  it('skips custom fields where required is false', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: 'Pets', question: '', required: true },
+      { id: 'cf-2', label: 'Parking instructions', question: '', required: false },
+    ]);
+    expect(out).toContain('- Pets');
+    expect(out).not.toContain('Parking instructions');
+  });
+
+  it('skips custom fields with blank labels', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: '', question: 'Something', required: true },
+      { id: 'cf-2', label: '   ', question: '', required: true },
+      { id: 'cf-3', label: 'Pets', question: '', required: true },
+    ]);
+    expect(out).toContain('- Pets');
+    expect((out.match(/^- /gm) || []).length).toBe(1);
+  });
+
+  it('dedupes custom fields by label (case-insensitive) so a duplicate save does not double-emit', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: 'Pets', question: '', required: true },
+      { id: 'cf-2', label: 'pets', question: 'Different question', required: true },
+    ]);
+    expect((out.match(/^- /gm) || []).length).toBe(1);
+  });
+
+  it('emits built-ins THEN custom fields in that order', () => {
+    const out = buildQualificationBlock(['phone_number', 'square_footage'], [
+      { id: 'cf-1', label: 'Pets', question: '', required: true },
+    ]);
+    const sfIdx = out.indexOf('Square Footage');
+    const pnIdx = out.indexOf('Phone Number');
+    const petsIdx = out.indexOf('- Pets');
+    expect(sfIdx).toBeGreaterThan(-1);
+    expect(pnIdx).toBeGreaterThan(sfIdx);
+    expect(petsIdx).toBeGreaterThan(pnIdx);
+  });
+
+  it('handles malformed custom rows defensively', () => {
+    const out = buildQualificationBlock([], [
+      null,
+      undefined,
+      'string-not-object',
+      { label: 'Pets', required: true }, // missing id + question
+      { id: 'cf-2', label: 42, question: '', required: true }, // non-string label
+    ] as any);
+    expect(out).toContain('- Pets');
+    expect((out.match(/^- /gm) || []).length).toBe(1);
+  });
+
+  it('mentions transitioning forward whether the block contains only customs', () => {
+    const out = buildQualificationBlock([], [
+      { id: 'cf-1', label: 'Pets', question: '', required: true },
+    ]);
+    expect(out.toLowerCase()).toContain('transition forward');
+  });
+});
+
 describe('buildQualificationBlockForStrategy', () => {
   it('emits block when strategy is qualify', () => {
     const out = buildQualificationBlockForStrategy('qualify', ['phone_number']);

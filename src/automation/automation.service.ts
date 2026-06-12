@@ -2121,15 +2121,18 @@ export class AutomationService implements OnModuleInit {
         // the conversation). See src/ai/qualification-context.ts.
         const { buildQualificationBlockForStrategy } = require('../ai/qualification-context');
         let qualificationRequiredFields: unknown = undefined;
+        let qualificationCustomFields: unknown = undefined;
         if (account?.followUpSettingsJson) {
           try {
             const s = JSON.parse(account.followUpSettingsJson);
             qualificationRequiredFields = s?.qualificationV2?.requiredFields;
+            qualificationCustomFields = s?.qualificationV2?.customFields;
           } catch { /* invalid JSON */ }
         }
         const qualificationBlock: string = buildQualificationBlockForStrategy(
           effectiveStrategyKey,
           qualificationRequiredFields,
+          qualificationCustomFields,
         );
 
         // Generate reply via OpenAI. Pass current time + timezone so the model

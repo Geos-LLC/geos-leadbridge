@@ -600,7 +600,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               selected={replyType === 'ai'}
               onClick={() => onReplyType('ai')}
               title="AI"
-              body="AI writes a personalized first reply using your Business Information, FAQ, Pricing Table, and AI Playbook."
+              body="AI writes a personalized first reply using your Business Information, FAQ, Pricing Guidance, and AI Playbook."
               icon={Sparkles}
               mixed={mixedReplyType && replyType === 'ai'}
               mixedTooltip={tipReplyType}
@@ -665,10 +665,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
                 {[
                   'Business Information',
                   'FAQ',
-                  'Pricing Table',
+                  'Pricing Guidance',
                   'AI Playbook',
                   'Conversation history',
-                  'Automatic goal routing',
                 ].map(item => (
                   <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>

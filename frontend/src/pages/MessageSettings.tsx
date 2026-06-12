@@ -241,6 +241,7 @@ export function MessageSettings() {
             Message <span className="gradient-text">Templates.</span>
           </h2>
           <p className="text-slate-500 mt-2 text-lg">Streamline your client communication with reusable response blocks.</p>
+          <p className="text-slate-400 mt-2 text-sm">Templates are used when you choose <span className="font-semibold text-slate-600">Custom Template</span> instead of AI in your automation settings.</p>
         </div>
         <div className="flex gap-3">
           <button

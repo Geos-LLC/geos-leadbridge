@@ -6,6 +6,7 @@ import {
   PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
   MessageSquareText, AlertTriangle, Power,
   ChevronDown, ChevronUp, Shield, Settings2, Target,
+  Plus, Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -22,6 +23,38 @@ import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../li
 // Module-level cache that survives mount/unmount AND tab switches, so toggling
 // account tabs feels instant and so the mixed-state detection has data to read
 // without waiting for the network.
+/**
+ * Custom required field for the Qualify goal. User-defined alongside the
+ * built-in catalog (bedrooms, bathrooms, etc.) — examples include Pets,
+ * Gate code, Move-in date. Stored at
+ * followUpSettingsJson.qualificationV2.customFields.
+ *
+ * `question` is optional — when empty the AI generates a natural question
+ * from the label at runtime (e.g. label "Pets" → AI asks "Do you have any
+ * pets in the home?"). `required` decides whether qualification completion
+ * waits for this field; unchecked = AI may ask but doesn't gate on it.
+ */
+export type QualificationCustomField = {
+  id: string;
+  label: string;
+  question: string;
+  required: boolean;
+};
+
+/**
+ * Generate a stable client-side id for a new custom field row. Prefers
+ * crypto.randomUUID where available; falls back to a time + random suffix
+ * for older browsers / weird embeds. The id is opaque to the backend —
+ * it's only used by React for stable list keys + save-time diffing.
+ */
+function makeCustomFieldId(): string {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof (c as any).randomUUID === 'function') {
+    return (c as any).randomUUID();
+  }
+  return `cf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 type CachedConvSettings = {
   strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
   priceMode: 'range' | 'exact';
@@ -29,6 +62,7 @@ type CachedConvSettings = {
   stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
   qualificationRequiredFields: string[];
+  qualificationCustomFields: QualificationCustomField[];
   // V2 per-goal completion stops (2026-06-12). Each Conversation Goal
   // owns its own "Stop AI + Notify Team" choice. Price reuses the
   // existing `aiStopOnPriceAgreed` field (stopRules.price_agreed here).
@@ -128,6 +162,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [qualificationRequiredFields, setQualificationRequiredFields] =
     useState<string[]>(QUALIFICATION_DEFAULT_FIELDS);
 
+  // Custom Qualify fields (Pets, Gate code, Move-in date, etc). Tenant-
+  // defined alongside the built-in catalog. Stored at
+  // followUpSettingsJson.qualificationV2.customFields. Empty by default —
+  // existing tenants with no saved customFields render no rows.
+  const [qualificationCustomFields, setQualificationCustomFields] =
+    useState<QualificationCustomField[]>([]);
+
   // V2 per-goal completion stops. Default false: existing tenants
   // unaffected. Backend gates in automation.service treat undefined as
   // false too (no behavior change for accounts without the key).
@@ -152,7 +193,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'strategy' | 'priceMode' | 'availability'
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
-    | 'qualificationRequiredFields'
+    | 'qualificationRequiredFields' | 'qualificationCustomFields'
     | 'qualifyStopOnComplete' | 'phoneStopOnComplete';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
@@ -200,6 +241,28 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           .filter((k): k is string => typeof k === 'string')
       : QUALIFICATION_DEFAULT_FIELDS;
 
+    // Custom fields — defensive parsing. Drops malformed rows so a bad
+    // save from an older UI version doesn't poison the editor. Each row
+    // needs at minimum a non-empty label; missing question defaults to ''
+    // (AI auto-generates at runtime). Missing required defaults to true.
+    const savedCustom: unknown = s?.qualificationV2?.customFields;
+    const customFields: QualificationCustomField[] = Array.isArray(savedCustom)
+      ? (savedCustom as unknown[])
+          .map((row): QualificationCustomField | null => {
+            if (!row || typeof row !== 'object') return null;
+            const r = row as Record<string, unknown>;
+            const label = typeof r.label === 'string' ? r.label.trim() : '';
+            if (!label) return null;
+            return {
+              id: typeof r.id === 'string' && r.id ? r.id : makeCustomFieldId(),
+              label,
+              question: typeof r.question === 'string' ? r.question : '',
+              required: r.required !== false,
+            };
+          })
+          .filter((x): x is QualificationCustomField => x !== null)
+      : [];
+
     // Strategy DISPLAY remap: hide Hybrid + Convert from the picker but
     // remap their saved DB values to a visible card so users see SOMETHING
     // selected. No DB write — the legacy value persists in
@@ -229,6 +292,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
       },
       qualificationRequiredFields: requiredFields,
+      qualificationCustomFields: customFields,
       // V2 goal completion stops. Missing key → default false. The new
       // backend gates in automation.service.ts check `=== true` strictly,
       // so undefined or false both mean "Continue AI + Notify Team".
@@ -249,6 +313,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(first.stopRules);
         setTakeover(first.takeover);
         setQualificationRequiredFields(first.qualificationRequiredFields);
+        setQualificationCustomFields(first.qualificationCustomFields);
         setQualifyStopOnComplete(first.qualifyStopOnComplete);
         setPhoneStopOnComplete(first.phoneStopOnComplete);
       }
@@ -261,6 +326,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(cached.stopRules);
         setTakeover(cached.takeover);
         setQualificationRequiredFields(cached.qualificationRequiredFields);
+        setQualificationCustomFields(cached.qualificationCustomFields);
         setQualifyStopOnComplete(cached.qualifyStopOnComplete);
         setPhoneStopOnComplete(cached.phoneStopOnComplete);
       }
@@ -291,6 +357,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setStopRules(parsed.stopRules);
             setTakeover(parsed.takeover);
             setQualificationRequiredFields(parsed.qualificationRequiredFields);
+            setQualificationCustomFields(parsed.qualificationCustomFields);
             setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
             setPhoneStopOnComplete(parsed.phoneStopOnComplete);
           }
@@ -312,6 +379,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setStopRules(parsed.stopRules);
               setTakeover(parsed.takeover);
               setQualificationRequiredFields(parsed.qualificationRequiredFields);
+              setQualificationCustomFields(parsed.qualificationCustomFields);
               setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
               setPhoneStopOnComplete(parsed.phoneStopOnComplete);
             }
@@ -348,8 +416,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     // writes `extendedSettings.qualificationV2 = body.qualificationV2`,
     // which preserves any future sibling keys (e.g. completionAction)
     // alongside requiredFields without a payload-shape change.
-    if (fields.has('qualificationRequiredFields')) {
-      payload.qualificationV2 = { requiredFields: qualificationRequiredFields };
+    if (fields.has('qualificationRequiredFields') || fields.has('qualificationCustomFields')) {
+      // Save BOTH sub-keys together — backend replaces the whole
+      // qualificationV2 object, so omitting either when one is dirty
+      // would wipe the other from storage.
+      payload.qualificationV2 = {
+        requiredFields: qualificationRequiredFields,
+        customFields: qualificationCustomFields,
+      };
     }
     // V2 goal completion stops — Qualify + Phone goals each carry their
     // own "Stop AI + Notify Team" choice as a new top-level JSON key.
@@ -368,7 +442,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (!prev) {
         convCache.set(id, {
           strategy, priceMode, availability,
-          stopRules, takeover, qualificationRequiredFields,
+          stopRules, takeover,
+          qualificationRequiredFields, qualificationCustomFields,
           qualifyStopOnComplete, phoneStopOnComplete,
         });
         return;
@@ -392,6 +467,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       next.takeover = nextTake;
       if (fields.has('qualificationRequiredFields')) {
         next.qualificationRequiredFields = qualificationRequiredFields;
+      }
+      if (fields.has('qualificationCustomFields')) {
+        next.qualificationCustomFields = qualificationCustomFields;
       }
       if (fields.has('qualifyStopOnComplete')) next.qualifyStopOnComplete = qualifyStopOnComplete;
       if (fields.has('phoneStopOnComplete'))   next.phoneStopOnComplete   = phoneStopOnComplete;
@@ -489,7 +567,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields, qualifyStopOnComplete, phoneStopOnComplete]);
+  }, [strategy, priceMode, availability, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -527,6 +605,30 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     const catalogPart = QUALIFICATION_FIELDS.map(f => f.key).filter(k => next.includes(k));
     const preservedPart = next.filter(k => !QUALIFICATION_CATALOG_KEYS.has(k));
     setQualificationRequiredFields([...catalogPart, ...preservedPart]);
+  };
+
+  // Custom Qualify fields — add / update / remove. Each mutates the
+  // qualificationCustomFields array and marks the same dirty key, so
+  // auto-save batches consecutive edits.
+  const addCustomField = () => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('qualificationCustomFields');
+    setQualificationCustomFields(prev => [
+      ...prev,
+      { id: makeCustomFieldId(), label: '', question: '', required: true },
+    ]);
+  };
+  const updateCustomField = (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('qualificationCustomFields');
+    setQualificationCustomFields(prev =>
+      prev.map(f => (f.id === id ? { ...f, ...patch } : f)),
+    );
+  };
+  const removeCustomField = (id: string) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('qualificationCustomFields');
+    setQualificationCustomFields(prev => prev.filter(f => f.id !== id));
   };
 
   // V2 per-goal "Stop AI on completion" setters. Each goal owns ONE field
@@ -654,6 +756,10 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         mixedPriceMode={mixedPriceMode}
         qualificationRequiredFields={qualificationRequiredFields}
         toggleQualificationField={toggleQualificationField}
+        qualificationCustomFields={qualificationCustomFields}
+        addCustomField={addCustomField}
+        updateCustomField={updateCustomField}
+        removeCustomField={removeCustomField}
         // V2 per-goal completion stops. Each goal radio writes ONE field
         // (no global fan-out). Auto has no completion radio at all.
         priceStop={stopRules.price_agreed}
@@ -843,6 +949,7 @@ function FlowArrow() {
 function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
   qualificationRequiredFields, toggleQualificationField,
+  qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
   priceStop, qualifyStop, phoneStop,
   onPriceStop, onQualifyStop, onPhoneStop,
 }: {
@@ -854,6 +961,11 @@ function GoalSetupCard({
   qualificationRequiredFields: string[];
   /** Single-field toggle. Owns dirty-tracking + canonical sort. */
   toggleQualificationField: (key: string) => void;
+  /** User-defined Qualify fields (Pets, Gate code, etc). */
+  qualificationCustomFields: QualificationCustomField[];
+  addCustomField: () => void;
+  updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
+  removeCustomField: (id: string) => void;
   /** V2 per-goal Stop-on-completion booleans. true = Stop AI, false = Continue. */
   priceStop: boolean;
   qualifyStop: boolean;
@@ -921,18 +1033,26 @@ function GoalSetupCard({
               </>
             )}
             {strategy === 'price' && (
-              <>Focus on providing pricing information as quickly and accurately as possible.</>
+              <>
+                Focus on providing pricing information.
+                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                  <strong>Goal completion:</strong> the customer agrees with the price.
+                </div>
+              </>
             )}
             {strategy === 'qualify' && (
               <>
-                Focus on collecting the information needed before quoting or booking. This goal naturally moves the customer toward booking.
+                Focus on collecting the information needed before quoting or booking.
+                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
+                  <strong>Goal completion:</strong> lead is qualified when all required information is collected.
+                </div>
               </>
             )}
             {strategy === 'phone' && (
               <>
-                Focus on getting the customer onto a phone call.
+                Focus on collecting the customer's phone number so your team can call them.
                 <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  <strong>Goal completion:</strong> customer requests a call, or provides a phone number.
+                  <strong>Goal completion:</strong> the customer provides a phone number.
                 </div>
               </>
             )}
@@ -980,7 +1100,56 @@ function GoalSetupCard({
             })}
           </div>
           <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-            These fields determine when qualification is considered complete. AI will prioritize collecting them before transitioning to other goals.
+            AI will collect the selected information before marking the lead as qualified.
+          </div>
+
+          {/* Custom Required Fields — tenant-defined items beyond the
+              built-in catalog. Each row carries a label, optional helper
+              question (AI auto-generates one if empty), and a required
+              toggle. Saved alongside requiredFields under
+              followUpSettingsJson.qualificationV2.customFields. */}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--lb-line-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
+                letterSpacing: 0.06, textTransform: 'uppercase',
+                fontFamily: 'var(--lb-font-mono)',
+              }}>
+                Custom Required Fields
+              </div>
+              <button
+                type="button"
+                onClick={addCustomField}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 10px',
+                  background: 'white', color: 'var(--lb-accent)',
+                  border: '1px solid var(--lb-accent-line)', borderRadius: 999,
+                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                }}
+              >
+                <Plus size={12} /> Add field
+              </button>
+            </div>
+
+            {qualificationCustomFields.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
+                Add fields like <em>Pets</em>, <em>Gate code</em>, or <em>Move-in date</em>. If you leave the helper question empty, AI will phrase a natural question from the label.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {qualificationCustomFields.map(field => (
+                  <CustomFieldRow
+                    key={field.id}
+                    field={field}
+                    onLabelChange={v => updateCustomField(field.id, { label: v })}
+                    onQuestionChange={v => updateCustomField(field.id, { question: v })}
+                    onRequiredChange={v => updateCustomField(field.id, { required: v })}
+                    onRemove={() => removeCustomField(field.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1074,6 +1243,89 @@ function GoalSetupCard({
 // fan-out. Caller picks which goal this radio represents and passes the
 // corresponding boolean + setter. Notify-Team is implicit: the handoff
 // alert SMS fires on the classifier signal regardless of this choice.
+/**
+ * One editable row inside the Custom Required Fields list. Label is
+ * required (an empty label is allowed in state but its row carries a
+ * warning border until filled). Helper question is optional. Required
+ * toggle defaults true — uncheck to mark the field as "ask but don't
+ * gate qualification on it."
+ */
+function CustomFieldRow({
+  field, onLabelChange, onQuestionChange, onRequiredChange, onRemove,
+}: {
+  field: QualificationCustomField;
+  onLabelChange: (v: string) => void;
+  onQuestionChange: (v: string) => void;
+  onRequiredChange: (v: boolean) => void;
+  onRemove: () => void;
+}) {
+  const labelEmpty = field.label.trim().length === 0;
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'minmax(140px, 1fr) minmax(180px, 2fr) auto auto',
+      gap: 8, alignItems: 'center',
+      padding: '8px 10px',
+      background: 'white',
+      border: '1px solid ' + (labelEmpty ? '#fde68a' : 'var(--lb-line-soft)'),
+      borderRadius: 8,
+    }}>
+      <input
+        type="text"
+        value={field.label}
+        onChange={e => onLabelChange(e.target.value)}
+        placeholder="Field label (e.g. Pets)"
+        style={{
+          padding: '6px 8px',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 6,
+          fontSize: 13, fontFamily: 'inherit',
+          background: 'white', color: 'var(--lb-ink-1)',
+        }}
+      />
+      <input
+        type="text"
+        value={field.question}
+        onChange={e => onQuestionChange(e.target.value)}
+        placeholder="Optional helper question (AI will auto-phrase if empty)"
+        style={{
+          padding: '6px 8px',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 6,
+          fontSize: 13, fontFamily: 'inherit',
+          background: 'white', color: 'var(--lb-ink-1)',
+        }}
+      />
+      <label style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 12, color: 'var(--lb-ink-3)', cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}>
+        <input
+          type="checkbox"
+          checked={field.required}
+          onChange={e => onRequiredChange(e.target.checked)}
+          style={{ accentColor: 'var(--lb-accent)' }}
+        />
+        Required
+      </label>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove field"
+        title="Remove field"
+        style={{
+          padding: 6, background: 'transparent', border: 0,
+          cursor: 'pointer', color: 'var(--lb-ink-5)',
+          display: 'inline-flex', alignItems: 'center',
+        }}
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
+}
+
 function PerGoalWhenReachedRadio({
   goalKey,
   stopValue,

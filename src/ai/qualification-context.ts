@@ -47,29 +47,69 @@ const FIELD_LABELS: Record<string, string> = {
  * @param requiredFields snake_case keys pulled from
  *   `followUpSettingsJson.qualificationV2.requiredFields`. Garbage-in
  *   safe: non-strings, duplicates, and unknown keys are dropped.
+ * @param customFields Optional tenant-defined fields from
+ *   `followUpSettingsJson.qualificationV2.customFields`. Each row has a
+ *   label, optional helper question, and required flag. Only required
+ *   rows are emitted into the block — non-required custom fields are
+ *   ignored for prompt purposes (they remain saved on the account but
+ *   don't gate qualification completion). Garbage-in safe: malformed
+ *   rows + rows without a label are dropped.
  */
-export function buildQualificationBlock(requiredFields: unknown): string {
-  if (!Array.isArray(requiredFields) || requiredFields.length === 0) return '';
-
-  // Filter to known keys, dedupe, preserve catalog order. We don't trust
-  // caller order because the storage layer doesn't enforce it.
+export function buildQualificationBlock(
+  requiredFields: unknown,
+  customFields?: unknown,
+): string {
+  // Parse the built-in catalog selections.
   const seen = new Set<string>();
-  for (const raw of requiredFields) {
-    if (typeof raw !== 'string') continue;
-    if (FIELD_LABELS[raw] === undefined) continue;
-    seen.add(raw);
+  if (Array.isArray(requiredFields)) {
+    for (const raw of requiredFields) {
+      if (typeof raw !== 'string') continue;
+      if (FIELD_LABELS[raw] === undefined) continue;
+      seen.add(raw);
+    }
   }
-  if (seen.size === 0) return '';
-
   // Re-emit in canonical catalog order so the block doesn't shuffle
   // randomly between saves (the model is mildly position-sensitive
   // for priority-style instructions).
-  const ordered = Object.keys(FIELD_LABELS).filter(k => seen.has(k));
+  const orderedBuiltins = Object.keys(FIELD_LABELS).filter(k => seen.has(k));
+
+  // Parse custom fields defensively. Required-only; preserves caller
+  // order so the user-visible row order in the editor matches the
+  // priority the AI sees.
+  const customRows: { label: string; question: string }[] = [];
+  const labelDedup = new Set<string>();
+  if (Array.isArray(customFields)) {
+    for (const raw of customFields) {
+      if (!raw || typeof raw !== 'object') continue;
+      const r = raw as Record<string, unknown>;
+      if (r.required === false) continue;
+      const label = typeof r.label === 'string' ? r.label.trim() : '';
+      if (!label) continue;
+      const dedupKey = label.toLowerCase();
+      if (labelDedup.has(dedupKey)) continue;
+      labelDedup.add(dedupKey);
+      const question = typeof r.question === 'string' ? r.question.trim() : '';
+      customRows.push({ label, question });
+    }
+  }
+
+  if (orderedBuiltins.length === 0 && customRows.length === 0) return '';
 
   const lines: string[] = [];
   lines.push('The business has marked these fields as required to qualify a lead before quoting or booking:');
-  for (const key of ordered) {
+  for (const key of orderedBuiltins) {
     lines.push(`- ${FIELD_LABELS[key]}`);
+  }
+  for (const row of customRows) {
+    // Helper question (when present) is wrapped in quotes so the AI
+    // reads it as a hint to phrase its question naturally, not as a
+    // verbatim line to send. Without a question, the AI generates one
+    // from the label.
+    if (row.question) {
+      lines.push(`- ${row.label} — ask: "${row.question}"`);
+    } else {
+      lines.push(`- ${row.label}`);
+    }
   }
   lines.push('');
   lines.push('Prioritize collecting these one or two at a time. When the customer has answered all of them, transition forward (to pricing if Price-goal, or to booking if Qualify-goal). Do NOT re-ask information the customer already provided.');
@@ -92,7 +132,8 @@ const QUALIFICATION_STRATEGIES = new Set(['qualify']);
 export function buildQualificationBlockForStrategy(
   strategy: string | undefined,
   requiredFields: unknown,
+  customFields?: unknown,
 ): string {
   if (!strategy || !QUALIFICATION_STRATEGIES.has(strategy)) return '';
-  return buildQualificationBlock(requiredFields);
+  return buildQualificationBlock(requiredFields, customFields);
 }

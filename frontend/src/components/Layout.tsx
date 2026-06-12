@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
-  AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
+  AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
   DollarSign, Sparkles, Paperclip, Send, X,
 } from 'lucide-react';
@@ -86,7 +86,6 @@ export function Layout() {
         { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert',  tone: 'blue' },
       ],
     },
-    { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
     { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
     // Partner Network Beta lives under Settings → Partner Network (last tab)
     // while in beta. The top-level /partner-network/* routes remain available
