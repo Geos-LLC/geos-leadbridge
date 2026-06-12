@@ -209,6 +209,60 @@ export const authApi = {
   },
 };
 
+/**
+ * Structured facts extracted from a verified website, keyed by Playbook V2
+ * section. Source for later FAQ + AI Playbook auto-fill. Every field is
+ * optional; the backend drops empty sections before saving.
+ */
+export interface PlaybookSeed {
+  businessInformation?: {
+    serviceArea?: string;
+    teamSize?: string;
+    yearsInBusiness?: string;
+    ownerName?: string;
+    suppliesPolicy?: string;
+    petsPolicy?: string;
+    paymentMethods?: string[];
+    officeLocations?: string[];
+    insurance?: string;
+    bonding?: string;
+    licensing?: string;
+    guarantees?: string;
+    ecoFriendly?: string;
+  };
+  pricingGuidance?: {
+    pricingModel?: string;
+    startingPrices?: Array<{ service: string; price: string }>;
+    whatsIncluded?: string;
+    discounts?: string;
+  };
+  bookingGuidance?: {
+    bookingChannels?: string[];
+    leadTime?: string;
+    schedulingNotes?: string;
+  };
+  objectionHandling?: {
+    trustSignals?: string[];
+  };
+  humanHandoffGuidance?: {
+    phones?: string[];
+    emails?: string[];
+    addresses?: string[];
+  };
+  personalityBrandVoice?: {
+    toneNotes?: string;
+  };
+}
+
+export interface WebsiteMetadataPayload {
+  title?: string;
+  description?: string;
+  phone?: string;
+  imageUrl?: string;
+  summary?: string;
+  playbookSeed?: PlaybookSeed;
+}
+
 // Health issue type from backend
 export interface HealthIssue {
   code: 'no_webhooks' | 'not_connected';
@@ -1392,7 +1446,7 @@ export const usersApi = {
       name?: string;
       businessPhone?: string;
       website?: string | null;
-      websiteMetadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string } | null;
+      websiteMetadata?: WebsiteMetadataPayload | null;
     },
   ): Promise<{
     success: boolean;
@@ -1402,7 +1456,7 @@ export const usersApi = {
       email: string;
       businessPhone?: string | null;
       website?: string | null;
-      websiteMetadataJson?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string } | null;
+      websiteMetadataJson?: WebsiteMetadataPayload | null;
     };
   }> => {
     const { data } = await api.patch('/v1/users/me', updates);
@@ -1411,8 +1465,9 @@ export const usersApi = {
   // Onboarding wizard's Business step calls this before saving the URL.
   // The backend normalizes ("myco.com" → "https://myco.com"), runs an
   // SSRF guard, fetches with a timeout, and extracts <title> + meta
-  // description + a likely phone number + og:image, then asks gpt-4o-mini
-  // for a 2-3 sentence summary used for FAQ/Playbook seeding later.
+  // description + a likely phone number + og:image / screenshot, then
+  // asks gpt-4o-mini for a prose summary AND a structured Playbook seed
+  // (per-section facts ready for FAQ/Playbook auto-fill).
   // If unreachable, returns a typed errorCode so the UI can show a
   // specific message.
   verifyWebsite: async (
@@ -1420,7 +1475,7 @@ export const usersApi = {
   ): Promise<{
     reachable: boolean;
     normalizedUrl: string;
-    metadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string };
+    metadata?: WebsiteMetadataPayload;
     errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
     errorMessage?: string;
   }> => {

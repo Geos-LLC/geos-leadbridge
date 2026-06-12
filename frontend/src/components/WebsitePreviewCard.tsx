@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Globe, Image as ImageIcon } from 'lucide-react';
+import type { PlaybookSeed } from '../services/api';
 
 export interface WebsiteMetadata {
   title?: string;
@@ -7,6 +8,7 @@ export interface WebsiteMetadata {
   phone?: string;
   imageUrl?: string;
   summary?: string;
+  playbookSeed?: PlaybookSeed;
 }
 
 interface Props {
@@ -106,6 +108,131 @@ export function WebsitePreviewCard({ url, metadata, tone = 'wizard' }: Props) {
           )}
         </div>
       )}
+
+      {/* Structured facts — one row per Playbook section. These feed the
+          AI Playbook + FAQ auto-fill later; surfacing them here lets the
+          user verify what the AI actually pulled before they trust it. */}
+      {m.playbookSeed && (
+        <PlaybookSeedDetails seed={m.playbookSeed} accent={accent} muted={muted} subtle={subtle} />
+      )}
     </div>
   );
+}
+
+function PlaybookSeedDetails({
+  seed, accent, muted, subtle,
+}: {
+  seed: NonNullable<WebsiteMetadata['playbookSeed']>;
+  accent: string; muted: string; subtle: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const sections = buildSeedRows(seed);
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="border-t border-current/10 px-3 py-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center justify-between w-full text-[11px] uppercase tracking-wider font-bold ${subtle} hover:opacity-80`}
+      >
+        <span>
+          {open ? '▾' : '▸'} Site facts extracted ({sections.length} section{sections.length === 1 ? '' : 's'})
+        </span>
+        <span className={`normal-case tracking-normal font-semibold ${accent}`}>
+          {open ? 'Hide' : 'Show'}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3">
+          {sections.map(([label, rows]) => (
+            <div key={label}>
+              <div className={`text-[11px] font-bold ${accent} mb-1`}>{label}</div>
+              <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-xs">
+                {rows.map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className={`${subtle} font-mono text-[11px]`}>{k}</dt>
+                    <dd className={muted}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Flatten the PlaybookSeed object into [sectionLabel, [[key, value], ...]] rows
+ * for tabular rendering. Values that are arrays get joined with bullets;
+ * structured priceList becomes "Standard cleaning — from $129" lines.
+ */
+function buildSeedRows(seed: PlaybookSeed): Array<[string, Array<[string, string]>]> {
+  const out: Array<[string, Array<[string, string]>]> = [];
+
+  const joinArr = (a?: string[]) => (a && a.length ? a.join(', ') : undefined);
+  const pushSection = (label: string, rows: Array<[string, string | undefined]>) => {
+    const filtered = rows.filter(([, v]) => v && v.length > 0) as Array<[string, string]>;
+    if (filtered.length > 0) out.push([label, filtered]);
+  };
+
+  if (seed.businessInformation) {
+    const b = seed.businessInformation;
+    pushSection('Business Information', [
+      ['Service area', b.serviceArea],
+      ['Years', b.yearsInBusiness],
+      ['Team', b.teamSize],
+      ['Owner', b.ownerName],
+      ['Insurance', b.insurance],
+      ['Bonding', b.bonding],
+      ['Licensing', b.licensing],
+      ['Guarantees', b.guarantees],
+      ['Eco / products', b.ecoFriendly],
+      ['Supplies', b.suppliesPolicy],
+      ['Pets', b.petsPolicy],
+      ['Payment', joinArr(b.paymentMethods)],
+      ['Offices', joinArr(b.officeLocations)],
+    ]);
+  }
+  if (seed.pricingGuidance) {
+    const p = seed.pricingGuidance;
+    const prices = (p.startingPrices || [])
+      .map((sp) => `${sp.service} — ${sp.price}`)
+      .join('; ');
+    pushSection('Pricing', [
+      ['Model', p.pricingModel],
+      ['Starting', prices || undefined],
+      ['Includes', p.whatsIncluded],
+      ['Discounts', p.discounts],
+    ]);
+  }
+  if (seed.bookingGuidance) {
+    const k = seed.bookingGuidance;
+    pushSection('Booking', [
+      ['Channels', joinArr(k.bookingChannels)],
+      ['Lead time', k.leadTime],
+      ['Notes', k.schedulingNotes],
+    ]);
+  }
+  if (seed.objectionHandling) {
+    pushSection('Trust signals', [
+      ['Signals', joinArr(seed.objectionHandling.trustSignals)],
+    ]);
+  }
+  if (seed.humanHandoffGuidance) {
+    const h = seed.humanHandoffGuidance;
+    pushSection('Contact', [
+      ['Phones', joinArr(h.phones)],
+      ['Emails', joinArr(h.emails)],
+      ['Address', joinArr(h.addresses)],
+    ]);
+  }
+  if (seed.personalityBrandVoice) {
+    pushSection('Brand voice', [
+      ['Tone notes', seed.personalityBrandVoice.toneNotes],
+    ]);
+  }
+  return out;
 }

@@ -10,6 +10,55 @@ import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { PlatformService } from '../platforms/platform.service';
 
+/**
+ * Structured facts extracted from the homepage, organized by the 8 Playbook
+ * V2 section keys so a later auto-fill pass can drop fields straight into
+ * `aiPlaybookV2.{section}.customInstructions` without re-parsing prose.
+ *
+ * Every field is optional — only what the model finds on the page is
+ * populated. Empty objects ("nothing extracted for this section") are
+ * dropped before storage to keep the JSON column lean.
+ */
+export interface PlaybookSeed {
+  businessInformation?: {
+    serviceArea?: string;
+    teamSize?: string;
+    yearsInBusiness?: string;
+    ownerName?: string;
+    suppliesPolicy?: string;
+    petsPolicy?: string;
+    paymentMethods?: string[];
+    officeLocations?: string[];
+    insurance?: string;
+    bonding?: string;
+    licensing?: string;
+    guarantees?: string;
+    ecoFriendly?: string;
+  };
+  pricingGuidance?: {
+    pricingModel?: string;
+    startingPrices?: Array<{ service: string; price: string }>;
+    whatsIncluded?: string;
+    discounts?: string;
+  };
+  bookingGuidance?: {
+    bookingChannels?: string[];
+    leadTime?: string;
+    schedulingNotes?: string;
+  };
+  objectionHandling?: {
+    trustSignals?: string[];
+  };
+  humanHandoffGuidance?: {
+    phones?: string[];
+    emails?: string[];
+    addresses?: string[];
+  };
+  personalityBrandVoice?: {
+    toneNotes?: string;
+  };
+}
+
 export interface VerifyWebsiteResult {
   reachable: boolean;
   normalizedUrl: string;
@@ -19,8 +68,10 @@ export interface VerifyWebsiteResult {
     phone?: string;
     /** og:image URL resolved to absolute form. Rendered as the wizard's site preview thumbnail. */
     imageUrl?: string;
-    /** AI-generated 2-3 sentence summary of the homepage. Used to seed FAQ/Playbook later. */
+    /** AI-generated prose summary of the homepage for the preview card. */
     summary?: string;
+    /** Structured facts keyed by Playbook V2 section. Source for later auto-fill. */
+    playbookSeed?: PlaybookSeed;
   };
   errorCode?:
     | 'invalid_url'
@@ -707,14 +758,16 @@ export class UsersService {
       });
       if (screenshot) metadata.imageUrl = screenshot;
 
-      // AI summary — non-blocking failure. We don't want the entire verify
-      // flow to fail if OpenAI is down or the key is missing; the wizard
-      // can still show the title/description/phone we already pulled.
-      const summary = await this.summarizeWebsite(html, metadata).catch((e) => {
+      // AI summary + structured Playbook seed — non-blocking failure. We
+      // don't want the entire verify flow to fail if OpenAI is down or the
+      // key is missing; the wizard can still show the title/description/
+      // phone we already pulled.
+      const ai = await this.summarizeWebsite(html, metadata).catch((e) => {
         this.logger.warn(`[verifyWebsite] summary failed for ${finalUrl}: ${e?.message || e}`);
         return undefined;
       });
-      if (summary) metadata.summary = summary;
+      if (ai?.summary) metadata.summary = ai.summary;
+      if (ai?.playbookSeed) metadata.playbookSeed = ai.playbookSeed;
 
       return { reachable: true, normalizedUrl: finalUrl, metadata };
     } catch (err: any) {
@@ -927,15 +980,19 @@ export class UsersService {
   }
 
   /**
-   * Strip HTML to readable text and feed a chunk to gpt-4o-mini for a 2-3
-   * sentence summary. Returns undefined when OPENAI_API_KEY is unset or any
-   * step fails — the caller treats that as "no summary yet" and still saves
-   * the rest of the metadata.
+   * Strip HTML to readable text and ask gpt-4o-mini for BOTH a prose summary
+   * (for the preview card) AND a structured Playbook seed (for later auto-fill
+   * of `aiPlaybookV2.{section}.customInstructions`). Returns undefined when
+   * OPENAI_API_KEY is unset or any step fails — the caller treats that as
+   * "no summary yet" and still saves the rest of the metadata.
+   *
+   * Uses `response_format: json_object` so the model returns a parseable
+   * object instead of free prose with embedded JSON.
    */
   private async summarizeWebsite(
     html: string,
     metadata: NonNullable<VerifyWebsiteResult['metadata']>,
-  ): Promise<string | undefined> {
+  ): Promise<{ summary?: string; playbookSeed?: PlaybookSeed } | undefined> {
     const client = this.openai;
     if (!client) {
       this.logger.warn('[summarizeWebsite] OPENAI_API_KEY not set — skipping summary');
@@ -959,34 +1016,75 @@ export class UsersService {
       metadata.description ? `Meta description: ${metadata.description}` : null,
     ].filter(Boolean).join('\n');
 
-    this.logger.log(`[summarizeWebsite] requesting summary (visibleLen=${visible.length}, snippetLen=${snippet.length})`);
+    this.logger.log(`[summarizeWebsite] requesting structured extract (visibleLen=${visible.length}, snippetLen=${snippet.length})`);
     const resp = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      temperature: 0.2,
-      max_tokens: 800,
+      temperature: 0.1,
+      max_tokens: 1800,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
           content:
-            // The output of this summary feeds the AI Playbook and FAQ auto-fill
-            // later, so we want a denser extract of what this business actually
-            // does — not just one polite sentence.
-            'You extract a structured summary of a small-business homepage that ' +
-            'will later be used to pre-fill an AI playbook and FAQ. Write 5-8 ' +
-            'sentences (150-220 words) in plain prose covering, when present on ' +
-            'the page:\n' +
-            '- What services the business offers and any variations (e.g. deep ' +
-            'clean vs standard, move-in/out, recurring).\n' +
-            '- Where it serves (cities, regions, neighborhoods, service-area ' +
-            'radius).\n' +
-            '- Hours of operation, booking model (online, phone, request a quote).\n' +
-            '- Pricing model if mentioned (flat rate, hourly, by sqft, ranges).\n' +
-            '- Standout claims (insurance, eco-friendly, satisfaction guarantee, ' +
-            'years in business, team size).\n' +
-            '- Phone numbers, email addresses, and any explicit policies.\n' +
-            'Do NOT invent details that aren\'t on the page. Plain text only — ' +
-            'no markdown headings, no bullet points, no preamble like "This ' +
-            'website" or "The business". Open with the business name.',
+            // Schema is dictated in the prompt because gpt-4o-mini JSON mode
+            // only enforces "valid JSON object", not a structured schema —
+            // we get the shape right by being explicit and giving examples.
+            'You extract structured facts from a small-business homepage that ' +
+            'will be used to pre-fill an AI playbook (the AI assistant\'s ' +
+            'knowledge base for talking to leads). The output feeds 6 playbook ' +
+            'sections so each fact must be tagged with the section it belongs ' +
+            'to.\n\n' +
+            'Return ONLY a JSON object with this exact shape (omit any field, ' +
+            'including whole sections, that isn\'t supported by the page — do ' +
+            'NOT invent or guess):\n\n' +
+            '{\n' +
+            '  "summary": "5-8 sentence plain-prose summary (150-220 words). ' +
+            'Open with the business name. Cover services, coverage area, ' +
+            'pricing, standout claims, contact. No markdown, no preamble.",\n' +
+            '  "playbookSeed": {\n' +
+            '    "businessInformation": {\n' +
+            '      "serviceArea": "cities/regions/radius they cover",\n' +
+            '      "teamSize": "e.g. \\"family-owned\\", \\"team of 12\\"",\n' +
+            '      "yearsInBusiness": "e.g. \\"since 2018\\", \\"15+ years\\"",\n' +
+            '      "ownerName": "if a name appears as owner/founder",\n' +
+            '      "suppliesPolicy": "do they bring their own supplies/products?",\n' +
+            '      "petsPolicy": "pets-friendly? any restrictions?",\n' +
+            '      "paymentMethods": ["card", "cash", "Zelle", ...],\n' +
+            '      "officeLocations": ["physical addresses if listed"],\n' +
+            '      "insurance": "their exact wording, e.g. \\"fully insured\\"",\n' +
+            '      "bonding": "e.g. \\"bonded\\" or \\"$1M bond\\"",\n' +
+            '      "licensing": "license #, state, or \\"licensed\\"",\n' +
+            '      "guarantees": "e.g. \\"100% satisfaction guarantee\\"",\n' +
+            '      "ecoFriendly": "green/plant-based/non-toxic claims"\n' +
+            '    },\n' +
+            '    "pricingGuidance": {\n' +
+            '      "pricingModel": "flat / hourly / by sqft / request a quote",\n' +
+            '      "startingPrices": [{"service": "Standard cleaning", "price": "from $129"}],\n' +
+            '      "whatsIncluded": "what each tier includes if listed",\n' +
+            '      "discounts": "recurring %, first-clean, referral, etc."\n' +
+            '    },\n' +
+            '    "bookingGuidance": {\n' +
+            '      "bookingChannels": ["online form", "phone", "email"],\n' +
+            '      "leadTime": "e.g. \\"24-hour notice\\", \\"same-day available\\"",\n' +
+            '      "schedulingNotes": "hours of operation, recurring options"\n' +
+            '    },\n' +
+            '    "objectionHandling": {\n' +
+            '      "trustSignals": ["awards", "BBB rating", "5-star reviews count", ...]\n' +
+            '    },\n' +
+            '    "humanHandoffGuidance": {\n' +
+            '      "phones": ["+1-..."], "emails": ["x@y.com"],\n' +
+            '      "addresses": ["physical addresses"]\n' +
+            '    },\n' +
+            '    "personalityBrandVoice": {\n' +
+            '      "toneNotes": "observed brand voice on the site — 1-2 sentences"\n' +
+            '    }\n' +
+            '  }\n' +
+            '}\n\n' +
+            'Rules:\n' +
+            '- Drop any field whose value would be empty, generic, or invented.\n' +
+            '- Drop a whole section if nothing was extracted for it.\n' +
+            '- Use the SITE\'s own wording for claims (don\'t paraphrase "fully insured" as "has insurance").\n' +
+            '- "summary" is REQUIRED. The structured fields are optional.',
         },
         {
           role: 'user',
@@ -995,13 +1093,125 @@ export class UsersService {
       ],
     });
 
-    const text = resp.choices?.[0]?.message?.content?.trim() || '';
-    this.logger.log(`[summarizeWebsite] summary generated (${text.length} chars)`);
-    if (!text) return undefined;
-    // Soft cap — UI can still expand, but DB shouldn't grow unboundedly if
-    // the model ignores max_tokens. 3000 chars accommodates the 5-8 sentence
-    // structured summary we now ask for.
-    return text.length > 3000 ? text.slice(0, 3000) : text;
+    const raw = resp.choices?.[0]?.message?.content?.trim() || '';
+    if (!raw) {
+      this.logger.warn('[summarizeWebsite] empty response from gpt-4o-mini');
+      return undefined;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e: any) {
+      this.logger.warn(`[summarizeWebsite] JSON parse failed: ${e?.message || e}; raw=${raw.slice(0, 200)}`);
+      return undefined;
+    }
+
+    const summary = typeof parsed.summary === 'string' ? parsed.summary.trim() : undefined;
+    // Soft cap on summary — UI can still expand, but DB shouldn't grow
+    // unboundedly if the model ignores max_tokens.
+    const cappedSummary = summary && summary.length > 3000 ? summary.slice(0, 3000) : summary;
+
+    const playbookSeed = this.sanitizePlaybookSeed(parsed.playbookSeed);
+
+    this.logger.log(
+      `[summarizeWebsite] extracted summary=${cappedSummary?.length || 0}ch, ` +
+      `seedSections=${playbookSeed ? Object.keys(playbookSeed).length : 0}`,
+    );
+
+    if (!cappedSummary && !playbookSeed) return undefined;
+    return { summary: cappedSummary, playbookSeed };
+  }
+
+  /**
+   * Drop empty / non-string fields from the model's playbookSeed output so
+   * the stored JSON stays lean and downstream auto-fill doesn't have to
+   * distinguish "extracted, empty" from "not on the page".
+   */
+  private sanitizePlaybookSeed(seed: any): PlaybookSeed | undefined {
+    if (!seed || typeof seed !== 'object' || Array.isArray(seed)) return undefined;
+
+    const cleanString = (v: any): string | undefined => {
+      if (typeof v !== 'string') return undefined;
+      const t = v.trim();
+      return t.length === 0 ? undefined : t.slice(0, 800);
+    };
+    const cleanStringArr = (v: any): string[] | undefined => {
+      if (!Array.isArray(v)) return undefined;
+      const out = v.map((x) => (typeof x === 'string' ? x.trim() : '')).filter((x) => x.length > 0);
+      return out.length === 0 ? undefined : out.slice(0, 12);
+    };
+    const cleanSection = (s: any, shape: Record<string, (v: any) => any>): any => {
+      if (!s || typeof s !== 'object' || Array.isArray(s)) return undefined;
+      const out: Record<string, unknown> = {};
+      for (const [k, fn] of Object.entries(shape)) {
+        const v = fn(s[k]);
+        if (v !== undefined) out[k] = v;
+      }
+      return Object.keys(out).length === 0 ? undefined : out;
+    };
+
+    const result: PlaybookSeed = {};
+
+    const businessInformation = cleanSection(seed.businessInformation, {
+      serviceArea: cleanString,
+      teamSize: cleanString,
+      yearsInBusiness: cleanString,
+      ownerName: cleanString,
+      suppliesPolicy: cleanString,
+      petsPolicy: cleanString,
+      paymentMethods: cleanStringArr,
+      officeLocations: cleanStringArr,
+      insurance: cleanString,
+      bonding: cleanString,
+      licensing: cleanString,
+      guarantees: cleanString,
+      ecoFriendly: cleanString,
+    });
+    if (businessInformation) result.businessInformation = businessInformation;
+
+    const pricingGuidance = cleanSection(seed.pricingGuidance, {
+      pricingModel: cleanString,
+      startingPrices: (v: any) => {
+        if (!Array.isArray(v)) return undefined;
+        const out = v
+          .map((x) => ({
+            service: typeof x?.service === 'string' ? x.service.trim().slice(0, 200) : '',
+            price: typeof x?.price === 'string' ? x.price.trim().slice(0, 100) : '',
+          }))
+          .filter((x) => x.service && x.price);
+        return out.length === 0 ? undefined : out.slice(0, 12);
+      },
+      whatsIncluded: cleanString,
+      discounts: cleanString,
+    });
+    if (pricingGuidance) result.pricingGuidance = pricingGuidance;
+
+    const bookingGuidance = cleanSection(seed.bookingGuidance, {
+      bookingChannels: cleanStringArr,
+      leadTime: cleanString,
+      schedulingNotes: cleanString,
+    });
+    if (bookingGuidance) result.bookingGuidance = bookingGuidance;
+
+    const objectionHandling = cleanSection(seed.objectionHandling, {
+      trustSignals: cleanStringArr,
+    });
+    if (objectionHandling) result.objectionHandling = objectionHandling;
+
+    const humanHandoffGuidance = cleanSection(seed.humanHandoffGuidance, {
+      phones: cleanStringArr,
+      emails: cleanStringArr,
+      addresses: cleanStringArr,
+    });
+    if (humanHandoffGuidance) result.humanHandoffGuidance = humanHandoffGuidance;
+
+    const personalityBrandVoice = cleanSection(seed.personalityBrandVoice, {
+      toneNotes: cleanString,
+    });
+    if (personalityBrandVoice) result.personalityBrandVoice = personalityBrandVoice;
+
+    return Object.keys(result).length === 0 ? undefined : result;
   }
 
   private firstMatch(html: string, re: RegExp, group = 1): string | undefined {
