@@ -62,7 +62,7 @@ const accountCache = new Map<string, CachedAccount>();
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const fromState = { from: location.pathname + location.search, fromLabel: 'When a Lead Arrives' };
+  const fromState = { from: location.pathname + location.search, fromLabel: 'First Reply' };
   const accounts = useAppStore(s => s.savedAccounts);
 
   // Advanced/legacy mode — same gate used by the Advanced Rules card on

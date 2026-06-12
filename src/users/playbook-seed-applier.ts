@@ -3,61 +3,50 @@
  * per-section `customInstructions` strings that get saved as
  * `aiPlaybookV2.{section}.customInstructions` on each SavedAccount.
  *
- * Playbook V2.4 — simplified UI (June 2026)
- * ─────────────────────────────────────────
- * The visible Playbook sections collapsed from 8 → 5:
+ * Playbook V2.5 — Business Information becomes the canonical store
+ * ─────────────────────────────────────────────────────────────────
+ * The visible Playbook narrowed to 4 sections:
  *
- *   Business Information
+ *   Business Information         ← THIS APPLIER WRITES HERE
  *   FAQ                          (dedicated UI, not touched here)
- *   Pricing Guidance             (HOW textarea + Pricing Table)
- *   Communication Style & Brand Voice   (renamed from personality_brand_voice)
+ *   Pricing Guidance             ← THIS APPLIER WRITES HERE
  *   Global Custom Instructions   (User.globalAiPrompt, not touched here)
  *
- * This applier writes to ONLY 3 backend section keys:
+ * Communication Style & Brand Voice moved to advanced mode in V2.5. The
+ * friendly/professional/local default behavior already lives in
+ * BASE_HARD_RULES and the system prompt, so we no longer auto-populate it
+ * from website extraction — the website should not invent style/persona.
  *
- *   business_information     ← BI + handoff contact facts + booking facts
- *   pricing_guidance         ← pricing fields + price-related trust signals
- *   personality_brand_voice  ← toneNotes + non-price trust signals
+ * This applier writes to ONLY 2 backend section keys now:
  *
- * It does NOT write to booking_guidance, objection_handling,
- * human_handoff_guidance, qualification_guidance, followup_tone, or
- * phone-call guidance. Workflow logic (qualification, booking, handoff,
- * phone) lives in Automation → AI Conversation Goals — not in the Playbook.
- * Objection handling is folded into Pricing Guidance + Communication Style.
+ *   business_information  ← BI fields + contact facts + booking facts
+ *                           + ALL trust signals (no longer split)
+ *   pricing_guidance      ← pricing fields ONLY (no trust signals)
+ *
+ * It does NOT write to personality_brand_voice, booking_guidance,
+ * objection_handling, human_handoff_guidance, qualification_guidance,
+ * followup_tone, or phone-call guidance. Workflow logic
+ * (qualification, booking, handoff, phone) lives in Automation → AI
+ * Conversation Goals. Communication style comes from BASE_HARD_RULES.
  *
  * Backend default prompts for the now-hidden sections still exist in
  * `src/ai/section-default-prompts.ts` and continue to emit into the
  * runtime AI prompt — that's intentional, since their HOW guidance still
- * shapes how the AI responds. We just don't expose the textareas in the UI
- * and don't write new content into them from website extraction.
+ * shapes how the AI responds. We just don't expose the textareas in the
+ * normal UI and don't write new content into them from website extraction.
  */
 
 import type { PlaybookSeed } from './users.service';
 
-/** The 3 Playbook V2 section keys this applier writes to. */
+/** The 2 Playbook V2 section keys this applier writes to. */
 export type SupportedPlaybookSectionKey =
   | 'business_information'
-  | 'pricing_guidance'
-  | 'personality_brand_voice';
+  | 'pricing_guidance';
 
 export const SUPPORTED_SECTIONS: readonly SupportedPlaybookSectionKey[] = [
   'business_information',
   'pricing_guidance',
-  'personality_brand_voice',
 ] as const;
-
-/**
- * Heuristic: does a trust-signal sentence mention pricing/value words?
- * If yes, it belongs in Pricing Guidance; if no, in Communication Style.
- *
- * We err on the side of "non-price" so generic trust statements
- * ("Fully insured", "Same-day service") don't bloat the Pricing card.
- */
-const PRICE_KEYWORDS = /\b(price|prices|pricing|priced|cost|costs|costly|rate|rates|fee|fees|charge|charges|discount|discounts|discounted|value|affordable|budget|cheap|expensive|quote|quotes|estimate|estimates|guarantee|guaranteed|money[- ]?back|satisfaction|deal|deals)\b/i;
-
-function isPriceRelated(trustSignal: string): boolean {
-  return PRICE_KEYWORDS.test(trustSignal);
-}
 
 /**
  * Build a "Label: Value." line, but strip trailing punctuation from the
@@ -78,21 +67,19 @@ function factLine(label: string, value: string): string {
 export interface SectionLines {
   business_information: string[];
   pricing_guidance: string[];
-  personality_brand_voice: string[];
 }
 
 export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
   const out: SectionLines = {
     business_information: [],
     pricing_guidance: [],
-    personality_brand_voice: [],
   };
 
   // ─── BUSINESS INFORMATION ─────────────────────────────────────────────
-  // Core BI fields + absorbed contact facts (phones/emails/addresses) +
-  // booking facts (channels/leadTime/notes) — everything that's an
-  // immutable BUSINESS FACT goes here. Workflow logic (e.g. "move toward
-  // booking") is intentionally NOT generated.
+  // Canonical AI knowledge store for the business. Everything factual
+  // about the company — identity, policies, contact info, booking
+  // channels, and trust signals — lands here. Workflow logic is
+  // deliberately NOT generated (e.g. no "AI should move toward booking").
   const b = seed.businessInformation;
   if (b) {
     if (b.serviceArea)     out.business_information.push(factLine('Service area',     b.serviceArea));
@@ -131,7 +118,26 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
     if (k.schedulingNotes)         out.business_information.push(factLine('Scheduling notes', k.schedulingNotes));
   }
 
+  // ALL trust signals → Business Information. V2.5 stops splitting them
+  // between Pricing and Communication Style: trust signals describe the
+  // business ("Fully insured", "Same-day service", "Best prices in town"),
+  // so they belong with the other business facts. The pricing card stays
+  // focused on actual pricing rules.
+  const trustSignals = seed.objectionHandling?.trustSignals ?? [];
+  if (trustSignals.length > 0) {
+    const cleaned = trustSignals
+      .filter((ts): ts is string => typeof ts === 'string')
+      .map(ts => ts.trim())
+      .filter(ts => ts.length > 0);
+    if (cleaned.length > 0) {
+      out.business_information.push(factLine('Trust signals', cleaned.join('; ')));
+    }
+  }
+
   // ─── PRICING GUIDANCE ─────────────────────────────────────────────────
+  // Pricing fields only. Stores the business's pricing facts and policy
+  // hooks — the actual prices live in the Pricing Table; this card
+  // captures rules and ranges. Trust signals are no longer appended here.
   const p = seed.pricingGuidance;
   if (p) {
     if (p.pricingModel) out.pricing_guidance.push(factLine('Pricing model', p.pricingModel));
@@ -143,39 +149,12 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
     if (p.discounts)     out.pricing_guidance.push(factLine('Discounts',       p.discounts));
   }
 
-  // ─── COMMUNICATION STYLE & BRAND VOICE ────────────────────────────────
-  // (Backend key still `personality_brand_voice` — only the UI label
-  // changes to "Communication Style & Brand Voice".)
-  const pbv = seed.personalityBrandVoice;
-  if (pbv?.toneNotes) {
-    out.personality_brand_voice.push(pbv.toneNotes);
-  }
-
-  // ─── TRUST-SIGNAL SPLIT ───────────────────────────────────────────────
-  // Distribute Objection Handling trust signals across Pricing Guidance
-  // and Communication Style, depending on whether the signal mentions
-  // price/value language. The same fact never appears in both sections.
-  const trustSignals = seed.objectionHandling?.trustSignals ?? [];
-  if (trustSignals.length > 0) {
-    const priceRelated: string[] = [];
-    const generic: string[] = [];
-    for (const ts of trustSignals) {
-      if (typeof ts !== 'string') continue;
-      const cleaned = ts.trim();
-      if (cleaned.length === 0) continue;
-      if (isPriceRelated(cleaned)) priceRelated.push(cleaned);
-      else generic.push(cleaned);
-    }
-    if (priceRelated.length > 0) {
-      out.pricing_guidance.push(factLine('Value / trust signals', priceRelated.join('; ')));
-    }
-    if (generic.length > 0) {
-      out.personality_brand_voice.push(factLine(
-        'Trust signals to surface naturally when customers hesitate',
-        generic.join('; '),
-      ));
-    }
-  }
+  // ─── COMMUNICATION STYLE & BRAND VOICE — NOT WRITTEN (V2.5) ──────────
+  // We deliberately no longer populate personality_brand_voice from the
+  // website. The website doesn't invent style/persona. BASE_HARD_RULES
+  // already covers friendly/professional/local tone. Users who want to
+  // personalize tone can edit the section in advanced mode or use the
+  // (future) AI assistant chat.
 
   return out;
 }
@@ -191,9 +170,8 @@ export function seedToCustomInstructions(
 ): Partial<Record<SupportedPlaybookSectionKey, string>> {
   const lines = seedToSectionLines(seed);
   const out: Partial<Record<SupportedPlaybookSectionKey, string>> = {};
-  if (lines.business_information.length > 0)    out.business_information = lines.business_information.join('\n');
-  if (lines.pricing_guidance.length > 0)        out.pricing_guidance = lines.pricing_guidance.join('\n');
-  if (lines.personality_brand_voice.length > 0) out.personality_brand_voice = lines.personality_brand_voice.join('\n');
+  if (lines.business_information.length > 0) out.business_information = lines.business_information.join('\n');
+  if (lines.pricing_guidance.length > 0)     out.pricing_guidance = lines.pricing_guidance.join('\n');
   return out;
 }
 

@@ -81,7 +81,7 @@ export function Layout() {
       label: 'Automation',
       path: '/automation',
       children: [
-        { label: 'When a Lead Arrives', path: '/automation/respond', hint: 'Respond',  tone: 'green' },
+        { label: 'First Reply',         path: '/automation/respond', hint: 'Respond',  tone: 'green' },
         { label: 'Follow-ups',          path: '/automation/engage',  hint: 'Engage',   tone: 'purple' },
         { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert',  tone: 'blue' },
       ],
@@ -116,7 +116,7 @@ export function Layout() {
   // user can always get back to where they came from with one click.
   const navState = (location.state || null) as { from?: string; fromLabel?: string } | null;
   const backLabelFor = (path: string): string => {
-    if (path.startsWith('/automation/respond')) return 'When a Lead Arrives';
+    if (path.startsWith('/automation/respond')) return 'First Reply';
     if (path.startsWith('/automation/engage')) return 'Follow-ups';
     if (path.startsWith('/automation/convert')) return 'AI Conversation';
     if (path.startsWith('/automation')) return 'Automation';

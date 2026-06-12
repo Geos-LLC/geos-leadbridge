@@ -11,7 +11,7 @@ type SubTab = 'respond' | 'engage' | 'convert';
 
 const META: Record<SubTab, { title: string; subtitle: string; badge: { label: string; tone: BadgeTone } }> = {
   respond: {
-    title: 'When a Lead Arrives',
+    title: 'First Reply',
     subtitle: 'Choose what happens immediately when a new lead comes in.',
     badge: { label: 'Respond', tone: 'green' },
   },

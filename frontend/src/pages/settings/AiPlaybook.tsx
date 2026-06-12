@@ -150,24 +150,32 @@ export function SettingsAiPlaybook() {
         </SectionCard>
       )}
 
-      {/* === Cards rendered in Playbook V2.4 order — simplified to 5 ===
-            Workflow-logic sections (Qualification, Booking, Human Handoff,
-            Phone Call) live in Automation → AI Conversation Goals; their
-            backend default prompts still emit at runtime so behavior is
-            unchanged. The Objection Handling + Follow-up Tone sections
-            are folded into Pricing Guidance + Communication Style at
-            content-application time (see playbook-seed-applier.ts) and
-            their UI cards are hidden so users see one canonical home for
-            each piece of behavior. No backend deletions — every backend
-            section key still exists; only the UI surface narrows.
+      {/* === Cards rendered in Playbook V2.5 order — simplified to 4 ===
+            Visible Playbook now answers two business-owner questions:
+            "What should AI know about my company?" and "What business
+            rules should AI follow?" Communication Style & Brand Voice
+            (personality_brand_voice) moved to advanced mode along with
+            the other legacy sections — friendly/professional/local
+            behavior is already in BASE_HARD_RULES and the system prompt,
+            users rarely know what to enter, and future personalization
+            will happen via the AI assistant chat. Every backend section
+            key still exists and still emits at runtime; only the UI
+            surface narrows.
 
-            Visible cards (5 total):
+            Visible cards (4 total):
               1. Business Information
               2. FAQ
               3. Pricing Guidance (with embedded Pricing Table)
-              4. Communication Style & Brand Voice
-                 (backend key: personality_brand_voice)
-              5. Global Custom Instructions */}
+              4. Global Custom Instructions
+
+            Advanced-mode cards (when ?advanced=1 / ?debug=1):
+              - Qualification Guidance
+              - Booking Guidance
+              - Human Handoff Guidance
+              - Objection Handling
+              - Follow-up Tone
+              - Communication Style & Brand Voice
+                (backend key: personality_brand_voice) */}
 
       {accounts.length > 0 && <>
         {/* 1. Business Information */}
@@ -240,20 +248,21 @@ export function SettingsAiPlaybook() {
               onChange={v => onSectionChange('followup_tone', v)}
               legacyAdvanced
             />
+            {/* Communication Style & Brand Voice — moved to advanced in V2.5.
+                Backend key still personality_brand_voice; the runtime
+                renderer still consults customInstructions if set, so a
+                legacy account that saved tone notes keeps them active. */}
+            <HowSectionCard
+              section="personality_brand_voice"
+              value={v2.personality_brand_voice?.customInstructions ?? ''}
+              onChange={v => onSectionChange('personality_brand_voice', v)}
+              legacyAdvanced
+              isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
+            />
           </>
         )}
 
-        {/* 4. Communication Style & Brand Voice
-              (backend key still personality_brand_voice — see
-              frontend/src/lib/playbook-renderer.ts label mapping). */}
-        <HowSectionCard
-          section="personality_brand_voice"
-          value={v2.personality_brand_voice?.customInstructions ?? ''}
-          onChange={v => onSectionChange('personality_brand_voice', v)}
-          isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
-        />
-
-        {/* 5. Global Custom Instructions — surfaces User.globalAiPrompt */}
+        {/* 4. Global Custom Instructions — surfaces User.globalAiPrompt */}
         <GlobalCustomInstructionsCard />
       </>}
 

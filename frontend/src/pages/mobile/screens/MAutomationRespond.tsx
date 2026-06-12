@@ -25,7 +25,7 @@ export default function MAutomationRespond() {
   return (
     <MShell
       tab="auto"
-      appBar={<MAppBar leading={<MBack label="" />} title="When a Lead Arrives" subtitle="Respond" />}
+      appBar={<MAppBar leading={<MBack label="" />} title="First Reply" subtitle="Respond" />}
     >
       {accounts.loading && <MLoading label="Loading your accounts…" />}
       {!accounts.loading && (
