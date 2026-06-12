@@ -764,7 +764,13 @@ export class UsersService {
       s.trim().toLowerCase().replace(/[\s.;:!?]+$/, '');
 
     for (const account of accounts) {
-      const existing = (account.followUpSettingsJson as any) || {};
+      // followUpSettingsJson is a String? column — raw text, not auto-
+      // parsed by Prisma. We have to JSON.parse on read and JSON.stringify
+      // on write; spreading the raw string here would corrupt the row.
+      let existing: any = {};
+      if (account.followUpSettingsJson) {
+        try { existing = JSON.parse(account.followUpSettingsJson) || {}; } catch { existing = {}; }
+      }
       const aiPlaybookV2: Record<string, { customInstructions?: string }> = existing.aiPlaybookV2 || {};
 
       let changedThisAccount = false;
@@ -826,7 +832,7 @@ export class UsersService {
         await this.prisma.savedAccount.update({
           where: { id: account.id },
           data: {
-            followUpSettingsJson: { ...existing, aiPlaybookV2 },
+            followUpSettingsJson: JSON.stringify({ ...existing, aiPlaybookV2 }),
           },
         });
         accountsAffected++;
@@ -915,7 +921,12 @@ export class UsersService {
     let accountsAffected = 0;
 
     for (const account of accounts) {
-      const existing = (account.faqJson as any) || {};
+      // faqJson is a String? column — raw text, not auto-parsed by Prisma.
+      // Parse on read, stringify on write.
+      let existing: any = {};
+      if (account.faqJson) {
+        try { existing = JSON.parse(account.faqJson) || {}; } catch { existing = {}; }
+      }
       const next: Record<string, any> = { ...existing };
       let changed = false;
 
@@ -935,7 +946,7 @@ export class UsersService {
       if (changed) {
         await this.prisma.savedAccount.update({
           where: { id: account.id },
-          data: { faqJson: next },
+          data: { faqJson: JSON.stringify(next) },
         });
         accountsAffected++;
       }
