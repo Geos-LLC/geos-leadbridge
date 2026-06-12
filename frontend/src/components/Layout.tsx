@@ -490,25 +490,6 @@ export function Layout() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setAiChatOpen(true)}
-                    className="flex items-center justify-center hover:scale-105 transition-all"
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 999,
-                      background: 'var(--lb-accent)',
-                      color: 'var(--lb-accent-fg)',
-                      border: 0,
-                      cursor: 'pointer',
-                      boxShadow: 'var(--lb-shadow-sm)',
-                    }}
-                    title="Open AI assistant"
-                    aria-label="Open AI assistant"
-                  >
-                    <Sparkles size={17} />
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => navigate('/onboarding/setup')}
                     className="flex items-center justify-center hover:scale-105 transition-all"
                     style={{
@@ -603,6 +584,29 @@ export function Layout() {
 
           <Outlet />
 
+          {/* Floating AI assistant trigger — bottom-right. */}
+          {!aiChatOpen && (
+            <button
+              type="button"
+              onClick={() => setAiChatOpen(true)}
+              className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 999,
+                background: 'var(--lb-accent)',
+                color: 'var(--lb-accent-fg)',
+                border: 0,
+                cursor: 'pointer',
+                boxShadow: 'var(--lb-shadow-md)',
+              }}
+              title="Open AI assistant"
+              aria-label="Open AI assistant"
+            >
+              <Sparkles size={18} />
+            </button>
+          )}
+
           {/* AI Assistant chat panel — UI only, no backend wiring yet. */}
           {aiChatOpen && (
             <>
@@ -617,9 +621,10 @@ export function Layout() {
                 role="dialog"
                 aria-label="AI assistant chat"
                 style={{
-                  top: 16,
-                  right: 16,
                   bottom: 16,
+                  right: 16,
+                  height: '33vh',
+                  minHeight: 280,
                   width: 'min(420px, calc(100vw - 32px))',
                   background: 'var(--lb-surface)',
                   border: '1px solid var(--lb-line)',
