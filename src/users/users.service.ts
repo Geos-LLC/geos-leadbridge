@@ -791,13 +791,6 @@ export class UsersService {
       this.metaContent(html, 'description') ||
       this.metaContent(html, 'og:description', 'property') ||
       undefined;
-    const phone = this.firstMatch(
-      html,
-      // Tolerant US phone regex — captures most "(415) 555-1234" /
-      // "+1 415 555 1234" / "415.555.1234" forms.
-      /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/,
-      0,
-    );
     // Page preview image — try og:image / twitter:image / first <link rel=image_src>.
     // Resolve relative paths against pageUrl so the frontend can <img src=...> it directly.
     const rawImage =
@@ -808,12 +801,56 @@ export class UsersService {
       this.firstMatch(html, /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i) ||
       undefined;
     const imageUrl = rawImage ? this.absolutizeUrl(rawImage, pageUrl) : undefined;
+    // Phone — only mine the visible body, not the entire HTML. Many marketing
+    // pages embed tracking pixels / random numeric IDs in <script> blocks (e.g.
+    // Wix's ad pixels) that happen to be 10 digits and were getting picked up
+    // as the business's phone (saw a Waco TX area code on a Florida site).
+    const visibleForPhone = this.stripToVisibleText(html).slice(0, 100_000);
+    const phone = this.firstMatch(
+      visibleForPhone,
+      // Tolerant US phone regex — captures most "(415) 555-1234" /
+      // "+1 415 555 1234" / "415.555.1234" forms.
+      /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/,
+      0,
+    );
     return {
-      title: this.trimText(title),
-      description: this.trimText(description),
+      title: this.decodeHtmlEntities(this.trimText(title)),
+      description: this.decodeHtmlEntities(this.trimText(description)),
       phone: phone ? phone.trim() : undefined,
       imageUrl,
     };
+  }
+
+  /** Strip <script>/<style>/comments and tags, then decode the few common
+   *  HTML entities that show up in marketing copy. Shared by phone extraction
+   *  and AI summarization so they see the same text the customer would. */
+  private stripToVisibleText(html: string): string {
+    if (!html) return '';
+    return this.decodeHtmlEntities(
+      html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    ) || '';
+  }
+
+  /** Decode the handful of HTML entities that survive marketing copy
+   *  (&amp; &lt; &gt; &quot; &#39; &nbsp; &ndash; &mdash;). Anything more
+   *  exotic falls through unchanged. */
+  private decodeHtmlEntities(s: string | undefined): string | undefined {
+    if (s == null) return s;
+    return s
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&ndash;/g, '–')
+      .replace(/&mdash;/g, '—');
   }
 
   /** Resolve relative URLs (`/logo.png`, `images/hero.jpg`) against the page URL. */
@@ -838,25 +875,18 @@ export class UsersService {
     metadata: NonNullable<VerifyWebsiteResult['metadata']>,
   ): Promise<string | undefined> {
     const client = this.openai;
-    if (!client) return undefined;
+    if (!client) {
+      this.logger.warn('[summarizeWebsite] OPENAI_API_KEY not set — skipping summary');
+      return undefined;
+    }
     if (!html) return undefined;
 
-    // Cheap visible-text extraction: drop <script>/<style>, then strip tags.
-    const visible = html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
+    const visible = this.stripToVisibleText(html);
 
-    if (visible.length < 80) return undefined;
+    if (visible.length < 80) {
+      this.logger.warn(`[summarizeWebsite] visible text too short (${visible.length}) — skipping`);
+      return undefined;
+    }
     // Cap input so we don't burn tokens on multi-MB Wix bundles. 6000 chars
     // ≈ 1500 tokens — plenty for a homepage summary.
     const snippet = visible.slice(0, 6000);
@@ -866,6 +896,7 @@ export class UsersService {
       metadata.description ? `Meta description: ${metadata.description}` : null,
     ].filter(Boolean).join('\n');
 
+    this.logger.log(`[summarizeWebsite] requesting summary (visibleLen=${visible.length}, snippetLen=${snippet.length})`);
     const resp = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       temperature: 0.2,
@@ -887,6 +918,7 @@ export class UsersService {
     });
 
     const text = resp.choices?.[0]?.message?.content?.trim() || '';
+    this.logger.log(`[summarizeWebsite] summary generated (${text.length} chars)`);
     if (!text) return undefined;
     // Soft cap — UI can still expand, but DB shouldn't grow unboundedly if
     // the model ignores max_tokens.
