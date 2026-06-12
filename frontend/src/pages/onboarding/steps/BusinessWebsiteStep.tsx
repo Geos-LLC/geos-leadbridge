@@ -7,7 +7,6 @@ import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
-import { ApplyToPlaybookButton } from '../../../components/ApplyToPlaybookButton';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -45,6 +44,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
     | { kind: 'checking' }
+    | { kind: 'applying' }
     | { kind: 'invalid'; outcome: VerifyOutcome }
     | { kind: 'valid'; outcome: VerifyOutcome }
   >({ kind: 'idle' });
@@ -156,6 +156,29 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           token,
         );
       }
+
+      // Auto-apply to AI Playbook inside the wizard. The user already
+      // committed to "use AI" by getting this far; making them click an
+      // extra button after the spinner just adds friction. Failure here
+      // is silent (toast only) — we don't block the wizard advance on
+      // playbook apply since the data is already saved on the user.
+      if (outcome.metadata?.playbookSeed) {
+        setVerifyState({ kind: 'applying' });
+        try {
+          const applyRes = await usersApi.applyPlaybookSeed('fill_empty');
+          if (applyRes.success && applyRes.filled > 0) {
+            notify.success(
+              'Applied to AI Playbook',
+              `${applyRes.filled} section${applyRes.filled === 1 ? '' : 's'} filled from your website. Review later in Settings → AI Playbook.`,
+              5000,
+            );
+          }
+        } catch (e: any) {
+          // Non-fatal — the user can re-apply later from Settings.
+          console.warn('[BusinessWebsiteStep] auto-apply failed:', e?.message || e);
+        }
+      }
+
       setVerifyState({ kind: 'valid', outcome });
       await onSaveContinue();
     } catch (err: any) {
@@ -196,7 +219,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
 
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
-  const canSave = trimmed.length > 0 && !isChecking;
+  const isApplying = verifyState.kind === 'applying';
+  const isBusy = isChecking || isApplying;
+  const canSave = trimmed.length > 0 && !isBusy;
   // Persistent "verified" indicator: the URL in the input matches
   // what we saved AND we have metadata (which only gets written if
   // the verify endpoint actually loaded the site). Survives wizard
@@ -262,20 +287,35 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               }}
             />
           </div>
+          {/* Prominent inline spinner shown while we're talking to the
+              backend. The verify endpoint can take 5-15 seconds (HTML
+              fetch + Microlink screenshot + gpt-4o-mini summary) so a
+              tiny button-label spinner doesn't communicate well — this
+              card sets expectation that work is happening. */}
+          {isBusy && (
+            <div className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <Loader2 className="w-5 h-5 text-slate-500 animate-spin shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <div className="font-bold text-slate-900">
+                  {isApplying ? 'Applying website info to your AI Playbook…' : 'Pulling info from your site…'}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {isApplying
+                    ? 'Filling empty Playbook sections so your AI starts with real context.'
+                    : 'We fetch the page, render a preview, and generate an AI summary. Takes a few seconds.'}
+                </div>
+              </div>
+            </div>
+          )}
           {/* If the user has a previously-verified site (came back to
               this step, or refreshed the page) show what we found so
-              they have visible proof the URL really loaded. */}
-          {savedAndVerified && savedMetadata && !isChecking && (
-            <div className="mt-2 space-y-3">
+              they have visible proof the URL really loaded. The Apply
+              button is gone from this surface — auto-apply runs inline
+              when Save & continue is clicked, so the user never has to
+              think about it during the wizard. */}
+          {savedAndVerified && savedMetadata && !isBusy && (
+            <div className="mt-2">
               <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
-              {/* Apply-to-Playbook bridges the extracted seed into the AI
-                  Playbook. Only shown when verifyWebsite returned a
-                  playbookSeed (older verifications won't have one until
-                  the user re-verifies). */}
-              <ApplyToPlaybookButton
-                hasSeed={!!(savedMetadata as any)?.playbookSeed}
-                tone="wizard"
-              />
             </div>
           )}
         </label>
@@ -474,13 +514,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           disabled={!canSave}
           className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
-          {isChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {verifyState.kind === 'checking' ? 'Checking your site…' : (saving ? 'Saving…' : 'Save & Continue')}
+          {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {verifyState.kind === 'checking'
+            ? 'Checking your site…'
+            : verifyState.kind === 'applying'
+              ? 'Applying to Playbook…'
+              : (saving ? 'Saving…' : 'Save & Continue')}
         </button>
         <button
           type="button"
           onClick={() => void skipNoWebsite()}
-          disabled={isChecking}
+          disabled={isBusy}
           className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all"
         >
           I don't have a website
