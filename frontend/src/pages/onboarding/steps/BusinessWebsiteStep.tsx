@@ -6,6 +6,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
+import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -20,7 +21,7 @@ interface Props {
 interface VerifyOutcome {
   reachable: boolean;
   normalizedUrl: string;
-  metadata?: { title?: string; description?: string; phone?: string };
+  metadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string };
   errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
   errorMessage?: string;
 }
@@ -264,18 +265,8 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               this step, or refreshed the page) show what we found so
               they have visible proof the URL really loaded. */}
           {savedAndVerified && savedMetadata && !isChecking && (
-            <div className="mt-2 px-3 py-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-xs">
-              {savedMetadata.title && (
-                <div className="font-bold text-emerald-900 truncate">{savedMetadata.title}</div>
-              )}
-              {savedMetadata.description && (
-                <div className="text-emerald-700 mt-0.5 line-clamp-2">{savedMetadata.description}</div>
-              )}
-              {savedMetadata.phone && (
-                <div className="text-emerald-600 mt-1 font-mono text-[11px]">
-                  Phone found on site: {savedMetadata.phone}
-                </div>
-              )}
+            <div className="mt-2">
+              <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
             </div>
           )}
         </label>

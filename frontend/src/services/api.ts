@@ -1392,7 +1392,7 @@ export const usersApi = {
       name?: string;
       businessPhone?: string;
       website?: string | null;
-      websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+      websiteMetadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string } | null;
     },
   ): Promise<{
     success: boolean;
@@ -1402,7 +1402,7 @@ export const usersApi = {
       email: string;
       businessPhone?: string | null;
       website?: string | null;
-      websiteMetadataJson?: { title?: string; description?: string; phone?: string } | null;
+      websiteMetadataJson?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string } | null;
     };
   }> => {
     const { data } = await api.patch('/v1/users/me', updates);
@@ -1411,14 +1411,16 @@ export const usersApi = {
   // Onboarding wizard's Business step calls this before saving the URL.
   // The backend normalizes ("myco.com" → "https://myco.com"), runs an
   // SSRF guard, fetches with a timeout, and extracts <title> + meta
-  // description + a likely phone number. If unreachable, returns a
-  // typed errorCode so the UI can show a specific message.
+  // description + a likely phone number + og:image, then asks gpt-4o-mini
+  // for a 2-3 sentence summary used for FAQ/Playbook seeding later.
+  // If unreachable, returns a typed errorCode so the UI can show a
+  // specific message.
   verifyWebsite: async (
     url: string,
   ): Promise<{
     reachable: boolean;
     normalizedUrl: string;
-    metadata?: { title?: string; description?: string; phone?: string };
+    metadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string };
     errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
     errorMessage?: string;
   }> => {

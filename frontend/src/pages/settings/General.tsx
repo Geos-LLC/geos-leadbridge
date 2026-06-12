@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building, Info, Loader2 } from 'lucide-react';
+import { Building, Globe, Info, Loader2 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
 } from '../../components/automation/ui';
 import { useAuthStore } from '../../store/authStore';
 import { usersApi, authApi } from '../../services/api';
+import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -14,6 +15,10 @@ export function SettingsGeneral() {
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
   const [industry, setIndustry] = useState<string>('Cleaning & home services');
+  const [website, setWebsite] = useState<string>(user?.website ?? '');
+  const [websiteMetadata, setWebsiteMetadata] = useState<any>((user as any)?.websiteMetadataJson ?? null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later.
   const [_saving, setSaving] = useState(false);
@@ -51,6 +56,61 @@ export function SettingsGeneral() {
       setBusiness((user as any)?.businessName || user?.name || '');
     }
   }, [user, business]);
+
+  // Re-hydrate website + metadata when the cached auth user updates (e.g. after
+  // an authApi.getProfile() refresh elsewhere). Only seed empty state — don't
+  // clobber local edits.
+  useEffect(() => {
+    if (!website && user?.website) setWebsite(user.website);
+    if (!websiteMetadata && (user as any)?.websiteMetadataJson) {
+      setWebsiteMetadata((user as any).websiteMetadataJson);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const verifyAndSaveWebsite = async () => {
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      const trimmed = website.trim();
+      if (trimmed.length === 0) {
+        await usersApi.updateProfile({ website: null, websiteMetadata: null });
+        setWebsiteMetadata(null);
+        if (token) {
+          try {
+            const fresh: any = await authApi.getProfile();
+            const u = fresh?.user ?? fresh;
+            if (u?.id) setAuth(u, token);
+          } catch { /* silent */ }
+        }
+        setSavedAt(Date.now());
+        return;
+      }
+      const outcome = await usersApi.verifyWebsite(trimmed);
+      if (!outcome.reachable) {
+        setVerifyError(outcome.errorMessage || 'We couldn\'t load that site.');
+        return;
+      }
+      await usersApi.updateProfile({
+        website: outcome.normalizedUrl,
+        websiteMetadata: outcome.metadata ?? null,
+      });
+      setWebsite(outcome.normalizedUrl);
+      setWebsiteMetadata(outcome.metadata ?? null);
+      if (token) {
+        try {
+          const fresh: any = await authApi.getProfile();
+          const u = fresh?.user ?? fresh;
+          if (u?.id) setAuth(u, token);
+        } catch { /* silent */ }
+      }
+      setSavedAt(Date.now());
+    } catch (e: any) {
+      setVerifyError(e?.response?.data?.message || e?.message || 'Failed to verify');
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -144,6 +204,61 @@ export function SettingsGeneral() {
             />
           )}
         </FieldRow>
+      </SettingCard>
+
+      <SettingCard
+        icon={Globe}
+        iconTone="violet"
+        title="Business website"
+        subtitle="We pull a preview + AI summary so we can seed your FAQ and AI playbook."
+        contentPad="8px 24px 24px"
+      >
+        <FieldRow label="Website URL">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+            <div style={{ flex: 1 }}>
+              <SettingsInput
+                value={website}
+                onChange={setWebsite}
+                placeholder="myco.com or https://myco.com"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void verifyAndSaveWebsite()}
+              disabled={verifying}
+              style={{
+                padding: '9px 16px',
+                fontSize: 13, fontWeight: 700,
+                color: 'white',
+                background: 'var(--lb-accent)',
+                border: 0, borderRadius: 8,
+                cursor: verifying ? 'not-allowed' : 'pointer',
+                opacity: verifying ? 0.6 : 1,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
+              {verifying ? 'Checking…' : 'Verify & save'}
+            </button>
+          </div>
+        </FieldRow>
+        {verifyError && (
+          <div style={{
+            margin: '0 24px 12px', padding: '8px 12px', borderRadius: 8,
+            background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
+            fontSize: 12, fontWeight: 600,
+          }}>{verifyError}</div>
+        )}
+        {(user?.website || websiteMetadata) && (
+          <div style={{ padding: '0 24px 12px' }}>
+            <WebsitePreviewCard
+              url={user?.website || website || null}
+              metadata={websiteMetadata}
+              tone="settings"
+            />
+          </div>
+        )}
       </SettingCard>
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />

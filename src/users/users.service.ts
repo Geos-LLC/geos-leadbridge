@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import OpenAI from 'openai';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,6 +17,10 @@ export interface VerifyWebsiteResult {
     title?: string;
     description?: string;
     phone?: string;
+    /** og:image URL resolved to absolute form. Rendered as the wizard's site preview thumbnail. */
+    imageUrl?: string;
+    /** AI-generated 2-3 sentence summary of the homepage. Used to seed FAQ/Playbook later. */
+    summary?: string;
   };
   errorCode?:
     | 'invalid_url'
@@ -30,6 +36,7 @@ export interface VerifyWebsiteResult {
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
+  private _openai: OpenAI | null = null;
 
   constructor(
     private prisma: PrismaService,
@@ -39,7 +46,16 @@ export class UsersService {
     private cache: CacheService,
     @Inject(forwardRef(() => PlatformService))
     private platformService: PlatformService,
+    private configService: ConfigService,
   ) {}
+
+  private get openai(): OpenAI | null {
+    if (this._openai) return this._openai;
+    const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+    if (!apiKey) return null;
+    this._openai = new OpenAI({ apiKey });
+    return this._openai;
+  }
 
   async updateProfile(userId: string, updates: {
     name?: string;
@@ -675,11 +691,21 @@ export class UsersService {
         validateStatus: (s) => s < 400,
       });
       const html: string = typeof response.data === 'string' ? response.data : '';
-      const metadata = this.extractWebsiteMetadata(html);
       // Capture the final URL after redirect-following so we save the
       // canonical form ("https://spotless.homes" → save
       // "https://www.spotless.homes/").
       const finalUrl: string = (response.request?.res?.responseUrl as string) || url;
+      const metadata = this.extractWebsiteMetadata(html, finalUrl);
+
+      // AI summary — non-blocking failure. We don't want the entire verify
+      // flow to fail if OpenAI is down or the key is missing; the wizard
+      // can still show the title/description/phone we already pulled.
+      const summary = await this.summarizeWebsite(html, metadata).catch((e) => {
+        this.logger.warn(`[verifyWebsite] summary failed for ${finalUrl}: ${e?.message || e}`);
+        return undefined;
+      });
+      if (summary) metadata.summary = summary;
+
       return { reachable: true, normalizedUrl: finalUrl, metadata };
     } catch (err: any) {
       const code = err.code || '';
@@ -758,7 +784,7 @@ export class UsersService {
     return false;
   }
 
-  private extractWebsiteMetadata(html: string): VerifyWebsiteResult['metadata'] {
+  private extractWebsiteMetadata(html: string, pageUrl?: string): NonNullable<VerifyWebsiteResult['metadata']> {
     if (!html) return {};
     const title = this.firstMatch(html, /<title[^>]*>([\s\S]{1,500}?)<\/title>/i);
     const description =
@@ -772,11 +798,99 @@ export class UsersService {
       /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/,
       0,
     );
+    // Page preview image — try og:image / twitter:image / first <link rel=image_src>.
+    // Resolve relative paths against pageUrl so the frontend can <img src=...> it directly.
+    const rawImage =
+      this.metaContent(html, 'og:image', 'property') ||
+      this.metaContent(html, 'og:image') ||
+      this.metaContent(html, 'twitter:image') ||
+      this.metaContent(html, 'twitter:image:src') ||
+      this.firstMatch(html, /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i) ||
+      undefined;
+    const imageUrl = rawImage ? this.absolutizeUrl(rawImage, pageUrl) : undefined;
     return {
       title: this.trimText(title),
       description: this.trimText(description),
       phone: phone ? phone.trim() : undefined,
+      imageUrl,
     };
+  }
+
+  /** Resolve relative URLs (`/logo.png`, `images/hero.jpg`) against the page URL. */
+  private absolutizeUrl(href: string, base?: string): string | undefined {
+    const trimmed = (href || '').trim();
+    if (!trimmed) return undefined;
+    try {
+      return new URL(trimmed, base).toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Strip HTML to readable text and feed a chunk to gpt-4o-mini for a 2-3
+   * sentence summary. Returns undefined when OPENAI_API_KEY is unset or any
+   * step fails — the caller treats that as "no summary yet" and still saves
+   * the rest of the metadata.
+   */
+  private async summarizeWebsite(
+    html: string,
+    metadata: NonNullable<VerifyWebsiteResult['metadata']>,
+  ): Promise<string | undefined> {
+    const client = this.openai;
+    if (!client) return undefined;
+    if (!html) return undefined;
+
+    // Cheap visible-text extraction: drop <script>/<style>, then strip tags.
+    const visible = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (visible.length < 80) return undefined;
+    // Cap input so we don't burn tokens on multi-MB Wix bundles. 6000 chars
+    // ≈ 1500 tokens — plenty for a homepage summary.
+    const snippet = visible.slice(0, 6000);
+
+    const seed = [
+      metadata.title ? `Page title: ${metadata.title}` : null,
+      metadata.description ? `Meta description: ${metadata.description}` : null,
+    ].filter(Boolean).join('\n');
+
+    const resp = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      max_tokens: 220,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You summarize a small-business homepage for an onboarding flow. ' +
+            'Return 2-3 sentences (max ~60 words) describing what the business does, ' +
+            'who it serves, and any standout services or coverage area mentioned. ' +
+            'Plain text — no markdown, no bullet points, no preamble like "This website".',
+        },
+        {
+          role: 'user',
+          content: `${seed ? seed + '\n\n' : ''}Homepage content:\n${snippet}`,
+        },
+      ],
+    });
+
+    const text = resp.choices?.[0]?.message?.content?.trim() || '';
+    if (!text) return undefined;
+    // Soft cap — UI can still expand, but DB shouldn't grow unboundedly if
+    // the model ignores max_tokens.
+    return text.length > 1200 ? text.slice(0, 1200) : text;
   }
 
   private firstMatch(html: string, re: RegExp, group = 1): string | undefined {
