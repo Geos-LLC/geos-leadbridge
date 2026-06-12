@@ -819,11 +819,12 @@ function GoalSetupCard({
   // Backend gate in qualification-context.ts mirrors this: only qualify
   // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
   const showRequiredInfo = strategy === 'qualify';
-  // When-Goal-Is-Reached radio appears on Price / Qualify / Phone.
-  // Auto has no setup. For Price, completion = "AI provided pricing" and
-  // the radio still controls whether AI keeps talking after the quote or
-  // hands off to the team.
-  const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'phone';
+  // When-Goal-Is-Reached radio appears on every goal. Auto inherits the
+  // completion event of whichever sub-goal AI picks (price quote, all
+  // qualification fields collected, phone number provided), and the radio
+  // still controls whether AI keeps replying after that event or hands
+  // off to the team. Writes to the same global stop/handoff fields.
+  const showWhenReached = strategy === 'auto' || strategy === 'price' || strategy === 'qualify' || strategy === 'phone';
 
   return (
     <SectionCard padding="22px 24px 24px">
@@ -845,9 +846,6 @@ function GoalSetupCard({
                     <li>Customer explores options → <strong>Qualify behavior</strong></li>
                     <li>Customer requests a call → <strong>Phone behavior</strong></li>
                   </ul>
-                </div>
-                <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--lb-ink-5)', fontStyle: 'italic' }}>
-                  No setup. No completion rules.
                 </div>
               </>
             )}
