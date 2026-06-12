@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Bell, Phone, PhoneCall, MessageSquare, Zap, Loader2, AlertCircle,
   AlertTriangle, CheckCircle, X, Send, ChevronDown, Pencil, Check,
@@ -196,6 +196,14 @@ export function SettingsCommunicationSection() {
   const canUseEngage = trialActive || subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
   const canUseConvert = trialActive || subscriptionTier === 'ENTERPRISE';
 
+  // Hash-scroll for deep-links like /settings/communication#test-section.
+  // We can't rely on the browser's native anchor jump because the page hydrates
+  // (account list, settings JSON, hours) asynchronously — the target div doesn't
+  // exist on first paint. Watch the hash and a hydration sentinel; once the
+  // element is present, scroll it into view with a soft top margin so the row
+  // doesn't hide under the sticky page header.
+  const location = useLocation();
+
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -367,6 +375,23 @@ export function SettingsCommunicationSection() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAccountId]);
+
+  // Scroll to the deep-link hash target once the page is hydrated. Fires
+  // after the test row's id is in the DOM so getElementById has something
+  // to find. Used by automation/Respond's "Test it on Settings → Communication"
+  // link to land users directly at the Test Alert / Test Number rows.
+  useEffect(() => {
+    if (hydrating) return;
+    const hash = location.hash?.replace(/^#/, '');
+    if (!hash) return;
+    // Defer one frame so the SettingCard's contents have rendered after the
+    // hydrating flag flipped.
+    const t = setTimeout(() => {
+      const el = document.getElementById(hash);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [hydrating, location.hash]);
 
   // Debounced auto-save for the alert templates (existing followUpApi field).
   // Skipped in ALL_ACCOUNTS mode — Reply / Handoff Alerts are per-account
@@ -896,8 +921,12 @@ export function SettingsCommunicationSection() {
               </div>
             </div>
             <div className="px-5 py-4 space-y-4">
-              {/* Row 1: Business Phone (Respond) — editable. */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Row 1: Business Phone (Respond) — editable. id="test-section"
+                  is the scroll anchor for deep links from the Automation page
+                  (Respond → "Test it"); putting the id on the row that holds
+                  the Business Phone editor + Test Alert button lands the user
+                  at the top of all three test affordances at once. */}
+              <div id="test-section" className="grid grid-cols-1 md:grid-cols-2 gap-4 scroll-mt-6">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Business Phone</span>

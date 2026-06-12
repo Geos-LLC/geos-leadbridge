@@ -849,7 +849,18 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
       <FooterBanner
         icon={Info}
-        body={<>Templates can be managed in <Link to="/templates" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Templates</Link>.</>}
+        body={
+          <>
+            Templates can be managed in <Link to="/templates" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Templates</Link>.
+            {' '}Want to preview a real alert, instant text, or call?{' '}
+            <Link
+              to="/settings/communication#test-section"
+              style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+            >
+              Test it from Settings → Communication
+            </Link>.
+          </>
+        }
       />
     </div>
   );
