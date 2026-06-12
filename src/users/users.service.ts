@@ -227,11 +227,11 @@ export class UsersService {
       .map((a) => a.businessId as string);
     for (const businessId of ttBusinessIds) {
       try {
-        // Registers both the owner phone (just changed) and the LB number
-        // (substitute sender). ensureAssociatePhone skips no-op POSTs.
-        await this.platformService.syncAccountPhonesToThumbtack(userId, businessId);
+        await this.platformService.registerAgentPhoneWithThumbtack(userId, businessId);
       } catch (err: any) {
         // Profile save must not break if TT registration fails — log and move on.
+        // ensureAssociatePhone already skips when the number is already on the
+        // business, so this only surfaces real failures (auth, network, 4xx).
         console.error(
           `[UsersService] TT associate-phone sync failed user=${userId} business=${businessId}: ${err?.message ?? err}`,
         );
