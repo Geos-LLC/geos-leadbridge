@@ -39,6 +39,15 @@ type CachedAccount = {
   instantTextOn: boolean;
   instantCallOn: boolean;
   replyType: 'ai' | 'template';
+  /**
+   * Instant Text generation mode (V2 — 2026-06-12). Lives in
+   * followUpSettingsJson.instantTextMode. AI = AI-generated SMS via the
+   * notifications.service Instant Text AI path; template = the saved
+   * NotificationRule.template. Missing key → treated as 'template' on
+   * the backend (existing-tenant back-compat); the UI surfaces the saved
+   * value or 'ai' as the visual default for fresh tenants.
+   */
+  instantTextMode: 'ai' | 'template';
   connMode: 'agent-first' | 'parallel';
   textBizHours: boolean;
   callBizHours: boolean;
@@ -74,6 +83,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const [instantTextOn,  setInstantTextOn]  = useState(true);
   const [instantCallOn,  setInstantCallOn]  = useState(true);
   const [replyType, setReplyType] = useState<'template' | 'ai'>('ai');
+  // V2 Instant Text AI default — new tenants land on AI. Existing tenants'
+  // value is hydrated from followUpSettingsJson.instantTextMode below.
+  const [instantTextMode, setInstantTextMode] = useState<'template' | 'ai'>('ai');
   const [textBizHours, setTextBizHours] = useState(true);
   const [callBizHours, setCallBizHours] = useState(true);
   const [connMode, setConnMode] = useState<'agent-first' | 'parallel'>('agent-first');
@@ -123,7 +135,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // account, wiping out their per-account values for untouched settings.
   type RespondField =
     | 'instantReplyOn' | 'replyType'
-    | 'instantTextOn'
+    | 'instantTextOn' | 'instantTextMode'
     | 'instantCallOn' | 'connMode'
     | 'textBizHours' | 'callBizHours';
   const dirtyFieldsRef = useRef<Set<RespondField>>(new Set());
@@ -218,6 +230,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
             const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
             const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
+            const rawInstantTextMode = (fuRes?.settings as any)?.instantTextMode;
             const cached: CachedAccount = {
               instantReplyOn: !!nl?.enabled,
               instantTextOn: !!ct?.enabled,
@@ -227,6 +240,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               // 'ai'. Existing rules with useAi=false explicitly opt out and
               // keep their 'template' choice.
               replyType: (nl?.useAi === false ? 'template' : 'ai') as 'ai' | 'template',
+              // Visual default 'ai' for new tenants (no saved value yet).
+              // Existing tenants whose seed wrote 'template' or 'ai' get
+              // their saved value back here.
+              instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,
@@ -255,6 +272,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             setInstantTextOn(first.instantTextOn);
             setInstantCallOn(first.instantCallOn);
             setReplyType(first.replyType);
+            setInstantTextMode(first.instantTextMode);
             setConnMode(first.connMode);
             setTextBizHours(first.textBizHours);
             setCallBizHours(first.callBizHours);
@@ -278,11 +296,13 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
         const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
+        const rawInstantTextMode = (fuRes?.settings as any)?.instantTextMode;
         const cached: CachedAccount = {
           instantReplyOn: !!nl?.enabled,
           instantTextOn: !!ct?.enabled,
           instantCallOn: !!ccRes.settings?.enabled,
           replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+          instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
           textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
           callBizHours: hoursRes?.callDuringBusinessHours ?? true,
@@ -301,6 +321,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setInstantTextOn(cached.instantTextOn);
           setInstantCallOn(cached.instantCallOn);
           setReplyType(cached.replyType);
+          setInstantTextMode(cached.instantTextMode);
           setConnMode(cached.connMode);
           setTextBizHours(cached.textBizHours);
           setCallBizHours(cached.callBizHours);
@@ -324,7 +345,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode, textBizHours, callBizHours]);
+  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, instantTextMode, connMode, textBizHours, callBizHours]);
 
   // markDirty-wrapped setters — each one records both the dirty flag AND the
   // specific field name so the save only writes that field's endpoint.
@@ -332,6 +353,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const onInstantTextOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextOn');  setInstantTextOn(v); };
   const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantCallOn');  setInstantCallOn(v); };
   const onReplyType      = (v: 'ai' | 'template')           => { dirtyRef.current = true; dirtyFieldsRef.current.add('replyType');      setReplyType(v); };
+  const onInstantTextMode = (v: 'ai' | 'template')          => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextMode'); setInstantTextMode(v); };
   const onConnMode       = (v: 'agent-first' | 'parallel')  => { dirtyRef.current = true; dirtyFieldsRef.current.add('connMode');       setConnMode(v); };
   const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('textBizHours');   setTextBizHours(v); };
   const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('callBizHours');   setCallBizHours(v); };
@@ -351,6 +373,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       instantTextOn:  fields.has('instantTextOn')  ? instantTextOn  : (prev?.instantTextOn  ?? instantTextOn),
       instantCallOn:  fields.has('instantCallOn')  ? instantCallOn  : (prev?.instantCallOn  ?? instantCallOn),
       replyType:      fields.has('replyType')      ? replyType      : (prev?.replyType      ?? replyType),
+      instantTextMode: fields.has('instantTextMode') ? instantTextMode : (prev?.instantTextMode ?? instantTextMode),
       connMode:       fields.has('connMode')       ? connMode       : (prev?.connMode       ?? connMode),
       textBizHours:   fields.has('textBizHours')   ? textBizHours   : (prev?.textBizHours   ?? textBizHours),
       callBizHours:   fields.has('callBizHours')   ? callBizHours   : (prev?.callBizHours   ?? callBizHours),
@@ -407,6 +430,19 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
         if (ct) await notificationsApi.updateRule(id, ct.id, { enabled: instantTextOn });
       })());
+    }
+
+    // 2b. Instant Text AI mode — followUpSettingsJson.instantTextMode.
+    // Saved separately from the on/off toggle because the backend stores
+    // them on different rows (NotificationRule.enabled vs SavedAccount
+    // followUpSettingsJson). Existing tenants without the key get
+    // 'template' behavior at runtime; writing 'ai' or 'template' here
+    // explicitly opts them into the new generation path.
+    if (fields.has('instantTextMode')) {
+      ops.push(
+        followUpApi.saveWizardSettings(id, { instantTextMode })
+          .catch(() => undefined),
+      );
     }
 
     // 3. Instant Call — call-connect settings (only the touched keys).
@@ -730,21 +766,34 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        {/* Advanced message template — hidden by default per the Automation
-            Simplification (2026-06-12). Normal users don't need to see or
-            edit the raw SMS template; we send the saved Custom Template at
-            runtime as before. AI SMS generation isn't wired on the backend
-            (NotificationRule has no useAi field — only AutomationRule does),
-            so we don't expose an AI option that would silently fall back to
-            the template. TODO(backend): when NotificationRule gains useAi
-            or the customer-text path goes through AutomationRule, restore
-            the AI/Custom Template radio above this expand and default to AI. */}
-        <AdvancedExpand
-          title="Advanced message template"
-          helper="The pre-written SMS sent when a lead arrives. Most teams don't need to change this."
-          defaultOpen={advancedMode}
-        >
-          <FieldRow icon={FileText} iconTone="green" label="SMS Template" noBorder>
+        {/* V2 Message generation picker (2026-06-12).
+            Backend wiring: NotificationsService.sendNotificationWithRule
+            reads followUpSettingsJson.instantTextMode at send time. 'ai'
+            → InstantTextAiService.generateInstantTextBody; 'template' or
+            missing → existing render path. Failures fall back to template
+            with INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker. */}
+        <FieldRow label="Message generation" align="top">
+          <div style={{ display: 'flex', gap: 12 }}>
+            <OptionCard
+              selected={instantTextMode === 'ai'}
+              onClick={() => onInstantTextMode('ai')}
+              title="AI"
+              body="AI writes a short text using your Business Information, FAQ, Pricing Guidance, and the lead details."
+              icon={Sparkles}
+            />
+            <OptionCard
+              selected={instantTextMode === 'template'}
+              onClick={() => onInstantTextMode('template')}
+              title="Custom template"
+              body="Send a fixed, pre-written SMS."
+              icon={Clipboard}
+            />
+          </div>
+        </FieldRow>
+
+        {/* Compact template preview — only when Custom template is selected. */}
+        {instantTextMode === 'template' && (
+          <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
             <InfoTile
               title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
               body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
@@ -754,7 +803,31 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               onAction={() => goTemplate(ctTpl, 'auto-reply')}
             />
           </FieldRow>
-        </AdvancedExpand>
+        )}
+
+        {/* Advanced: show the template tile even when AI is selected so
+            support/power users can inspect / edit the fallback body. The
+            same template runs when AI generation throws — see
+            INSTANT_TEXT_AI_FALLBACK_TEMPLATE in
+            notifications.service.sendNotificationWithRule. */}
+        {instantTextMode === 'ai' && advancedMode && (
+          <AdvancedExpand
+            title="Fallback / custom SMS template"
+            helper="Used when Custom Template is selected or if AI generation fails."
+            defaultOpen={true}
+          >
+            <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
+              <InfoTile
+                title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
+                body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+                badge={{ label: 'Template', tone: 'green' }}
+                tooltip={ctTpl?.content || customerTextRule?.template || undefined}
+                actionLabel="Edit Template"
+                onAction={() => goTemplate(ctTpl, 'auto-reply')}
+              />
+            </FieldRow>
+          </AdvancedExpand>
+        )}
       </SettingCard>
 
       {/* Instant Call */}

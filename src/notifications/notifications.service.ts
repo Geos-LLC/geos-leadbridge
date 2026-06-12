@@ -11,6 +11,7 @@ import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { InstantTextAiService } from './instant-text-ai.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -202,6 +203,12 @@ export class NotificationsService {
     // freshness guard sees a stale outbound timestamp and the badge stays
     // red after operator replies via rule SMS.
     private conversationContext: ConversationContextService,
+    // Wired 2026-06-12 — Instant Text AI generation. Used inside
+    // sendNotificationWithRule when the account's followUpSettingsJson
+    // resolves instantTextMode='ai' on a sendToCustomer=true rule.
+    // Failures fall back to the existing template path with a
+    // INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker.
+    private instantTextAi: InstantTextAiService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -1426,8 +1433,52 @@ export class NotificationsService {
     const platformLabel = rule?.sendToCustomer
       ? ''
       : (context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '');
+
+    // V2 Instant Text AI generation (2026-06-12).
+    //
+    // When the per-account followUpSettingsJson.instantTextMode === 'ai'
+    // AND this is a customer-facing rule, generate the SMS body via
+    // AiService instead of rendering the saved template. Failures fall
+    // through to the existing template path with a structured warn log
+    // — INSTANT_TEXT_AI_FALLBACK_TEMPLATE — so customers always receive
+    // a message even if OpenAI is down or the prompt context is invalid.
+    //
+    // Mode resolution (intentionally narrow):
+    //   - missing key  → 'template' (preserves existing-tenant behavior)
+    //   - 'template'   → template
+    //   - 'ai'         → AI (with template fallback on failure)
+    // platform.service.seedOrInheritNotificationSettings writes 'ai'
+    // explicitly for new tenants so they default to AI immediately.
+    let aiGeneratedBody: string | null = null;
+    if (rule?.sendToCustomer && savedAccountId && leadId) {
+      const instantTextMode = await this.resolveInstantTextMode(savedAccountId);
+      if (instantTextMode === 'ai') {
+        try {
+          aiGeneratedBody = await this.instantTextAi.generateInstantTextBody({
+            savedAccountId,
+            customerName: lead.customerName || 'there',
+            customerMessage: lead.message || '',
+            category: lead.category ?? undefined,
+            accountName: context.accountName,
+          });
+          this.logger.log(
+            `[INSTANT_TEXT_AI] generated ${aiGeneratedBody.length} chars for lead ${leadId} account ${savedAccountId}`,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[INSTANT_TEXT_AI_FALLBACK_TEMPLATE] AI generation failed for lead ${leadId} account ${savedAccountId}: ${err?.message ?? err}`,
+          );
+          aiGeneratedBody = null;
+        }
+      }
+    }
+
     let messageBody: string;
-    if (template) {
+    if (aiGeneratedBody) {
+      // AI path skips platform-label prepending — first-touch SMS to a
+      // customer never carries the internal [TT] / [Yelp] marker.
+      messageBody = aiGeneratedBody;
+    } else if (template) {
       const rendered = this.renderTemplate(template, lead, context.accountName);
       const alreadyHasPlatform = /yelp|thumbtack|\[tt\]|\[yelp\]/i.test(rendered.split('\n')[0] || '');
       messageBody = alreadyHasPlatform ? rendered : `${platformLabel}${rendered}`;
@@ -1794,6 +1845,31 @@ export class NotificationsService {
       });
 
       return { success: false, error: error.message || 'Failed to send test notification' };
+    }
+  }
+
+  /**
+   * Resolve the per-account Instant Text generation mode (V2 — 2026-06-12).
+   *
+   * Reads `followUpSettingsJson.instantTextMode` for the SavedAccount.
+   * Returns `'ai'` when the key is explicitly set to that string; every
+   * other case ('template', undefined, missing JSON, invalid JSON, account
+   * not found) returns `'template'` so existing tenants without the key
+   * stay on the existing template path — per the spec's migration-safety
+   * rule. New accounts get `'ai'` written explicitly by
+   * platform.service.seedOrInheritNotificationSettings.
+   */
+  private async resolveInstantTextMode(savedAccountId: string): Promise<'ai' | 'template'> {
+    try {
+      const account = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return 'template';
+      const parsed = JSON.parse(account.followUpSettingsJson);
+      return parsed?.instantTextMode === 'ai' ? 'ai' : 'template';
+    } catch {
+      return 'template';
     }
   }
 

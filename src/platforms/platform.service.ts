@@ -1262,8 +1262,42 @@ export class PlatformService {
       },
     });
 
+    // V2 Instant Text AI default (2026-06-12).
+    //
+    // New accounts default to AI-generated SMS for Instant Text. The
+    // resolver in notifications.service.resolveInstantTextMode treats a
+    // missing instantTextMode key as 'template' (existing-tenant
+    // back-compat), so we write 'ai' EXPLICITLY here for new tenants.
+    // Existing tenants whose seedOrInherit was already called keep the
+    // missing-key/'template' behavior until they save the toggle from
+    // the Respond page.
+    //
+    // Merge-don't-replace: followUpSettingsJson may already carry other
+    // keys (goal flags, qualification config) from the seed-or-inherit
+    // path that ran for an earlier account on the same tenant.
+    try {
+      const existingAccount = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { followUpSettingsJson: true },
+      });
+      const merged = {
+        ...(existingAccount?.followUpSettingsJson
+          ? JSON.parse(existingAccount.followUpSettingsJson)
+          : {}),
+        instantTextMode: 'ai',
+      };
+      await this.prisma.savedAccount.update({
+        where: { id: savedAccountId },
+        data: { followUpSettingsJson: JSON.stringify(merged) },
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `[seedOrInheritNotificationSettings] Failed to seed instantTextMode='ai' for ${savedAccountId}: ${err?.message ?? err}`,
+      );
+    }
+
     this.logger.log(
-      `[seedOrInheritNotificationSettings] Seeded first-account defaults for ${savedAccountId} (businessPhone=${user?.businessPhone ? 'set' : 'unset'})`,
+      `[seedOrInheritNotificationSettings] Seeded first-account defaults for ${savedAccountId} (businessPhone=${user?.businessPhone ? 'set' : 'unset'}, instantTextMode=ai)`,
     );
   }
 
