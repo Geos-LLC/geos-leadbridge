@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone, Sparkles } from 'lucide-react';
 import { notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
@@ -64,6 +64,50 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [searchingPhone, setSearchingPhone] = useState(false);
   const [purchasingPhone, setPurchasingPhone] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  // Per-account public Thumbtack profile URL. Moved here from the
+  // Connect step — it's a data-source input, not an OAuth setting.
+  // Without it the Partner API only returns businessID + name + phone,
+  // which gives Pull-from-Thumbtack nothing useful to merge into
+  // playbookSeed.businessInformation.
+  const [ttUrls, setTtUrls] = useState<Record<string, string>>({});
+  const ttUrlsInitialRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const ttAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
+    if (ttAccounts.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      ttAccounts.map(a => usersApi.getThumbtackProfileUrl(a.id)
+        .then(res => ({ id: a.id, url: res.url ?? '' }))
+        .catch(() => ({ id: a.id, url: '' })),
+      ),
+    ).then(results => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const r of results) next[r.id] = r.url;
+      setTtUrls(prev => ({ ...next, ...prev })); // preserve in-flight edits
+      ttUrlsInitialRef.current = { ...next };
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedAccounts.map(a => a.id).join(',')]);
+
+  const saveTtUrl = async (accountId: string) => {
+    const next = (ttUrls[accountId] || '').trim();
+    if (next === (ttUrlsInitialRef.current[accountId] || '').trim()) return;
+    try {
+      const res = await usersApi.saveThumbtackProfileUrl(accountId, next || null);
+      if (!res.success) {
+        notify.warning('Could not save URL', res.warning || 'Try again.');
+        return;
+      }
+      ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
+      notify.success('Saved', 'AI will use this when pulling business info.', 2500);
+    } catch (e: any) {
+      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -330,6 +374,39 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         </label>
 
       </div>
+
+      {/* Thumbtack profile URL — one input per connected TT account.
+          Only rendered when a TT account exists; otherwise nothing to
+          attach a URL to. Same flow as Settings → General. */}
+      {savedAccounts.some(a => a.platform === 'thumbtack') && (
+        <section className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Globe className="w-4 h-4 text-slate-500" />
+            <h2 className="text-sm font-extrabold text-slate-900">Thumbtack profile URL</h2>
+            <span className="text-xs font-normal text-slate-400">(optional)</span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+            Paste your public Thumbtack profile so AI can pull services, address, insurance, and pricing. Thumbtack's API alone returns only name and phone.
+          </p>
+          <ul className="space-y-3">
+            {savedAccounts.filter(a => a.platform === 'thumbtack').map(acct => (
+              <li key={acct.id}>
+                <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                  {acct.businessName || 'Thumbtack business'}
+                </label>
+                <input
+                  type="url"
+                  value={ttUrls[acct.id] ?? ''}
+                  onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
+                  onBlur={() => void saveTtUrl(acct.id)}
+                  placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* LeadBridge phone number — the dedicated outbound number purchased
           from Twilio via Sigcore. Lives on TenantPhoneNumber, not on

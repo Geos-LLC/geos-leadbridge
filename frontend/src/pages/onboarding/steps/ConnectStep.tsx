@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Plus, Facebook, Globe, AlertCircle } from 'lucide-react';
 import ConnectionModal from '../../../components/ConnectionModal';
 import { useAppStore } from '../../../store/appStore';
-import { thumbtackApi, usersApi } from '../../../services/api';
-import { notify } from '../../../store/notificationStore';
+import { thumbtackApi } from '../../../services/api';
 import { PlatformBadge } from '../../../components/ui';
 import { getStepMeta } from '../wizardConfig';
 import type { SavedAccount } from '../../../types';
@@ -70,53 +69,11 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
     }
   }, [savedAccounts.length, alreadyDone, onMarkDone]);
 
-  // Per-account public Thumbtack profile URL. Pasting one enables the
-  // website-scrape path in seedBusinessInfoFromAccount, which extracts
-  // services / address / insurance / pricing from the public profile
-  // page. Without it the Partner API only returns businessID + name +
-  // phone — useless for business-info seeding. Same flow as the input
-  // on Settings → General; lives here so onboarding can collect it
-  // up-front instead of forcing tenants to dig into Settings later.
-  const [ttUrls, setTtUrls] = useState<Record<string, string>>({});
-  const ttUrlsInitialRef = useRef<Record<string, string>>({});
-  // Hydrate URLs for every connected Thumbtack account whenever the
-  // account list changes (e.g. after OAuth callback). New accounts
-  // start with an empty input.
-  useEffect(() => {
-    const ttAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
-    if (ttAccounts.length === 0) return;
-    let cancelled = false;
-    Promise.all(
-      ttAccounts.map(a => usersApi.getThumbtackProfileUrl(a.id)
-        .then(res => ({ id: a.id, url: res.url ?? '' }))
-        .catch(() => ({ id: a.id, url: '' })),
-      ),
-    ).then(results => {
-      if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const r of results) next[r.id] = r.url;
-      setTtUrls(prev => ({ ...next, ...prev })); // keep any in-progress edits
-      ttUrlsInitialRef.current = { ...next };
-    });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts.map(a => a.id).join(',')]);
-
-  const saveTtUrl = async (accountId: string) => {
-    const next = (ttUrls[accountId] || '').trim();
-    if (next === (ttUrlsInitialRef.current[accountId] || '').trim()) return;
-    try {
-      const res = await usersApi.saveThumbtackProfileUrl(accountId, next || null);
-      if (!res.success) {
-        notify.warning('Could not save URL', res.warning || 'Try again.');
-        return;
-      }
-      ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
-      notify.success('Saved', 'AI will use this when pulling business info.', 2500);
-    } catch (e: any) {
-      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
-    }
-  };
+  // The per-account public Thumbtack profile URL input used to live here.
+  // It moved to the Business Website step (and Settings → General already
+  // has its own copy) so onboarding's "where do my business facts come
+  // from" surface owns all of it — this Connect step is about OAuth
+  // wiring, not data sourcing.
 
   function openConnectionModal() {
     // Tell Dashboard "if you see ?connected=… on your next mount,
@@ -177,24 +134,10 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
                     </span>
                   )}
                 </div>
-                {acct.platform === 'thumbtack' && (
-                  <div className="pl-10">
-                    <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                      Thumbtack profile URL <span className="font-normal text-slate-400">(optional)</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={ttUrls[acct.id] ?? ''}
-                      onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
-                      onBlur={() => void saveTtUrl(acct.id)}
-                      placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                    />
-                    <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                      Paste your public Thumbtack profile so AI can pull services, address, insurance, and pricing. Thumbtack's API alone returns only name and phone.
-                    </p>
-                  </div>
-                )}
+                {/* Thumbtack profile URL input moved to the Business
+                    Website step — it's a data-source input, not an OAuth
+                    setting. Connect this step intentionally keeps just
+                    the OAuth list. */}
               </li>
             ))}
           </ul>
