@@ -303,4 +303,158 @@ export class ConversationRuntimeService {
       );
     }
   }
+
+  // ─── V2 AI Conversation Review Mode — pending suggestion storage ─────────
+  //
+  // When the per-account `aiConversationDeliveryMode === 'suggest'`, the
+  // AI Conversation path generates a reply but parks it here instead of
+  // sending. The operator approves or discards from Lead Activity via the
+  // `/v1/leads/:id/ai-suggestion/{send,discard}` endpoints.
+  //
+  // Storage: ThreadContext.stateJson.pendingAiSuggestion (no schema change
+  // — stateJson is already the catch-all JSON bag for derived state like
+  // priceDiscussed, lastQuestionAsked, etc).
+  //
+  // Shape:
+  //   {
+  //     id:               uuid,
+  //     message:          AI-generated body,
+  //     goal:             'price' | 'qualify' | 'phone' | 'hybrid' | 'convert',
+  //     reason:           'customer_reply',
+  //     sourceMessageId:  id of the inbound Message that triggered generation,
+  //     createdAt:        ISO timestamp,
+  //     status:           'pending',
+  //   }
+  //
+  // Dedup: sourceMessageId is the dedup key. handleCustomerReply checks
+  // for an existing suggestion before generating; we re-check inside
+  // executePendingMessage as a race guard.
+
+  async setAiSuggestion(
+    conversationId: string | null | undefined,
+    suggestion: {
+      id: string;
+      message: string;
+      goal?: string | null;
+      reason?: string;
+      sourceMessageId?: string | null;
+      createdAt?: string;
+    },
+    meta?: RuntimeWriteMeta,
+  ): Promise<void> {
+    if (!conversationId) return;
+    try {
+      // Load existing stateJson + merge — never replace the whole object,
+      // or we'd wipe priceDiscussed / engagementLevel / etc.
+      const ctx = await this.prisma.threadContext.findUnique({
+        where: { conversationId },
+        select: { stateJson: true },
+      });
+      const currentState = ctx?.stateJson ? JSON.parse(ctx.stateJson) : {};
+      const next = {
+        ...currentState,
+        pendingAiSuggestion: {
+          id: suggestion.id,
+          message: suggestion.message,
+          goal: suggestion.goal ?? null,
+          reason: suggestion.reason ?? 'customer_reply',
+          sourceMessageId: suggestion.sourceMessageId ?? null,
+          createdAt: suggestion.createdAt ?? new Date().toISOString(),
+          status: 'pending',
+        },
+      };
+      const result = await this.prisma.threadContext.updateMany({
+        where: { conversationId },
+        data: { stateJson: JSON.stringify(next) },
+      });
+      if (result.count > 0) {
+        this.logRuntimeWrite(
+          'ai_suggestion_write',
+          conversationId,
+          {
+            action: 'set',
+            suggestion_id: suggestion.id,
+            source_message_id: suggestion.sourceMessageId ?? null,
+            message_chars: suggestion.message.length,
+          },
+          meta,
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(
+        `[ConvRuntime] setAiSuggestion failed conversation_id=${conversationId} err=${e?.message ?? e}`,
+      );
+    }
+  }
+
+  async getAiSuggestion(
+    conversationId: string | null | undefined,
+  ): Promise<{
+    id: string;
+    message: string;
+    goal: string | null;
+    reason: string;
+    sourceMessageId: string | null;
+    createdAt: string;
+    status: 'pending';
+  } | null> {
+    if (!conversationId) return null;
+    try {
+      const ctx = await this.prisma.threadContext.findUnique({
+        where: { conversationId },
+        select: { stateJson: true },
+      });
+      if (!ctx?.stateJson) return null;
+      const parsed = JSON.parse(ctx.stateJson);
+      const sugg = parsed?.pendingAiSuggestion;
+      if (!sugg || typeof sugg !== 'object' || !sugg.id || !sugg.message) return null;
+      return {
+        id: String(sugg.id),
+        message: String(sugg.message),
+        goal: sugg.goal ?? null,
+        reason: typeof sugg.reason === 'string' ? sugg.reason : 'customer_reply',
+        sourceMessageId: sugg.sourceMessageId ?? null,
+        createdAt: typeof sugg.createdAt === 'string' ? sugg.createdAt : new Date().toISOString(),
+        status: 'pending',
+      };
+    } catch (e: any) {
+      this.logger.warn(
+        `[ConvRuntime] getAiSuggestion failed conversation_id=${conversationId} err=${e?.message ?? e}`,
+      );
+      return null;
+    }
+  }
+
+  async clearAiSuggestion(
+    conversationId: string | null | undefined,
+    meta?: RuntimeWriteMeta,
+  ): Promise<void> {
+    if (!conversationId) return;
+    try {
+      const ctx = await this.prisma.threadContext.findUnique({
+        where: { conversationId },
+        select: { stateJson: true },
+      });
+      if (!ctx?.stateJson) return;
+      const parsed = JSON.parse(ctx.stateJson);
+      if (!parsed?.pendingAiSuggestion) return; // no-op if nothing to clear
+      const { pendingAiSuggestion, ...rest } = parsed;
+      const result = await this.prisma.threadContext.updateMany({
+        where: { conversationId },
+        data: { stateJson: JSON.stringify(rest) },
+      });
+      if (result.count > 0) {
+        this.logRuntimeWrite(
+          'ai_suggestion_write',
+          conversationId,
+          { action: 'cleared', suggestion_id: pendingAiSuggestion?.id ?? null },
+          meta,
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(
+        `[ConvRuntime] clearAiSuggestion failed conversation_id=${conversationId} err=${e?.message ?? e}`,
+      );
+    }
+  }
 }

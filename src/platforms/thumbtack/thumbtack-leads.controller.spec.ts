@@ -53,6 +53,7 @@ function buildController(opts: {
     leadsService,
     configService,
     prisma,
+    /* conversationRuntime */ { getAiSuggestion: jest.fn().mockResolvedValue(null) } as any,
   );
 
   return { controller, leadsService, prisma, calls };
