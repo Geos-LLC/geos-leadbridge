@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, Zap, DollarSign,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -13,22 +13,14 @@ import { SettingsAccounts } from './Accounts';
 import { SettingsBilling } from './Billing';
 import { SettingsPartnerNetwork } from './PartnerNetwork';
 import { SettingsAiPlaybook } from './AiPlaybook';
-import { SettingsAi } from './Ai';
-import { SettingsPricing } from './Pricing';
 
-type TabKey = 'general' | 'communication' | 'hours' | 'ai-playbook' | 'ai' | 'pricing' | 'team' | 'accounts' | 'billing' | 'partner-network';
+type TabKey = 'general' | 'communication' | 'hours' | 'ai-playbook' | 'team' | 'accounts' | 'billing' | 'partner-network';
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
   { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
   { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'How AI communicates' },
-  // Legacy tabs — kept in place until Playbook V2 is verified on staging.
-  // The AI and Pricing tabs duplicate FAQ + Pricing + Global Prompt editing
-  // now available inside Playbook. Once verification passes, these tabs are
-  // removed in a follow-up commit (see Playbook V2 PR description).
-  { key: 'ai',              label: 'AI',                icon: Zap,           sublabel: 'Prompt & FAQ (legacy)' },
-  { key: 'pricing',         label: 'Pricing',           icon: DollarSign,    sublabel: 'Service price table (legacy)' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
   { key: 'billing',         label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
@@ -42,8 +34,6 @@ const SUBTITLES: Record<TabKey, string> = {
   communication: 'Phone numbers, notifications and alert routing.',
   hours: "When you're open, and how Leadbridge behaves outside hours.",
   'ai-playbook': 'Define how AI communicates with customers. Timing, automation, follow-ups, stop rules, and notifications are configured in Automation settings.',
-  ai: 'Legacy editor for Global AI prompt and per-account FAQ. Both now also live inside AI Playbook.',
-  pricing: 'Legacy editor for the service pricing table. Now also lives inside AI Playbook → Pricing Guidance.',
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
   billing: 'Plan, payment method, and invoices.',
@@ -67,8 +57,6 @@ export default function SettingsPage() {
     case 'communication':   body = <SettingsCommunication />; break;
     case 'hours':           body = <SettingsHours />; break;
     case 'ai-playbook':     body = <SettingsAiPlaybook />; break;
-    case 'ai':              body = <SettingsAi />; break;
-    case 'pricing':         body = <SettingsPricing />; break;
     case 'team':            body = <SettingsTeam />; break;
     case 'accounts':        body = <SettingsAccounts />; break;
     case 'billing':         body = <SettingsBilling />; break;
