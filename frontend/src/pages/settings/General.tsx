@@ -59,15 +59,30 @@ export function SettingsGeneral() {
   }, [user, business]);
 
   // Re-hydrate website + metadata when the cached auth user updates (e.g. after
-  // an authApi.getProfile() refresh elsewhere). Only seed empty state — don't
-  // clobber local edits.
+  // an authApi.getProfile() refresh elsewhere). The URL input is user-typed so
+  // we only seed it when empty. websiteMetadata is API-derived (verify writes
+  // it), so we ALWAYS resync — that lets us pick up the newer playbookSeed
+  // shape on cache refresh, which drives the Apply-to-Playbook button enable.
   useEffect(() => {
     if (!website && user?.website) setWebsite(user.website);
-    if (!websiteMetadata && (user as any)?.websiteMetadataJson) {
-      setWebsiteMetadata((user as any).websiteMetadataJson);
-    }
+    const fresh = (user as any)?.websiteMetadataJson ?? null;
+    setWebsiteMetadata(fresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // Force-refresh the cached user once on mount. The Apply-to-Playbook button
+  // gates on `websiteMetadata.playbookSeed`, which only landed in the verify
+  // flow recently; users who verified earlier have a stale auth-store entry
+  // without `playbookSeed` and would see the button stuck disabled until
+  // their next login. One getProfile call closes that gap.
+  useEffect(() => {
+    if (!token) return;
+    authApi.getProfile().then((fresh: any) => {
+      const u = fresh?.user ?? fresh;
+      if (u?.id) setAuth(u, token);
+    }).catch(() => { /* non-fatal */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const verifyAndSaveWebsite = async () => {
     setVerifying(true);
