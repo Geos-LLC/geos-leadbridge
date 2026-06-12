@@ -386,25 +386,12 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               )}
             </FinetuneCard>
 
-            {/* Auto Reply Availability */}
-            <FinetuneCard
-              icon={Bot}
-              title="AI Auto Reply Availability"
-              subtitle="Choose when AI can reply automatically."
-            >
-              <RadioRow
-                label="Always (24/7)"
-                description="AI replies to leads at any time, day or night."
-                checked={opts.followUpAvailability === 'always'}
-                onSelect={() => setOpts(o => ({ ...o, followUpAvailability: 'always' }))}
-              />
-              <RadioRow
-                label="Outside of business hours"
-                description={`AI replies only outside your business hours window. (${businessHoursLabel})`}
-                checked={opts.followUpAvailability === 'active_hours'}
-                onSelect={() => setOpts(o => ({ ...o, followUpAvailability: 'active_hours' }))}
-              />
-            </FinetuneCard>
+            {/* Auto Reply Availability moved to AI Rules step — it's a
+                conversation-level rule about WHEN AI can reply, not a
+                timing knob about how follow-ups schedule. The save merge
+                here still keeps `followUpAvailability` flowing through so
+                a user revisiting the wizard's Automation step doesn't
+                wipe what they set on AI Rules. */}
           </div>
         )}
       </div>
@@ -508,31 +495,7 @@ function DelayPicker({
   );
 }
 
-function RadioRow({
-  label, description, checked, onSelect,
-}: { label: string; description?: string; checked: boolean; onSelect: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full text-left px-3 py-3 rounded-lg border-2 transition-colors ${
-        checked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200 bg-white hover:border-slate-300'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <span className={`w-4 h-4 rounded-full border-2 shrink-0 mt-0.5 flex items-center justify-center ${
-          checked ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
-        }`}>
-          {checked && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-        </span>
-        <div>
-          <div className="text-sm font-semibold text-slate-900">{label}</div>
-          {description && <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</div>}
-        </div>
-      </div>
-    </button>
-  );
-}
+// RadioRow moved to AIRulesStep with the Auto Reply Availability card.
 
 // Convert a 24h "HH:MM" string into a friendlier "9:00 AM" label. Used
 // only for the read-only business-hours line; the full hours picker
