@@ -139,26 +139,24 @@ export function SettingsAiPlaybook() {
         </SectionCard>
       )}
 
-      {/* === Cards rendered in Playbook V2.3 order — HOW only ===
-            All 8 HOW sections are now visible, since each one's default
-            prompt is still emitted at runtime by the backend renderer.
-            Sections whose WHEN/WHAT is now configured at the Goal level
-            (Qualification, Booking, Human Handoff) carry a
-            "Managed with Conversation Goals, still used by AI." badge so
-            users know where the trigger logic lives — but the HOW textarea
-            below is fully editable because the wording still takes effect.
+      {/* === Cards rendered in Playbook V2.4 order — simplified to 5 ===
+            Workflow-logic sections (Qualification, Booking, Human Handoff,
+            Phone Call) live in Automation → AI Conversation Goals; their
+            backend default prompts still emit at runtime so behavior is
+            unchanged. The Objection Handling + Follow-up Tone sections
+            are folded into Pricing Guidance + Communication Style at
+            content-application time (see playbook-seed-applier.ts) and
+            their UI cards are hidden so users see one canonical home for
+            each piece of behavior. No backend deletions — every backend
+            section key still exists; only the UI surface narrows.
 
-            Cards rendered (10 total):
+            Visible cards (5 total):
               1. Business Information
               2. FAQ
               3. Pricing Guidance (with embedded Pricing Table)
-              4. Qualification Guidance     (managed badge)
-              5. Booking Guidance           (managed badge)
-              6. Human Handoff Guidance     (managed badge)
-              7. Objection Handling
-              8. Follow-up Tone
-              9. AI Personality & Brand Voice
-             10. Global Custom Instructions */}
+              4. Communication Style & Brand Voice
+                 (backend key: personality_brand_voice)
+              5. Global Custom Instructions */}
 
       {accounts.length > 0 && <>
         {/* 1. Business Information */}
@@ -186,48 +184,9 @@ export function SettingsAiPlaybook() {
           isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
         />
 
-        {/* 4. Qualification Guidance — Managed by Conversation Goals */}
-        <HowSectionCard
-          section="qualification_guidance"
-          value={v2.qualification_guidance?.customInstructions ?? ''}
-          onChange={v => onSectionChange('qualification_guidance', v)}
-          managedByGoals
-        />
-
-        {/* 5. Booking Guidance — Managed by Conversation Goals */}
-        <HowSectionCard
-          section="booking_guidance"
-          value={v2.booking_guidance?.customInstructions ?? ''}
-          onChange={v => onSectionChange('booking_guidance', v)}
-          managedByGoals
-          isSuggested={!!v2.booking_guidance?.suggestedFromWebsite}
-        />
-
-        {/* 6. Human Handoff Guidance — Managed by Conversation Goals */}
-        <HowSectionCard
-          section="human_handoff_guidance"
-          value={v2.human_handoff_guidance?.customInstructions ?? ''}
-          onChange={v => onSectionChange('human_handoff_guidance', v)}
-          managedByGoals
-          isSuggested={!!v2.human_handoff_guidance?.suggestedFromWebsite}
-        />
-
-        {/* 7. Objection Handling */}
-        <HowSectionCard
-          section="objection_handling"
-          value={v2.objection_handling?.customInstructions ?? ''}
-          onChange={v => onSectionChange('objection_handling', v)}
-          isSuggested={!!v2.objection_handling?.suggestedFromWebsite}
-        />
-
-        {/* 8. Follow-up Tone */}
-        <HowSectionCard
-          section="followup_tone"
-          value={v2.followup_tone?.customInstructions ?? ''}
-          onChange={v => onSectionChange('followup_tone', v)}
-        />
-
-        {/* 9. AI Personality & Brand Voice */}
+        {/* 4. Communication Style & Brand Voice
+              (backend key still personality_brand_voice — see
+              frontend/src/lib/playbook-renderer.ts label mapping). */}
         <HowSectionCard
           section="personality_brand_voice"
           value={v2.personality_brand_voice?.customInstructions ?? ''}
@@ -235,7 +194,7 @@ export function SettingsAiPlaybook() {
           isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
         />
 
-        {/* 10. Global Custom Instructions — surfaces User.globalAiPrompt */}
+        {/* 5. Global Custom Instructions — surfaces User.globalAiPrompt */}
         <GlobalCustomInstructionsCard />
       </>}
 

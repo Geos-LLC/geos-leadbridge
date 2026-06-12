@@ -34,36 +34,40 @@ export function ApplyToPlaybookButton({ hasSeed, tone = 'wizard' }: Props) {
     if (!hasSeed || applying) return;
     setApplying(true);
     try {
-      // fill_empty is the only mode we expose from this button — protects
-      // any user-typed text already in the Playbook. Replace-mode lives
-      // only inside the AI Playbook page itself if we ever need it.
+      // V2.4 apply is always additive line-level on the backend — the
+      // mode parameter is preserved in the API for back-compat but the
+      // server ignores it. Existing custom instructions are never erased;
+      // new fact-lines are appended only if not already present.
       const res = await usersApi.applyPlaybookSeed('fill_empty');
       if (!res.success) {
         notify.warning('Could not apply', res.warning || 'Nothing to apply.');
         return;
       }
-      if (res.filled === 0 && res.skipped === 0) {
+      // Tolerate either response shape — line-level (new) or section-level
+      // (legacy) — so a stale frontend never crashes on a freshly-deployed
+      // backend or vice versa. The new fields are linesAdded /
+      // linesDuplicate / sectionsTouched; the old were filled / skipped.
+      const r = res as any;
+      const linesAdded: number   = typeof r.linesAdded   === 'number' ? r.linesAdded   : (r.filled ?? 0);
+      const linesDuplicate: number = typeof r.linesDuplicate === 'number' ? r.linesDuplicate : 0;
+
+      if (linesAdded === 0) {
         notify.info(
-          'Nothing to apply',
-          'No supported sections were extracted from the site yet.',
+          'AI Playbook already up to date',
+          linesDuplicate > 0
+            ? 'AI Playbook already includes this website information.'
+            : 'No supported sections were extracted from the site yet.',
+          4000,
         );
         return;
       }
-      const filledMsg = res.filled === 0
-        ? 'No empty sections to fill.'
-        : `Applied website information to ${res.filled} AI Playbook section${res.filled === 1 ? '' : 's'}.`;
-      const reviewMsg = res.filled > 0
-        ? ' Review and edit the suggestions below.'
-        : '';
       notify.success(
         'Applied to AI Playbook',
-        filledMsg + reviewMsg,
+        'Website information applied to AI Playbook. Review AI Playbook below.',
         5000,
       );
-      // Route the user to the Playbook so they can see the badges
-      // immediately. The page reads `suggestedFromWebsite` per section
-      // and renders a "Suggested from website" pill on each one we
-      // just touched.
+      // Route to the Playbook so the "Suggested from website" badges are
+      // immediately visible.
       navigate('/settings/ai-playbook');
     } catch (e: any) {
       notify.error(

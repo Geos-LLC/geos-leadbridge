@@ -43,7 +43,10 @@ export const PLAYBOOK_SECTION_UI_LABELS: Record<PlaybookSectionKey, string> = {
   objection_handling:     'Objection Handling',
   human_handoff_guidance: 'Human Handoff Guidance',
   followup_tone:          'Follow-up Tone',
-  personality_brand_voice: 'AI Personality & Brand Voice',
+  // Backend section key stays `personality_brand_voice` (the prompt block
+  // header is still 'AI PERSONALITY & BRAND VOICE'). Only the user-facing
+  // UI label changes to align with the V2.4 simplification.
+  personality_brand_voice: 'Communication Style & Brand Voice',
 };
 
 /** One-line description shown under each card title in the UI. */

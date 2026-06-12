@@ -53,10 +53,20 @@ export const SUPPORTED_SECTIONS: readonly SupportedPlaybookSectionKey[] = [
  * We err on the side of "non-price" so generic trust statements
  * ("Fully insured", "Same-day service") don't bloat the Pricing card.
  */
-const PRICE_KEYWORDS = /\b(price|pricing|cost|costs|rate|rates|fee|fees|charge|charges|discount|discounts|value|affordable|budget|quote|estimate|guarantee|guaranteed|money[- ]?back|satisfaction)\b/i;
+const PRICE_KEYWORDS = /\b(price|prices|pricing|priced|cost|costs|costly|rate|rates|fee|fees|charge|charges|discount|discounts|discounted|value|affordable|budget|cheap|expensive|quote|quotes|estimate|estimates|guarantee|guaranteed|money[- ]?back|satisfaction|deal|deals)\b/i;
 
 function isPriceRelated(trustSignal: string): boolean {
   return PRICE_KEYWORDS.test(trustSignal);
+}
+
+/**
+ * Build a "Label: Value." line, but strip trailing punctuation from the
+ * value first so we don't emit "Value..." when the source ends with a
+ * period. The site's extracted text varies; the prompt should look clean.
+ */
+function factLine(label: string, value: string): string {
+  const cleaned = value.trim().replace(/[.;!?]+$/, '');
+  return `${label}: ${cleaned}.`;
 }
 
 /**
@@ -85,19 +95,19 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
   // booking") is intentionally NOT generated.
   const b = seed.businessInformation;
   if (b) {
-    if (b.serviceArea)     out.business_information.push(`Service area: ${b.serviceArea}.`);
-    if (b.yearsInBusiness) out.business_information.push(`Years in business: ${b.yearsInBusiness}.`);
-    if (b.teamSize)        out.business_information.push(`Team: ${b.teamSize}.`);
-    if (b.ownerName)       out.business_information.push(`Owner: ${b.ownerName}.`);
-    if (b.insurance)       out.business_information.push(`Insurance: ${b.insurance}.`);
-    if (b.bonding)         out.business_information.push(`Bonding: ${b.bonding}.`);
-    if (b.licensing)       out.business_information.push(`Licensing: ${b.licensing}.`);
-    if (b.guarantees)      out.business_information.push(`Guarantee: ${b.guarantees}.`);
-    if (b.ecoFriendly)     out.business_information.push(`Products / eco: ${b.ecoFriendly}.`);
-    if (b.suppliesPolicy)  out.business_information.push(`Supplies: ${b.suppliesPolicy}.`);
-    if (b.petsPolicy)      out.business_information.push(`Pets: ${b.petsPolicy}.`);
-    if (b.paymentMethods?.length)  out.business_information.push(`Payment methods: ${b.paymentMethods.join(', ')}.`);
-    if (b.officeLocations?.length) out.business_information.push(`Office locations: ${b.officeLocations.join('; ')}.`);
+    if (b.serviceArea)     out.business_information.push(factLine('Service area',     b.serviceArea));
+    if (b.yearsInBusiness) out.business_information.push(factLine('Years in business', b.yearsInBusiness));
+    if (b.teamSize)        out.business_information.push(factLine('Team',             b.teamSize));
+    if (b.ownerName)       out.business_information.push(factLine('Owner',            b.ownerName));
+    if (b.insurance)       out.business_information.push(factLine('Insurance',        b.insurance));
+    if (b.bonding)         out.business_information.push(factLine('Bonding',          b.bonding));
+    if (b.licensing)       out.business_information.push(factLine('Licensing',        b.licensing));
+    if (b.guarantees)      out.business_information.push(factLine('Guarantee',        b.guarantees));
+    if (b.ecoFriendly)     out.business_information.push(factLine('Products / eco',   b.ecoFriendly));
+    if (b.suppliesPolicy)  out.business_information.push(factLine('Supplies',         b.suppliesPolicy));
+    if (b.petsPolicy)      out.business_information.push(factLine('Pets',             b.petsPolicy));
+    if (b.paymentMethods?.length)  out.business_information.push(factLine('Payment methods',   b.paymentMethods.join(', ')));
+    if (b.officeLocations?.length) out.business_information.push(factLine('Office locations', b.officeLocations.join('; ')));
   }
 
   // Absorb contact facts from the (no-longer-visible) Human Handoff section.
@@ -105,9 +115,9 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
   // business, not how the AI should hand off.
   const h = seed.humanHandoffGuidance;
   if (h) {
-    if (h.phones?.length)    out.business_information.push(`Phone: ${h.phones.join(', ')}.`);
-    if (h.emails?.length)    out.business_information.push(`Email: ${h.emails.join(', ')}.`);
-    if (h.addresses?.length) out.business_information.push(`Address: ${h.addresses.join('; ')}.`);
+    if (h.phones?.length)    out.business_information.push(factLine('Phone',   h.phones.join(', ')));
+    if (h.emails?.length)    out.business_information.push(factLine('Email',   h.emails.join(', ')));
+    if (h.addresses?.length) out.business_information.push(factLine('Address', h.addresses.join('; ')));
   }
 
   // Absorb booking FACTS from the (no-longer-visible) Booking Guidance
@@ -116,21 +126,21 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
   // booking …". The latter is automation logic, not Playbook content.
   const k = seed.bookingGuidance;
   if (k) {
-    if (k.bookingChannels?.length) out.business_information.push(`Booking channels: ${k.bookingChannels.join(', ')}.`);
-    if (k.leadTime)                out.business_information.push(`Lead time: ${k.leadTime}.`);
-    if (k.schedulingNotes)         out.business_information.push(`Scheduling notes: ${k.schedulingNotes}.`);
+    if (k.bookingChannels?.length) out.business_information.push(factLine('Booking channels', k.bookingChannels.join(', ')));
+    if (k.leadTime)                out.business_information.push(factLine('Lead time',        k.leadTime));
+    if (k.schedulingNotes)         out.business_information.push(factLine('Scheduling notes', k.schedulingNotes));
   }
 
   // ─── PRICING GUIDANCE ─────────────────────────────────────────────────
   const p = seed.pricingGuidance;
   if (p) {
-    if (p.pricingModel) out.pricing_guidance.push(`Pricing model: ${p.pricingModel}.`);
+    if (p.pricingModel) out.pricing_guidance.push(factLine('Pricing model', p.pricingModel));
     if (p.startingPrices?.length) {
       const priced = p.startingPrices.map(sp => `${sp.service} ${sp.price}`).join('; ');
-      out.pricing_guidance.push(`Starting prices: ${priced}.`);
+      out.pricing_guidance.push(factLine('Starting prices', priced));
     }
-    if (p.whatsIncluded) out.pricing_guidance.push(`What's included: ${p.whatsIncluded}.`);
-    if (p.discounts)     out.pricing_guidance.push(`Discounts: ${p.discounts}.`);
+    if (p.whatsIncluded) out.pricing_guidance.push(factLine("What's included", p.whatsIncluded));
+    if (p.discounts)     out.pricing_guidance.push(factLine('Discounts',       p.discounts));
   }
 
   // ─── COMMUNICATION STYLE & BRAND VOICE ────────────────────────────────
@@ -157,10 +167,13 @@ export function seedToSectionLines(seed: PlaybookSeed): SectionLines {
       else generic.push(cleaned);
     }
     if (priceRelated.length > 0) {
-      out.pricing_guidance.push(`Value / trust signals: ${priceRelated.join('; ')}.`);
+      out.pricing_guidance.push(factLine('Value / trust signals', priceRelated.join('; ')));
     }
     if (generic.length > 0) {
-      out.personality_brand_voice.push(`Trust signals to surface naturally when customers hesitate: ${generic.join('; ')}.`);
+      out.personality_brand_voice.push(factLine(
+        'Trust signals to surface naturally when customers hesitate',
+        generic.join('; '),
+      ));
     }
   }
 
