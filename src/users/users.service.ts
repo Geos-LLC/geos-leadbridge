@@ -243,8 +243,8 @@ export class UsersService {
         await this.platformService.syncAccountPhonesToThumbtack(userId, businessId);
       } catch (err: any) {
         // Profile save must not break if TT registration fails — log and move on.
-        console.error(
-          `[UsersService] TT associate-phone sync failed user=${userId} business=${businessId}: ${err?.message ?? err}`,
+        this.logger.error(
+          `[tt.associate-phone] profile-save sync-failed userId=${userId} businessId=${businessId} message="${err?.message ?? err}"`,
         );
       }
     }
