@@ -157,10 +157,9 @@ function App() {
                   /automation redirects to /automation/respond. The legacy single-page
                   Services component is still reachable at /automation-classic. */}
               <Route path="/automation" element={<Navigate to="/automation/respond" replace />} />
-              <Route path="/automation/respond"  element={<AutomationPage />} />
-              <Route path="/automation/engage"   element={<AutomationPage />} />
-              <Route path="/automation/playbook" element={<AutomationPage />} />
-              <Route path="/automation/convert"  element={<AutomationPage />} />
+              <Route path="/automation/respond" element={<AutomationPage />} />
+              <Route path="/automation/engage"  element={<AutomationPage />} />
+              <Route path="/automation/convert" element={<AutomationPage />} />
               <Route path="/automation-classic" element={<Services />} />
               <Route path="/templates" element={<MessageSettings />} />
               <Route path="/insights" element={<Analytics />} />

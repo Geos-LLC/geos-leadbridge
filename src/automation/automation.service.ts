@@ -1910,6 +1910,7 @@ export class AutomationService implements OnModuleInit {
                 followUpActiveHoursStart: true,
                 followUpActiveHoursEnd: true,
                 followUpTimezone: true,
+                aiConversationMode: true,
               },
             })
           : null;
@@ -2041,6 +2042,18 @@ export class AutomationService implements OnModuleInit {
         const { buildFaqBlock, parseAccountFaq } = require('../ai/faq-context');
         const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson)) || undefined;
 
+        // PLAYBOOK — behavior summary (generated from settings) + user
+        // instructions (followUpSettingsJson.aiPlaybookInstructions). Pure
+        // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
+        // No automation-derived "current behavior" bullets in V2; Playbook is
+        // HOW only. See src/ai/playbook-renderer.ts.
+        const { renderPlaybookBlock } = require('../ai/playbook-renderer');
+        const playbookBlock: string = account
+          ? renderPlaybookBlock({
+              followUpSettingsJson: account.followUpSettingsJson ?? null,
+            })
+          : '';
+
         // Generate reply via OpenAI. Pass current time + timezone so the model
         // knows whether previously offered slots have passed and how big the
         // gaps between messages are.
@@ -2058,6 +2071,7 @@ export class AutomationService implements OnModuleInit {
           businessBlock,
           pricingBlock,
           faqBlock,
+          playbookBlock: playbookBlock || undefined,
           conversationHistory,
           leadDetails,
           currentTime: new Date(),

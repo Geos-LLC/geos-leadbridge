@@ -87,6 +87,7 @@ export interface Lead {
   externalRequestId: string;
   customerName: string;
   customerPhone: string | null;
+  customerPhoneSubstitute?: string | null;
   customerEmail: string | null;
   message: string;
   budget?: number;

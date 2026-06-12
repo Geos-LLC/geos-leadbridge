@@ -10,6 +10,12 @@ type TierId = 'STARTER' | 'PRO' | 'ENTERPRISE';
 
 interface Tier {
   label: string;
+  /**
+   * Short name used inside button copy ("Upgrade to <shortLabel>"). Lets the
+   * decorative header label keep punctuation/icons that read fine in big type
+   * but look awkward inside a button. Falls back to `label` when omitted.
+   */
+  shortLabel?: string;
   id: TierId;
   price: number;
   tagline: string;
@@ -56,6 +62,7 @@ const tiers: Tier[] = [
   },
   {
     label: 'Convert · AI',
+    shortLabel: 'Convert',
     id: 'ENTERPRISE',
     price: 139,
     tagline: 'Let AI handle conversations and convert leads',
@@ -234,11 +241,11 @@ export default function Pricing() {
                 ) : hasActiveSubscription && currentTier ? (
                   // Has an existing subscription — upgrade / downgrade / switch.
                   TIER_RANK[tier.id] > TIER_RANK[currentTier]
-                    ? `Upgrade to ${tier.label}`
-                    : `Switch to ${tier.label}`
+                    ? `Upgrade to ${tier.shortLabel ?? tier.label}`
+                    : `Switch to ${tier.shortLabel ?? tier.label}`
                 ) : trialUsed ? (
                   // Trial already consumed; this is a paid subscription.
-                  `Subscribe to ${tier.label}`
+                  `Subscribe to ${tier.shortLabel ?? tier.label}`
                 ) : (
                   'Start Free Trial'
                 )}

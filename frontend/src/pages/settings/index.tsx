@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -12,13 +12,15 @@ import { SettingsTeam } from './Team';
 import { SettingsAccounts } from './Accounts';
 import { SettingsBilling } from './Billing';
 import { SettingsPartnerNetwork } from './PartnerNetwork';
+import { SettingsAiPlaybook } from './AiPlaybook';
 
-type TabKey = 'general' | 'communication' | 'hours' | 'team' | 'accounts' | 'billing' | 'partner-network';
+type TabKey = 'general' | 'communication' | 'hours' | 'ai-playbook' | 'team' | 'accounts' | 'billing' | 'partner-network';
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
   { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
+  { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'How AI communicates' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
   { key: 'billing',         label: 'Billing',           icon: CreditCard,    sublabel: 'Plan & invoices' },
@@ -31,6 +33,7 @@ const SUBTITLES: Record<TabKey, string> = {
   general: 'Your business profile and basic preferences.',
   communication: 'Phone numbers, notifications and alert routing.',
   hours: "When you're open, and how Leadbridge behaves outside hours.",
+  'ai-playbook': 'Define how AI communicates with customers. Timing, automation, follow-ups, stop rules, and notifications are configured in Automation settings.',
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
   billing: 'Plan, payment method, and invoices.',
@@ -53,6 +56,7 @@ export default function SettingsPage() {
     case 'general':         body = <SettingsGeneral />; break;
     case 'communication':   body = <SettingsCommunication />; break;
     case 'hours':           body = <SettingsHours />; break;
+    case 'ai-playbook':     body = <SettingsAiPlaybook />; break;
     case 'team':            body = <SettingsTeam />; break;
     case 'accounts':        body = <SettingsAccounts />; break;
     case 'billing':         body = <SettingsBilling />; break;

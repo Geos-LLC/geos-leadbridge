@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
-  RefreshCw, Clock, UserX, Info,
+  RefreshCw, Clock, UserX, Info, Power,
   Scale, CircleDollarSign, UserCheck, Calendar, Phone,
 } from 'lucide-react';
 import {
@@ -13,6 +13,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
 import { formatQuietHoursSummary } from '../../lib/businessHours';
 
 // Strategy meta — mirrors the picker on AutomationConversation. Used to
@@ -33,6 +34,9 @@ const isStrategyKey = (v: unknown): v is StrategyKey =>
 
 // Module-level cache for instant tab switching + delay-free mixed detection.
 type CachedFollowups = {
+  // Master ON/OFF — derived from followUpMode. Off when followUpMode is
+  // null or the literal 'off'. ON snaps to auto_send (+ AI if plan allows).
+  followUpsOn: boolean;
   quietOn: boolean;
   deliveryMode: 'suggest' | 'active';
   messageMode: 'template' | 'ai';
@@ -69,6 +73,19 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
 
+  // Plan check — Convert tier (or active trial) unlocks AI message mode.
+  // Toggling master ON snaps to AI when allowed, otherwise stays on templates.
+  const user = useAuthStore(s => s.user);
+  const canUseAi =
+    !!user?.trialActive ||
+    user?.subscriptionTier === 'ENTERPRISE';
+
+  // Master ON/OFF — single source of truth for follow-ups being active.
+  // DB column followUpMode has three states: 'off' | 'suggest' | 'auto_send'.
+  // The new UI collapses 'suggest' + 'auto_send' under ON and adds an
+  // explicit OFF state so users can disable follow-ups entirely without
+  // visiting the legacy Services page.
+  const [followUpsOn, setFollowUpsOn] = useState(false);
   // 'suggest' UI mode → API 'suggest'; 'active' UI mode → API 'auto_send'.
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
@@ -104,6 +121,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // state to every account, wiping out their per-account values for any
   // setting the user never touched on this visit.
   type FollowupsField =
+    | 'followUpsOn'
     | 'quietOn' | 'deliveryMode' | 'messageMode'
     | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
     | 'resumeDelay' | 'deferralDelay' | 'hiredDelay';
@@ -128,6 +146,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
 
   const parseSettings = (s: any, accountHoursQuiet?: boolean): CachedFollowups => ({
+    // Master toggle is ON whenever followUpMode is a non-off value
+    // ('suggest' or 'auto_send'). Null/missing maps to OFF (the default
+    // for new accounts and the legacy column's NULL state).
+    followUpsOn: s?.followUpMode != null && s?.followUpMode !== 'off',
     quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
     deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
     messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
@@ -160,6 +182,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       const cached = accounts.map(a => followupsCache.get(a.id)).filter(Boolean) as CachedFollowups[];
       if (cached.length > 0 && !dirtyRef.current) {
         const first = cached[0];
+        setFollowUpsOn(first.followUpsOn);
         setQuietOn(first.quietOn);
         setDeliveryMode(first.deliveryMode);
         setMessageMode(first.messageMode);
@@ -174,6 +197,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     } else {
       const cached = followupsCache.get(accountId);
       if (cached && !dirtyRef.current) {
+        setFollowUpsOn(cached.followUpsOn);
         setQuietOn(cached.quietOn);
         setDeliveryMode(cached.deliveryMode);
         setMessageMode(cached.messageMode);
@@ -208,6 +232,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         if (!dirtyRef.current && accounts.length > 0) {
           const first = followupsCache.get(accounts[0].id);
           if (first) {
+            setFollowUpsOn(first.followUpsOn);
             setQuietOn(first.quietOn);
             setDeliveryMode(first.deliveryMode);
             setMessageMode(first.messageMode);
@@ -231,6 +256,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         const parsed = parseSettings(res?.settings, hours?.followUpsApplyQuietHours);
         followupsCache.set(accountId, parsed);
         if (!dirtyRef.current) {
+          setFollowUpsOn(parsed.followUpsOn);
           setQuietOn(parsed.quietOn);
           setDeliveryMode(parsed.deliveryMode);
           setMessageMode(parsed.messageMode);
@@ -257,6 +283,18 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     if (fields.size === 0) return;
     // wizard payload — only include keys for fields actually touched.
     const wizardPayload: Record<string, unknown> = {};
+    // Master toggle write order matters: when followUpsOn was touched in the
+    // SAME save as deliveryMode, the deliveryMode write wins (covers the
+    // implicit 'auto_send' snap on a fresh ON). When followUpsOn is the only
+    // touched master field, write 'off' or 'auto_send' (+ AI if allowed).
+    if (fields.has('followUpsOn')) {
+      if (followUpsOn) {
+        wizardPayload.mode = 'auto_send';
+        if (canUseAi) wizardPayload.replyType = 'ai';
+      } else {
+        wizardPayload.mode = 'off';
+      }
+    }
     if (fields.has('deliveryMode'))     wizardPayload.mode      = deliveryMode === 'active' ? 'auto_send' : 'suggest';
     if (fields.has('messageMode'))      wizardPayload.replyType = messageMode;
     if (fields.has('activeHoursStart')) wizardPayload.activeHoursStart = activeHoursStart;
@@ -279,15 +317,26 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       const prev = followupsCache.get(a.id);
       if (!prev) {
         followupsCache.set(a.id, {
-          quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
+          followUpsOn, quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
           resumeDelay, deferralDelay, hiredDelay, followUpStrategy,
         });
         return;
       }
       followupsCache.set(a.id, {
+        followUpsOn:      fields.has('followUpsOn')      ? followUpsOn      : prev.followUpsOn,
         quietOn:          fields.has('quietOn')          ? quietOn          : prev.quietOn,
-        deliveryMode:     fields.has('deliveryMode')     ? deliveryMode     : prev.deliveryMode,
-        messageMode:      fields.has('messageMode')      ? messageMode      : prev.messageMode,
+        // When the master toggle flips ON in this save, mirror the
+        // implicit deliveryMode='active' + (if AI plan) messageMode='ai'
+        // into the cache so a follow-up save in the same session knows
+        // the new shape without round-tripping the API.
+        deliveryMode:
+          fields.has('deliveryMode') ? deliveryMode
+            : fields.has('followUpsOn') && followUpsOn ? 'active'
+              : prev.deliveryMode,
+        messageMode:
+          fields.has('messageMode') ? messageMode
+            : fields.has('followUpsOn') && followUpsOn && canUseAi ? 'ai'
+              : prev.messageMode,
         activeHoursStart: fields.has('activeHoursStart') ? activeHoursStart : prev.activeHoursStart,
         activeHoursEnd:   fields.has('activeHoursEnd')   ? activeHoursEnd   : prev.activeHoursEnd,
         timezone:         fields.has('timezone')         ? timezone         : prev.timezone,
@@ -344,6 +393,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached[key])}`).join('\n');
     return { mixed: true, tooltip };
   }
+  const mixedMaster   = getMixedF('followUpsOn', v => v ? 'On' : 'Off');
   const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
   const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
   const mixedQuiet    = getMixedF('quietOn', v => v ? 'On' : 'Off');
@@ -361,10 +411,22 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay]);
+  }, [followUpsOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay]);
 
   // markDirty-wrapped setters used by JSX. Each setter adds its specific
   // field name so the save only writes the keys the user changed.
+  const onFollowUpsOn = (v: boolean) => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('followUpsOn');
+    // Snap downstream UI fields to the implied state so the cards render
+    // consistently the moment the master toggle flips. The save payload
+    // mirrors the same snap server-side.
+    if (v) {
+      setDeliveryMode('active');
+      if (canUseAi) setMessageMode('ai');
+    }
+    setFollowUpsOn(v);
+  };
   const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; dirtyFieldsRef.current.add('deliveryMode');  setDeliveryMode(v); };
   const onMessageMode   = (v: 'template' | 'ai')    => { dirtyRef.current = true; dirtyFieldsRef.current.add('messageMode');   setMessageMode(v); };
   const onQuietOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('quietOn');       setQuietOn(v); };
@@ -385,6 +447,26 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       {!error && saving && <StatusPill status="saving" />}
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
+
+      {/* Master Follow-ups toggle — single source of truth for whether
+          follow-ups run at all. OFF writes followUpMode='off'; ON snaps to
+          'auto_send' (and AI message mode when the plan allows). Other
+          cards below are hidden until the master is ON, matching the
+          legacy Services page behavior. */}
+      <SettingCard
+        icon={Power}
+        iconTone="violet"
+        title="Follow-ups"
+        subtitle={followUpsOn
+          ? 'Automatically follow up with leads who stop responding.'
+          : 'Turn on to start following up with leads who stop responding.'}
+        enabled={followUpsOn}
+        onToggle={onFollowUpsOn}
+        mixed={mixedMaster.mixed}
+        mixedTooltip={mixedMaster.tooltip}
+      />
+
+      {!followUpsOn ? null : <>
 
       {/* Quiet hours */}
       <SettingCard
@@ -598,6 +680,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         icon={Info}
         body={<>Follow-ups respect quiet hours and business hours. You can edit those in <Link to="/settings?tab=hours" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings</Link>.</>}
       />
+
+      </>}
     </div>
   );
 }

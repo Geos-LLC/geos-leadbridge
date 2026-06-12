@@ -52,6 +52,14 @@ export interface AiReplyContext {
   faqBlock?: string;
   /** REFERENCE — urgency context (customer urgency × business capability). Optional. */
   urgencyBlock?: string;
+  /**
+   * PLAYBOOK — situational behavior summary (generated from settings) +
+   * user-editable instructions per category. Pre-formatted block already
+   * including the `=== PLAYBOOK ===` header. Optional. Built by
+   * src/ai/playbook-renderer.ts:renderPlaybookBlock. Empty string when the
+   * user has no instructions AND no toggles produce bullets.
+   */
+  playbookBlock?: string;
   conversationHistory?: ConversationMessage[];
   leadDetails?: Record<string, string>;
   /** "Now" — defaults to new Date() at generation time. */
@@ -117,6 +125,14 @@ export class AiService {
     sections.push(`=== GLOBAL (guardrails — apply to every reply) ===\n${globalPrompt}`);
     if (strategyPrompt) {
       sections.push(`=== PRIMARY INSTRUCTION (this overrides GLOBAL when they conflict) ===\n${strategyPrompt}`);
+    }
+    // PLAYBOOK — situational behavior summary + user instructions. Sits
+    // between PRIMARY (goal) and REFERENCE (lookup material): closer to the
+    // goal because Playbook rules are conditional on situation, but separate
+    // because it's user-authored content. The block already includes its
+    // `=== PLAYBOOK ===` header — see playbook-renderer.ts.
+    if (ctx.playbookBlock?.trim()) {
+      sections.push(ctx.playbookBlock.trim());
     }
     if (referenceBlocks.length > 0) {
       sections.push(referenceBlocks.join('\n\n'));

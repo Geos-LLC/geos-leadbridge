@@ -11,6 +11,7 @@ import { SigcoreService } from '../sigcore/sigcore.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
+import { TrialType } from '../../generated/prisma';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
 
@@ -63,13 +64,19 @@ export class AuthService {
       ? this.normalizePhoneToE164(businessPhone)
       : undefined;
 
-    // Create user with trial
+    // Create user with trial. trialType=TIME_BASED gives the user immediate
+    // gate-passing for the 14-day window — needed for phone provisioning and
+    // other access-gated actions during onboarding, before they connect any
+    // platform. onPlatformConnected later upgrades the type to LEAD_BASED /
+    // HYBRID based on the actual platform mix (upgrade-only — won't shorten
+    // the window or reduce the lead allowance).
     const user = await this.prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         name,
         businessPhone: normalizedBusinessPhone || null,
+        trialType: TrialType.TIME_BASED,
         trialStartDate: now,
         trialEndDate: trialEndDate,
         trialUsed: false,
