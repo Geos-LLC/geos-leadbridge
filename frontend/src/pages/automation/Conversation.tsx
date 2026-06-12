@@ -655,6 +655,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
+  const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
 
   // Master toggle handler — writes to User.aiConversationEnabled via the
   // per-account saveSettings endpoint (server-side it's user-scope). On
@@ -796,35 +797,85 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         />
       )}
 
-      {/* ───── 4. Auto Reply Availability ─────────────────────────────────── */}
-      <SettingCard
-        icon={Clock}
-        iconTone="violet"
-        title="Auto Reply Availability"
-        subtitle="Choose when AI can reply automatically."
-        headerRight={
-          <div style={{ display: 'flex', gap: 12, flex: 1, marginLeft: 24, marginTop: -4 }}>
-            <OptionCard
-              compact
-              selected={availability === 'always'}
-              onClick={() => onAvailability('always')}
-              title="Always (24/7)"
-              body="AI replies to leads at any time, day or night."
-              mixed={mixedAvailability.mixed && availability === 'always'}
-              mixedTooltip={mixedAvailability.tooltip}
-            />
-            <OptionCard
-              compact
-              selected={availability === 'hours'}
-              onClick={() => onAvailability('hours')}
-              title="Outside of business hours"
-              body={<>AI replies only outside your business hours window.<br /><span style={{ color: 'var(--lb-ink-3)' }}>Business Hours: {bizHoursSummary}</span></>}
-              mixed={mixedAvailability.mixed && availability === 'hours'}
-              mixedTooltip={mixedAvailability.tooltip}
-            />
+      {/* ───── 4. AI Response Mode ──────────────────────────────────────────
+            Merges the old Delivery Mode + Auto Reply Availability concepts
+            into one "when is AI allowed to respond" picker. This is
+            AI-Conversation specific — Follow-ups keep their own quiet
+            hours + delivery picker because business-initiated re-engagement
+            has different customer expectations than mid-conversation reply.
+            See spec section 3.
+
+            Internal mapping (no backend change):
+              "Review before sending" → DISABLED (no backend support today —
+                see TODO below).
+              "Assist when unavailable" → availability='hours'
+                (followUpAvailability='active_hours' on save).
+              "Full autopilot"        → availability='always'
+                (followUpAvailability='always' on save).
+
+            TODO(backend): "Review before sending" needs an AI-Conversation
+            suggestion path equivalent to FollowUpEnrollment.status='suggested'
+            — drafts a reply, parks it as a pending suggestion, alerts the
+            operator, and only sends after approval. Until that's wired, the
+            tile is rendered disabled with a "Coming soon" badge per the
+            spec's "Do NOT add fake UI" rule. */}
+      <SectionCard padding="22px 24px 24px">
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
+          <IconTile icon={Clock} tone="violet" size="lg" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
+              AI Response Mode
+            </div>
+            <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+              When AI is allowed to respond automatically to customer messages.
+            </div>
           </div>
-        }
-      />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <ResponseModeOption
+            selected={false}
+            disabled={true}
+            title="Review before sending"
+            body="AI drafts replies for approval before they are sent."
+            badge="Coming soon"
+          />
+          <ResponseModeOption
+            selected={availability === 'hours'}
+            onClick={() => onAvailability('hours')}
+            title="Assist when unavailable"
+            body="AI responds automatically outside your business hours."
+            mixed={mixedAvailability.mixed && availability === 'hours'}
+            mixedTooltip={mixedAvailability.tooltip}
+          />
+          <ResponseModeOption
+            selected={availability === 'always'}
+            onClick={() => onAvailability('always')}
+            title="Full autopilot"
+            body="AI responds automatically at any time."
+            mixed={mixedAvailability.mixed && availability === 'always'}
+            mixedTooltip={mixedAvailability.tooltip}
+          />
+        </div>
+
+        <div style={{
+          marginTop: 16,
+          padding: '12px 14px',
+          background: '#f8fafc',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
+              <strong style={{ color: 'var(--lb-ink-1)' }}>Business Hours:</strong> {bizHoursSummary}
+            </div>
+            <ActionLink external onClick={goEditHours}>Edit</ActionLink>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6, lineHeight: 1.5 }}>
+            Business hours are used when AI Response Mode is set to <em>Assist when unavailable</em>.
+          </div>
+        </div>
+      </SectionCard>
 
       {/* ───── 5. How it works ────────────────────────────────────────────── */}
       <SectionCard padding="20px 24px">
@@ -854,6 +905,77 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
       </UpgradeOverlay>
     </div>
+  );
+}
+
+/**
+ * Vertical-stack option tile used by the AI Response Mode card. Rendered as
+ * a button row with a radio indicator on the left. When `disabled` is true,
+ * the tile cannot be clicked and renders muted with the supplied `badge`
+ * (used today for the "Coming soon" Review-before-sending mode while
+ * backend wiring catches up). When `mixed` is true (All-Accounts cross-
+ * account disagreement), the tile draws the same amber border the other
+ * mixed-state controls on this page use.
+ */
+function ResponseModeOption({
+  selected, onClick, disabled, title, body, badge, mixed, mixedTooltip,
+}: {
+  selected: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  title: string;
+  body: string;
+  badge?: string;
+  mixed?: boolean;
+  mixedTooltip?: string;
+}) {
+  const interactive = !disabled && !!onClick;
+  return (
+    <button
+      type="button"
+      onClick={interactive ? onClick : undefined}
+      disabled={disabled}
+      title={mixed ? mixedTooltip : undefined}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 12,
+        width: '100%',
+        padding: '12px 14px',
+        textAlign: 'left',
+        background: disabled ? '#f8fafc' : mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
+        border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        borderRadius: 10,
+        cursor: interactive ? 'pointer' : 'default',
+        fontFamily: 'inherit',
+        opacity: disabled ? 0.7 : 1,
+        transition: 'border-color 120ms, background 120ms',
+        boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
+      }}
+    >
+      <div style={{ paddingTop: 2 }}>
+        <Radio selected={selected} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</span>
+          {badge && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.05,
+              padding: '2px 7px', borderRadius: 999,
+              background: '#fef3c7', color: '#92400e',
+              textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+            }}>
+              {badge}
+            </span>
+          )}
+          {mixed && !disabled && (
+            <span style={{ display: 'inline-flex', color: '#d97706' }}>
+              <AlertTriangle size={12} />
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>{body}</div>
+      </div>
+    </button>
   );
 }
 
