@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
@@ -55,6 +56,16 @@ const SECTION_ICONS: Record<PlaybookSectionKey, LucideIcon> = {
 
 export function SettingsAiPlaybook() {
   const accounts = useAppStore(s => s.savedAccounts);
+
+  // Advanced/legacy mode (?advanced=1 or ?debug=1) — exposes the 5 legacy
+  // sections (Qualification, Booking, Handoff, Objection Handling,
+  // Follow-up Tone) that still emit at runtime via the backend renderer
+  // but are no longer part of the normal Playbook UI. Each carries a
+  // "preserved for compatibility" badge so it's obvious they're legacy.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
   const [v2, setV2] = useState<PlaybookV2Storage>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -184,6 +195,54 @@ export function SettingsAiPlaybook() {
           isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
         />
 
+        {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
+              These 5 backend section keys still emit their default prompts
+              at runtime via src/ai/section-default-prompts.ts; the textareas
+              accept user customInstructions and the runtime renderer still
+              reads them. They're hidden from the normal user UI because
+              workflow logic now lives in Automation → AI Conversation
+              Goals and tone/follow-up logic folded into the visible
+              Communication Style card below. Advanced/support users can
+              still hand-tune the underlying prompts here. */}
+        {advancedMode && (
+          <>
+            <AdvancedSectionsBanner />
+            <HowSectionCard
+              section="qualification_guidance"
+              value={v2.qualification_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('qualification_guidance', v)}
+              legacyAdvanced
+            />
+            <HowSectionCard
+              section="booking_guidance"
+              value={v2.booking_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('booking_guidance', v)}
+              legacyAdvanced
+              isSuggested={!!v2.booking_guidance?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="human_handoff_guidance"
+              value={v2.human_handoff_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('human_handoff_guidance', v)}
+              legacyAdvanced
+              isSuggested={!!v2.human_handoff_guidance?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="objection_handling"
+              value={v2.objection_handling?.customInstructions ?? ''}
+              onChange={v => onSectionChange('objection_handling', v)}
+              legacyAdvanced
+              isSuggested={!!v2.objection_handling?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="followup_tone"
+              value={v2.followup_tone?.customInstructions ?? ''}
+              onChange={v => onSectionChange('followup_tone', v)}
+              legacyAdvanced
+            />
+          </>
+        )}
+
         {/* 4. Communication Style & Brand Voice
               (backend key still personality_brand_voice — see
               frontend/src/lib/playbook-renderer.ts label mapping). */}
@@ -252,7 +311,7 @@ function HelpBlock() {
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange, managedByGoals, isSuggested,
+  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -265,6 +324,11 @@ function HowSectionCard({
   /** Set by the website Apply-to-Playbook flow. Shows the "Suggested from
    *  website" pill. Goes away on first edit (parent clears the flag). */
   isSuggested?: boolean;
+  /** Render the section with an "Advanced — preserved for compatibility"
+   *  badge, used for the 5 legacy sections exposed only in ?advanced=1
+   *  mode (qualification_guidance, booking_guidance, etc.). The textarea
+   *  is fully editable; behavior is unchanged. */
+  legacyAdvanced?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -275,6 +339,7 @@ function HowSectionCard({
     >
       {isSuggested && <SuggestedFromWebsiteBadge />}
       {managedByGoals && <ManagedByGoalsBadge />}
+      {legacyAdvanced && <LegacyAdvancedBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS[section]} />
       <CustomInstructionsEditor
         value={value}
@@ -283,6 +348,37 @@ function HowSectionCard({
         onRevertToDefault={() => onChange('')}
       />
     </PlaybookSectionShell>
+  );
+}
+
+function LegacyAdvancedBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#fef3c7',
+      border: '1px solid #fde68a',
+      borderRadius: 8,
+      fontSize: 12, color: '#92400e',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Info size={13} style={{ flexShrink: 0 }} />
+      <span><strong>Advanced prompt section</strong> — preserved for compatibility. Still emitted at runtime; edit only if you know what you need.</span>
+    </div>
+  );
+}
+
+function AdvancedSectionsBanner() {
+  return (
+    <SectionCard padding="14px 20px">
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <Info size={16} style={{ color: '#92400e', flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
+          <strong>Advanced legacy sections.</strong> These prompt sections still emit at runtime but are no longer part of the normal Playbook UI. Their workflow logic now lives in <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation Goals</a>. Edit below only for support / power-user tuning.
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 

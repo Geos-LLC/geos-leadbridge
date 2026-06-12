@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
   Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
@@ -79,6 +79,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const fromState = { from: location.pathname + location.search, fromLabel: 'AI Conversation' };
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
+
+  // Advanced/legacy mode — surfaced via ?advanced=1 or ?debug=1 in the URL.
+  // Hides the Stop Rules + Human Takeover toggle grid from the normal
+  // user UI (it's all driven by the Goal radio + protected events now)
+  // but keeps it reachable for support / power users. The backend fields
+  // these toggles write to (aiStopOn*, handoffTrigger*) are unchanged and
+  // continue to load + save normally — the only thing that changes is
+  // whether the toggles are visible.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
 
   // Master AI Conversation toggle — user-scoped per the 2026-05-23 migration
   // (User.aiConversationEnabled is the single source of truth). The legacy
@@ -544,7 +556,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         iconTone="violet"
         title="AI Conversation"
         subtitle={aiOn
-          ? 'AI replies to customers automatically based on your strategy.'
+          ? 'AI replies to customers automatically based on your Conversation Goal.'
           : canUseAi
             ? 'Turn on to let AI handle customer conversations end-to-end.'
             : 'Turn on to let AI handle customer conversations end-to-end.'}
@@ -605,24 +617,31 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         toggleQualificationField={toggleQualificationField}
       />
 
-      {/* ───── 3. Advanced Rules (the 9 original toggles + Custom banner) ─── */}
-      <AdvancedRulesCard
-        stopRules={stopRules}
-        takeover={takeover}
-        toggleStop={toggleStop}
-        toggleTakeover={toggleTakeover}
-        mxStopNotContacted={mxStopNotContacted}
-        mxStopBooked={mxStopBooked}
-        mxStopPriceAgreed={mxStopPriceAgreed}
-        mxStopDone={mxStopDone}
-        mxTakeReady={mxTakeReady}
-        mxTakeLive={mxTakeLive}
-        mxTakePhone={mxTakePhone}
-        mxTakeSqft={mxTakeSqft}
-        mxTakeQualified={mxTakeQualified}
-        goAlerts={goAlerts}
-        goFollowups={goFollowups}
-      />
+      {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
+            Normal users manage AI behavior via Conversation Goals + the
+            per-goal When-Goal-Is-Reached radio above. The 9 legacy
+            Stop Rules / Human Takeover toggles still drive the backend
+            (aiStopOn* / handoffTrigger* fields) and remain reachable
+            for support and power users through the URL param. */}
+      {advancedMode && (
+        <AdvancedRulesCard
+          stopRules={stopRules}
+          takeover={takeover}
+          toggleStop={toggleStop}
+          toggleTakeover={toggleTakeover}
+          mxStopNotContacted={mxStopNotContacted}
+          mxStopBooked={mxStopBooked}
+          mxStopPriceAgreed={mxStopPriceAgreed}
+          mxStopDone={mxStopDone}
+          mxTakeReady={mxTakeReady}
+          mxTakeLive={mxTakeLive}
+          mxTakePhone={mxTakePhone}
+          mxTakeSqft={mxTakeSqft}
+          mxTakeQualified={mxTakeQualified}
+          goAlerts={goAlerts}
+          goFollowups={goFollowups}
+        />
+      )}
 
       {/* ───── 4. Auto Reply Availability ─────────────────────────────────── */}
       <SettingCard
@@ -1112,11 +1131,20 @@ function AdvancedRulesCard({
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
         <IconTile icon={Settings2} tone="gray" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-            Advanced Rules
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Advanced legacy controls
+            </div>
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+              background: '#fef3c7', color: '#92400e',
+              letterSpacing: 0.05, textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+            }}>
+              Advanced
+            </span>
           </div>
           <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            Fine-grained control over every Stop Rule and Human Takeover trigger. These toggles back the simplified <em>When Goal Is Reached</em> radio on each Goal — flipping individual rows here is what produces a Custom Configuration.
+            These settings are preserved for compatibility and support. Most users should manage AI behavior through Conversation Goals above. Toggles below back the simplified <em>When Goal Is Reached</em> radio on each Goal — flipping individual rows here produces a Custom Configuration.
           </div>
         </div>
       </div>
