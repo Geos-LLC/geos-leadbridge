@@ -42,15 +42,18 @@ export function WebsitePreviewCard({ url, metadata, tone = 'wizard' }: Props) {
   return (
     <div className={`${wrap} overflow-hidden`}>
       <div className="flex">
-        {/* Thumbnail — falls back to a placeholder if og:image is missing or 404s. */}
-        <div className="w-28 h-28 shrink-0 bg-slate-100 flex items-center justify-center overflow-hidden">
+        {/* Thumbnail — a real homepage screenshot (Microlink) when available,
+            falling back to og:image, falling back to a placeholder. The
+            wider 11rem × 7rem (176×112) box gives a 3:2 viewport-style crop
+            and shows the top of the page so the hero is visible. */}
+        <div className="w-44 h-28 shrink-0 bg-slate-100 flex items-center justify-center overflow-hidden">
           {m.imageUrl && !imgFailed ? (
             <img
               src={m.imageUrl}
               alt={m.title || 'Site preview'}
               loading="lazy"
               onError={() => setImgFailed(true)}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover object-top"
             />
           ) : (
             <ImageIcon className="w-7 h-7 text-slate-300" />

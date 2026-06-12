@@ -697,6 +697,16 @@ export class UsersService {
       const finalUrl: string = (response.request?.res?.responseUrl as string) || url;
       const metadata = this.extractWebsiteMetadata(html, finalUrl);
 
+      // Real homepage screenshot via Microlink — overrides the og:image when
+      // it succeeds. og:image is often the brand logo (Wix in particular),
+      // which doesn't visually identify the page; a real rendered screenshot
+      // is what the user expects from "site preview".
+      const screenshot = await this.fetchHomepageScreenshot(finalUrl).catch((e) => {
+        this.logger.warn(`[verifyWebsite] screenshot failed for ${finalUrl}: ${e?.message || e}`);
+        return undefined;
+      });
+      if (screenshot) metadata.imageUrl = screenshot;
+
       // AI summary — non-blocking failure. We don't want the entire verify
       // flow to fail if OpenAI is down or the key is missing; the wizard
       // can still show the title/description/phone we already pulled.
@@ -853,6 +863,58 @@ export class UsersService {
       .replace(/&mdash;/g, '—');
   }
 
+  /**
+   * Real rendered screenshot of the homepage via Microlink. Free tier is
+   * rate-limited per-IP (~50/day) but caches per URL, so repeat verifies
+   * of the same site are instant. Set MICROLINK_API_KEY when production
+   * traffic outgrows the free tier. Returns the CDN URL of the cached
+   * screenshot — we don't proxy it through our backend.
+   *
+   * Why this over og:image: og:image is set by the site's CMS template
+   * and on Wix/Squarespace it almost always points at the brand LOGO,
+   * not a hero shot. A real rendered screenshot is what users mean by
+   * "preview thumbnail".
+   */
+  private async fetchHomepageScreenshot(url: string): Promise<string | undefined> {
+    const apiKey = this.configService.get<string>('MICROLINK_API_KEY');
+    const params = new URLSearchParams({
+      url,
+      screenshot: 'true',
+      meta: 'false',
+      // 1280x720 viewport — produces a usable thumbnail without burning
+      // bandwidth on full-page 4k captures.
+      'viewport.width': '1280',
+      'viewport.height': '720',
+    });
+    const endpoint = `https://api.microlink.io?${params.toString()}`;
+
+    try {
+      this.logger.log(`[fetchHomepageScreenshot] requesting screenshot for ${url}`);
+      const response = await axios.get(endpoint, {
+        timeout: 20000,
+        headers: apiKey ? { 'x-api-key': apiKey } : undefined,
+        // Microlink returns JSON regardless of source size.
+        responseType: 'json',
+        validateStatus: (s) => s < 500,
+      });
+      if (response.status !== 200) {
+        this.logger.warn(`[fetchHomepageScreenshot] microlink HTTP ${response.status} for ${url}`);
+        return undefined;
+      }
+      const data = response.data;
+      const screenshotUrl = data?.data?.screenshot?.url;
+      if (typeof screenshotUrl === 'string' && screenshotUrl.length > 0) {
+        this.logger.log(`[fetchHomepageScreenshot] got screenshot for ${url}: ${screenshotUrl.substring(0, 80)}...`);
+        return screenshotUrl;
+      }
+      this.logger.warn(`[fetchHomepageScreenshot] microlink returned no screenshot URL for ${url} (status=${data?.status})`);
+      return undefined;
+    } catch (err: any) {
+      this.logger.warn(`[fetchHomepageScreenshot] ${url} failed: ${err?.message || err}`);
+      return undefined;
+    }
+  }
+
   /** Resolve relative URLs (`/logo.png`, `images/hero.jpg`) against the page URL. */
   private absolutizeUrl(href: string, base?: string): string | undefined {
     const trimmed = (href || '').trim();
@@ -887,9 +949,10 @@ export class UsersService {
       this.logger.warn(`[summarizeWebsite] visible text too short (${visible.length}) — skipping`);
       return undefined;
     }
-    // Cap input so we don't burn tokens on multi-MB Wix bundles. 6000 chars
-    // ≈ 1500 tokens — plenty for a homepage summary.
-    const snippet = visible.slice(0, 6000);
+    // Cap input so we don't burn tokens on multi-MB Wix bundles. 12000 chars
+    // ≈ 3000 tokens — enough to capture services, coverage, hours, pricing,
+    // and policies on a typical cleaning-co marketing page.
+    const snippet = visible.slice(0, 12000);
 
     const seed = [
       metadata.title ? `Page title: ${metadata.title}` : null,
@@ -900,15 +963,30 @@ export class UsersService {
     const resp = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       temperature: 0.2,
-      max_tokens: 220,
+      max_tokens: 800,
       messages: [
         {
           role: 'system',
           content:
-            'You summarize a small-business homepage for an onboarding flow. ' +
-            'Return 2-3 sentences (max ~60 words) describing what the business does, ' +
-            'who it serves, and any standout services or coverage area mentioned. ' +
-            'Plain text — no markdown, no bullet points, no preamble like "This website".',
+            // The output of this summary feeds the AI Playbook and FAQ auto-fill
+            // later, so we want a denser extract of what this business actually
+            // does — not just one polite sentence.
+            'You extract a structured summary of a small-business homepage that ' +
+            'will later be used to pre-fill an AI playbook and FAQ. Write 5-8 ' +
+            'sentences (150-220 words) in plain prose covering, when present on ' +
+            'the page:\n' +
+            '- What services the business offers and any variations (e.g. deep ' +
+            'clean vs standard, move-in/out, recurring).\n' +
+            '- Where it serves (cities, regions, neighborhoods, service-area ' +
+            'radius).\n' +
+            '- Hours of operation, booking model (online, phone, request a quote).\n' +
+            '- Pricing model if mentioned (flat rate, hourly, by sqft, ranges).\n' +
+            '- Standout claims (insurance, eco-friendly, satisfaction guarantee, ' +
+            'years in business, team size).\n' +
+            '- Phone numbers, email addresses, and any explicit policies.\n' +
+            'Do NOT invent details that aren\'t on the page. Plain text only — ' +
+            'no markdown headings, no bullet points, no preamble like "This ' +
+            'website" or "The business". Open with the business name.',
         },
         {
           role: 'user',
@@ -921,8 +999,9 @@ export class UsersService {
     this.logger.log(`[summarizeWebsite] summary generated (${text.length} chars)`);
     if (!text) return undefined;
     // Soft cap — UI can still expand, but DB shouldn't grow unboundedly if
-    // the model ignores max_tokens.
-    return text.length > 1200 ? text.slice(0, 1200) : text;
+    // the model ignores max_tokens. 3000 chars accommodates the 5-8 sentence
+    // structured summary we now ask for.
+    return text.length > 3000 ? text.slice(0, 3000) : text;
   }
 
   private firstMatch(html: string, re: RegExp, group = 1): string | undefined {
