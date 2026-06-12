@@ -7,6 +7,7 @@ import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
+import { ApplyToPlaybookButton } from '../../../components/ApplyToPlaybookButton';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -265,8 +266,16 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               this step, or refreshed the page) show what we found so
               they have visible proof the URL really loaded. */}
           {savedAndVerified && savedMetadata && !isChecking && (
-            <div className="mt-2">
+            <div className="mt-2 space-y-3">
               <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
+              {/* Apply-to-Playbook bridges the extracted seed into the AI
+                  Playbook. Only shown when verifyWebsite returned a
+                  playbookSeed (older verifications won't have one until
+                  the user re-verifies). */}
+              <ApplyToPlaybookButton
+                hasSeed={!!(savedMetadata as any)?.playbookSeed}
+                tone="wizard"
+              />
             </div>
           )}
         </label>

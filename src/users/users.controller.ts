@@ -77,6 +77,30 @@ export class UsersController {
   }
 
   /**
+   * Apply the structured Playbook seed (from `User.websiteMetadataJson.
+   * playbookSeed`) to every connected SavedAccount's `aiPlaybookV2`.
+   *
+   * mode: 'fill_empty' (default) only sets sections whose customInstructions
+   *       is empty / blank — protects user-typed text.
+   *       'replace' overwrites every supported section unconditionally.
+   *
+   * The call is idempotent in fill_empty mode (re-applying the same seed
+   * to an already-filled section is a no-op).
+   *
+   * POST /v1/users/me/website/apply-playbook
+   */
+  @Post('me/website/apply-playbook')
+  async applyPlaybookSeed(
+    @Request() req: any,
+    @Body() body: { mode?: 'fill_empty' | 'replace' },
+  ) {
+    return this.usersService.applyPlaybookSeedToAccounts(
+      req.user.id,
+      body?.mode === 'replace' ? 'replace' : 'fill_empty',
+    );
+  }
+
+  /**
    * Get the user's global AI prompt
    * GET /v1/users/me/ai-prompt
    */

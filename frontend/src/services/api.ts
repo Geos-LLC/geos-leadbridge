@@ -1482,6 +1482,23 @@ export const usersApi = {
     const { data } = await api.post('/v1/users/me/website/verify', { url });
     return data;
   },
+  // Apply the structured Playbook seed (extracted by verifyWebsite) to every
+  // connected SavedAccount's aiPlaybookV2. 'fill_empty' is the safe default —
+  // user-typed text in each section is preserved. 'replace' overwrites every
+  // supported section. Returns counts so the UI can show "4 filled, 2 skipped".
+  applyPlaybookSeed: async (
+    mode: 'fill_empty' | 'replace',
+  ): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    overwritten: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/website/apply-playbook', { mode });
+    return data;
+  },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
     const { data } = await api.delete('/v1/users/me');
     return data;

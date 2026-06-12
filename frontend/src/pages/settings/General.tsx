@@ -6,6 +6,7 @@ import {
 import { useAuthStore } from '../../store/authStore';
 import { usersApi, authApi } from '../../services/api';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
+import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -251,10 +252,17 @@ export function SettingsGeneral() {
           }}>{verifyError}</div>
         )}
         {(user?.website || websiteMetadata) && (
-          <div style={{ padding: '0 24px 12px' }}>
+          <div style={{ padding: '0 24px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <WebsitePreviewCard
               url={user?.website || website || null}
               metadata={websiteMetadata}
+              tone="settings"
+            />
+            {/* Apply-to-Playbook is the bridge between the extracted seed
+                and the AI Playbook page. Shown here so users who add their
+                site after onboarding can still feed the Playbook from it. */}
+            <ApplyToPlaybookButton
+              hasSeed={!!websiteMetadata?.playbookSeed}
               tone="settings"
             />
           </div>

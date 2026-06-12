@@ -9,6 +9,7 @@ import { StripeService } from '../stripe/stripe.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { PlatformService } from '../platforms/platform.service';
+import type { SupportedPlaybookSectionKey } from './playbook-seed-applier';
 
 /**
  * Structured facts extracted from the homepage, organized by the 8 Playbook
@@ -658,6 +659,150 @@ export class UsersService {
 
     this.logger.log(`[deleteOwnAccount] User ${user.email} deleted their account`);
     return { success: true };
+  }
+
+  /**
+   * Apply the user's stored Playbook seed to every SavedAccount they own.
+   * For each supported section the seed produced an instruction string for:
+   *   - fill_empty: only set when the existing customInstructions is empty/blank
+   *   - replace:    always set, regardless of existing content
+   *
+   * Returns aggregate counts plus a per-account result so the UI can show
+   * "4 sections filled across 2 accounts".
+   *
+   * Does NOT touch: FAQ, pricing table (servicePricingJson), qualification
+   * guidance, follow-up tone, phone-call guidance — per product decision,
+   * those need their own dedicated flows or aren't derivable from a site.
+   */
+  async applyPlaybookSeedToAccounts(
+    userId: string,
+    mode: 'fill_empty' | 'replace',
+  ): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    overwritten: number;
+    perSection: Partial<Record<SupportedPlaybookSectionKey, { filled: number; skipped: number; overwritten: number }>>;
+    warning?: string;
+  }> {
+    const { seedToCustomInstructions, SUPPORTED_SECTIONS } = await import('./playbook-seed-applier');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { websiteMetadataJson: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const metadata = (user.websiteMetadataJson as any) || null;
+    const seed = metadata?.playbookSeed as PlaybookSeed | undefined;
+    if (!seed) {
+      return {
+        success: false,
+        accountsAffected: 0,
+        filled: 0,
+        skipped: 0,
+        overwritten: 0,
+        perSection: {},
+        warning: 'No playbook seed on file. Verify your website first.',
+      };
+    }
+
+    const instructionsBySection = seedToCustomInstructions(seed);
+    const sectionsWithContent = (Object.keys(instructionsBySection) as SupportedPlaybookSectionKey[])
+      .filter((k) => !!instructionsBySection[k]);
+    if (sectionsWithContent.length === 0) {
+      return {
+        success: false,
+        accountsAffected: 0,
+        filled: 0,
+        skipped: 0,
+        overwritten: 0,
+        perSection: {},
+        warning: 'Playbook seed has no fields to apply.',
+      };
+    }
+
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: { id: true, followUpSettingsJson: true },
+    });
+    if (accounts.length === 0) {
+      return {
+        success: false,
+        accountsAffected: 0,
+        filled: 0,
+        skipped: 0,
+        overwritten: 0,
+        perSection: {},
+        warning: 'Connect an account first — the Playbook is stored per account.',
+      };
+    }
+
+    const perSection: Partial<Record<SupportedPlaybookSectionKey, { filled: number; skipped: number; overwritten: number }>> = {};
+    for (const k of SUPPORTED_SECTIONS) perSection[k] = { filled: 0, skipped: 0, overwritten: 0 };
+
+    let totalFilled = 0;
+    let totalSkipped = 0;
+    let totalOverwritten = 0;
+    let accountsAffected = 0;
+
+    // One transaction per account — cheaper than one global transaction
+    // (account writes are independent) and any single account failure
+    // doesn't roll back the others.
+    for (const account of accounts) {
+      const existing = (account.followUpSettingsJson as any) || {};
+      const aiPlaybookV2: Record<string, { customInstructions?: string }> = existing.aiPlaybookV2 || {};
+
+      let changedThisAccount = false;
+
+      for (const sectionKey of sectionsWithContent) {
+        const text = instructionsBySection[sectionKey]!;
+        const current = aiPlaybookV2[sectionKey]?.customInstructions;
+        const hasExisting = typeof current === 'string' && current.trim().length > 0;
+
+        if (mode === 'fill_empty' && hasExisting) {
+          perSection[sectionKey]!.skipped++;
+          totalSkipped++;
+          continue;
+        }
+
+        if (hasExisting) {
+          perSection[sectionKey]!.overwritten++;
+          totalOverwritten++;
+        } else {
+          perSection[sectionKey]!.filled++;
+          totalFilled++;
+        }
+
+        aiPlaybookV2[sectionKey] = { ...(aiPlaybookV2[sectionKey] || {}), customInstructions: text };
+        changedThisAccount = true;
+      }
+
+      if (changedThisAccount) {
+        await this.prisma.savedAccount.update({
+          where: { id: account.id },
+          data: {
+            followUpSettingsJson: { ...existing, aiPlaybookV2 },
+          },
+        });
+        accountsAffected++;
+      }
+    }
+
+    this.logger.log(
+      `[applyPlaybookSeed] userId=${userId} mode=${mode} accounts=${accountsAffected}/${accounts.length} ` +
+      `filled=${totalFilled} skipped=${totalSkipped} overwritten=${totalOverwritten}`,
+    );
+
+    return {
+      success: true,
+      accountsAffected,
+      filled: totalFilled,
+      skipped: totalSkipped,
+      overwritten: totalOverwritten,
+      perSection,
+    };
   }
 
   // ---------------------------------------------------------------------
