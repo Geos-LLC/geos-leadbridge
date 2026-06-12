@@ -33,7 +33,6 @@ import { notify } from '../../store/notificationStore';
 import AccountFaqForm from '../../components/AccountFaqForm';
 import ServicePricingForm from '../../components/ServicePricingForm';
 import {
-  PLAYBOOK_SECTION_ORDER,
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
   SECTION_DEFAULT_PROMPTS,
@@ -136,44 +135,97 @@ export function SettingsAiPlaybook() {
         </SectionCard>
       )}
 
-      {/* === HOW sections — 8 cards with default + custom === */}
-      {accounts.length > 0 && PLAYBOOK_SECTION_ORDER.map(section => {
-        // Pricing Guidance is special — also embeds the pricing TABLE editor
-        if (section === 'pricing_guidance') {
-          return (
-            <PricingGuidanceCard
-              key={section}
-              value={v2[section]?.customInstructions ?? ''}
-              onChange={v => onSectionChange(section, v)}
-              accountId={accounts[0].id}
-              accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
-              accountIds={accounts.map(a => a.id)}
-            />
-          );
-        }
-        return (
-          <HowSectionCard
-            key={section}
-            section={section}
-            value={v2[section]?.customInstructions ?? ''}
-            onChange={v => onSectionChange(section, v)}
-          />
-        );
-      })}
+      {/* === Cards rendered in explicit Playbook V2.1 order ===
+            1. Business Information (HOW)
+            2. FAQ (embed)
+            3. Pricing Guidance (HOW + Pricing Table embed)
+            4. Qualification Guidance (HOW)
+            5. Booking Guidance (HOW)
+            6. Phone Call Guidance (planned — UI preview, no save)
+            7. Objection Handling (HOW)
+            8. Human Handoff Guidance (HOW)
+            9. Follow-up Tone (HOW)
+           10. AI Personality & Brand Voice (HOW)
+           11. Global Custom Instructions (User.globalAiPrompt)
 
-      {/* === FAQ section (between qualification_guidance and booking_guidance? — per UI, FAQ is right
-            after Pricing in spec. Render after Pricing in the section order, but in V2 the prompt
-            block only emits the 8 HOW sections; FAQ data is injected as REFERENCE block at runtime.) === */}
-      {accounts.length > 0 && (
+            PLAYBOOK_SECTION_ORDER stays canonical for backend prompt
+            assembly — we just choose UI ordering here. */}
+
+      {accounts.length > 0 && <>
+        {/* 1. Business Information */}
+        <HowSectionCard
+          section="business_information"
+          value={v2.business_information?.customInstructions ?? ''}
+          onChange={v => onSectionChange('business_information', v)}
+        />
+
+        {/* 2. FAQ */}
         <FaqCard
           accountId={accounts[0].id}
           accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
           accountIds={accounts.map(a => a.id)}
         />
-      )}
 
-      {/* === Global Custom Instructions card — surfaces User.globalAiPrompt === */}
-      {accounts.length > 0 && <GlobalCustomInstructionsCard />}
+        {/* 3. Pricing Guidance (with embedded Pricing Table) */}
+        <PricingGuidanceCard
+          value={v2.pricing_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('pricing_guidance', v)}
+          accountId={accounts[0].id}
+          accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
+          accountIds={accounts.map(a => a.id)}
+        />
+
+        {/* 4. Qualification Guidance */}
+        <HowSectionCard
+          section="qualification_guidance"
+          value={v2.qualification_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('qualification_guidance', v)}
+        />
+
+        {/* 5. Booking Guidance */}
+        <HowSectionCard
+          section="booking_guidance"
+          value={v2.booking_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('booking_guidance', v)}
+        />
+
+        {/* 6. Phone Call Guidance — PLANNED section. UI preview only;
+              no backend key yet so this card does not save. Once the
+              backend renderer ships a `phone_call_guidance` section key,
+              this becomes a real <HowSectionCard />. */}
+        <PhoneCallGuidancePlannedCard />
+
+        {/* 7. Objection Handling */}
+        <HowSectionCard
+          section="objection_handling"
+          value={v2.objection_handling?.customInstructions ?? ''}
+          onChange={v => onSectionChange('objection_handling', v)}
+        />
+
+        {/* 8. Human Handoff Guidance */}
+        <HowSectionCard
+          section="human_handoff_guidance"
+          value={v2.human_handoff_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('human_handoff_guidance', v)}
+        />
+
+        {/* 9. Follow-up Tone */}
+        <HowSectionCard
+          section="followup_tone"
+          value={v2.followup_tone?.customInstructions ?? ''}
+          onChange={v => onSectionChange('followup_tone', v)}
+        />
+
+        {/* 10. AI Personality & Brand Voice */}
+        <HowSectionCard
+          section="personality_brand_voice"
+          value={v2.personality_brand_voice?.customInstructions ?? ''}
+          onChange={v => onSectionChange('personality_brand_voice', v)}
+        />
+
+        {/* 11. Global Custom Instructions — surfaces User.globalAiPrompt */}
+        <GlobalCustomInstructionsCard />
+      </>}
 
       {/* Footer save button */}
       {accounts.length > 0 && (
@@ -215,13 +267,79 @@ function HelpBlock() {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            Define how AI communicates with customers
+            AI Playbook controls how AI communicates
           </div>
           <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            Timing, automation, follow-ups, stop rules, and notifications are configured in <a href="/automation/respond" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation settings</a>.
+            <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation</a> controls <em>when</em> AI responds, follows up, and hands off conversations.
           </div>
         </div>
       </div>
+    </SectionCard>
+  );
+}
+
+// ─── Phone Call Guidance — PLANNED section (UI preview only) ─────────────
+// Renders the future "Phone Call Guidance" card with a locked textarea.
+// No backend storage yet — saving is disabled. Once the backend renderer
+// adds a `phone_call_guidance` PlaybookSectionKey, swap this for a real
+// <HowSectionCard section="phone_call_guidance" ... />.
+function PhoneCallGuidancePlannedCard() {
+  return (
+    <SectionCard padding="22px 24px">
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 10,
+          background: '#fef3c7', color: '#92400e',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <PhoneCall size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em',
+          }}>
+            Phone Call Guidance
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999,
+              background: '#fef3c7', color: '#92400e',
+              letterSpacing: 0.05, textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+            }}>Coming Soon</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>
+            How AI should explain a phone call and ask for the customer's number when the Phone goal is active.
+          </div>
+        </div>
+      </div>
+
+      <div style={{
+        padding: '12px 14px',
+        background: '#fffbeb',
+        border: '1px dashed #fde68a',
+        borderRadius: 10,
+        fontSize: 12.5, color: '#92400e',
+        lineHeight: 1.55,
+        marginBottom: 12,
+      }}>
+        This section is shipping in a future release. Today, phone-call behavior is driven by the Conversation Goal in <strong>Automation → AI Conversation</strong> (the Phone goal) and the BASE HARD RULES that ship with every AI reply. When this section ships, you'll be able to customize the AI's exact wording for explaining why a call helps and how it asks for a number.
+      </div>
+
+      <textarea
+        readOnly
+        disabled
+        rows={4}
+        placeholder='Custom instructions for the Phone goal will go here. (Disabled until backend support ships.)'
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          padding: '10px 12px',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 8,
+          fontFamily: 'inherit', fontSize: 13, lineHeight: 1.55,
+          color: 'var(--lb-ink-5)', background: '#f8fafc',
+          resize: 'vertical', minHeight: 80,
+          cursor: 'not-allowed',
+        }}
+      />
     </SectionCard>
   );
 }
