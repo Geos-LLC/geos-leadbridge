@@ -441,6 +441,20 @@ export interface MessageAttachment {
 }
 
 // Message type for API responses
+// V2 Review Mode: parked AI draft awaiting operator approval. Stored on
+// ThreadContext.stateJson.pendingAiSuggestion server-side. `goal` carries
+// the resolved conversation goal at generation time (qualify, phone, etc.)
+// and is purely informational; the runtime does not consult it on send.
+export interface PendingAiSuggestion {
+  id: string;
+  message: string;
+  goal: string | null;
+  reason: string;
+  sourceMessageId: string | null;
+  createdAt: string;
+  status: 'pending';
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -484,9 +498,27 @@ export const leadsApi = {
     const { data } = await api.get(`/v1/thumbtack/leads/${id}`);
     return data;
   },
-  getMessages: async (leadId: string, opts?: { fresh?: boolean }): Promise<{ messages: ApiMessage[]; count: number }> => {
+  getMessages: async (leadId: string, opts?: { fresh?: boolean }): Promise<{
+    messages: ApiMessage[];
+    count: number;
+    // V2 Review Mode (2026-06-12). Non-null when this lead's account has
+    // aiConversationDeliveryMode='suggest' AND a draft is parked on the
+    // thread. Lead Activity surfaces it as a banner above the composer.
+    pendingAiSuggestion?: PendingAiSuggestion | null;
+  }> => {
     const qs = opts?.fresh ? '?fresh=1' : '';
     const { data } = await api.get(`/v1/thumbtack/leads/${leadId}/messages${qs}`);
+    return data;
+  },
+  // V2 Review Mode approval actions. Both clear the parked draft; send
+  // dispatches it via leadsService.sendMessage('ai') so observability is
+  // byte-identical to an auto-sent reply.
+  sendAiSuggestion: async (leadId: string): Promise<{ success: boolean; sent: boolean; suggestionId: string }> => {
+    const { data } = await api.post(`/v1/leads/${leadId}/ai-suggestion/send`, {});
+    return data;
+  },
+  discardAiSuggestion: async (leadId: string): Promise<{ success: boolean; cleared: boolean }> => {
+    const { data } = await api.post(`/v1/leads/${leadId}/ai-suggestion/discard`, {});
     return data;
   },
   sendMessage: async (leadId: string, message: string): Promise<{ success: boolean }> => {

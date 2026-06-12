@@ -27,7 +27,7 @@ import {
   Sparkles,
   AlertTriangle,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -377,6 +377,16 @@ export function Messages() {
   const [fuSuggestions, setFuSuggestions] = useState<any[]>([]);
   const [fuEditMsg, setFuEditMsg] = useState('');
   const [fuEditId, setFuEditId] = useState<string | null>(null);
+  // V2 Review Mode: pending AI draft for the currently selected lead. Comes
+  // from the messages payload (no extra fetch) so it appears on first paint
+  // when the operator opens a thread with a parked draft.
+  const [pendingAiSuggestion, setPendingAiSuggestion] = useState<PendingAiSuggestion | null>(null);
+  const [aiSuggestionBusy, setAiSuggestionBusy] = useState<'sending' | 'discarding' | null>(null);
+  // Leads that currently carry a parked draft. Populated from the same
+  // payload as the active thread (per-lead pending-suggestion map). Drives
+  // the yellow "AI Draft Pending" badge in the lead list. Resets when the
+  // user navigates away from a lead so stale flags don't linger.
+  const [leadsWithPendingDraft, setLeadsWithPendingDraft] = useState<Record<string, true>>({});
   const [fuActionLoading, setFuActionLoading] = useState(false);
 
   // Lead status editor state
@@ -974,6 +984,9 @@ export function Messages() {
     setMessages([]);
     setSmsLogs([]);
     setTimelineEvents([]);
+    // Clear any prior thread's pending draft so the banner doesn't flash the
+    // wrong lead's suggestion while the new payload is in flight.
+    setPendingAiSuggestion(null);
     markLeadAsSeen(lead);
 
     // Initial-request injection — used by both the messages-only first paint and
@@ -1006,7 +1019,16 @@ export function Messages() {
       // clicked the lead, tab regained focus, SSE pushed an update). Pair the
       // frontend cache bypass with backend cache bypass so we don't read a
       // 5-min-stale Redis snapshot of the messages thread.
-      const { messages: apiMessages } = await leadsApi.getMessages(lead.id, { fresh: forceRefresh });
+      const { messages: apiMessages, pendingAiSuggestion: pendingDraft } = await leadsApi.getMessages(lead.id, { fresh: forceRefresh });
+      // The draft belongs to the lead we just asked about — if the operator
+      // already navigated away by the time the response arrives, the lead-
+      // switch effect will have cleared it again before this assignment.
+      setPendingAiSuggestion(pendingDraft ?? null);
+      setLeadsWithPendingDraft(prev => {
+        const next = { ...prev };
+        if (pendingDraft) next[lead.id] = true; else delete next[lead.id];
+        return next;
+      });
 
       // Fire-and-forget auto-resync when DB is empty. Previously this awaited
       // resyncMessages + a second getMessages before rendering, blocking the
@@ -2015,6 +2037,28 @@ export function Messages() {
                           </span>
                         );
                       })()}
+                      {/* V2 Review Mode: yellow badge surfacing leads that
+                          have an AI draft waiting for operator approval.
+                          Populated from the per-thread messages payload as
+                          the operator opens leads — so the badge appears on
+                          re-renders after the first visit. */}
+                      {leadsWithPendingDraft[lead.id] && (
+                        <span
+                          title="AI drafted a reply for this lead — open to review"
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          🟡 AI Draft
+                        </span>
+                      )}
                       {/* Refunded badge — surfaces leads where the platform
                           (currently only Thumbtack) reported chargeState='Refunded',
                           which auto-sets Lead.refundedAt + Lead.budgetVoidedAt
@@ -2708,6 +2752,83 @@ export function Messages() {
               )}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* V2 Review Mode pending AI draft. Shown above the composer
+                when the account opted into 'suggest' delivery and a draft
+                is parked. Send dispatches via /v1/leads/:id/ai-suggestion/send
+                (server uses sendMessage('ai') so the outbound row is
+                indistinguishable from auto-send). Discard clears the parked
+                blob via /discard. Both actions trigger a force-refresh to
+                update the surrounding thread + clear the banner.
+
+                MVP per spec: Send + Discard only. Edit&Send and Regenerate
+                are deferred. */}
+            {pendingAiSuggestion && selectedLead && (
+              <div className="px-3 sm:px-4 pt-3 border-t border-slate-100 bg-amber-50">
+                <div className="flex items-start gap-2 mb-2">
+                  <span className="text-amber-500" aria-hidden>🟡</span>
+                  <div className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                    AI drafted this reply
+                  </div>
+                </div>
+                <p className="text-sm text-slate-700 bg-white border border-amber-200 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
+                  {pendingAiSuggestion.message}
+                </p>
+                <div className="flex gap-2 mt-3 pb-3">
+                  <button
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    disabled={aiSuggestionBusy !== null}
+                    onClick={async () => {
+                      if (!selectedLead) return;
+                      setAiSuggestionBusy('sending');
+                      try {
+                        await leadsApi.sendAiSuggestion(selectedLead.id);
+                        setPendingAiSuggestion(null);
+                        setLeadsWithPendingDraft(prev => {
+                          const next = { ...prev };
+                          delete next[selectedLead.id];
+                          return next;
+                        });
+                        // Refresh the thread so the operator sees the sent
+                        // message appear in the timeline.
+                        delete messageCache.current[selectedLead.id];
+                        await loadMessagesForLead(selectedLead, true);
+                      } catch (err: any) {
+                        console.error('[AI Suggestion] send failed:', err);
+                      } finally {
+                        setAiSuggestionBusy(null);
+                      }
+                    }}
+                  >
+                    {aiSuggestionBusy === 'sending' ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
+                    Send
+                  </button>
+                  <button
+                    className="px-3 py-2 border border-slate-300 text-slate-700 rounded-lg font-semibold text-sm hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={aiSuggestionBusy !== null}
+                    onClick={async () => {
+                      if (!selectedLead) return;
+                      setAiSuggestionBusy('discarding');
+                      try {
+                        await leadsApi.discardAiSuggestion(selectedLead.id);
+                        setPendingAiSuggestion(null);
+                        setLeadsWithPendingDraft(prev => {
+                          const next = { ...prev };
+                          delete next[selectedLead.id];
+                          return next;
+                        });
+                      } catch (err: any) {
+                        console.error('[AI Suggestion] discard failed:', err);
+                      } finally {
+                        setAiSuggestionBusy(null);
+                      }
+                    }}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Message Input */}
             {canSendMessage ? (
