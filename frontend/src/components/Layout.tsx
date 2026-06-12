@@ -692,66 +692,14 @@ export function Layout() {
                   </button>
                 </div>
 
-                {/* Conversation area (empty state with suggested prompts) */}
+                {/* Conversation area */}
                 <div
                   className="flex-1"
                   style={{
                     overflowY: 'auto',
-                    padding: '20px 16px 8px',
+                    padding: '12px 16px',
                   }}
-                >
-                  <div className="flex flex-col items-center" style={{ textAlign: 'center', marginBottom: 18 }}>
-                    <div
-                      className="flex items-center justify-center"
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 12,
-                        background: 'var(--lb-ink-10)',
-                        color: 'var(--lb-accent)',
-                        marginBottom: 10,
-                      }}
-                    >
-                      <Sparkles size={18} />
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-                      How can I help?
-                    </div>
-                    <div style={{ fontSize: 12.5, color: 'var(--lb-ink-4)', marginTop: 4, maxWidth: 300, lineHeight: 1.45 }}>
-                      Ask about your account, paste a screenshot, or describe what you want to do.
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', letterSpacing: '0.04em', textTransform: 'uppercase', padding: '0 2px 8px' }}>
-                    Try asking
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    {[
-                      'How do I connect a new account?',
-                      'Why did AI stop replying to this lead?',
-                      'Draft a follow-up for unresponsive leads',
-                    ].map((q, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setAiChatInput(q)}
-                        className="text-left hover:border-[var(--lb-accent)] transition-colors"
-                        style={{
-                          fontSize: 13,
-                          color: 'var(--lb-ink-2)',
-                          background: 'var(--lb-surface)',
-                          border: '1px solid var(--lb-line)',
-                          borderRadius: 10,
-                          padding: '10px 12px',
-                          cursor: 'pointer',
-                          fontFamily: 'inherit',
-                        }}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                />
 
                 {/* Composer */}
                 <div
