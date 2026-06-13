@@ -169,15 +169,18 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
   it('builds the canonical PRICING block (parsed rows + range/exact + guard rules) when the table is valid', async () => {
     // Same pipeline as automation.service / follow-up-generator. The raw
     // JSON dump that used to live here bypassed range/exact mode and the
-    // FargiPro guard rules — that drift is closed.
+    // FargiPro guard rules — that drift is closed. Under the 2026-06-13
+    // source-of-truth fix the "Deep not offered" signal is no longer
+    // `enabled: false` — it's `deep: 0` across every row. The guard
+    // layer then emits the "do NOT quote, defer" clause for Deep.
     const pricingJson = JSON.stringify({
       cleaningTypes: [
         { key: 'regular', label: 'Regular', enabled: true },
-        { key: 'deep', label: 'Deep', enabled: false },
+        { key: 'deep', label: 'Deep', enabled: true },
       ],
       priceTable: [
-        { bed: 2, bath: 1, sqftMin: 800, sqftMax: 1000, regular: 150, deep: 220 },
-        { bed: 3, bath: 2, sqftMin: 1200, sqftMax: 1600, regular: 200, deep: 280 },
+        { bed: 2, bath: 1, sqftMin: 800, sqftMax: 1000, regular: 150, deep: 0 },
+        { bed: 3, bath: 2, sqftMin: 1200, sqftMax: 1600, regular: 200, deep: 0 },
       ],
       sqftAdjustEnabled: true,
     });
@@ -198,26 +201,35 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     });
     const pricingBlock = generateReply.mock.calls[0][0].pricingBlock;
     expect(typeof pricingBlock).toBe('string');
-    // Row formatting + enabled-type filtering (Deep is disabled → must not appear)
+    // Row formatting: all rows + both service columns render (including
+    // Deep: $0, since the column always renders under the new rule).
     expect(pricingBlock).toContain('2BR/1BA');
     expect(pricingBlock).toContain('3BR/2BA');
     expect(pricingBlock).toContain('Regular: $150');
     expect(pricingBlock).toContain('Regular: $200');
-    expect(pricingBlock).not.toContain('Deep:');
+    expect(pricingBlock).toContain('Deep: $0');
     // Range-mode quoting instruction (from buildPriceRangeInstruction)
     expect(pricingBlock).toMatch(/range/i);
     // Hard guard rules (from buildPricingGuardRules) — defer-on-unknown
+    // AND defer-on-not-offered (Deep, since every row is 0).
     expect(pricingBlock.toLowerCase()).toContain('do not quote');
+    expect(pricingBlock).toMatch(/does NOT currently offer[\s\S]*Deep/);
   });
 
-  it('omits pricingBlock entirely when the table has no enabled cleaning types', async () => {
-    // The pre-unification path leaked raw JSON here too. Canonical pattern
-    // returns undefined so the REFERENCE section is dropped cleanly.
-    const pricingJson = JSON.stringify({ rooms: { 3: 220 } });
+  it('still emits pricingBlock when saved JSON omits cleaningTypes — hydration backfills the defaults', async () => {
+    // Legacy regression case (the bug that started this refactor): saved
+    // JSON has a priceTable but no cleaningTypes. Hydration now fills in
+    // Regular/Deep/Airbnb from defaults, so the AI gets a real prompt
+    // block instead of silently dropping it. The shape `{ rooms: ... }`
+    // is unparseable as priceTable → block stays undefined; we also
+    // verify the legacy-priceTable case below.
+    const legacyButValid = JSON.stringify({
+      priceTable: [{ bed: 2, bath: 1, regular: 150 }],
+    });
     const { svc, generateReply } = buildSvc({
       account: {
         businessName: 'Test',
-        servicePricingJson: pricingJson,
+        servicePricingJson: legacyButValid,
         faqJson: null,
         followUpSettingsJson: null,
         followUpTimezone: null,
@@ -229,7 +241,13 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
       customerName: 'Sam',
       customerMessage: 'how much',
     });
-    expect(generateReply.mock.calls[0][0].pricingBlock).toBeUndefined();
+    const pricingBlock = generateReply.mock.calls[0][0].pricingBlock;
+    expect(typeof pricingBlock).toBe('string');
+    expect(pricingBlock).toContain('2BR/1BA');
+    expect(pricingBlock).toContain('Regular Cleaning: $150');
+    // Default Deep + Airbnb backfilled from DEFAULT_CLEANING_PRICING (2/1 row).
+    expect(pricingBlock).toContain('Moving / Deep Cleaning: $179');
+    expect(pricingBlock).toContain('Airbnb Turnaround: $149');
   });
 
   it('passes the unified playbookBlock so BASE HARD RULES + Playbook V2 sections apply to first-touch SMS', async () => {
