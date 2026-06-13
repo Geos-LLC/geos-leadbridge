@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Bell, Bot, Check, Clock, MessageSquare, Moon, PhoneCall, RotateCcw, Sparkles, Workflow, Loader2,
+  Clock, MessageSquare, Moon, PhoneCall, RotateCcw, Workflow, Loader2,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
 import { followUpApi, usersApi } from '../../../services/api';
@@ -12,8 +12,6 @@ interface Props {
   saving: boolean;
   setSaving: (v: boolean) => void;
 }
-
-type LevelId = 'basic' | 'recommended' | 'advanced';
 
 // Defaults for the granular cards. These match what the existing
 // automation pages (Followups + Conversation) treat as the recommended
@@ -37,78 +35,41 @@ const RESUME_DELAY_OPTIONS = ['6 hours', '12 hours', '24 hours', '2 days', '3 da
 const DEFERRAL_DELAY_OPTIONS = ['1 day', '2 days', '3 days', '5 days', '1 week', '2 weeks'];
 const HIRED_DELAY_OPTIONS = ['1 week', '2 weeks', '3 weeks', '1 month', '2 months', '3 months'];
 
-// Each level pre-fills the bundle keys the existing wizard already used.
-// The granular cards (below) start at DEFAULTS — they're additive, not
-// overridden by the level. We send the level bundle + the granular fields
-// in a single payload to followUpApi.saveWizardSettings.
-const LEVEL_BUNDLES: Record<LevelId, Record<string, unknown>> = {
-  basic: {
-    mode: 'off',
-    aiConversationEnabled: false,
-    reEngagementAlertEnabled: true,
-  },
-  recommended: {
-    mode: 'suggest',
-    aiConversationEnabled: true,
-    reEngagementAlertEnabled: true,
-    followUpStrategy: 'hybrid',
-  },
-  advanced: {
-    mode: 'auto_send',
-    aiConversationEnabled: true,
-    reEngagementAlertEnabled: true,
-    followUpStrategy: 'hybrid',
-    handoffTriggerAgreed: true,
-    handoffTriggerWantsLiveContact: true,
-    handoffTriggerProvidedPhone: true,
-    handoffTriggerProvidedSquareFootage: true,
-    handoffTriggerQualificationComplete: true,
-  },
+// "Everything on" trial bundle. Users start on a trial where the full
+// product is available, so we don't make them pick a Basic/Recommended/
+// Advanced tier — the wizard just enables the lot and lets users dial it
+// back on the Automation page later if they want to. This mirrors what
+// the old "advanced" bundle wrote, minus the user-chosen followUpStrategy
+// (set on the next wizard step — AI Rules — so we don't pin it here).
+const TRIAL_BUNDLE: Record<string, unknown> = {
+  mode: 'auto_send',
+  aiConversationEnabled: true,
+  reEngagementAlertEnabled: true,
+  handoffTriggerAgreed: true,
+  handoffTriggerWantsLiveContact: true,
+  handoffTriggerProvidedPhone: true,
+  handoffTriggerProvidedSquareFootage: true,
+  handoffTriggerQualificationComplete: true,
 };
 
-const LEVELS: { id: LevelId; title: string; subtitle: string; bullets: string[]; icon: React.ReactNode; recommended?: boolean }[] = [
-  {
-    id: 'basic',
-    title: 'Basic',
-    subtitle: 'Reply to new leads, get a heads-up when something comes in.',
-    bullets: ['Instant reply', 'Alerts & notifications'],
-    icon: <Bell className="w-5 h-5" />,
-  },
-  {
-    id: 'recommended',
-    title: 'Recommended',
-    subtitle: "We'll keep the conversation going for you and nudge silent leads.",
-    bullets: ['Instant reply', 'Follow-ups', 'Text messages', 'Alerts & notifications'],
-    icon: <Sparkles className="w-5 h-5" />,
-    recommended: true,
-  },
-  {
-    id: 'advanced',
-    title: 'Advanced AI',
-    subtitle: 'Hand the lead off to your team the moment they show real intent.',
-    bullets: ['Everything in Recommended', 'AI Conversation', 'Handoff to your team', 'Recovery flows'],
-    icon: <Bot className="w-5 h-5" />,
-  },
-];
-
 /**
- * Wizard step 6 — Automation level + fine-tune timing & follow-ups.
+ * Wizard step 6 — Fine-tune timing & follow-ups.
  *
- * Two sections:
- *   1. Bundle picker (Basic / Recommended / Advanced) — sets the master
- *      switches (AI on/off, follow-up mode, handoff triggers).
- *   2. Fine-tune cards — the granular toggles a user would otherwise have
- *      to discover on the Automation pages later:
- *        - Timing (instant text + call during business hours)
- *        - Quiet hours for follow-ups
- *        - Resume follow-ups after a conversation
- *        - Check in after customer deferral
- *        - Re-engage after customer hired competitor
- *        - AI Auto Reply Availability (24/7 vs outside business hours)
+ * The Basic/Recommended/Advanced plan picker is gone — trial users get
+ * the full product enabled by default. This step now only exposes the
+ * granular toggles a user would otherwise have to discover on the
+ * Automation pages later:
  *
- * Save fans out across every connected SavedAccount: the bundle + granular
- * settings go through `followUpApi.saveWizardSettings`, and the three
- * SavedAccount column toggles (firstMsg / call / quietHours) go through
+ *   - Timing (instant text + call during business hours)
+ *   - Quiet hours for follow-ups
+ *   - Resume follow-ups after a conversation
+ *   - Check in after customer deferral
+ *   - Re-engage after customer hired competitor
+ *
+ * Save fans out across every connected SavedAccount: the TRIAL_BUNDLE
+ * master switches + granular settings go through
+ * `followUpApi.saveWizardSettings`, and the three SavedAccount column
+ * toggles (firstMsg / call / quietHours) go through
  * `usersApi.updateAccountHours`. Failures on individual accounts surface
  * as a partial-save toast and the wizard still advances — these settings
  * remain fully editable on the Automation pages.
@@ -117,7 +78,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const meta = getStepMeta('automation');
 
-  const [level, setLevel] = useState<LevelId>('recommended');
   const [loading, setLoading] = useState(true);
 
   // Master business-hours window — read-only label so users see what
@@ -184,11 +144,11 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Combine the level bundle + granular toggles into the payload for
+  // Combine the trial bundle + granular toggles into the payload for
   // followUpApi.saveWizardSettings. Granular fields take precedence — a
   // user who flipped one before saving expects that exact value to land.
   const wizardPayload = useMemo(() => ({
-    ...LEVEL_BUNDLES[level],
+    ...TRIAL_BUNDLE,
     fuReEnrollOnSilence: opts.fuReEnrollOnSilence,
     fuReEnrollDelay: opts.fuReEnrollDelay,
     aiDeferralCheckIn: opts.aiDeferralCheckIn,
@@ -196,7 +156,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     aiHiredCompetitorReengage: opts.aiHiredCompetitorReengage,
     aiHiredCompetitorDelay: opts.aiHiredCompetitorDelay,
     followUpAvailability: opts.followUpAvailability,
-  }), [level, opts]);
+  }), [opts]);
 
   async function apply() {
     if (saving) return;
@@ -240,55 +200,17 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         {meta.description}
       </p>
 
-      {/* ─── Bundle picker ──────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        {LEVELS.map(L => {
-          const active = level === L.id;
-          return (
-            <button
-              key={L.id}
-              type="button"
-              onClick={() => setLevel(L.id)}
-              disabled={saving}
-              className={`w-full flex items-start gap-4 p-5 rounded-2xl border-2 text-left transition-all ${
-                active ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200 bg-white hover:border-slate-300'
-              } disabled:opacity-60 disabled:cursor-not-allowed`}
-            >
-              <span className={`w-10 h-10 rounded-xl inline-flex items-center justify-center shrink-0 ${
-                active ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-              }`}>{L.icon}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-base font-extrabold text-slate-900 tracking-tight">{L.title}</span>
-                  {L.recommended && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold uppercase tracking-widest">
-                      Recommended
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-slate-500 leading-relaxed mb-3">{L.subtitle}</p>
-                <ul className="space-y-1">
-                  {L.bullets.map(b => (
-                    <li key={b} className="flex items-center gap-2 text-sm text-slate-700">
-                      <Check className={`w-3.5 h-3.5 ${active ? 'text-blue-600' : 'text-slate-400'}`} />
-                      {b}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-1 ${
-                active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
-              }`} aria-hidden>{active && <Check className="w-3 h-3" />}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Trial users get the full product turned on. The Basic /
+          Recommended / Advanced plan picker that used to sit here is
+          gone — there's nothing to choose between, and the granular
+          cards below stay editable for users who want to dial things
+          back. */}
 
       {/* ─── Fine-tune section ──────────────────────────────────────────── */}
-      <div className="mt-10">
+      <div>
         <div className="mb-4">
-          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Fine-tune timing &amp; follow-ups</h2>
-          <p className="text-sm text-slate-500 mt-1">All of these are editable later on Automation. Defaults shown match the recommended setup.</p>
+          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Timing &amp; follow-ups</h2>
+          <p className="text-sm text-slate-500 mt-1">All of these are editable later on Automation. Defaults are tuned for the trial.</p>
         </div>
 
         {loading ? (

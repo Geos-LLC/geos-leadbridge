@@ -53,8 +53,8 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'automation',
     label: 'Automation',
-    title: 'Choose your automation level',
-    description: 'Pick how much LeadBridge handles automatically. You can change this anytime.',
+    title: 'Fine-tune your automation',
+    description: 'Your trial has the full LeadBridge experience turned on. Adjust the defaults below if you want — everything stays editable later.',
     countsTowardChecklist: true,
   },
   {
