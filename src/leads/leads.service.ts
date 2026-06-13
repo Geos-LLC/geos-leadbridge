@@ -2216,6 +2216,77 @@ export class LeadsService {
    */
 
   /**
+   * Populate Lead.customerPhoneSubstitute from Thumbtack's GET
+   * /negotiations/{id} endpoint, if it differs from the value already in
+   * Lead.customerPhone (which came from the webhook).
+   *
+   * Why this exists: TT's LEADS_V4 webhook delivers a forwarding number,
+   * not the customer's real phone (confirmed 2026-06-13 — the area-code
+   * distribution + same-customer-different-account pattern proves the
+   * webhook number is a per-pro forwarding pool, not real). The GET
+   * endpoint returns a SECOND forwarding number for the same lead. Both
+   * are forwarding, but exposing both in the top bar at least gives the
+   * operator the "in-app number" the customer sees on Thumbtack's UI so
+   * they can cross-check vs the SMS forwarding number.
+   *
+   * This is the lean version of refetchLeadFromPlatform — it ONLY
+   * touches customerPhoneSubstitute. Never overwrites customerPhone,
+   * customerName, status, or any other column. Fire-and-forget safe.
+   * No-op when:
+   *   - lead is not Thumbtack
+   *   - GET returns null/empty phone
+   *   - GET phone matches customerPhone exactly (no second number to show)
+   *   - credentials unavailable
+   *   - adapter call throws (caller logs via the returned reason)
+   */
+  async populateThumbtackSubstitute(
+    userId: string,
+    leadId: string,
+  ): Promise<{ updated: boolean; reason?: string }> {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId },
+      select: { id: true, platform: true, businessId: true, externalRequestId: true, customerPhone: true, customerPhoneSubstitute: true },
+    });
+    if (!lead) return { updated: false, reason: 'lead_not_found' };
+    if (lead.platform !== 'thumbtack') return { updated: false, reason: 'not_thumbtack' };
+
+    const credentials = lead.businessId
+      ? await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId)
+      : await this.platformService.getCredentials(userId, lead.platform);
+    if (!credentials) return { updated: false, reason: 'no_credentials' };
+
+    const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+    if (typeof adapter.getLead !== 'function') return { updated: false, reason: 'adapter_missing_getLead' };
+
+    let freshLead: NormalizedLead;
+    try {
+      freshLead = await adapter.getLead(credentials, lead.externalRequestId);
+    } catch (err: any) {
+      return { updated: false, reason: `get_failed:${err?.message ?? 'unknown'}` };
+    }
+
+    const getPhone = (freshLead?.customerPhone || '').trim();
+    if (!getPhone) return { updated: false, reason: 'get_phone_empty' };
+
+    // Normalize for comparison only — store the GET endpoint's raw value
+    // so the UI's formatPhoneNumber renders consistently with the webhook
+    // value's formatting choices.
+    const norm = (p: string | null | undefined) => (p || '').replace(/\D/g, '');
+    if (norm(getPhone) === norm(lead.customerPhone)) {
+      return { updated: false, reason: 'same_as_webhook' };
+    }
+    if (norm(getPhone) === norm(lead.customerPhoneSubstitute)) {
+      return { updated: false, reason: 'already_stored' };
+    }
+
+    await this.prisma.lead.update({
+      where: { id: lead.id },
+      data: { customerPhoneSubstitute: getPhone },
+    });
+    return { updated: true };
+  }
+
+  /**
    * Re-fetch lead data from platform API (fixes "Unknown" leads from token failures)
    */
   async refetchLeadFromPlatform(userId: string, leadId: string): Promise<{ updated: boolean; customerName?: string }> {
