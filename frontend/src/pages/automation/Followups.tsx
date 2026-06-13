@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  PhoneOff, Sparkles,
+  PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight, X,
   RefreshCw, Clock, UserX, Info, Power,
 } from 'lucide-react';
 import {
@@ -30,6 +30,10 @@ const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
 // Module-level cache for instant tab switching + delay-free mixed detection.
+type PlanStepData = { val: number; unit: PlanUnit };
+type PlanUnit = 'min' | 'hour' | 'day' | 'week' | 'month' | 'year';
+const PLAN_UNITS: PlanUnit[] = ['min', 'hour', 'day', 'week', 'month', 'year'];
+
 type CachedFollowups = {
   // Master ON/OFF — derived from followUpMode. Off when followUpMode is
   // null or the literal 'off'. ON snaps to auto_send (+ AI if plan allows).
@@ -43,11 +47,53 @@ type CachedFollowups = {
   resumeDelay: string;
   deferralDelay: string;
   hiredDelay: string;
+  plan: PlanStepData[];
   // Read-only on this page (edited in AutomationConversation). Cached so
   // the AI Strategy tile under Follow-up mode reflects the saved value.
   followUpStrategy: StrategyKey;
 };
 const followupsCache = new Map<string, CachedFollowups>();
+
+// Default 11-step cadence — matches the backend follow-up engine seed
+// templates so a fresh account sees the system's standard rhythm.
+const DEFAULT_FOLLOWUP_PLAN: PlanStepData[] = [
+  { val: 2,  unit: 'min' },
+  { val: 10, unit: 'min' },
+  { val: 1,  unit: 'hour' },
+  { val: 1,  unit: 'day' },
+  { val: 3,  unit: 'day' },
+  { val: 7,  unit: 'day' },
+  { val: 2,  unit: 'week' },
+  { val: 1,  unit: 'month' },
+  { val: 3,  unit: 'month' },
+  { val: 6,  unit: 'month' },
+  { val: 1,  unit: 'year' },
+];
+
+// Parse the persisted `${val} ${unit}` string back into the editor shape.
+// Matches the backend's parseDelay() substring rules — keep in sync if those
+// change (src/follow-up-engine/follow-up-scheduler.service.ts).
+function parseDelayToStep(delay: string): PlanStepData {
+  const d = (delay || '').toLowerCase().trim();
+  const val = Math.max(1, Math.round(parseFloat(d) || 1));
+  if (d.includes('min')) return { val, unit: 'min' };
+  if (d.includes('hour') || d.includes('hr')) return { val, unit: 'hour' };
+  if (d.includes('day')) return { val, unit: 'day' };
+  if (d.includes('week') || d.includes('wk')) return { val, unit: 'week' };
+  if (d.includes('month') || d.includes('mo')) return { val, unit: 'month' };
+  if (d.includes('year') || d.includes('yr')) return { val, unit: 'year' };
+  return { val: 1, unit: 'day' };
+}
+
+// Serialize an editor step back to the canonical `${val} ${unit}` form
+// the backend's parseDelay() understands.
+function stepToDelayString(step: PlanStepData): string {
+  return `${step.val} ${step.unit}`;
+}
+
+function unitLabel(unit: PlanUnit, val: number): string {
+  return val === 1 ? unit : `${unit}s`;
+}
 
 export function AutomationFollowups({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
@@ -86,6 +132,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [resumeDelay, setResumeDelay] = useState('12 hours');
   const [deferralDelay, setDeferralDelay] = useState('3 days');
   const [hiredDelay, setHiredDelay] = useState('3 weeks');
+  // 11-step plan — editable. Persisted to followUpSettingsJson.followUpSteps
+  // as [{ delay: '2 min', message: null }, ...]. Backend parseDelay()
+  // converts each delay string into minutes for scheduling.
+  const [plan, setPlan] = useState<PlanStepData[]>(DEFAULT_FOLLOWUP_PLAN);
   // Read-only AI Strategy + Quiet Hours summary. AI Strategy is per-account
   // (lives in followUpSettingsJson.followUpStrategy); Quiet Hours times are
   // user-level (User.quietHours*) and fetched once below.
@@ -110,7 +160,8 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     | 'followUpsOn'
     | 'quietOn' | 'deliveryMode' | 'messageMode'
     | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
-    | 'resumeDelay' | 'deferralDelay' | 'hiredDelay';
+    | 'resumeDelay' | 'deferralDelay' | 'hiredDelay'
+    | 'plan';
   const dirtyFieldsRef = useRef<Set<FollowupsField>>(new Set());
   // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
   // for compatibility with effect deps below.
@@ -131,22 +182,31 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // Reset dirty on scope change so the next user action triggers save fresh.
   useEffect(() => { dirtyRef.current = false; dirtyFieldsRef.current = new Set(); }, [accountId, isAll]);
 
-  const parseSettings = (s: any, accountHoursQuiet?: boolean): CachedFollowups => ({
-    // Master toggle is ON whenever followUpMode is a non-off value
-    // ('suggest' or 'auto_send'). Null/missing maps to OFF (the default
-    // for new accounts and the legacy column's NULL state).
-    followUpsOn: s?.followUpMode != null && s?.followUpMode !== 'off',
-    quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
-    deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
-    messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
-    activeHoursStart: s?.followUpActiveHoursStart || '09:00',
-    activeHoursEnd: s?.followUpActiveHoursEnd || '18:00',
-    timezone: s?.followUpTimezone || 'America/New_York',
-    resumeDelay: s?.fuReEnrollDelay || '12 hours',
-    deferralDelay: s?.aiDeferralDelay || '3 days',
-    hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
-    followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
-  });
+  const parseSettings = (s: any, accountHoursQuiet?: boolean): CachedFollowups => {
+    // Follow-up plan — hydrate from any of the three legacy key names the
+    // backend accepts (followUpSteps is the canonical one).
+    const rawSteps = s?.followUpSteps || s?.followUpSmartSteps || s?.followUpCustomSteps;
+    const hydratedPlan: PlanStepData[] = Array.isArray(rawSteps) && rawSteps.length > 0
+      ? rawSteps.map((st: any) => parseDelayToStep(st?.delay ?? ''))
+      : DEFAULT_FOLLOWUP_PLAN;
+    return {
+      // Master toggle is ON whenever followUpMode is a non-off value
+      // ('suggest' or 'auto_send'). Null/missing maps to OFF (the default
+      // for new accounts and the legacy column's NULL state).
+      followUpsOn: s?.followUpMode != null && s?.followUpMode !== 'off',
+      quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
+      deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
+      messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
+      activeHoursStart: s?.followUpActiveHoursStart || '09:00',
+      activeHoursEnd: s?.followUpActiveHoursEnd || '18:00',
+      timezone: s?.followUpTimezone || 'America/New_York',
+      resumeDelay: s?.fuReEnrollDelay || '12 hours',
+      deferralDelay: s?.aiDeferralDelay || '3 days',
+      hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
+      plan: hydratedPlan,
+      followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
+    };
+  };
 
   // User-level quiet hours — independent of selected account. The Quiet
   // hours card under Follow-ups shows the saved start/end/timezone.
@@ -178,6 +238,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(first.resumeDelay);
         setDeferralDelay(first.deferralDelay);
         setHiredDelay(first.hiredDelay);
+        setPlan(first.plan);
         setFollowUpStrategy(first.followUpStrategy);
       }
     } else {
@@ -193,6 +254,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(cached.resumeDelay);
         setDeferralDelay(cached.deferralDelay);
         setHiredDelay(cached.hiredDelay);
+        setPlan(cached.plan);
         setFollowUpStrategy(cached.followUpStrategy);
       }
     }
@@ -228,6 +290,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             setResumeDelay(first.resumeDelay);
             setDeferralDelay(first.deferralDelay);
             setHiredDelay(first.hiredDelay);
+            setPlan(first.plan);
             setFollowUpStrategy(first.followUpStrategy);
           }
         }
@@ -252,6 +315,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           setResumeDelay(parsed.resumeDelay);
           setDeferralDelay(parsed.deferralDelay);
           setHiredDelay(parsed.hiredDelay);
+          setPlan(parsed.plan);
           setFollowUpStrategy(parsed.followUpStrategy);
         }
       })
@@ -289,6 +353,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     if (fields.has('resumeDelay'))      wizardPayload.fuReEnrollDelay        = resumeDelay;
     if (fields.has('deferralDelay'))    wizardPayload.aiDeferralDelay        = deferralDelay;
     if (fields.has('hiredDelay'))       wizardPayload.aiHiredCompetitorDelay = hiredDelay;
+    if (fields.has('plan')) {
+      // Persisted as the canonical `steps` array. Backend writes it to
+      // followUpSettingsJson.followUpSteps; the scheduler prefers these
+      // user-configured delays over the seed template's defaults
+      // (see follow-up-scheduler.service.ts getUserConfiguredSteps).
+      wizardPayload.steps = plan.map(s => ({ delay: stepToDelayString(s), message: null }));
+    }
     // 'preset' was always passed before — keep only when deliveryMode is part
     // of this save, since the backend ignores it for unrelated saves anyway.
     if (fields.has('deliveryMode')) wizardPayload.preset = 'smart';
@@ -304,7 +375,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       if (!prev) {
         followupsCache.set(a.id, {
           followUpsOn, quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-          resumeDelay, deferralDelay, hiredDelay, followUpStrategy,
+          resumeDelay, deferralDelay, hiredDelay, plan, followUpStrategy,
         });
         return;
       }
@@ -329,6 +400,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         resumeDelay:      fields.has('resumeDelay')      ? resumeDelay      : prev.resumeDelay,
         deferralDelay:    fields.has('deferralDelay')    ? deferralDelay    : prev.deferralDelay,
         hiredDelay:       fields.has('hiredDelay')       ? hiredDelay       : prev.hiredDelay,
+        plan:             fields.has('plan')             ? plan             : prev.plan,
         // followUpStrategy is read-only on this page — preserve prev or
         // fall back to the displayed value (loaded from getSettings).
         followUpStrategy: prev.followUpStrategy ?? followUpStrategy,
@@ -387,6 +459,33 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const mixedDeferral = getMixedF('deferralDelay', v => String(v));
   const mixedHired    = getMixedF('hiredDelay', v => String(v));
 
+  // Plan needs a deep-equality compare — getMixedF stringifies via String()
+  // which collapses arrays of objects to the same value. Bypass with a
+  // JSON-serialized key so distinct plans show up as deviants.
+  function getMixedPlan(): { mixed: boolean; tooltip?: string } {
+    if (!isAll) return { mixed: false };
+    const entries = accounts
+      .map(a => ({ account: a, cached: followupsCache.get(a.id) }))
+      .filter(x => x.cached !== undefined) as { account: typeof accounts[0]; cached: CachedFollowups }[];
+    if (entries.length < 2) return { mixed: false };
+    const keyOf = (p: PlanStepData[]) => JSON.stringify(p);
+    const fmt = (p: PlanStepData[]) => p.map(s => `${s.val}${s.unit[0]}`).join(' → ');
+    const counts = new Map<string, number>();
+    for (const e of entries) counts.set(keyOf(e.cached.plan), (counts.get(keyOf(e.cached.plan)) || 0) + 1);
+    let majorityKey = keyOf(entries[0].cached.plan);
+    let maxCount = 0;
+    counts.forEach((c, k) => { if (c > maxCount) { maxCount = c; majorityKey = k; } });
+    const majorityEntry = entries.find(e => keyOf(e.cached.plan) === majorityKey)!;
+    const deviants = entries.filter(e => keyOf(e.cached.plan) !== majorityKey);
+    if (deviants.length === 0) return { mixed: false };
+    const tooltip =
+      `Most accounts: ${fmt(majorityEntry.cached.plan)}\n` +
+      `Differs in:\n` +
+      deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached.plan)}`).join('\n');
+    return { mixed: true, tooltip };
+  }
+  const mixedPlan = getMixedPlan();
+
   // Auto-save IMMEDIATELY on every USER change. We snapshot the dirty-fields
   // set, clear it, then pass to handleSave so only those fields are written.
   useEffect(() => {
@@ -397,7 +496,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followUpsOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay]);
+  }, [followUpsOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay, plan]);
 
   // markDirty-wrapped setters used by JSX. Each setter adds its specific
   // field name so the save only writes the keys the user changed.
@@ -419,6 +518,23 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
   const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
   const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
+  const markPlanDirty = () => { dirtyRef.current = true; dirtyFieldsRef.current.add('plan'); };
+  const onPlanStepChange = (index: number, next: PlanStepData) => {
+    markPlanDirty();
+    setPlan(p => p.map((s, i) => i === index ? next : s));
+  };
+  const onPlanAddStep = () => {
+    markPlanDirty();
+    setPlan(p => [...p, { val: 1, unit: 'month' }]);
+  };
+  const onPlanRemoveStep = (index: number) => {
+    markPlanDirty();
+    setPlan(p => p.length > 1 ? p.filter((_, i) => i !== index) : p);
+  };
+  const onPlanReset = () => {
+    markPlanDirty();
+    setPlan(DEFAULT_FOLLOWUP_PLAN);
+  };
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 
@@ -597,24 +713,85 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         </FieldRow>
       </SectionCard>
 
-      {/* Follow-up plan — read-only summary.
-          The grid that used to live here was UI-only (setPlan touched local
-          React state but no save effect persisted it), so editing the
-          numbers gave users false confidence. The plan itself is driven
-          by the backend follow-up engine seed templates; per-step custom
-          delays are configurable via API (followUpSettingsJson.customStepDelays
-          / customStepEnabled) and exposed elsewhere when needed. */}
+      {/* Follow-up plan — editable cadence.
+          Persists to followUpSettingsJson.followUpSteps as
+          [{ delay: '2 min', message: null }, ...]. The scheduler prefers
+          these user-configured delays over the seed template defaults
+          (src/follow-up-engine/follow-up-scheduler.service.ts
+           getUserConfiguredSteps). AI still writes each message; only the
+          timing is user-controlled here. */}
       <SectionCard padding="20px 24px 24px">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            Follow-up plan
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, marginBottom: 4, flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Follow-up plan
+            </div>
+            <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
+            {mixedPlan.mixed && <MixedBadge tooltip={mixedPlan.tooltip} />}
           </div>
-          <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
+          <button
+            type="button"
+            onClick={onPlanReset}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: 'transparent', border: 0, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+              color: 'var(--lb-accent)', padding: 0,
+            }}
+          >
+            <RotateCcw size={13} /> Reset to defaults
+          </button>
         </div>
-        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-          LeadBridge follows up with unresponsive leads over an 11-step schedule
-          spanning up to one year. AI writes each step from the live conversation;
-          timing is managed by the system to match standard best practices.
+        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginBottom: 18, lineHeight: 1.55 }}>
+          AI writes each step from the live conversation. You set the timing
+          between steps — {plan.length} steps total.
+        </div>
+
+        <div style={{
+          display: 'flex', alignItems: 'stretch', gap: 6, flexWrap: 'nowrap',
+          overflowX: 'auto', paddingBottom: 8,
+          background: mixedPlan.mixed ? '#fffbeb' : undefined,
+          borderLeft: mixedPlan.mixed ? '4px solid #f59e0b' : undefined,
+          paddingLeft: mixedPlan.mixed ? 12 : undefined,
+        }}>
+          {plan.map((step, i) => (
+            <div key={i} style={{ display: 'contents' }}>
+              <PlanStepEditor
+                n={i + 1}
+                step={step}
+                canRemove={plan.length > 1}
+                onChange={next => onPlanStepChange(i, next)}
+                onRemove={() => onPlanRemoveStep(i)}
+              />
+              {i < plan.length - 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)', paddingTop: 22 }}>
+                  <ChevronRight size={14} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
+            Each step fires the configured time after the previous step's send.
+          </div>
+          <button
+            type="button"
+            onClick={onPlanAddStep}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '7px 14px',
+              background: 'white', color: 'var(--lb-accent)',
+              border: '1px solid var(--lb-accent-line)', borderRadius: 999,
+              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            <Plus size={13} /> Add step
+          </button>
         </div>
       </SectionCard>
 
@@ -671,6 +848,92 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       />
 
       </>}
+    </div>
+  );
+}
+
+function PlanStepEditor({
+  n, step, canRemove, onChange, onRemove,
+}: {
+  n: number;
+  step: PlanStepData;
+  canRemove: boolean;
+  onChange: (next: PlanStepData) => void;
+  onRemove: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'relative',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        minWidth: 96,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)' }}>
+        #{n}
+      </div>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4,
+        width: 96, padding: 8,
+        background: 'white', border: '1px solid var(--lb-line)', borderRadius: 10,
+      }}>
+        <input
+          type="number"
+          min={1}
+          max={999}
+          value={step.val}
+          onChange={(e) => {
+            const v = Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1));
+            onChange({ ...step, val: v });
+          }}
+          style={{
+            width: '100%', textAlign: 'center',
+            fontFamily: 'inherit', fontSize: 18, fontWeight: 700,
+            color: 'var(--lb-ink-1)', letterSpacing: '-0.02em',
+            border: '1px solid var(--lb-line-soft)', borderRadius: 6,
+            padding: '4px 0', background: '#fafbfc',
+            outline: 'none',
+          }}
+        />
+        <select
+          value={step.unit}
+          onChange={(e) => onChange({ ...step, unit: e.target.value as PlanUnit })}
+          style={{
+            width: '100%',
+            fontFamily: 'inherit', fontSize: 11.5, fontWeight: 500,
+            color: 'var(--lb-ink-3)',
+            border: '1px solid var(--lb-line-soft)', borderRadius: 6,
+            padding: '3px 4px', background: 'white',
+            cursor: 'pointer', textAlign: 'center',
+            appearance: 'none',
+          }}
+        >
+          {PLAN_UNITS.map(u => (
+            <option key={u} value={u}>{unitLabel(u, step.val)}</option>
+          ))}
+        </select>
+      </div>
+      {canRemove && hover && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove step ${n}`}
+          style={{
+            position: 'absolute', top: 12, right: -6,
+            width: 18, height: 18, padding: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'white', color: 'var(--lb-ink-5)',
+            border: '1px solid var(--lb-line)', borderRadius: 999,
+            cursor: 'pointer',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+          }}
+        >
+          <X size={11} />
+        </button>
+      )}
     </div>
   );
 }
