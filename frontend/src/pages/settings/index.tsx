@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText, Check,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -75,6 +75,26 @@ export default function SettingsPage() {
         title={meta.label}
         badge={{ label: 'Settings', tone: 'blue' }}
         subtitle={SUBTITLES[tab]}
+        headerActions={
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 11px',
+              borderRadius: 999,
+              background: 'var(--lb-success-tint)',
+              color: 'var(--lb-success)',
+              border: '1px solid #a7f3d0',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+            title="Settings auto-save as you make changes."
+          >
+            <Check size={13} />
+            Saved
+          </span>
+        }
       />
 
       <SettingsTabs value={tab} onChange={setTab} />
@@ -102,13 +122,20 @@ function SettingsTemplates() {
 
 function SettingsTabs({ value, onChange }: { value: TabKey; onChange: (k: TabKey) => void }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-end', gap: 2,
-      borderBottom: '1px solid var(--lb-line)',
-      marginBottom: 22,
-      overflowX: 'auto',
-      paddingBottom: 1,
-    }}>
+    <div
+      className="lb-settings-tabs"
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 6,
+        background: 'var(--lb-surface)',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 5,
+        boxShadow: 'var(--lb-shadow-sm)',
+        marginBottom: 22,
+      }}
+    >
       {TABS.map(t => {
         const active = value === t.key;
         const Icon = t.icon;
@@ -117,44 +144,42 @@ function SettingsTabs({ value, onChange }: { value: TabKey; onChange: (k: TabKey
             key={t.key}
             type="button"
             onClick={() => onChange(t.key)}
+            title={t.sublabel}
             style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '10px 14px 12px',
-              background: 'transparent',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: active ? 'var(--lb-accent-tint)' : 'transparent',
               border: 0,
-              borderBottom: '2px solid ' + (active ? 'var(--lb-accent)' : 'transparent'),
               cursor: 'pointer',
               fontFamily: 'inherit',
-              color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
-              transition: 'color 120ms, border-color 120ms',
-              marginBottom: -1,
+              fontSize: 13,
+              fontWeight: active ? 700 : 600,
+              color: active ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
+              transition: 'background 120ms, color 120ms',
               flexShrink: 0,
             }}
           >
-            <Icon size={14} style={{ color: active ? 'var(--lb-accent)' : 'var(--lb-ink-6)' }} />
-            <div style={{ textAlign: 'left' }}>
-              <div style={{
-                fontSize: 13, fontWeight: active ? 700 : 500, lineHeight: 1.2,
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-              }}>
-                {t.label}
-                {t.beta && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, letterSpacing: 0.06,
-                    padding: '1px 5px', borderRadius: 4,
-                    background: '#ede9fe', color: '#6d28d9',
-                    textTransform: 'uppercase',
-                  }}>Beta</span>
-                )}
-              </div>
-              <div style={{
-                fontSize: 10.5, color: 'var(--lb-ink-6)', marginTop: 2,
-                fontFamily: 'var(--lb-font-mono)', letterSpacing: 0.04,
-                textTransform: 'uppercase', fontWeight: 500,
-              }}>
-                {t.sublabel}
-              </div>
-            </div>
+            <Icon size={14} />
+            <span>{t.label}</span>
+            {t.beta && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0.06,
+                  padding: '1px 5px',
+                  borderRadius: 4,
+                  background: '#ede9fe',
+                  color: '#6d28d9',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Beta
+              </span>
+            )}
           </button>
         );
       })}

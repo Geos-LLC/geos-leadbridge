@@ -79,3 +79,31 @@ h1, h2, h3, h4 {
   color: var(--lb-accent);
   font-weight: 700;
 }
+
+/* ─── Responsive: top-nav Setup button collapses to icon-only ≤640px ─── */
+@media (max-width: 640px) {
+  .lb-setup-btn {
+    padding: 0 !important;
+    width: 36px;
+    height: 36px;
+  }
+  .lb-setup-btn .lb-setup-label {
+    display: none;
+  }
+}
+
+/* ─── Responsive: AI launcher tucks down ≤560px ─── */
+@media (max-width: 560px) {
+  .lb-ai-launcher {
+    bottom: 16px !important;
+    right: 16px !important;
+  }
+  .lb-ai-panel {
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    bottom: 80px !important;
+    max-height: calc(100dvh - 150px) !important;
+    height: auto !important;
+  }
+}

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
+  Settings, LogOut, Shield, FlaskConical, Menu,
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
-  DollarSign, Sparkles, Paperclip, Send, X,
+  DollarSign, Sparkles, Paperclip, Send, X, MessageSquare,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -677,20 +677,24 @@ export function Layout() {
                   <button
                     type="button"
                     onClick={() => navigate('/onboarding/setup')}
-                    className="flex items-center justify-center hover:scale-105 transition-all"
+                    className="lb-setup-btn flex items-center gap-2 hover:opacity-90 transition-opacity"
                     style={{
-                      width: 38,
                       height: 38,
+                      padding: '0 14px',
                       borderRadius: 999,
-                      background: 'var(--lb-ink-10)',
-                      color: 'var(--lb-ink-2)',
-                      border: '1px solid var(--lb-line)',
+                      background: 'var(--lb-accent-tint)',
+                      color: 'var(--lb-accent)',
+                      border: '1px solid var(--lb-accent-line)',
                       cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      fontSize: 13.5,
+                      fontWeight: 600,
                     }}
                     title="Open setup guide"
                     aria-label="Open setup guide"
                   >
-                    <GraduationCap size={17} />
+                    <Sparkles size={15} />
+                    <span className="lb-setup-label">Setup</span>
                   </button>
                 </div>
               </div>
@@ -770,26 +774,30 @@ export function Layout() {
 
           <Outlet />
 
-          {/* Floating AI assistant trigger — bottom-right. */}
+          {/* Floating AI assistant trigger — raised so it never overlaps the
+              Lead Activity composer send button. */}
           {!aiChatOpen && (
             <button
               type="button"
               onClick={() => setAiChatOpen(true)}
-              className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
+              className="lb-ai-launcher fixed flex items-center justify-center hover:scale-105 transition-all"
               style={{
-                width: 44,
-                height: 44,
+                bottom: 88,
+                right: 24,
+                width: 54,
+                height: 54,
                 borderRadius: 999,
                 background: 'var(--lb-accent)',
                 color: 'var(--lb-accent-fg)',
                 border: 0,
                 cursor: 'pointer',
                 boxShadow: 'var(--lb-shadow-md)',
+                zIndex: 60,
               }}
               title="Open AI assistant"
               aria-label="Open AI assistant"
             >
-              <Sparkles size={18} />
+              <MessageSquare size={20} />
             </button>
           )}
 
@@ -803,72 +811,73 @@ export function Layout() {
                 aria-hidden
               />
               <div
-                className="fixed z-50 flex flex-col"
+                className="lb-ai-panel fixed z-50 flex flex-col"
                 role="dialog"
                 aria-label="AI assistant chat"
                 style={{
                   bottom: 20,
-                  right: 20,
-                  height: 'min(620px, calc(100vh - 40px))',
-                  width: 'min(440px, calc(100vw - 40px))',
+                  right: 24,
+                  height: 'min(520px, calc(100dvh - 40px))',
+                  width: 'min(374px, calc(100vw - 40px))',
                   background: 'var(--lb-surface)',
                   border: '1px solid var(--lb-line)',
-                  borderRadius: 18,
-                  boxShadow: '0 24px 60px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.06)',
+                  borderRadius: 16,
+                  boxShadow: 'var(--lb-shadow-lg)',
                   overflow: 'hidden',
                 }}
               >
-                {/* Header */}
+                {/* Header — navy gradient with sparkles tile + online status */}
                 <div
                   className="flex items-center justify-between"
                   style={{
-                    padding: '12px 14px',
-                    borderBottom: '1px solid var(--lb-line)',
+                    padding: '14px 16px',
+                    background: 'linear-gradient(135deg, #0a1530 0%, #1b2a52 100%)',
+                    color: '#fff',
                   }}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-3">
                     <div
                       className="flex items-center justify-center"
                       style={{
-                        width: 30,
-                        height: 30,
+                        width: 34,
+                        height: 34,
                         borderRadius: 10,
-                        background: 'var(--lb-accent)',
-                        color: 'var(--lb-accent-fg)',
+                        background: 'rgba(255,255,255,0.12)',
+                        color: '#fff',
                       }}
                     >
-                      <Sparkles size={15} />
+                      <Sparkles size={16} />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-                        AI Assistant
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>
+                        LeadBridge Assistant
                       </div>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: '0.04em',
-                          textTransform: 'uppercase',
-                          color: 'var(--lb-accent)',
-                          background: 'var(--lb-ink-10)',
-                          padding: '2px 6px',
-                          borderRadius: 999,
-                        }}
-                      >
-                        Beta
-                      </span>
+                      <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: 999,
+                            background: '#22c55e',
+                            display: 'inline-block',
+                          }}
+                        />
+                        <span style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.75)' }}>
+                          Online · AI agent
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setAiChatOpen(false)}
-                    className="flex items-center justify-center hover:bg-[var(--lb-ink-10)] transition-colors"
+                    className="flex items-center justify-center hover:bg-white/10 transition-colors"
                     style={{
                       width: 30,
                       height: 30,
                       borderRadius: 8,
                       background: 'transparent',
-                      color: 'var(--lb-ink-4)',
+                      color: 'rgba(255,255,255,0.85)',
                       border: 0,
                       cursor: 'pointer',
                     }}
