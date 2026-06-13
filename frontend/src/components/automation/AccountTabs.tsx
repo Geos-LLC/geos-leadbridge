@@ -14,7 +14,52 @@ function getShortName(a: SavedAccount): string {
   return PLATFORM_LABEL[a.platform] || a.platform;
 }
 
-function AccountTab({
+export function AccountTabs({
+  value, onChange, accounts,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  accounts: SavedAccount[];
+}) {
+  return (
+    <div
+      className="lb-account-tabs"
+      style={{
+        display: 'flex',
+        gap: 6,
+        background: 'var(--lb-surface)',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 5,
+        boxShadow: 'var(--lb-shadow-sm)',
+        marginBottom: 18,
+        overflowX: 'auto',
+      }}
+    >
+      <PillAccountTab
+        active={value === ALL_ACCOUNTS}
+        onClick={() => onChange(ALL_ACCOUNTS)}
+        icon={Layers}
+        label="All accounts"
+        sublabel={`${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}`}
+        applyHint
+      />
+      {accounts.map(a => (
+        <PillAccountTab
+          key={a.id}
+          active={value === a.id}
+          onClick={() => onChange(a.id)}
+          icon={MapPin}
+          label={getShortName(a)}
+          sublabel={a.businessName || PLATFORM_LABEL[a.platform] || a.platform}
+          warning={!!a.tokenDead}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PillAccountTab({
   active, onClick, icon: Icon, label, sublabel, applyHint, warning,
 }: {
   active: boolean;
@@ -29,80 +74,33 @@ function AccountTab({
     <button
       type="button"
       onClick={onClick}
+      title={sublabel + (applyHint ? ' — applies to all' : '')}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '10px 14px 12px',
-        background: 'transparent',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 12px',
+        borderRadius: 8,
+        background: active ? 'var(--lb-accent-tint)' : 'transparent',
         border: 0,
-        borderBottom: '2px solid ' + (active ? 'var(--lb-accent)' : 'transparent'),
         cursor: 'pointer',
         fontFamily: 'inherit',
-        color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
-        transition: 'color 120ms, border-color 120ms',
-        marginBottom: -1,
+        fontSize: 13,
+        fontWeight: active ? 700 : 600,
+        color: active ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
+        transition: 'background 120ms, color 120ms',
         flexShrink: 0,
-        position: 'relative',
       }}
     >
-      <Icon size={14} style={{ color: active ? 'var(--lb-accent)' : 'var(--lb-ink-6)' }} />
-      <div style={{ textAlign: 'left' }}>
-        <div style={{
-          fontSize: 13, fontWeight: active ? 700 : 500, lineHeight: 1.2,
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          {label}
-          {warning && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--lb-warn)' }} />}
-        </div>
-        {sublabel && (
-          <div style={{
-            fontSize: 10.5, color: 'var(--lb-ink-6)', marginTop: 2,
-            fontFamily: 'var(--lb-font-mono)', letterSpacing: 0.04,
-            textTransform: 'uppercase', fontWeight: 500,
-          }}>
-            {sublabel}
-            {applyHint && <span style={{ color: 'var(--lb-accent)' }}> · APPLIES TO ALL</span>}
-          </div>
-        )}
-      </div>
-    </button>
-  );
-}
-
-export function AccountTabs({
-  value, onChange, accounts,
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  accounts: SavedAccount[];
-}) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-end', gap: 2,
-      borderBottom: '1px solid var(--lb-line)',
-      marginBottom: 22,
-      overflowX: 'auto',
-      paddingBottom: 1,
-    }}>
-      <AccountTab
-        active={value === ALL_ACCOUNTS}
-        onClick={() => onChange(ALL_ACCOUNTS)}
-        icon={Layers}
-        label="All accounts"
-        sublabel={`${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}`}
-        applyHint
-      />
-      {accounts.map(a => (
-        <AccountTab
-          key={a.id}
-          active={value === a.id}
-          onClick={() => onChange(a.id)}
-          icon={MapPin}
-          label={getShortName(a)}
-          sublabel={a.businessName || PLATFORM_LABEL[a.platform] || a.platform}
-          warning={!!a.tokenDead}
+      <Icon size={14} />
+      <span>{label}</span>
+      {warning && (
+        <span
+          aria-label="Token issue"
+          style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--lb-warn)' }}
         />
-      ))}
-    </div>
+      )}
+    </button>
   );
 }
 

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { AutoPageHeader, type BadgeTone } from '../../components/automation/ui';
 import { AccountTabs, ScopeBanner, ALL_ACCOUNTS } from '../../components/automation/AccountTabs';
+import { PlanSwitcher } from '../../components/automation/PlanSwitcher';
 import { AutomationRespond } from './Respond';
 import { AutomationFollowups } from './Followups';
 import { AutomationConversation } from './Conversation';
@@ -59,6 +60,7 @@ export function AutomationPage() {
         badge={meta.badge}
         subtitle={meta.subtitle}
       />
+      <PlanSwitcher active={tab} accountId={accountId} />
       <AccountTabs value={accountId} onChange={onChangeScope} accounts={storedAccounts} />
       <ScopeBanner accountId={accountId} accounts={storedAccounts} />
 
