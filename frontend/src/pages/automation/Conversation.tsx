@@ -533,6 +533,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
   const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
+  // V2 per-goal completion-stop mixed detection across accounts.
+  // The account-level Goal Completion Behavior radio aggregates these
+  // (mixed if ANY of the three underlying booleans diverges across
+  // accounts), so the user sees a single "mixed" indicator instead of
+  // three separate per-goal warnings.
+  const mxQualifyStopOnComplete = getMixed('qualifyStopOnComplete', v => v ? 'Stop AI' : 'Continue AI');
+  const mxPhoneStopOnComplete   = getMixed('phoneStopOnComplete',   v => v ? 'Stop AI' : 'Continue AI');
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -665,26 +672,31 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setQualificationCustomFields(prev => prev.filter(f => f.id !== id));
   };
 
-  // V2 per-goal "Stop AI on completion" setters. Each goal owns ONE field
-  // — no global fan-out — so picking Stop on Phone doesn't accidentally
-  // flip Price's behavior. Price still wires through stopRules.price_agreed
-  // (aiStopOnPriceAgreed) — see GoalSetupCard for the per-goal radio prop.
-  const onQualifyStop = (v: boolean) => {
-    dirtyRef.current = true;
-    dirtyFieldsRef.current.add('qualifyStopOnComplete');
-    setQualifyStopOnComplete(v);
-  };
-  const onPhoneStop = (v: boolean) => {
-    dirtyRef.current = true;
-    dirtyFieldsRef.current.add('phoneStopOnComplete');
-    setPhoneStopOnComplete(v);
-  };
-  // Price still flips the existing aiStopOnPriceAgreed via stopRules.
-  // Wrapper here so the per-goal radio prop signature stays uniform.
-  const onPriceStop = (v: boolean) => {
+  // V2.1 (2026-06-13): Goal completion behavior is now an account-level
+  // setting, not per-goal. One radio writes all three underlying fields
+  // consistently so a tenant can't accidentally end up with Price=Stop
+  // but Qualify=Continue. Backend writes are unchanged — the save handler
+  // still serializes each field independently (aiStopOnPriceAgreed via
+  // stopRules.price_agreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete);
+  // we just mark all three dirty in one click.
+  //
+  // Derived display: 'stop' only when all three are true. Mixed saved
+  // values (e.g. legacy tenant with price=true but qualify=false) display
+  // as 'continue' and the user's next click normalizes them.
+  const goalCompletionMode: 'continue' | 'stop' =
+    stopRules.price_agreed && qualifyStopOnComplete && phoneStopOnComplete
+      ? 'stop'
+      : 'continue';
+
+  const onGoalCompletionBehavior = (mode: 'continue' | 'stop') => {
+    const v = mode === 'stop';
     dirtyRef.current = true;
     dirtyFieldsRef.current.add('stopRules.price_agreed');
+    dirtyFieldsRef.current.add('qualifyStopOnComplete');
+    dirtyFieldsRef.current.add('phoneStopOnComplete');
     setStopRules({ ...stopRules, price_agreed: v });
+    setQualifyStopOnComplete(v);
+    setPhoneStopOnComplete(v);
   };
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
@@ -783,7 +795,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
       </SectionCard>
 
-      {/* ───── 2. Goal-specific setup (includes per-goal When-Reached radio) ── */}
+      {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
       <GoalSetupCard
         strategy={strategy}
         priceMode={priceMode}
@@ -795,14 +807,28 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         addCustomField={addCustomField}
         updateCustomField={updateCustomField}
         removeCustomField={removeCustomField}
-        // V2 per-goal completion stops. Each goal radio writes ONE field
-        // (no global fan-out). Auto has no completion radio at all.
-        priceStop={stopRules.price_agreed}
-        qualifyStop={qualifyStopOnComplete}
-        phoneStop={phoneStopOnComplete}
-        onPriceStop={onPriceStop}
-        onQualifyStop={onQualifyStop}
-        onPhoneStop={onPhoneStop}
+      />
+
+      {/* ───── 2.5 Goal Completion Behavior — account-level (V2.1 2026-06-13) ─
+            Replaces the per-goal "When Goal Is Reached" radios that
+            previously lived inside each GoalSetupCard. The product
+            decision (continue replying vs hand off to the team) is the
+            same regardless of which goal AI reaches, so we surface it
+            once at the account level. One click writes all three
+            underlying fields consistently — see onGoalCompletionBehavior. */}
+      <GoalCompletionBehaviorCard
+        mode={goalCompletionMode}
+        onChange={onGoalCompletionBehavior}
+        mixed={
+          mxStopPriceAgreed.mixed ||
+          mxQualifyStopOnComplete.mixed ||
+          mxPhoneStopOnComplete.mixed
+        }
+        mixedTooltip={[
+          mxStopPriceAgreed.tooltip,
+          mxQualifyStopOnComplete.tooltip,
+          mxPhoneStopOnComplete.tooltip,
+        ].filter(Boolean).join('\n\n')}
       />
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
@@ -1087,22 +1113,20 @@ function FlowArrow() {
 }
 
 // ─── Goal-specific setup card ──────────────────────────────────────────────
-// Renders the per-goal configuration: Required Information (Price/Qualify,
-// UI-only checkboxes), Goal Completion description (Convert/Phone), the
-// price-quote-mode picker (Price), AND the per-goal "When Goal Is Reached"
-// radio (Price/Qualify/Convert/Phone). Auto and Hybrid have no extras.
+// Renders the per-goal configuration ONLY: Required Information (Qualify,
+// UI-driven checkboxes + custom fields), Goal description blurb, and the
+// price-quote-mode picker (Price). Auto + Phone get the goal description
+// only (Phone has no extra controls; Auto explains the auto-router).
 //
-// Backend fields are UNCHANGED. The When-Goal-Is-Reached radio writes to
-// the SAME global fields (aiStopOnBooked, aiStopOnPriceAgreed, all 5
-// handoffTrigger*) — it's presented inside the goal panel for clarity
-// since only the active goal can reach its completion criterion at a time.
+// V2.1 (2026-06-13): the per-goal "When Goal Is Reached" radio that used
+// to live here has moved out to the account-level
+// <GoalCompletionBehaviorCard>. Completion behavior is one decision per
+// account, not per goal — see the new card in the parent JSX.
 
 function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
   qualificationRequiredFields, toggleQualificationField,
   qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
-  priceStop, qualifyStop, phoneStop,
-  onPriceStop, onQualifyStop, onPhoneStop,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
@@ -1117,14 +1141,6 @@ function GoalSetupCard({
   addCustomField: () => void;
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
   removeCustomField: (id: string) => void;
-  /** V2 per-goal Stop-on-completion booleans. true = Stop AI, false = Continue. */
-  priceStop: boolean;
-  qualifyStop: boolean;
-  phoneStop: boolean;
-  /** Each setter writes ONLY that goal's underlying field. */
-  onPriceStop: (v: boolean) => void;
-  onQualifyStop: (v: boolean) => void;
-  onPhoneStop: (v: boolean) => void;
 }) {
 
   // Display metadata for the 4 visible goals. Legacy 'hybrid' / 'convert'
@@ -1153,12 +1169,6 @@ function GoalSetupCard({
   // Backend gate in qualification-context.ts mirrors this: only qualify
   // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
   const showRequiredInfo = strategy === 'qualify';
-  // V2: When-Goal-Is-Reached radio appears on the 3 concrete goals only.
-  // Auto has NO completion criteria (per spec) — AI inherits whichever
-  // sub-goal it picks each turn, so a single Continue/Stop choice
-  // wouldn't apply cleanly. Per-goal completion semantics are owned by
-  // each goal individually.
-  const showWhenReached = strategy === 'price' || strategy === 'qualify' || strategy === 'phone';
 
   return (
     <SectionCard padding="22px 24px 24px">
@@ -1364,36 +1374,117 @@ function GoalSetupCard({
         </>
       )}
 
-      {/* Per-goal "When Goal Is Reached" radio. V2: each goal owns ONE
-          field — no global fan-out. Price → aiStopOnPriceAgreed.
-          Qualify → goalQualifyStopOnComplete (new). Phone →
-          goalPhoneStopOnComplete (new). Backend gates honor each
-          independently; the Notify-Team side is implicit (handoff alert
-          fires on classifier signal regardless of this choice). */}
-      {showWhenReached && (
-        <PerGoalWhenReachedRadio
-          goalKey={strategy as 'price' | 'qualify' | 'phone'}
-          stopValue={
-            strategy === 'price'   ? priceStop :
-            strategy === 'qualify' ? qualifyStop :
-            phoneStop
-          }
-          setStopValue={
-            strategy === 'price'   ? onPriceStop :
-            strategy === 'qualify' ? onQualifyStop :
-            onPhoneStop
-          }
-        />
-      )}
+      {/* V2.1 (2026-06-13): per-goal "When Goal Is Reached" radio was
+          removed from this card. Completion behavior is now an
+          account-level setting rendered by <GoalCompletionBehaviorCard>
+          in the parent JSX — see commit log. */}
     </SectionCard>
   );
 }
 
-// ─── Per-goal When-Goal-Is-Reached radio ──────────────────────────────────
-// V2: each Conversation Goal owns ONE backend stop flag — no global toggle
-// fan-out. Caller picks which goal this radio represents and passes the
-// corresponding boolean + setter. Notify-Team is implicit: the handoff
-// alert SMS fires on the classifier signal regardless of this choice.
+// ─── Account-level Goal Completion Behavior card ──────────────────────────
+// V2.1 (2026-06-13). Replaces the three per-goal "When Goal Is Reached"
+// radios that previously lived inside <GoalSetupCard>. The product
+// decision is: "after AI reaches any goal, should it continue replying
+// and notify the team, or stop and let the team take over?" That answer
+// is the same regardless of which goal completed, so we surface it once.
+//
+// Selecting one option fans out to all three underlying booleans
+// (aiStopOnPriceAgreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete)
+// via the parent's onGoalCompletionBehavior handler. Backend save logic
+// is unchanged — the save handler still writes each field independently
+// to its existing JSON key.
+//
+// The card explicitly lists the goal completion criteria it applies to
+// (Price agreed / Qualified lead / Phone provided) and notes that Auto
+// goal mode falls through to whichever sub-goal AI picks each turn —
+// this setting still applies when that sub-goal completes.
+function GoalCompletionBehaviorCard({
+  mode, onChange, mixed, mixedTooltip,
+}: {
+  mode: 'continue' | 'stop';
+  onChange: (mode: 'continue' | 'stop') => void;
+  mixed: boolean;
+  mixedTooltip: string;
+}) {
+  return (
+    <SectionCard padding="22px 24px 24px">
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
+        <IconTile icon={Target} tone="blue" size="lg" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Goal Completion Behavior
+            </div>
+            {mixed && (
+              <span
+                title={mixedTooltip || 'Differs across accounts'}
+                style={{
+                  fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                  background: '#fef3c7', color: '#92400e',
+                  letterSpacing: 0.05, textTransform: 'uppercase',
+                  fontFamily: 'var(--lb-font-mono)',
+                  whiteSpace: 'pre-line',
+                }}
+              >
+                Mixed
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+            Choose what AI does after it reaches a goal.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <OptionCard
+          selected={mode === 'continue'}
+          onClick={() => onChange('continue')}
+          title="Continue AI + Notify Team"
+          body="AI keeps replying after the goal is reached. Your team is notified."
+        />
+        <OptionCard
+          selected={mode === 'stop'}
+          onClick={() => onChange('stop')}
+          title="Stop AI + Notify Team"
+          body="AI stops after the goal is reached. Your team takes over."
+        />
+      </div>
+
+      <div style={{
+        padding: '12px 14px',
+        background: '#f8fafc',
+        border: '1px solid var(--lb-line-soft)',
+        borderRadius: 10,
+        fontSize: 12.5, color: 'var(--lb-ink-3)',
+        lineHeight: 1.55,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 6, fontFamily: 'var(--lb-font-mono)' }}>
+          Applies to
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
+            <span>Price agreed</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
+            <span>Qualified lead</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
+            <span>Phone provided</span>
+          </li>
+        </ul>
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--lb-line-soft)', color: 'var(--lb-ink-5)' }}>
+          <strong style={{ color: 'var(--lb-ink-3)' }}>Auto goal:</strong> uses whichever goal AI detects. This setting still applies when that goal is reached.
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 /**
  * One editable row inside the Custom Required Fields list. Label is
  * required (an empty label is allowed in state but its row carries a
@@ -1473,52 +1564,6 @@ function CustomFieldRow({
       >
         <Trash2 size={14} />
       </button>
-    </div>
-  );
-}
-
-function PerGoalWhenReachedRadio({
-  goalKey,
-  stopValue,
-  setStopValue,
-}: {
-  goalKey: 'price' | 'qualify' | 'phone';
-  /** true = "Stop AI + Notify Team", false = "Continue AI + Notify Team". */
-  stopValue: boolean;
-  setStopValue: (v: boolean) => void;
-}) {
-  const completionLabel: Record<'price' | 'qualify' | 'phone', string> = {
-    price:   'When the customer agrees with the price',
-    qualify: 'When all required fields are collected',
-    phone:   'When the customer provides a phone number',
-  };
-
-  return (
-    <div>
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
-        letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 6,
-        fontFamily: 'var(--lb-font-mono)',
-      }}>
-        When Goal Is Reached
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginBottom: 10 }}>
-        {completionLabel[goalKey]}:
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <OptionCard
-          selected={!stopValue}
-          onClick={() => setStopValue(false)}
-          title="Continue AI + Notify Team"
-          body="AI keeps replying after the goal is reached. Your team is notified."
-        />
-        <OptionCard
-          selected={stopValue}
-          onClick={() => setStopValue(true)}
-          title="Stop AI + Notify Team"
-          body="AI stops once the goal is reached. Your team takes over."
-        />
-      </div>
     </div>
   );
 }
