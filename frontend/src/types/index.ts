@@ -14,6 +14,18 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 export type WizardStatus = 'done' | 'skipped';
 export type WizardChecklist = Partial<Record<WizardStep, WizardStatus>>;
 
+// Wizard ↔ Settings sync — boolean rollup of "is the data behind each
+// step actually configured on the primary SavedAccount?". Returned by
+// GET /v1/onboarding/config-summary. Used by deriveDisplayChecklist to
+// turn the wizard sidebar tick green when the user configured the same
+// thing from Settings, without requiring them to re-walk the wizard.
+export interface OnboardingConfigSummary {
+  faqConfigured: boolean;
+  pricingConfigured: boolean;
+  automationConfigured: boolean;
+  aiRulesConfigured: boolean;
+}
+
 export interface OnboardingProfile {
   id: string;
   userId: string;

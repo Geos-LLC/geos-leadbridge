@@ -46,6 +46,18 @@ export class OnboardingController {
     return { success: true, profile };
   }
 
+  // Wizard ↔ Settings sync — used by SetupProgressCard and SetupWizard to
+  // mark the four "stored-only" steps (ai / pricing / automation / ai_rules)
+  // green when the underlying SavedAccount JSON is actually configured,
+  // regardless of whether the user clicked Continue inside the wizard.
+  // Returns a flat boolean summary; intentionally never returns the JSON
+  // blobs themselves.
+  @Get('config-summary')
+  async getConfigSummary(@CurrentUser() user: any) {
+    const summary = await this.onboardingService.getConfigSummary(user.id);
+    return { success: true, summary };
+  }
+
   @Post('step1')
   async saveStep1(@CurrentUser() user: any, @Body() body: Step1Input) {
     if (!body.primaryLeadSource || !VALID_PRIMARY_SOURCES.includes(body.primaryLeadSource)) {
