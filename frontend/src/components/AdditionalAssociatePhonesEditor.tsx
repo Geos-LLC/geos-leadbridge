@@ -15,9 +15,25 @@ interface DraftEntry {
   label: string;
 }
 
-function isValidPhone(raw: string): boolean {
-  const digits = raw.replace(/\D/g, '');
-  return digits.length === 10 || (digits.length === 11 && digits.startsWith('1')) || digits.length > 10;
+/**
+ * E.164 normalization for US/CA phone numbers (only country code we support
+ * for Thumbtack associate registration). Accepts the three formats listed
+ * below and returns a canonical `+1XXXXXXXXXX` string. Returns null when
+ * the input doesn't match any accepted shape — callers treat null as
+ * "validation failed".
+ *
+ *   10 digits           → 9047164356      → +19047164356
+ *   11 digits w/ '1'    → 19047164356     → +19047164356
+ *   E.164 +1            → +19047164356    → +19047164356
+ */
+function normalizePhoneE164(raw: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null;
 }
 
 function genId(): string {
@@ -92,12 +108,24 @@ export function AdditionalAssociatePhonesEditor({ savedAccountId, initialValue, 
     for (const d of drafts) {
       const phone = d.phoneNumber.trim();
       if (!phone) continue;
-      if (!isValidPhone(phone)) {
-        setError(`"${phone}" is not a valid phone number`);
+      const normalized = normalizePhoneE164(phone);
+      if (!normalized) {
+        setError(
+          `"${phone}" is not a valid US phone number. Enter 10 digits, ` +
+            `11 digits starting with 1, or E.164 (+1XXXXXXXXXX).`,
+        );
         return;
       }
-      cleaned.push({ id: d.id, phoneNumber: phone, label: d.label.trim() });
+      cleaned.push({ id: d.id, phoneNumber: normalized, label: d.label.trim() });
     }
+    // Reflect the normalized form back in the UI so users see the
+    // canonical +1XXXXXXXXXX value they actually saved.
+    setDrafts((prev) =>
+      prev.map((d) => {
+        const match = cleaned.find((c) => c.id === d.id);
+        return match ? { ...d, phoneNumber: match.phoneNumber } : d;
+      }),
+    );
     setSaving(true);
     try {
       const payload = cleaned.map((d) => ({
@@ -107,7 +135,14 @@ export function AdditionalAssociatePhonesEditor({ savedAccountId, initialValue, 
       }));
       await thumbtackApi.updateSavedAccount(savedAccountId, { additionalAssociatePhones: payload });
       setSavedAt(Date.now());
-      notify.success('Saved', 'Additional associate numbers updated');
+      // We can confirm the LeadBridge-side save, but the actual
+      // registration with Thumbtack depends on TT-side OAuth scope
+      // approval and may not be in place yet. Don't tell users it
+      // definitely synced when we don't know.
+      notify.success(
+        'Saved in LeadBridge',
+        'Thumbtack sync will complete once Thumbtack enables associate-phone access.',
+      );
       onSaved?.(
         cleaned.map((d) => ({
           id: d.id,
@@ -124,6 +159,27 @@ export function AdditionalAssociatePhonesEditor({ savedAccountId, initialValue, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div
+        style={{
+          padding: '8px 12px',
+          borderRadius: 8,
+          background: 'var(--lb-ink-tint, #f8fafc)',
+          color: 'var(--lb-ink-4, #475569)',
+          fontSize: 12,
+          lineHeight: 1.5,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 8,
+        }}
+      >
+        <Info size={13} style={{ marginTop: 2, flexShrink: 0 }} />
+        <div>
+          Associate numbers are saved per Thumbtack business. Registration on
+          Thumbtack&rsquo;s side depends on your Thumbtack OAuth permissions —
+          numbers you add here will sync once those permissions are in place.
+        </div>
+      </div>
+
       {drafts.length === 0 && (
         <div
           style={{

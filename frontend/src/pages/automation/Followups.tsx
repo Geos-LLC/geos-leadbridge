@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
+  PhoneOff, Sparkles,
   RefreshCw, Clock, UserX, Info, Power,
 } from 'lucide-react';
 import {
@@ -49,20 +49,6 @@ type CachedFollowups = {
 };
 const followupsCache = new Map<string, CachedFollowups>();
 
-const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
-  { val: 2,  unit: 'min' },
-  { val: 10, unit: 'min' },
-  { val: 1,  unit: 'hour' },
-  { val: 1,  unit: 'day' },
-  { val: 3,  unit: 'days' },
-  { val: 7,  unit: 'days' },
-  { val: 2,  unit: 'weeks' },
-  { val: 1,  unit: 'month' },
-  { val: 3,  unit: 'months' },
-  { val: 6,  unit: 'months' },
-  { val: 1,  unit: 'year' },
-];
-
 export function AutomationFollowups({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -91,7 +77,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
   const [messageMode, setMessageMode] = useState<'template' | 'ai'>('ai');
-  const [plan, setPlan] = useState(DEFAULT_FOLLOWUP_PLAN);
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
   const [timezone, setTimezone] = useState('America/New_York');
@@ -441,8 +426,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // Conversation is still reachable via the sidebar; we don't need a
   // per-card link from here anymore.
   const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
-  const resetPlan = () => setPlan(DEFAULT_FOLLOWUP_PLAN);
-  const addStep = () => setPlan(p => [...p, { val: 1, unit: 'month' }]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -614,65 +597,24 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         </FieldRow>
       </SectionCard>
 
-      {/* Follow-up plan */}
+      {/* Follow-up plan — read-only summary.
+          The grid that used to live here was UI-only (setPlan touched local
+          React state but no save effect persisted it), so editing the
+          numbers gave users false confidence. The plan itself is driven
+          by the backend follow-up engine seed templates; per-step custom
+          delays are configurable via API (followUpSettingsJson.customStepDelays
+          / customStepEnabled) and exposed elsewhere when needed. */}
       <SectionCard padding="20px 24px 24px">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Follow-up plan
-            </div>
-            <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Follow-up plan
           </div>
-          <button
-            type="button"
-            onClick={resetPlan}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              background: 'transparent', border: 0, cursor: 'pointer',
-              fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-              color: 'var(--lb-accent)', padding: 0,
-            }}
-          >
-            <RotateCcw size={13} /> Reset to defaults
-          </button>
+          <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
         </div>
-        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginBottom: 18 }}>
-          AI writes each step from the live conversation. You only set the timing.
-        </div>
-
-        <div style={{
-          display: 'flex', alignItems: 'stretch', gap: 6, flexWrap: 'nowrap',
-          overflowX: 'auto', paddingBottom: 8,
-        }}>
-          {plan.map((step, i) => (
-            <div key={i} style={{ display: 'contents' }}>
-              <PlanStep n={i + 1} val={step.val} unit={step.unit} />
-              {i < plan.length - 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)', paddingTop: 22 }}>
-                  <ChevronRight size={14} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
-            Click any step to edit its timing.
-          </div>
-          <button
-            type="button"
-            onClick={addStep}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '7px 14px',
-              background: 'white', color: 'var(--lb-accent)',
-              border: '1px solid var(--lb-accent-line)', borderRadius: 999,
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-            }}
-          >
-            <Plus size={13} /> Add step
-          </button>
+        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+          LeadBridge follows up with unresponsive leads over an 11-step schedule
+          spanning up to one year. AI writes each step from the live conversation;
+          timing is managed by the system to match standard best practices.
         </div>
       </SectionCard>
 
@@ -729,30 +671,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       />
 
       </>}
-    </div>
-  );
-}
-
-function PlanStep({ n, val, unit }: { n: number; val: number; unit: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 64 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)' }}>
-        #{n}
-      </div>
-      <button
-        type="button"
-        style={{
-          width: 64, padding: '10px 6px',
-          background: 'white', border: '1px solid var(--lb-line)',
-          borderRadius: 10,
-          cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          transition: 'border-color 120ms',
-        }}
-      >
-        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--lb-ink-1)', lineHeight: 1, letterSpacing: '-0.02em' }}>{val}</div>
-        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', lineHeight: 1 }}>{unit}</div>
-      </button>
     </div>
   );
 }
