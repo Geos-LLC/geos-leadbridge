@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Bot, CircleDollarSign, Loader2, Phone, Sparkles, UserCheck,
+  Bot, CircleDollarSign, Eye, Flag, Loader2, MoonStar, Phone, Sparkles, UserCheck, Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
@@ -17,24 +17,39 @@ interface Props {
 /**
  * Wizard step 7 — AI Rules.
  *
- * Post-AI-First-Simplification (June 2026), this step owns the two
- * conversation-level controls that used to live elsewhere:
+ * Three conversation-level controls, all account-wide and applied to
+ * every connected SavedAccount on save:
  *
- *   1. Goal — what the AI is trying to achieve in each conversation.
- *      Auto / Price / Qualify / Phone, matching the Conversation page
- *      picker. Persists to `followUpSettingsJson.followUpStrategy`.
+ *   1. Conversation Goal — what AI tries to achieve.
+ *      auto / price / qualify / phone. Persists `followUpStrategy`.
  *
- *   2. Auto Reply Availability — when AI can reply automatically.
- *      Always (24/7) vs Outside business hours. Moved here from the
- *      wizard's Automation step because it's a conversation rule, not
- *      a timing knob. Persists to `followUpSettingsJson.followUpAvailability`.
+ *   2. AI Response Mode — when AI is allowed to respond automatically.
+ *      Three options that fold the old "Auto Reply Availability" radio
+ *      together with V2 Review Mode:
+ *        Review before sending → aiConversationDeliveryMode='suggest'
+ *          AI drafts replies, parks them on ThreadContext; operator
+ *          approves from Lead Activity. Nothing sends automatically.
+ *        Assist when unavailable → deliveryMode='auto_send' +
+ *          followUpAvailability='active_hours' (sends only outside
+ *          business hours).
+ *        Full autopilot → deliveryMode='auto_send' +
+ *          followUpAvailability='always' (sends any time).
  *
- * The legacy Stop Rules + Handoff Triggers controls are gone. Per the
- * Conversation page V2 spec, those collapsed into goal completion
- * actions ("Continue AI + Notify" / "Stop AI + Notify") which the user
- * configures on /automation/convert per goal, not at the tenant level.
+ *   3. Goal Completion Behavior — what AI does the moment it hits the
+ *      conversation goal.
+ *        Continue AI + Notify Team → keep the AI replying (it'll handle
+ *          follow-ups, scheduling questions, etc.) and ping the team so
+ *          a human can step in if they want.
+ *        Stop AI + Notify Team    → pause AI immediately on goal hit,
+ *          alert the team, hand the lead off cleanly.
+ *      Writes three underlying fields uniformly: aiStopOnPriceAgreed,
+ *      goalQualifyStopOnComplete, goalPhoneStopOnComplete. This is the
+ *      same shape Conversation page V2 uses for the account-level
+ *      goal-completion radio (Conversation.tsx:686).
  */
 type GoalKey = 'auto' | 'price' | 'qualify' | 'phone';
+type ResponseMode = 'review' | 'assist' | 'autopilot';
+type GoalCompletion = 'continue' | 'stop';
 
 interface GoalMeta {
   key: GoalKey;
@@ -80,13 +95,16 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
   const meta = getStepMeta('ai_rules');
 
   const [goal, setGoal] = useState<GoalKey>('auto');
-  const [availability, setAvailability] = useState<'always' | 'active_hours'>('always');
+  const [responseMode, setResponseMode] = useState<ResponseMode>('autopilot');
+  const [goalCompletion, setGoalCompletion] = useState<GoalCompletion>('continue');
   const [businessHoursLabel, setBusinessHoursLabel] = useState<string>('Mon–Fri, 9:00 AM – 6:00 PM');
   const [loading, setLoading] = useState(true);
 
   // Hydrate from the first connected account's saved settings so a
-  // returning user sees what they had. Falls back to defaults (auto,
-  // always) when nothing is on file or no account is connected.
+  // returning user sees what they had. Defaults: auto goal, autopilot
+  // response mode, continue-on-goal-hit. When nothing is on file (fresh
+  // tenant), the defaults match what the trial bundle sets up on the
+  // Automation step.
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -103,17 +121,37 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
         const res = await followUpApi.getSettings(savedAccounts[0].id).catch(() => null);
         if (cancelled) return;
         const s = (res as any)?.settings ?? {};
+
+        // Conversation Goal. Conversation page V2 remaps legacy
+        // 'hybrid' → 'auto' and 'convert' → 'qualify' for display; we
+        // do the same here.
         const savedGoal = s?.followUpStrategy;
-        // Conversation page V2 remaps legacy 'hybrid' → 'auto' and
-        // 'convert' → 'qualify' for display; we do the same here.
         const remapped: GoalKey =
           savedGoal === 'price' || savedGoal === 'qualify' || savedGoal === 'phone'
             ? savedGoal
             : savedGoal === 'convert' ? 'qualify'
             : 'auto';
         setGoal(remapped);
-        const a = s?.followUpAvailability;
-        setAvailability(a === 'active_hours' ? 'active_hours' : 'always');
+
+        // AI Response Mode. Default to 'auto_send' when missing so
+        // pre-V2 tenants stay autopilot — only explicit 'suggest'
+        // parks replies. Mapping mirrors Conversation.tsx:290.
+        const delivery = s?.aiConversationDeliveryMode === 'suggest' ? 'suggest' : 'auto_send';
+        const availability = s?.followUpAvailability === 'active_hours' ? 'active_hours' : 'always';
+        if (delivery === 'suggest') {
+          setResponseMode('review');
+        } else if (availability === 'active_hours') {
+          setResponseMode('assist');
+        } else {
+          setResponseMode('autopilot');
+        }
+
+        // Goal Completion. 'stop' only when all three underlying
+        // fields are explicitly true — matches Conversation.tsx:686.
+        // Mixed legacy saves (e.g. price=true / qualify=false) display
+        // as 'continue' and the user's next Save normalizes them.
+        const isStop = !!s?.aiStopOnPriceAgreed && !!s?.goalQualifyStopOnComplete && !!s?.goalPhoneStopOnComplete;
+        setGoalCompletion(isStop ? 'stop' : 'continue');
       } catch {
         /* non-fatal */
       } finally {
@@ -133,10 +171,25 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
         await onSaveContinue();
         return;
       }
+      // Map the three UI radios back to the canonical fields the
+      // backend reads. Keep the shape identical to what
+      // Conversation.tsx writes so a user round-tripping between the
+      // two surfaces sees the same selection.
+      const deliveryMode = responseMode === 'review' ? 'suggest' : 'auto_send';
+      const availability = responseMode === 'assist' ? 'active_hours' : 'always';
+      const stopOnGoal = goalCompletion === 'stop';
+
       const payload = {
         followUpStrategy: goal,
+        aiConversationDeliveryMode: deliveryMode,
         followUpAvailability: availability,
+        // Goal-completion stops — written uniformly so one click in the
+        // wizard normalizes any mixed legacy saves.
+        aiStopOnPriceAgreed: stopOnGoal,
+        goalQualifyStopOnComplete: stopOnGoal,
+        goalPhoneStopOnComplete: stopOnGoal,
       };
+
       let firstError: any = null;
       for (const acct of savedAccounts) {
         try {
@@ -173,8 +226,8 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
           <Loader2 className="w-5 h-5 animate-spin mx-auto" />
         </div>
       ) : (
-        <div className="space-y-6">
-          {/* Conversation Goal — 4 cards, Auto first as the recommended default. */}
+        <div className="space-y-8">
+          {/* ─── 1. Conversation Goal ─────────────────────────────── */}
           <section>
             <div className="mb-3">
               <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Conversation Goal</h2>
@@ -215,29 +268,67 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
             </div>
           </section>
 
-          {/* Auto Reply Availability — moved here from Automation. */}
+          {/* ─── 2. AI Response Mode ──────────────────────────────── */}
           <section>
             <div className="flex items-start gap-3 mb-3">
-              <span className="w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 text-slate-600 shrink-0">
+              <span className="w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 text-violet-600 shrink-0">
                 <Bot className="w-4 h-4" />
               </span>
               <div className="flex-1 min-w-0">
-                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Auto Reply Availability</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Choose when AI can reply automatically.</p>
+                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">AI Response Mode</h2>
+                <p className="text-xs text-slate-500 mt-0.5">When AI is allowed to respond to customer messages automatically.</p>
               </div>
             </div>
             <div className="space-y-2">
               <RadioRow
-                label="Always (24/7)"
-                description="AI replies to leads at any time, day or night."
-                checked={availability === 'always'}
-                onSelect={() => setAvailability('always')}
+                icon={Eye}
+                label="Review before sending"
+                description="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
+                checked={responseMode === 'review'}
+                onSelect={() => setResponseMode('review')}
               />
               <RadioRow
-                label="Outside of business hours"
-                description={`AI replies only outside your business hours window. (${businessHoursLabel})`}
-                checked={availability === 'active_hours'}
-                onSelect={() => setAvailability('active_hours')}
+                icon={MoonStar}
+                label="Assist when unavailable"
+                description={`AI responds automatically outside your business hours window. (${businessHoursLabel})`}
+                checked={responseMode === 'assist'}
+                onSelect={() => setResponseMode('assist')}
+              />
+              <RadioRow
+                icon={Zap}
+                label="Full autopilot"
+                description="AI replies to leads at any time, day or night."
+                checked={responseMode === 'autopilot'}
+                onSelect={() => setResponseMode('autopilot')}
+              />
+            </div>
+          </section>
+
+          {/* ─── 3. Goal Completion Behavior ──────────────────────── */}
+          <section>
+            <div className="flex items-start gap-3 mb-3">
+              <span className="w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 text-emerald-600 shrink-0">
+                <Flag className="w-4 h-4" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Goal Completion Behavior</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  What AI does the moment it reaches your Conversation Goal — keep replying, or stop and hand the lead off?
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <RadioRow
+                label="Continue AI + Notify Team"
+                description="AI keeps replying after the goal is reached (follow-up questions, scheduling, edge cases). Your team is alerted so they can step in any time."
+                checked={goalCompletion === 'continue'}
+                onSelect={() => setGoalCompletion('continue')}
+              />
+              <RadioRow
+                label="Stop AI + Notify Team"
+                description="AI pauses immediately once the goal is reached. Your team gets an alert and takes the lead from there."
+                checked={goalCompletion === 'stop'}
+                onSelect={() => setGoalCompletion('stop')}
               />
             </div>
           </section>
@@ -265,8 +356,14 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
 }
 
 function RadioRow({
-  label, description, checked, onSelect,
-}: { label: string; description?: string; checked: boolean; onSelect: () => void }) {
+  icon: Icon, label, description, checked, onSelect,
+}: {
+  icon?: LucideIcon;
+  label: string;
+  description?: string;
+  checked: boolean;
+  onSelect: () => void;
+}) {
   return (
     <button
       type="button"
@@ -281,6 +378,11 @@ function RadioRow({
         }`}>
           {checked && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
         </span>
+        {Icon && (
+          <span className="w-4 h-4 shrink-0 mt-0.5 text-slate-500">
+            <Icon className="w-4 h-4" />
+          </span>
+        )}
         <div>
           <div className="text-sm font-semibold text-slate-900">{label}</div>
           {description && <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</div>}
