@@ -60,8 +60,8 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'ai_rules',
     label: 'AI Rules',
-    title: 'AI goal & reply availability',
-    description: 'What AI is trying to achieve in each conversation, and when it can reply.',
+    title: 'AI conversation rules',
+    description: 'Goal AI is chasing, when it can reply, and what happens the moment it gets there.',
     countsTowardChecklist: true,
   },
   {
