@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   MessageSquareText, MessageCircle, Phone, Clock,
-  FileText, ArrowRightLeft, Volume2, Mic, Info,
-  Clipboard, Sparkles, User, ArrowRight, PhoneCall,
+  ArrowRightLeft, Volume2, Mic, Info,
+  User, ArrowRight, PhoneCall,
   ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
+  SettingCard, FieldRow, OptionCard, InfoTile, FooterBanner, MixedBadge, StatusPill,
+  MessageGenerationRow, TimingRow,
 } from '../../components/automation/ui';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
@@ -15,7 +16,6 @@ import { automationApi, callConnectApi, followUpApi, notificationsApi, templates
 import type { AutomationRule, CallConnectMode, CallConnectSettings, MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { LeadBridgeNumberLock } from '../../components/LeadBridgeNumberLock';
 import { useAppStore } from '../../store/appStore';
-import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
 
 // Strategy meta — mirrors the picker on AutomationConversation. Used to
 // render the "AI Strategy" tile below with the actual saved strategy for the
@@ -93,10 +93,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // We only display it so the tile reflects what AI will actually do when a
   // lead arrives.
   const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
-  // Business hours summary — fetched once from the user-level endpoint. The
-  // per-account checkboxes ("Only send during business hours") read this so
-  // their sublabel shows the user's actual schedule, not a placeholder.
-  const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
+  // Business hours summary was rendered as a sublabel under each Timing
+  // checkbox; spec 2d moves it behind the Edit Hours link so the row stays
+  // single-line. State + fetch removed. Schedule is editable in Settings →
+  // Hours via the Edit Hours link.
 
   // Loaded source-of-truth records (only when a specific account is picked)
   const [newLeadRule, setNewLeadRule] = useState<AutomationRule | null>(null);
@@ -159,21 +159,6 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   }, []);
 
   // Business hours load once for the whole user. The Instant Text / Instant
-  // Call cards show "Only send during business hours" with a sublabel that
-  // used to be the hardcoded string "Mon–Fri, 9:00 AM – 6:00 PM (America/
-  // New_York)" — now it's the real saved schedule.
-  useEffect(() => {
-    let alive = true;
-    usersApi.getBusinessHours()
-      .then(bh => {
-        if (!alive) return;
-        const summary = formatBusinessHoursSummary(bh.schedule as BusinessHoursSchedule, bh.timezone);
-        setBizHoursSummary(summary);
-      })
-      .catch(() => { if (alive) setBizHoursSummary('See Settings → Hours'); });
-    return () => { alive = false; };
-  }, []);
-
   // Hydrate displayed values INSTANTLY from the module-level cache on every
   // scope change. This is what makes tab switching feel smooth: the previous
   // visit's last-known values render immediately without waiting for the API.
@@ -584,11 +569,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     });
   };
 
-  // Instant Reply — AI prompt template (used in 'ai' reply type) or message template (used in 'template' reply type).
-  const firstReplyPromptTpl =
-    newLeadRule?.promptTemplate
-    || findTplByName('First Reply', 'AI - First Reply', 'First Reply Instructions')
-    || findTplLoose('first', 'reply');
+  // Instant Reply — message template (used in 'template' reply type).
+  // The AI prompt template (firstReplyPromptTpl) used to surface via the
+  // legacy ?advanced=1 custom-AI-prompt tile; that tile was removed when
+  // the unified Message Generation row landed. Prompts remain editable at
+  // /templates?filter=prompts.
   const firstReplyMessageTpl =
     newLeadRule?.template
     || findTplByName('Auto Reply - New Lead', 'Auto Reply', 'First Reply Template');
@@ -630,160 +615,22 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        {/* AI-first primary surface (2026-06-13 refactor).
-
-            The previous UI presented AI and Custom template as two equal
-            OptionCards, which made Templates look like a co-equal default.
-            Templates are an advanced fallback, not a primary choice — so
-            the primary surface is now the AI explainer and the response-method
-            picker lives under Advanced.
-
-            The "Advanced: edit first-reply prompt" link that used to flip
-            on ?advanced=1 has been removed. The prompt editor itself is
-            still reachable via the URL flag (support / power users); it
-            renders inside the Advanced disclosure when both ?advanced=1 is
-            in the URL AND replyType=ai.
-
-            Existing template tenants are preserved bit-for-bit on the
-            backend (no migration, no replyType rewrite); the Advanced
-            disclosure auto-opens when their saved replyType is 'template'
-            so they land on their current selection without hunting. */}
-        <div
-          style={{
-            padding: '14px 16px',
-            background: '#f8fafc',
-            border: '1px solid var(--lb-line-soft)',
-            borderRadius: 10,
-            fontSize: 13, color: 'var(--lb-ink-3)',
-            lineHeight: 1.55,
-          }}
-        >
-          <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            AI generates personalized replies.
+        {/* Unified Message generation block (spec 2e). The bordered Advanced
+            disclosure carries the AI vs Custom template choice, bound to
+            replyType. Backend wiring unchanged. The legacy ?advanced=1
+            custom-AI-prompt tile is no longer surfaced here — reach it
+            from /templates?filter=prompts. */}
+        <MessageGenerationRow
+          useAi={replyType === 'ai'}
+          onChangeUseAi={next => onReplyType(next ? 'ai' : 'template')}
+          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
+          onOpenTemplates={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
+        />
+        {mixedReplyType && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipReplyType}
           </div>
-          <div style={{ fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8 }}>
-            AI automatically uses:
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
-            {[
-              'Business Information',
-              'FAQ',
-              'Pricing Guidance',
-              'AI Playbook',
-              'Conversation history',
-            ].map(item => (
-              <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-          <div style={{ marginTop: 12, fontSize: 12.5 }}>
-            <a
-              href="/settings?tab=ai-playbook"
-              style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
-            >Edit AI Playbook →</a>
-          </div>
-        </div>
-
-        {/* Advanced disclosure — Response method picker + (when template
-            selected) the template tile + (when ?advanced=1 is in the URL
-            AND replyType=ai) the legacy custom-prompt tile.
-
-            defaultOpen tracks replyType so existing template tenants land
-            on their current selection without an extra click. Local state
-            inside AdvancedExpand also lets new users expand it once and
-            keep it open while editing. */}
-        <AdvancedExpand
-          title="Advanced"
-          helper="Change how the first reply is generated."
-          defaultOpen={replyType === 'template'}
-        >
-          {/* noBorder is true only when no Template tile or Custom AI prompt
-              tile renders below — i.e. AI selected and the URL advanced flag
-              is off. Otherwise we want a divider between the radio and the
-              tile below it. */}
-          <FieldRow label="Response method" align="top" noBorder={replyType === 'ai' && !advancedMode}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="instant-reply-response-method"
-                  checked={replyType === 'ai'}
-                  onChange={() => onReplyType('ai')}
-                  style={{ marginTop: 3, cursor: 'pointer' }}
-                />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                    AI-generated replies
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
-                    Recommended. Personalized using the inputs above.
-                  </div>
-                </div>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="instant-reply-response-method"
-                  checked={replyType === 'template'}
-                  onChange={() => onReplyType('template')}
-                  style={{ marginTop: 3, cursor: 'pointer' }}
-                />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                    Custom template
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
-                    Send a fixed, pre-written reply.
-                  </div>
-                </div>
-              </label>
-              {mixedReplyType && (
-                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic' }}>
-                  {tipReplyType}
-                </div>
-              )}
-            </div>
-          </FieldRow>
-
-          {/* Template tile — only when Custom template is the active method.
-              The Custom AI prompt tile only renders for AI mode, so when
-              template is selected this row has no sibling below it and
-              gets noBorder. */}
-          {replyType === 'template' && (
-            <FieldRow label="Template" noBorder>
-              <InfoTile
-                icon={FileText}
-                iconTone="violet"
-                title={firstReplyMessageTpl?.name || 'Default first-reply template'}
-                body={firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.'}
-                badge={{ label: 'Template', tone: 'blue' }}
-                tooltip={firstReplyMessageTpl?.content || undefined}
-                actionLabel="Edit Template"
-                onAction={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
-              />
-            </FieldRow>
-          )}
-
-          {/* Legacy custom AI prompt — still reachable for support / power
-              users via the ?advanced=1 URL flag. Only renders when both
-              the URL flag is set AND replyType=ai; otherwise hidden. */}
-          {advancedMode && replyType === 'ai' && (
-            <FieldRow label="Custom AI prompt" noBorder>
-              <InfoTile
-                icon={FileText}
-                iconTone="violet"
-                title={firstReplyPromptTpl?.name || 'Default first-reply instructions'}
-                body={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.'}
-                badge={{ label: 'AI Prompt — Advanced', tone: 'violet' }}
-                tooltip={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined}
-                actionLabel="Edit Prompt"
-                onAction={() => goTemplate(firstReplyPromptTpl, 'prompts')}
-              />
-            </FieldRow>
-          )}
-        </AdvancedExpand>
+        )}
       </SettingCard>
 
       {/* Instant Text */}
@@ -799,93 +646,29 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantText}
         contentPad="8px 24px 24px"
       >
-        <FieldRow
+        {/* Single-line Timing row per spec 2d — checkbox left, Edit Hours
+            link with ExternalLink icon right. The schedule string used to
+            be a sublabel; it now lives behind the Edit Hours link. */}
+        <TimingRow
           icon={Clock}
-          iconTone="gray"
-          label={
-            mixedTextBizHours ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Timing <MixedBadge tooltip={tipTextBizHours} />
-              </span>
-            ) : 'Timing'
-          }
-          align="top"
-        >
-          <div>
-            <Checkbox
-              checked={textBizHours}
-              onChange={onTextBizHours}
-              label="Only send during business hours"
-              sublabel={bizHoursSummary}
-            />
-            <div style={{ marginTop: 10 }}>
-              <ActionLink onClick={goEditHours}>Edit Hours</ActionLink>
-            </div>
-          </div>
-        </FieldRow>
+          checked={textBizHours}
+          onChangeChecked={onTextBizHours}
+          checkboxLabel="Only send during business hours"
+          onEditHours={goEditHours}
+          mixedLabelBadge={mixedTextBizHours ? <MixedBadge tooltip={tipTextBizHours} /> : undefined}
+        />
 
-        {/* V2 Message generation picker (2026-06-12).
-            Backend wiring: NotificationsService.sendNotificationWithRule
-            reads followUpSettingsJson.instantTextMode at send time. 'ai'
-            → InstantTextAiService.generateInstantTextBody; 'template' or
-            missing → existing render path. Failures fall back to template
-            with INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker. */}
-        <FieldRow label="Message generation" align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={instantTextMode === 'ai'}
-              onClick={() => onInstantTextMode('ai')}
-              title="AI"
-              body="AI writes a short text using your Business Information, FAQ, Pricing Guidance, and the lead details."
-              icon={Sparkles}
-            />
-            <OptionCard
-              selected={instantTextMode === 'template'}
-              onClick={() => onInstantTextMode('template')}
-              title="Custom template"
-              body="Send a fixed, pre-written SMS."
-              icon={Clipboard}
-            />
-          </div>
-        </FieldRow>
-
-        {/* Compact template preview — only when Custom template is selected. */}
-        {instantTextMode === 'template' && (
-          <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
-            <InfoTile
-              title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
-              body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
-              badge={{ label: 'Template', tone: 'green' }}
-              tooltip={ctTpl?.content || customerTextRule?.template || undefined}
-              actionLabel="Edit Template"
-              onAction={() => goTemplate(ctTpl, 'auto-reply')}
-            />
-          </FieldRow>
-        )}
-
-        {/* Advanced: show the template tile even when AI is selected so
-            support/power users can inspect / edit the fallback body. The
-            same template runs when AI generation throws — see
-            INSTANT_TEXT_AI_FALLBACK_TEMPLATE in
-            notifications.service.sendNotificationWithRule. */}
-        {instantTextMode === 'ai' && advancedMode && (
-          <AdvancedExpand
-            title="Fallback / custom SMS template"
-            helper="Used when Custom Template is selected or if AI generation fails."
-            defaultOpen={true}
-          >
-            <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
-              <InfoTile
-                title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
-                body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
-                badge={{ label: 'Template', tone: 'green' }}
-                tooltip={ctTpl?.content || customerTextRule?.template || undefined}
-                actionLabel="Edit Template"
-                onAction={() => goTemplate(ctTpl, 'auto-reply')}
-              />
-            </FieldRow>
-          </AdvancedExpand>
-        )}
+        {/* Unified Message generation block (spec 2e), bound to
+            instantTextMode. NotificationsService.sendNotificationWithRule
+            still reads followUpSettingsJson.instantTextMode — wiring
+            unchanged. The legacy fallback-tile under ?advanced=1 is
+            reachable from /templates?filter=auto-reply. */}
+        <MessageGenerationRow
+          useAi={instantTextMode === 'ai'}
+          onChangeUseAi={next => onInstantTextMode(next ? 'ai' : 'template')}
+          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
+          onOpenTemplates={() => goTemplate(ctTpl, 'auto-reply')}
+        />
       </SettingCard>
 
       {/* Instant Call */}
@@ -901,30 +684,15 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantCall}
         contentPad="8px 24px 24px"
       >
-        <FieldRow
+        {/* Single-line Timing row per spec 2d, matching Instant Text. */}
+        <TimingRow
           icon={Clock}
-          iconTone="gray"
-          label={
-            mixedCallBizHours ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Timing <MixedBadge tooltip={tipCallBizHours} />
-              </span>
-            ) : 'Timing'
-          }
-          align="top"
-        >
-          <div>
-            <Checkbox
-              checked={callBizHours}
-              onChange={onCallBizHours}
-              label="Only call during business hours"
-              sublabel={bizHoursSummary}
-            />
-            <div style={{ marginTop: 10 }}>
-              <ActionLink onClick={goEditHours}>Edit Hours</ActionLink>
-            </div>
-          </div>
-        </FieldRow>
+          checked={callBizHours}
+          onChangeChecked={onCallBizHours}
+          checkboxLabel="Only call during business hours"
+          onEditHours={goEditHours}
+          mixedLabelBadge={mixedCallBizHours ? <MixedBadge tooltip={tipCallBizHours} /> : undefined}
+        />
 
         <FieldRow
           icon={ArrowRightLeft}

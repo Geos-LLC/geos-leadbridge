@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -739,6 +739,203 @@ export function FooterBanner({ icon: Icon, body }: { icon: LucideIcon; body: Rea
       <Icon size={15} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
       <div style={{ flex: 1 }}>{body}</div>
     </div>
+  );
+}
+
+// ===================================================================
+// MessageGenerationRow — unified "Message generation" block per spec 2e.
+//
+// Used IDENTICALLY in Instant Reply, Instant Text, and Follow-ups. The
+// first line is the AI explainer + "Edit AI Playbook" link. Below it
+// sits a bordered "Advanced" disclosure: single header line (chevron +
+// bold "Advanced" + inline muted helper). When expanded: two radios
+// (AI / Custom template). When Custom is picked: a "Manage templates"
+// link to Settings → Templates.
+//
+// Bind `useAi` and `onChangeUseAi` to the plan's existing reply-mode
+// field (replyType / instantTextMode / followUpReplyType / messageMode).
+// Don't widen the API — this primitive is presentational.
+// ===================================================================
+export function MessageGenerationRow({
+  useAi,
+  onChangeUseAi,
+  onOpenPlaybook,
+  onOpenTemplates,
+  fieldRowProps,
+}: {
+  useAi: boolean;
+  onChangeUseAi: (next: boolean) => void;
+  onOpenPlaybook: () => void;
+  onOpenTemplates: () => void;
+  /** Optional FieldRow overrides — most callers can leave defaults. */
+  fieldRowProps?: Partial<Omit<Parameters<typeof FieldRow>[0], 'children'>>;
+}) {
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(!useAi);
+  return (
+    <FieldRow label="Message generation" sublabel="How messages are composed." align="top" noBorder {...fieldRowProps}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-4)', lineHeight: 1.55 }}>
+          AI writes each message automatically from your Business Information,
+          FAQ, Pricing Guidance and AI Playbook.{' '}
+          <button
+            type="button"
+            onClick={onOpenPlaybook}
+            style={{
+              background: 'transparent', border: 0, padding: 0,
+              fontFamily: 'inherit', fontSize: 'inherit',
+              color: 'var(--lb-accent)', fontWeight: 600,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            Edit AI Playbook →
+          </button>
+        </div>
+
+        <div style={{
+          border: '1px solid var(--lb-line)',
+          borderRadius: 10,
+          overflow: 'hidden',
+        }}>
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen(v => !v)}
+            aria-expanded={advancedOpen}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%',
+              padding: '10px 14px',
+              background: 'var(--lb-surface)', border: 0, cursor: 'pointer',
+              fontFamily: 'inherit', textAlign: 'left',
+            }}
+          >
+            {advancedOpen
+              ? <ChevronDown size={14} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+              : <ChevronRight size={14} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />}
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)' }}>Advanced</span>
+            <span style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
+              Use a custom template instead of AI.
+            </span>
+          </button>
+          {advancedOpen && (
+            <div style={{
+              padding: '12px 14px 14px',
+              borderTop: '1px solid var(--lb-line-soft)',
+              background: 'var(--lb-surface)',
+              display: 'flex', flexDirection: 'column', gap: 10,
+            }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  checked={useAi}
+                  onChange={() => onChangeUseAi(true)}
+                  style={{ marginTop: 3, cursor: 'pointer', accentColor: 'var(--lb-accent)' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    AI-generated
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Default. Personalized using your business inputs.
+                  </div>
+                </div>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  checked={!useAi}
+                  onChange={() => onChangeUseAi(false)}
+                  style={{ marginTop: 3, cursor: 'pointer', accentColor: 'var(--lb-accent)' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    Custom template
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Send a fixed, pre-written message.
+                  </div>
+                </div>
+              </label>
+              {!useAi && (
+                <button
+                  type="button"
+                  onClick={onOpenTemplates}
+                  style={{
+                    alignSelf: 'flex-start',
+                    background: 'transparent', border: 0, padding: 0,
+                    fontFamily: 'inherit', fontSize: 12.5,
+                    color: 'var(--lb-accent)', fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Manage templates in Settings → Templates →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </FieldRow>
+  );
+}
+
+// ===================================================================
+// TimingRow — single-line Timing block per spec 2d.
+//
+// FieldRow with a Clock IconTile + "Timing" label; content is a
+// single line: Checkbox on the left, ExternalLink "Edit Hours" link
+// on the right (justify-content: space-between). The schedule string
+// is NOT rendered as a sublabel inside the row — it lives behind the
+// Edit Hours link.
+// ===================================================================
+export function TimingRow({
+  icon,
+  checked,
+  onChangeChecked,
+  checkboxLabel,
+  onEditHours,
+  editHoursLabel = 'Edit Hours',
+  mixedLabelBadge,
+}: {
+  icon: LucideIcon;
+  checked: boolean;
+  onChangeChecked: (v: boolean) => void;
+  checkboxLabel: ReactNode;
+  onEditHours: () => void;
+  editHoursLabel?: string;
+  mixedLabelBadge?: ReactNode;
+}) {
+  return (
+    <FieldRow
+      icon={icon}
+      iconTone="gray"
+      label={
+        mixedLabelBadge ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            Timing {mixedLabelBadge}
+          </span>
+        ) : 'Timing'
+      }
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, flexWrap: 'wrap',
+      }}>
+        <Checkbox checked={checked} onChange={onChangeChecked} label={checkboxLabel} />
+        <button
+          type="button"
+          onClick={onEditHours}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: 'transparent', border: 0, padding: 0,
+            fontFamily: 'inherit', fontSize: 13,
+            color: 'var(--lb-accent)', fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          {editHoursLabel} <ExternalLink size={13} />
+        </button>
+      </div>
+    </FieldRow>
   );
 }
 
