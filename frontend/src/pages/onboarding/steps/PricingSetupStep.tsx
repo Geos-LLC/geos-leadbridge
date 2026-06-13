@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
 import { usersApi } from '../../../services/api';
 import { notify } from '../../../store/notificationStore';
-import { DEFAULT_CLEANING_PRICING } from '../../../components/ServicePricingForm';
+import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../../../data/defaultPricing';
 import { getStepMeta } from '../wizardConfig';
 import { WizardStepActions } from '../WizardStepActions';
 
@@ -92,12 +92,16 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
     return applyManual();
   }
 
-  // Show the full default table — users want to verify the numbers
-  // before committing, and the modal scrolls if it overflows.
-  const previewRows = (DEFAULT_CLEANING_PRICING as any)?.priceTable ?? [];
-  const previewExtras = (DEFAULT_CLEANING_PRICING as any)?.extras ?? [];
-  const previewFrequencies = (DEFAULT_CLEANING_PRICING as any)?.frequencyDiscounts ?? [];
-  const petSurcharge = (DEFAULT_CLEANING_PRICING as any)?.petSurcharge;
+  // Show the full default table — users want to verify the numbers before
+  // committing, and the modal scrolls if it overflows. Hydrated so that the
+  // wizard preview and the AI Playbook editable table always produce the
+  // same visible service columns (the rule: Deep Cleaning never disappears).
+  const previewPricing = hydratePricing(DEFAULT_CLEANING_PRICING);
+  const previewRows = previewPricing.priceTable;
+  const previewTypes = previewPricing.cleaningTypes;
+  const previewExtras = previewPricing.extras;
+  const previewFrequencies = previewPricing.frequencyDiscounts;
+  const petSurcharge = previewPricing.petSurcharge;
 
   return (
     <div className="pt-2">
@@ -198,18 +202,27 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
                   <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-widest sticky top-0">
                     <tr>
                       <th className="text-left py-2 px-3 font-bold">Bed / Bath</th>
-                      <th className="text-right py-2 px-3 font-bold">Regular</th>
-                      <th className="text-right py-2 px-3 font-bold">Deep</th>
+                      {previewTypes.map((t) => (
+                        <th key={t.key} className="text-right py-2 px-3 font-bold">
+                          {t.label.split(' ')[0]}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map((row: any, i: number) => (
+                    {previewRows.map((row, i) => (
                       <tr key={i} className="border-t border-slate-100">
                         <td className="py-2 px-3 text-slate-700 font-semibold">
                           {row.bed}b / {row.bath}b
                         </td>
-                        <td className="py-2 px-3 text-right text-slate-900">${row.regular ?? row.standard ?? '—'}</td>
-                        <td className="py-2 px-3 text-right text-slate-900">${row.deep ?? '—'}</td>
+                        {previewTypes.map((t) => {
+                          const v = row[t.key];
+                          return (
+                            <td key={t.key} className="py-2 px-3 text-right text-slate-900">
+                              {v === 0 ? '$0' : v != null ? `$${v}` : '—'}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>

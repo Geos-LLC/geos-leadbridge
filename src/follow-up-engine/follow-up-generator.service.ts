@@ -26,6 +26,7 @@ import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
+import { hydratePricing } from '../users/pricing-hydrate';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import OpenAI from 'openai';
@@ -226,9 +227,12 @@ export class FollowUpGeneratorService {
       const suppressPricingForQualify = strategyKey === 'qualify';
       if (account?.servicePricingJson && !suppressPricingForQualify) {
         try {
-          const p = JSON.parse(account.servicePricingJson);
-          const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
-          if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+          // Hydrate: legacy accounts missing cleaningTypes still get Deep
+          // Cleaning in the prompt; explicit 0 prices stay 0 (and flip the
+          // pricing-guards "do not quote, defer" clause on for that type).
+          const p = hydratePricing(JSON.parse(account.servicePricingJson));
+          const allTypes = p.cleaningTypes;
+          if (p.priceTable.length > 0 && allTypes.length > 0) {
             // Same range/exact toggle as automation.service / ai.controller.
             let priceQuoteMode: 'range' | 'exact' | undefined;
             if (account?.followUpSettingsJson) {
@@ -237,7 +241,7 @@ export class FollowUpGeneratorService {
                 if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
               } catch { /* fall back to legacy inference */ }
             }
-            const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false;
+            const sqftAdjustEnabled = p.sqftAdjustEnabled !== false;
             const priceParts = [
               '=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===',
             ];
@@ -247,7 +251,7 @@ export class FollowUpGeneratorService {
               const sqftMin = Number(row.sqftMin) || legacy;
               const sqftMax = Number(row.sqftMax) || legacy;
               const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-              const prices = enabledTypes.map((t: any) => {
+              const prices = allTypes.map((t) => {
                 const price = Number(row[t.key]) || 0;
                 const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
                 return perSqft && sqftAdjustEnabled
@@ -263,7 +267,7 @@ export class FollowUpGeneratorService {
             priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
             // Hard guards (see pricing-guards.ts). Closes the FargiPro follow-up
             // "$130 for 1BR/1BA" bug — AI must NOT quote when bed/bath unknown
-            // or when the requested service type is disabled on this account.
+            // or when the requested service type has zero prices across all rows.
             priceParts.push(buildPricingGuardRules(p));
             pricingContext = priceParts.join('\n');
           }

@@ -988,7 +988,16 @@ export class WebhooksService {
               city: lead.city,
               state: lead.state,
               postcode: lead.postcode,
-              message: lead.message,
+              // Pass the REPLY content (messageContent), not the original
+              // lead inquiry (lead.message). Customer-reply alert templates
+              // use {{message}} / {{lead.message}} to mean "what the
+              // customer just said", but passing lead.message would
+              // substitute the initial Thumbtack inquiry text instead —
+              // confusing for the owner who's trying to triage the live
+              // reply. Mirrors the Sigcore inbound SMS path
+              // (handleInboundSms → notificationsService.handleCustomerReply
+              // with `message: body`).
+              message: messageContent || lead.message,
               rawJson: lead.rawJson,
             },
             isFirstCustomerReply: customerMessageCount === 1,

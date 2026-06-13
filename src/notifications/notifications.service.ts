@@ -1926,6 +1926,14 @@ export class NotificationsService {
     message = message.replace(/\{lead\.zip\}/gi, lead.postcode || 'Not provided');
     message = message.replace(/\{\{lead\.message\}\}/gi, lead.message || 'No message');
     message = message.replace(/\{lead\.message\}/gi, lead.message || 'No message');
+    // Plain `{{message}}` / `{message}` alias — same content as
+    // {{lead.message}}. Templates authored against the re-engagement
+    // alert convention (which uses bare `{{message}}`) were silently
+    // falling through unsubstituted on the customer_reply path because
+    // only the `lead.`-prefixed variant was registered here (Lisa
+    // Campbell Hargrove 2026-06-13 incident).
+    message = message.replace(/\{\{message\}\}/gi, lead.message || 'No message');
+    message = message.replace(/\{message\}/gi, lead.message || 'No message');
 
     // Parse rawJson for additional fields
     let serviceDescription = 'Not specified';

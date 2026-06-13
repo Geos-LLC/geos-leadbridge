@@ -15,7 +15,8 @@ import type {
   CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
-import ServicePricingForm, { DEFAULT_CLEANING_PRICING } from '../components/ServicePricingForm';
+import ServicePricingForm from '../components/ServicePricingForm';
+import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { useAppStore } from '../store/appStore';
@@ -2432,14 +2433,17 @@ export function Services() {
                                 <Loader2 size={12} className="animate-spin" /> Loading pricing...
                               </div>
                             ) : (() => {
-                              const p = pricingPreview || DEFAULT_CLEANING_PRICING;
-                              const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
-                              const hasTable = p.priceTable?.length > 0 && enabledTypes.length > 0;
+                              // Hydrated so all cleaningTypes (Regular, Deep, Airbnb) always
+                              // render as columns regardless of legacy JSON. To "disable" a
+                              // service the user enters 0 in every row of that column.
+                              const p = hydratePricing(pricingPreview || DEFAULT_CLEANING_PRICING);
+                              const allTypes = p.cleaningTypes;
+                              const hasTable = p.priceTable.length > 0;
                               return (
                                 <div className="space-y-3">
-                                  {enabledTypes.length > 0 && (
+                                  {allTypes.length > 0 && (
                                     <div className="flex items-center flex-wrap gap-1.5">
-                                      {enabledTypes.map((t: any) => (
+                                      {allTypes.map((t) => (
                                         <span key={t.key} className="px-2 py-0.5 bg-white border border-blue-200 text-blue-700 rounded-md text-[10px] font-semibold">{t.label}</span>
                                       ))}
                                     </div>
@@ -2451,19 +2455,24 @@ export function Services() {
                                           <tr className="text-slate-500">
                                             <th className="px-2 py-1.5 text-left font-semibold">Bed</th>
                                             <th className="px-2 py-1.5 text-left font-semibold">Bath</th>
-                                            {enabledTypes.map((t: any) => (
+                                            {allTypes.map((t) => (
                                               <th key={t.key} className="px-2 py-1.5 text-left font-semibold">{t.label}</th>
                                             ))}
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {p.priceTable.map((row: any, i: number) => (
+                                          {p.priceTable.map((row, i) => (
                                             <tr key={i} className="border-t border-slate-100">
                                               <td className="px-2 py-1.5 text-slate-700">{row.bed}</td>
                                               <td className="px-2 py-1.5 text-slate-700">{row.bath}</td>
-                                              {enabledTypes.map((t: any) => (
-                                                <td key={t.key} className="px-2 py-1.5 text-slate-900 font-semibold">${row[t.key] || '—'}</td>
-                                              ))}
+                                              {allTypes.map((t) => {
+                                                const v = row[t.key];
+                                                return (
+                                                  <td key={t.key} className="px-2 py-1.5 text-slate-900 font-semibold">
+                                                    {v === 0 ? '$0' : v != null ? `$${v}` : '—'}
+                                                  </td>
+                                                );
+                                              })}
                                             </tr>
                                           ))}
                                         </tbody>
@@ -4182,8 +4191,10 @@ export function Services() {
                   <Loader2 size={16} className="animate-spin" /> Loading pricing...
                 </div>
               ) : (() => {
-                const p = pricingPreview || DEFAULT_CLEANING_PRICING;
-                const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+                // Hydrated preview — same source of truth as ServicePricingForm and
+                // wizard preview. All cleaningTypes always render as columns.
+                const p = hydratePricing(pricingPreview || DEFAULT_CLEANING_PRICING);
+                const allTypes = p.cleaningTypes;
                 const isDefault = !pricingPreview && !pricingPreviewInherited;
                 return (
                   <div className="space-y-6 text-sm">
@@ -4197,19 +4208,19 @@ export function Services() {
                         <span className="font-semibold">Inherited pricing.</span> This account has no pricing of its own, so the AI will use the pricing from another one of your accounts. Switch to <button className="underline font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to set pricing specifically for this account.
                       </div>
                     )}
-                    {/* Service type + enabled types */}
+                    {/* Service type + all available service columns */}
                     <div>
                       <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Service</div>
                       <div className="flex items-center flex-wrap gap-2">
                         <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold capitalize">{p.serviceType || 'cleaning'}</span>
-                        {enabledTypes.map((t: any) => (
+                        {allTypes.map((t) => (
                           <span key={t.key} className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-semibold">{t.label}</span>
                         ))}
                       </div>
                     </div>
 
                     {/* Price table */}
-                    {p.priceTable?.length > 0 && enabledTypes.length > 0 && (
+                    {p.priceTable.length > 0 && allTypes.length > 0 && (
                       <div>
                         <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Base Prices</div>
                         <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -4218,19 +4229,24 @@ export function Services() {
                               <tr className="text-slate-500">
                                 <th className="px-3 py-2 text-left font-semibold text-xs">Bed</th>
                                 <th className="px-3 py-2 text-left font-semibold text-xs">Bath</th>
-                                {enabledTypes.map((t: any) => (
+                                {allTypes.map((t) => (
                                   <th key={t.key} className="px-3 py-2 text-left font-semibold text-xs">{t.label}</th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
-                              {p.priceTable.map((row: any, i: number) => (
+                              {p.priceTable.map((row, i) => (
                                 <tr key={i} className="border-t border-slate-100">
                                   <td className="px-3 py-2 text-slate-700 font-medium">{row.bed}</td>
                                   <td className="px-3 py-2 text-slate-700 font-medium">{row.bath}</td>
-                                  {enabledTypes.map((t: any) => (
-                                    <td key={t.key} className="px-3 py-2 text-slate-900 font-semibold">${row[t.key] || '—'}</td>
-                                  ))}
+                                  {allTypes.map((t) => {
+                                    const v = row[t.key];
+                                    return (
+                                      <td key={t.key} className="px-3 py-2 text-slate-900 font-semibold">
+                                        {v === 0 ? '$0' : v != null ? `$${v}` : '—'}
+                                      </td>
+                                    );
+                                  })}
                                 </tr>
                               ))}
                             </tbody>

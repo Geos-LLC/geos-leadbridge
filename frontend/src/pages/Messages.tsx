@@ -2310,7 +2310,7 @@ export function Messages() {
                               <a key="phone-sub" href={`tel:${subPhone}`} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-600 whitespace-nowrap">
                                 <Phone size={14} />
                                 {formatPhoneNumber(subPhone)}
-                                <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-slate-100 text-slate-500">Forwarding</span>
+                                <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-green-100 text-green-700">Real</span>
                               </a>
                             );
                           }
@@ -2319,7 +2319,7 @@ export function Messages() {
                             <a key="phone" href={`tel:${subPhone}`} className="flex items-center gap-1.5 text-slate-600 hover:text-blue-600 whitespace-nowrap">
                               <Phone size={14} />
                               {formatPhoneNumber(subPhone)}
-                              <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-slate-100 text-slate-500">Forwarding</span>
+                              <span className="ml-1 px-1.5 py-px text-[10px] uppercase tracking-wide rounded bg-green-100 text-green-700">Real</span>
                             </a>
                           );
                         } else {

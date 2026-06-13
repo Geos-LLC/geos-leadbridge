@@ -110,6 +110,9 @@ describe('NotificationsService', () => {
       // SavedAccount lookups in this suite is 'template' (no
       // followUpSettingsJson seeded), so the AI branch is skipped anyway.
       generateInstantTextBody: jest.fn().mockResolvedValue('AI generated body'),
+    } as any, {
+      // PlatformService stub — wired 2026-06-13 for TT associate-phone
+      // resync. No method on PlatformService is exercised by this suite.
     } as any);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls
@@ -290,6 +293,60 @@ describe('NotificationsService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('No dedicated number assigned. Get a dedicated number first.');
       expect((service as any).sendViaSigcore).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // renderTemplate — variable substitution
+  //
+  // The customer_reply alert sender (handleCustomerReply →
+  // sendNotificationWithRule → renderTemplate) reads the template the
+  // user configured on a NotificationRule and substitutes placeholders.
+  // Lisa Campbell Hargrove 2026-06-13 incident: the template
+  // `Lead {{customerName}} replied: "{{message}}"` sent the literal
+  // string `{{message}}` because the renderer only recognized
+  // {{lead.message}} (with `lead.` prefix). The bare {{message}} /
+  // {message} variants are now aliased — same content as lead.message —
+  // so templates authored against the re-engagement-alert convention
+  // (which uses bare {{message}}) render correctly here too.
+  // =========================================================================
+  describe('renderTemplate — message placeholder aliases', () => {
+    const baseLead = {
+      customerName: 'Lisa Campbell Hargrove',
+      customerPhone: '+18135551212',
+      category: 'House Cleaning',
+      city: 'Tampa',
+      state: 'FL',
+      postcode: '33625',
+      message: 'Looking for a deep clean next Friday.',
+    };
+
+    const callRender = (template: string, lead: any = baseLead, accountName?: string): string =>
+      (service as any).renderTemplate(template, lead, accountName);
+
+    it('substitutes {{message}} (bare double-brace) with lead.message', () => {
+      const out = callRender('Lead {customerName} replied: "{{message}}"');
+      expect(out).toBe('Lead Lisa Campbell Hargrove replied: "Looking for a deep clean next Friday."');
+    });
+
+    it('substitutes {message} (bare single-brace) with lead.message', () => {
+      const out = callRender('Reply: {message}');
+      expect(out).toBe('Reply: Looking for a deep clean next Friday.');
+    });
+
+    it('falls back to "No message" when lead.message is empty', () => {
+      const out = callRender('Reply: "{{message}}"', { ...baseLead, message: '' });
+      expect(out).toBe('Reply: "No message"');
+    });
+
+    it('still substitutes the existing {{lead.message}} variant (no regression)', () => {
+      const out = callRender('Reply: "{{lead.message}}"');
+      expect(out).toBe('Reply: "Looking for a deep clean next Friday."');
+    });
+
+    it('replaces ALL occurrences of {{message}} (global flag)', () => {
+      const out = callRender('{{message}} | {{message}}');
+      expect(out).toBe('Looking for a deep clean next Friday. | Looking for a deep clean next Friday.');
     });
   });
 });
