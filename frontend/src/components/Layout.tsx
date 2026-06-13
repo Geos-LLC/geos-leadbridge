@@ -1115,8 +1115,19 @@ export function Layout() {
                               </div>
                             )}
                             {p.state === 'cancelled' && (
-                              <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>
-                                Kept existing rule — no changes.
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  color: 'var(--lb-success, #16a34a)',
+                                  background: 'rgba(34,197,94,0.12)',
+                                  border: '1px solid rgba(34,197,94,0.45)',
+                                  padding: '6px 10px',
+                                  borderRadius: 8,
+                                  display: 'inline-block',
+                                }}
+                              >
+                                ✓ Kept existing rule — no changes.
                               </div>
                             )}
                           </div>
