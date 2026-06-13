@@ -936,13 +936,6 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         body={
           <>
             Templates can be managed in <Link to="/templates" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Templates</Link>.
-            {' '}Want to preview a real alert, instant text, or call?{' '}
-            <Link
-              to="/settings?tab=communication"
-              style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
-            >
-              Test it from Settings → Communication
-            </Link>.
           </>
         }
       />

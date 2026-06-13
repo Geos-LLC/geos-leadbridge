@@ -69,7 +69,6 @@ export function SettingsGeneral() {
 
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
-  const [industry, setIndustry] = useState<string>('Cleaning & home services');
   const [website, setWebsite] = useState<string>(user?.website ?? '');
   const [websiteMetadata, setWebsiteMetadata] = useState<any>((user as any)?.websiteMetadataJson ?? null);
   const [verifying, setVerifying] = useState(false);
@@ -292,7 +291,7 @@ export function SettingsGeneral() {
     const t = setTimeout(() => { handleSave(); }, 800);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business, tz, industry]);
+  }, [business, tz]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -320,20 +319,6 @@ export function SettingsGeneral() {
       >
         <FieldRow label="Business name">
           <SettingsInput value={business} onChange={setBusiness} />
-        </FieldRow>
-        <FieldRow label="Industry">
-          <Dropdown
-            value={industry}
-            onChange={setIndustry}
-            width="100%"
-            options={[
-              'Cleaning & home services',
-              'Lawn care & landscaping',
-              'Handyman & repair',
-              'Pest control',
-              'Other',
-            ]}
-          />
         </FieldRow>
         <FieldRow label="Timezone" noBorder>
           {loading ? (
