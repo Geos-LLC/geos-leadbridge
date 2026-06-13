@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, Sparkles } from 'lucide-react';
+import { ArrowRight, ExternalLink, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
 import { thumbtackApi } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
 import AccountFaqForm from '../../../components/AccountFaqForm';
+import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -75,6 +76,31 @@ export default function AIKnowledgeStep({ onSaveContinue, saving, setSaving }: P
 
   return (
     <div className="pt-2">
+      {/* Sticky top action row — primary CTA + secondary deep link.
+          Always visible so users on long FAQ forms can save without
+          scrolling back up. */}
+      <WizardStepActions>
+        <button
+          type="button"
+          onClick={() => void handleContinue()}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? 'Continuing…' : 'Save & Continue'}
+          {!saving && <ArrowRight className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings/ai-playbook')}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
+        >
+          Advanced FAQ &amp; AI settings
+          <ExternalLink className="w-3.5 h-3.5" />
+        </button>
+      </WizardStepActions>
+
       <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
         {meta.title}
       </h1>
@@ -124,33 +150,11 @@ export default function AIKnowledgeStep({ onSaveContinue, saving, setSaving }: P
         </div>
       )}
 
-      <div className="mt-8 flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            type="button"
-            onClick={() => void handleContinue()}
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {saving ? 'Continuing…' : 'Continue'}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/settings/ai-playbook')}
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
-          >
-            Advanced FAQ &amp; AI settings
-            <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {savedAccounts.length > 1 && (
-          <p className="text-xs text-slate-400 max-w-md">
-            FAQ answers apply to all connected accounts. You can customize each account later in Settings → AI Playbook → FAQ.
-          </p>
-        )}
-      </div>
+      {savedAccounts.length > 1 && (
+        <p className="mt-6 text-xs text-slate-400 max-w-md">
+          FAQ answers apply to all connected accounts. You can customize each account later in Settings → AI Playbook → FAQ.
+        </p>
+      )}
     </div>
   );
 }

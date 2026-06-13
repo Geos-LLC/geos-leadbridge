@@ -7,16 +7,25 @@ interface WizardShellProps {
   currentStep: WizardStep;
   checklist: WizardChecklist;
   children: React.ReactNode;
-  // Action bar
+  // Action bar — now rendered in the sticky top header (no bottom
+  // footer). Steps that need custom action buttons (e.g. "I don't
+  // have a website", "Use default pricing") pass them via
+  // `headerActions` instead of relying on onSkip/onContinue.
   onBack?: () => void;
   onSkip?: () => void;
   onContinue?: () => void;
   continueLabel?: string;
   continueDisabled?: boolean;
   saving?: boolean;
-  // Hide the entire action bar (used by Welcome / Done which roll their
-  // own primary CTA).
+  // Hide the default Skip/Continue in the header. Steps that own
+  // their own actions either pass `headerActions` (rendered next to
+  // Back + Exit) or render their CTA inside the step body.
   hideActions?: boolean;
+  // Step-specific action buttons rendered in the sticky top header,
+  // between Back and Exit. Use this to surface a step's Save & Continue
+  // (and any siblings like Skip manual / I don't have a website) at the
+  // top of the screen, where the rest of the wizard navigation lives.
+  headerActions?: React.ReactNode;
   // Sidebar jump. Optional — when provided, the left-rail step rows
   // become clickable buttons that jump to the chosen step. The
   // container is responsible for the actual PATCH + state update.
@@ -42,6 +51,7 @@ export default function WizardShell({
   continueDisabled,
   saving,
   hideActions,
+  headerActions,
   onStepClick,
   onRestart,
 }: WizardShellProps) {
@@ -156,9 +166,12 @@ export default function WizardShell({
 
       {/* Right pane */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar with progress + close */}
+        {/* Sticky top header — owns ALL wizard navigation. Progress on
+            the left; Back + step-specific actions + Exit on the right.
+            Bottom footer is intentionally gone so users never have to
+            scroll to find a Save & Continue button. */}
         <header
-          className="sticky top-0 z-10 px-6 md:px-10 py-4 border-b flex items-center gap-4"
+          className="sticky top-0 z-10 px-6 md:px-10 py-4 border-b flex items-center gap-3 flex-wrap"
           style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line)' }}
         >
           <div className="flex-1 min-w-0">
@@ -172,9 +185,56 @@ export default function WizardShell({
               />
             </div>
           </div>
+
+          {/* Back — shown whenever a previous step exists, regardless
+              of whether the step owns its own actions. */}
+          {onBack && (
+            <button
+              onClick={onBack}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
+              aria-label="Previous step"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+          )}
+
+          {/* Step-owned action slot. When a step renders its own custom
+              buttons (e.g. "I don't have a website" + Save & Continue),
+              they land here. The default Skip/Continue is suppressed
+              whenever headerActions is provided. */}
+          {headerActions ? (
+            <div className="flex items-center gap-2 flex-wrap">{headerActions}</div>
+          ) : !hideActions ? (
+            <>
+              {onSkip && (
+                <button
+                  onClick={onSkip}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <SkipForward className="w-4 h-4" />
+                  <span className="hidden sm:inline">Skip this step</span>
+                </button>
+              )}
+              {onContinue && (
+                <button
+                  onClick={onContinue}
+                  disabled={continueDisabled || saving}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {saving ? 'Saving…' : continueLabel}
+                  {!saving && <ArrowRight className="w-4 h-4" />}
+                </button>
+              )}
+            </>
+          ) : null}
+
           <button
             onClick={() => navigate('/overview')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             aria-label="Exit setup"
             title="Skip for later — your progress is saved"
           >
@@ -187,45 +247,6 @@ export default function WizardShell({
         <main className="flex-1 px-6 md:px-10 py-8 md:py-12 overflow-y-auto">
           <div className="max-w-2xl mx-auto">{children}</div>
         </main>
-
-        {/* Action bar */}
-        {!hideActions && (
-          <footer
-            className="px-6 md:px-10 py-4 border-t flex items-center gap-3"
-            style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line)' }}
-          >
-            <button
-              onClick={onBack}
-              disabled={!onBack || saving}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back
-            </button>
-            <div className="flex-1" />
-            {onSkip && (
-              <button
-                onClick={onSkip}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <SkipForward className="w-4 h-4" />
-                Skip this step
-              </button>
-            )}
-            {onContinue && (
-              <button
-                onClick={onContinue}
-                disabled={continueDisabled || saving}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-blue-200 transition-all"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {saving ? 'Saving…' : continueLabel}
-                {!saving && <ArrowRight className="w-4 h-4" />}
-              </button>
-            )}
-          </footer>
-        )}
       </div>
     </div>
   );

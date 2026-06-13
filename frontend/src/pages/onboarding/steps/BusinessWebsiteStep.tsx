@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, DownloadCloud, Globe,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, DownloadCloud, Globe,
   Loader2, Phone, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
@@ -12,6 +12,7 @@ import type { SavedAccount } from '../../../types';
 import { getStepMeta } from '../wizardConfig';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
+import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -434,6 +435,33 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
 
   return (
     <div className="pt-2">
+      {/* Sticky top action row — Save & Continue stays in view while
+          the user works through the verify + phone provisioning flow. */}
+      <WizardStepActions>
+        <button
+          type="button"
+          onClick={() => void verifyAndContinue()}
+          disabled={!canSave}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+        >
+          {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {verifyState.kind === 'checking'
+            ? 'Checking your site…'
+            : verifyState.kind === 'applying'
+              ? 'Applying to Playbook…'
+              : (saving ? 'Saving…' : 'Save & Continue')}
+          {!isBusy && <ArrowRight className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => void skipNoWebsite()}
+          disabled={isBusy}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+        >
+          I don't have a website
+        </button>
+      </WizardStepActions>
+
       <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
         {meta.title}
       </h1>
@@ -824,30 +852,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         </section>
       )}
 
-      {/* ─── Footer actions ──────────────────────────────────────── */}
-      <div className="mt-6 flex flex-col sm:flex-row gap-3">
-        <button
-          type="button"
-          onClick={() => void verifyAndContinue()}
-          disabled={!canSave}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
-        >
-          {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {verifyState.kind === 'checking'
-            ? 'Checking your site…'
-            : verifyState.kind === 'applying'
-              ? 'Applying to Playbook…'
-              : (saving ? 'Saving…' : 'Save & Continue')}
-        </button>
-        <button
-          type="button"
-          onClick={() => void skipNoWebsite()}
-          disabled={isBusy}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all"
-        >
-          I don't have a website
-        </button>
-      </div>
     </div>
   );
 }
