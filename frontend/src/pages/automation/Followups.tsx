@@ -1,20 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight, X,
+  Sparkles, History,
   RefreshCw, Clock, UserX, Info, Power,
 } from 'lucide-react';
 import {
-  SettingCard, SectionCard, FieldRow, OptionCard,
-  Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedBadge,
-  PlanOffEmptyState,
+  SectionCard, FieldRow, OptionCard,
+  Dropdown, IconTile, FooterBanner, StatusPill, MixedBadge,
+  PlanOffEmptyState, TimingRow, MessageGenerationRow,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
-import { formatQuietHoursSummary } from '../../lib/businessHours';
 
 // Strategy meta — mirrors the picker on AutomationConversation. Used to
 // Strategy key (followUpStrategy in JSON) is preserved on save but no longer
@@ -33,7 +32,6 @@ const isStrategyKey = (v: unknown): v is StrategyKey =>
 // Module-level cache for instant tab switching + delay-free mixed detection.
 type PlanStepData = { val: number; unit: PlanUnit };
 type PlanUnit = 'min' | 'hour' | 'day' | 'week' | 'month' | 'year';
-const PLAN_UNITS: PlanUnit[] = ['min', 'hour', 'day', 'week', 'month', 'year'];
 
 type CachedFollowups = {
   // Master ON/OFF — derived from followUpMode. Off when followUpMode is
@@ -92,10 +90,6 @@ function stepToDelayString(step: PlanStepData): string {
   return `${step.val} ${step.unit}`;
 }
 
-function unitLabel(unit: PlanUnit, val: number): string {
-  return val === 1 ? unit : `${unit}s`;
-}
-
 export function AutomationFollowups({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -137,12 +131,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // as [{ delay: '2 min', message: null }, ...]. Backend parseDelay()
   // converts each delay string into minutes for scheduling.
   const [plan, setPlan] = useState<PlanStepData[]>(DEFAULT_FOLLOWUP_PLAN);
-  // Read-only AI Strategy + Quiet Hours summary. AI Strategy is per-account
-  // (lives in followUpSettingsJson.followUpStrategy); Quiet Hours times are
-  // user-level (User.quietHours*) and fetched once below.
+  // Read-only AI Strategy. Per-account, lives in followUpSettingsJson.
+  // Quiet hours summary used to render in its own card; per spec 2g it's
+  // now folded into the Timing row inside Follow-up mode (the schedule
+  // lives behind the Edit Hours link), so the standalone summary state
+  // is gone.
   const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
-  const [quietSummary, setQuietSummary] = useState<string>('Loading…');
-  const [quietTzLabel, setQuietTzLabel] = useState<string>('');
 
   const [loading, setLoading] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
@@ -210,19 +204,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   };
 
   // User-level quiet hours — independent of selected account. The Quiet
-  // hours card under Follow-ups shows the saved start/end/timezone.
-  useEffect(() => {
-    let alive = true;
-    usersApi.getQuietHours()
-      .then(qh => {
-        if (!alive) return;
-        setQuietSummary(formatQuietHoursSummary(qh.start, qh.end, qh.timezone));
-        setQuietTzLabel(qh.timezone || '');
-      })
-      .catch(() => { if (alive) { setQuietSummary('See Settings → Hours'); setQuietTzLabel(''); } });
-    return () => { alive = false; };
-  }, []);
-
   // Hydrate displayed values from cache on scope change (instant).
   useEffect(() => {
     if (isAll) {
@@ -488,7 +469,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached.plan)}`).join('\n');
     return { mixed: true, tooltip };
   }
-  const mixedPlan = getMixedPlan();
+  // mixedPlan was used by the editable cadence card before spec 2h made it
+  // presentational; getMixedPlan is preserved upstream in case the editable
+  // plan ever returns.
+  void getMixedPlan;
 
   // Auto-save IMMEDIATELY on every USER change. We snapshot the dirty-fields
   // set, clear it, then pass to handleSave so only those fields are written.
@@ -522,23 +506,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
   const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
   const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
-  const markPlanDirty = () => { dirtyRef.current = true; dirtyFieldsRef.current.add('plan'); };
-  const onPlanStepChange = (index: number, next: PlanStepData) => {
-    markPlanDirty();
-    setPlan(p => p.map((s, i) => i === index ? next : s));
-  };
-  const onPlanAddStep = () => {
-    markPlanDirty();
-    setPlan(p => [...p, { val: 1, unit: 'month' }]);
-  };
-  const onPlanRemoveStep = (index: number) => {
-    markPlanDirty();
-    setPlan(p => p.length > 1 ? p.filter((_, i) => i !== index) : p);
-  };
-  const onPlanReset = () => {
-    markPlanDirty();
-    setPlan(DEFAULT_FOLLOWUP_PLAN);
-  };
+  // Plan editor handlers (onPlanStepChange / onPlanAddStep / onPlanRemoveStep
+  // / onPlanReset) were removed when the Follow-up plan card became
+  // presentational per spec 2h. The plan state + save plumbing is preserved
+  // upstream so saved cadences keep loading; only the editing UI is gone.
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 
@@ -569,36 +540,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
 
       {!followUpsOn ? null : <>
 
-      {/* Quiet hours */}
-      <SettingCard
-        icon={PhoneOff}
-        iconTone="violet"
-        title="Quiet hours"
-        subtitle="Don't send follow-ups overnight."
-        enabled={quietOn}
-        onToggle={onQuietOn}
-        mixed={mixedQuiet.mixed}
-        mixedTooltip={mixedQuiet.tooltip}
-      >
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 16, paddingTop: 4,
-        }}>
-          <div style={{ flex: 1 }} />
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
-              <span style={{ fontWeight: 500 }}>Quiet hours: </span>
-              <span style={{ fontWeight: 700 }}>{quietSummary}</span>
-            </div>
-            <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>
-              {quietTzLabel ? `${quietTzLabel} (daily)` : 'daily'}
-            </div>
-          </div>
-          <ActionLink external onClick={goQuietSettings}>Edit in Settings</ActionLink>
-        </div>
-      </SettingCard>
-
-      {/* Follow-up mode */}
+      {/* Follow-up mode — spec 2g. Quiet hours is folded into the first
+          row of this card as a Timing checkbox; the separate Quiet hours
+          card is gone. */}
       <SectionCard padding="20px 24px 8px">
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
@@ -608,6 +552,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             Choose how follow-ups are delivered and composed.
           </div>
         </div>
+
+        <TimingRow
+          icon={Clock}
+          sublabel="When follow-ups can send."
+          checked={quietOn}
+          onChangeChecked={onQuietOn}
+          checkboxLabel="Don't send follow-ups overnight"
+          onEditHours={goQuietSettings}
+          mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
+        />
 
         <FieldRow label="Delivery mode" sublabel="How follow-ups are sent." align="top">
           <div style={{ display: 'flex', gap: 12 }}>
@@ -630,169 +584,28 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow label="Message generation" sublabel="How follow-up messages are composed." align="top" noBorder>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 12 }}>
-              {/* AI first — AI-first is the product default. */}
-              <OptionCard
-                selected={messageMode === 'ai'}
-                onClick={() => onMessageMode('ai')}
-                title="AI"
-                body="AI writes each follow-up from the live conversation."
-                mixed={mixedMessage.mixed && messageMode === 'ai'}
-                mixedTooltip={mixedMessage.tooltip}
-              />
-              <OptionCard
-                selected={messageMode === 'template'}
-                onClick={() => onMessageMode('template')}
-                title="Custom template"
-                body="Use your saved template for all follow-up messages."
-                mixed={mixedMessage.mixed && messageMode === 'template'}
-                mixedTooltip={mixedMessage.tooltip}
-              />
-            </div>
-            {messageMode === 'ai' && (
-              <div style={{
-                padding: '12px 14px',
-                background: '#f8fafc',
-                border: '1px solid var(--lb-line-soft)',
-                borderRadius: 10,
-                fontSize: 13, color: 'var(--lb-ink-3)',
-                lineHeight: 1.55,
-              }}>
-                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>AI follow-ups use:</div>
-                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
-                  {[
-                    'Conversation history',
-                    'Business Information',
-                    'FAQ',
-                    'Pricing Guidance',
-                    'AI Playbook',
-                  ].map(item => (
-                    <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {messageMode === 'template' && (
-              // Bug fix (2026-06-12): Custom template mode previously showed
-              // no path to manage the underlying templates. Linking to the
-              // Templates library filtered to auto-reply (the bucket the
-              // follow-up step templates land in — see MessageSettings.tsx
-              // getTemplateFilter).
-              <div style={{
-                padding: '12px 14px',
-                background: '#f8fafc',
-                border: '1px solid var(--lb-line-soft)',
-                borderRadius: 10,
-                fontSize: 13, color: 'var(--lb-ink-3)',
-                lineHeight: 1.55,
-              }}>
-                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-                  Follow-up templates
-                </div>
-                <div style={{ marginBottom: 10 }}>
-                  Each follow-up step uses a saved template. Manage which templates run for which step in your library.
-                </div>
-                <Link
-                  to="/templates?filter=auto-reply"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    color: 'var(--lb-accent)', fontWeight: 600, textDecoration: 'none',
-                  }}
-                >
-                  Manage templates →
-                </Link>
-              </div>
-            )}
+        {/* Unified Message generation row (spec 2e) bound to messageMode.
+            Backend wiring unchanged — saveWizardSettings still reads
+            replyType from messageMode. */}
+        <MessageGenerationRow
+          useAi={messageMode === 'ai'}
+          onChangeUseAi={next => onMessageMode(next ? 'ai' : 'template')}
+          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
+          onOpenTemplates={() => navigate('/templates?filter=auto-reply', { state: fromState })}
+        />
+        {mixedMessage.mixed && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 6 }}>
+            {mixedMessage.tooltip}
           </div>
-        </FieldRow>
+        )}
       </SectionCard>
 
-      {/* Follow-up plan — editable cadence.
-          Persists to followUpSettingsJson.followUpSteps as
-          [{ delay: '2 min', message: null }, ...]. The scheduler prefers
-          these user-configured delays over the seed template defaults
-          (src/follow-up-engine/follow-up-scheduler.service.ts
-           getUserConfiguredSteps). AI still writes each message; only the
-          timing is user-controlled here. */}
-      <SectionCard padding="20px 24px 24px">
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, marginBottom: 4, flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Follow-up plan
-            </div>
-            <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
-            {mixedPlan.mixed && <MixedBadge tooltip={mixedPlan.tooltip} />}
-          </div>
-          <button
-            type="button"
-            onClick={onPlanReset}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              background: 'transparent', border: 0, cursor: 'pointer',
-              fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-              color: 'var(--lb-accent)', padding: 0,
-            }}
-          >
-            <RotateCcw size={13} /> Reset to defaults
-          </button>
-        </div>
-        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginBottom: 18, lineHeight: 1.55 }}>
-          AI writes each step from the live conversation. You set the timing
-          between steps — {plan.length} steps total.
-        </div>
-
-        <div style={{
-          display: 'flex', alignItems: 'stretch', gap: 6, flexWrap: 'nowrap',
-          overflowX: 'auto', paddingBottom: 8,
-          background: mixedPlan.mixed ? '#fffbeb' : undefined,
-          borderLeft: mixedPlan.mixed ? '4px solid #f59e0b' : undefined,
-          paddingLeft: mixedPlan.mixed ? 12 : undefined,
-        }}>
-          {plan.map((step, i) => (
-            <div key={i} style={{ display: 'contents' }}>
-              <PlanStepEditor
-                n={i + 1}
-                step={step}
-                canRemove={plan.length > 1}
-                onChange={next => onPlanStepChange(i, next)}
-                onRemove={() => onPlanRemoveStep(i)}
-              />
-              {i < plan.length - 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)', paddingTop: 22 }}>
-                  <ChevronRight size={14} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
-            Each step fires the configured time after the previous step's send.
-          </div>
-          <button
-            type="button"
-            onClick={onPlanAddStep}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '7px 14px',
-              background: 'white', color: 'var(--lb-accent)',
-              border: '1px solid var(--lb-accent-line)', borderRadius: 999,
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-            }}
-          >
-            <Plus size={13} /> Add step
-          </button>
-        </div>
-      </SectionCard>
+      {/* Follow-up plan — spec 2h. Presentational card describing the
+          managed 11-step schedule. The real cadence is backend-driven,
+          so this card holds no editable state. The accent-tinted node 1
+          and outline-only nodes 2-5 + dashed node 11 illustrate the shape
+          of the schedule without exposing each step. */}
+      <FollowUpPlanCard />
 
       {/* Stacked rule cards */}
       <SectionCard padding="0">
@@ -851,88 +664,186 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   );
 }
 
-function PlanStepEditor({
-  n, step, canRemove, onChange, onRemove,
-}: {
+// ─── Follow-up plan presentational card (spec 2h) ─────────────────────
+//
+// Illustrates the managed 11-step schedule with five labelled nodes
+// (1·"1 hour"·First, 2·"4 hours"·Same day, 3·"1 day"·Next day, 4·"3
+// days"·This week, 5·"1 week"·Week out), a dashed connector to node 11
+// ("1 year"·Final), and a 3-cell stat strip below. No editable state —
+// the real cadence is backend-managed; users adjust pacing in
+// follow-up engine config, not here.
+
+type PlanNodeStyle = 'solid-accent' | 'outline-accent' | 'outline-gray' | 'outline-dashed';
+
+interface PlanNode {
   n: number;
-  step: PlanStepData;
-  canRemove: boolean;
-  onChange: (next: PlanStepData) => void;
-  onRemove: () => void;
-}) {
-  const [hover, setHover] = useState(false);
+  time: string;
+  sub: string;
+  style: PlanNodeStyle;
+}
+
+const PLAN_NODES: PlanNode[] = [
+  { n: 1,  time: '1 hour',  sub: 'First',     style: 'solid-accent' },
+  { n: 2,  time: '4 hours', sub: 'Same day',  style: 'outline-accent' },
+  { n: 3,  time: '1 day',   sub: 'Next day',  style: 'outline-gray' },
+  { n: 4,  time: '3 days',  sub: 'This week', style: 'outline-gray' },
+  { n: 5,  time: '1 week',  sub: 'Week out',  style: 'outline-gray' },
+  { n: 11, time: '1 year',  sub: 'Final',     style: 'outline-dashed' },
+];
+
+function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
+  const base = {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 11.5,
+    fontWeight: 700,
+    fontFamily: 'var(--lb-font-mono)',
+    flexShrink: 0,
+  } as const;
+  if (style === 'solid-accent') {
+    return <div style={{ ...base, background: 'var(--lb-accent)', color: '#fff' }}>{n}</div>;
+  }
+  if (style === 'outline-accent') {
+    return <div style={{ ...base, background: '#fff', color: 'var(--lb-accent)', border: '2px solid var(--lb-accent)' }}>{n}</div>;
+  }
+  if (style === 'outline-dashed') {
+    return <div style={{ ...base, background: '#fff', color: 'var(--lb-ink-5)', border: '2px dashed var(--lb-ink-7)' }}>{n}</div>;
+  }
+  // outline-gray
+  return <div style={{ ...base, background: '#fff', color: 'var(--lb-ink-3)', border: '2px solid var(--lb-ink-8)' }}>{n}</div>;
+}
+
+function FollowUpPlanCard() {
+  return (
+    <SectionCard padding="20px 24px 22px">
+      {/* Header — violet History tile + title + "Managed" mono pill + description */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+        <IconTile icon={History} tone="purple" size="lg" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Follow-up plan
+            </div>
+            <span
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 9px', borderRadius: 999,
+                background: '#ede9fe', color: '#6d28d9',
+                fontSize: 10, fontWeight: 700,
+                letterSpacing: 0.06, textTransform: 'uppercase',
+                fontFamily: 'var(--lb-font-mono)',
+              }}
+            >
+              <Sparkles size={10} /> Managed
+            </span>
+          </div>
+          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+            LeadBridge nudges unresponsive leads on an 11-step schedule
+            spanning up to a year — AI writes every step from the live
+            conversation.
+          </div>
+        </div>
+      </div>
+
+      {/* Cadence stepper */}
+      <div
+        style={{
+          background: '#f8fafc',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 12,
+          padding: '20px 18px',
+          overflowX: 'auto',
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, minWidth: 'fit-content' }}>
+          {PLAN_NODES.map((node, i) => {
+            const isLast = i === PLAN_NODES.length - 1;
+            const next = PLAN_NODES[i + 1];
+            // Dashed connector when the gap to the next node skips intermediate
+            // steps (5 -> 11), per spec.
+            const dashedConnector = next && (next.n - node.n) > 1;
+            return (
+              <div key={node.n} style={{ display: 'flex', alignItems: 'flex-start', flexShrink: 0 }}>
+                {/* Node + labels */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 90 }}>
+                  <PlanCircle n={node.n} style={node.style} />
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
+                    fontFamily: 'var(--lb-font-mono)',
+                    letterSpacing: '-0.01em',
+                  }}>
+                    {node.time}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)' }}>{node.sub}</div>
+                </div>
+                {/* Connector line */}
+                {!isLast && (
+                  <div
+                    style={{
+                      flex: '0 0 auto',
+                      width: 80,
+                      marginTop: 12,
+                      borderTop: dashedConnector
+                        ? '2px dashed var(--lb-ink-7)'
+                        : '2px solid var(--lb-ink-8)',
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Stat strip — 3 cells, bordered + divided */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 10,
+          overflow: 'hidden',
+          background: 'var(--lb-surface)',
+        }}
+      >
+        <StatCell value="11" label="steps total" />
+        <StatCell value="1 yr" label="max duration" divided />
+        <StatCell
+          value={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              AI <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
+            </span>
+          }
+          label="writes each step"
+          divided
+        />
+      </div>
+    </SectionCard>
+  );
+}
+
+function StatCell({ value, label, divided }: { value: ReactNode; label: string; divided?: boolean }) {
   return (
     <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
       style={{
-        position: 'relative',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-        minWidth: 96,
+        padding: '14px 16px',
+        borderLeft: divided ? '1px solid var(--lb-line)' : undefined,
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)' }}>
-        #{n}
-      </div>
       <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4,
-        width: 96, padding: 8,
-        background: 'white', border: '1px solid var(--lb-line)', borderRadius: 10,
+        fontSize: 20, fontWeight: 700, color: 'var(--lb-ink-1)',
+        letterSpacing: '-0.02em', fontFamily: 'var(--lb-font-mono)',
       }}>
-        <input
-          type="number"
-          min={1}
-          max={999}
-          value={step.val}
-          onChange={(e) => {
-            const v = Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1));
-            onChange({ ...step, val: v });
-          }}
-          style={{
-            width: '100%', textAlign: 'center',
-            fontFamily: 'inherit', fontSize: 18, fontWeight: 700,
-            color: 'var(--lb-ink-1)', letterSpacing: '-0.02em',
-            border: '1px solid var(--lb-line-soft)', borderRadius: 6,
-            padding: '4px 0', background: '#fafbfc',
-            outline: 'none',
-          }}
-        />
-        <select
-          value={step.unit}
-          onChange={(e) => onChange({ ...step, unit: e.target.value as PlanUnit })}
-          style={{
-            width: '100%',
-            fontFamily: 'inherit', fontSize: 11.5, fontWeight: 500,
-            color: 'var(--lb-ink-3)',
-            border: '1px solid var(--lb-line-soft)', borderRadius: 6,
-            padding: '3px 4px', background: 'white',
-            cursor: 'pointer', textAlign: 'center',
-            appearance: 'none',
-          }}
-        >
-          {PLAN_UNITS.map(u => (
-            <option key={u} value={u}>{unitLabel(u, step.val)}</option>
-          ))}
-        </select>
+        {value}
       </div>
-      {canRemove && hover && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Remove step ${n}`}
-          style={{
-            position: 'absolute', top: 12, right: -6,
-            width: 18, height: 18, padding: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'white', color: 'var(--lb-ink-5)',
-            border: '1px solid var(--lb-line)', borderRadius: 999,
-            cursor: 'pointer',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-          }}
-        >
-          <X size={11} />
-        </button>
-      )}
+      <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+        {label}
+      </div>
     </div>
   );
 }

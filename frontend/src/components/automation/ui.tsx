@@ -895,6 +895,7 @@ export function TimingRow({
   onEditHours,
   editHoursLabel = 'Edit Hours',
   mixedLabelBadge,
+  sublabel,
 }: {
   icon: LucideIcon;
   checked: boolean;
@@ -903,6 +904,7 @@ export function TimingRow({
   onEditHours: () => void;
   editHoursLabel?: string;
   mixedLabelBadge?: ReactNode;
+  sublabel?: ReactNode;
 }) {
   return (
     <FieldRow
@@ -915,6 +917,7 @@ export function TimingRow({
           </span>
         ) : 'Timing'
       }
+      sublabel={sublabel}
     >
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
