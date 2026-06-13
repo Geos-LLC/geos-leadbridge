@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion } from '../services/api';
 import { useAppStore } from '../store/appStore';
+import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
@@ -2795,6 +2796,17 @@ export function Messages() {
                         await loadMessagesForLead(selectedLead, true);
                       } catch (err: any) {
                         console.error('[AI Suggestion] send failed:', err);
+                        // Keep the draft banner visible so the operator can
+                        // retry — pendingAiSuggestion is only cleared on
+                        // success above. Surface the failure as a toast so
+                        // the spinner stopping doesn't look like a no-op.
+                        const detail = err?.response?.data?.message || err?.message || '';
+                        notify.error(
+                          'Failed to send AI draft',
+                          detail
+                            ? `Please try again. (${detail})`
+                            : 'Please try again.',
+                        );
                       } finally {
                         setAiSuggestionBusy(null);
                       }
@@ -2819,6 +2831,13 @@ export function Messages() {
                         });
                       } catch (err: any) {
                         console.error('[AI Suggestion] discard failed:', err);
+                        const detail = err?.response?.data?.message || err?.message || '';
+                        notify.error(
+                          'Failed to discard AI draft',
+                          detail
+                            ? `Please try again. (${detail})`
+                            : 'Please try again.',
+                        );
                       } finally {
                         setAiSuggestionBusy(null);
                       }

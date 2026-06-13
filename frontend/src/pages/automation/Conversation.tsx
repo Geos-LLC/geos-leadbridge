@@ -736,10 +736,10 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         iconTone="violet"
         title="AI Conversation"
         subtitle={aiOn
-          ? 'AI replies to customers automatically based on your Conversation Goal.'
+          ? 'AI replies to customers automatically based on your Conversation Goal. Applies to all connected accounts.'
           : canUseAi
-            ? 'Turn on to let AI handle customer conversations end-to-end.'
-            : 'Turn on to let AI handle customer conversations end-to-end.'}
+            ? 'Turn on to let AI handle customer conversations end-to-end. Applies to all connected accounts.'
+            : 'Turn on to let AI handle customer conversations end-to-end. Applies to all connected accounts.'}
         enabled={aiOn}
         onToggle={onAiToggle}
       />

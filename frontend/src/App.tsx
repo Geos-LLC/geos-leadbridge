@@ -31,7 +31,11 @@ const RuntimeDebug = lazy(() => import('./pages/RuntimeDebug'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const SettingsPage = lazy(() => import('./pages/settings'));
 const SettingsPageLegacy = lazy(() => import('./pages/SettingsPage'));
-const SettingsCommunication = lazy(() => import('./pages/SettingsCommunication').then(m => ({ default: m.SettingsCommunication })));
+// SettingsCommunication (legacy 1396-line page) is no longer mounted —
+// the /settings/communication route now redirects to /settings?tab=communication.
+// The file itself is kept on disk until Call Connect + Test Text + per-account
+// alert templates are ported into the modern Communication tab; see
+// chore/ui-cleanup-legacy-removal for the remaining follow-ups.
 const AutomationPage = lazy(() => import('./pages/automation').then(m => ({ default: m.AutomationPage })));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
@@ -187,7 +191,14 @@ function App() {
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings-classic" element={<SettingsPageLegacy />} />
-              <Route path="/settings/communication" element={<SettingsCommunication />} />
+              {/* Legacy /settings/communication route — superseded by the
+                  modern Settings tab shell. Redirect any deep-link or
+                  bookmarked URL to the canonical surface so users never
+                  land on the legacy 1396-line page. The SettingsCommunication
+                  file is kept until Call Connect / Test Text / per-account
+                  alert templates are ported into the modern Communication
+                  tab; see chore/ui-cleanup-legacy-removal. */}
+              <Route path="/settings/communication" element={<Navigate to="/settings?tab=communication" replace />} />
               <Route path="/invite/accept" element={<AcceptInvite />} />
               <Route path="/billing" element={<Navigate to="/settings" />} />
               <Route path="/admin" element={<AdminDashboard />} />

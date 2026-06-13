@@ -41,11 +41,12 @@ export function SettingsAccounts() {
   const accounts = useAppStore(s => s.savedAccounts);
   const [modal, setModal] = useState<{ open: boolean; reconnect?: SavedAccount | null }>({ open: false });
 
-  // "Configure" jumps to the legacy Services screen which still owns per-account
-  // settings UI today; remembered last-account is read from localStorage there.
+  // "Configure" jumps to the modern Automation surface (First Reply tab).
+  // The last-account id is persisted so the destination page can hydrate
+  // its account tab to the row the user clicked.
   const goConfigure = (a: SavedAccount) => {
     localStorage.setItem('lb_last_account_id', a.id);
-    navigate('/automation-classic');
+    navigate('/automation/respond');
   };
 
   // ── Import & Sync state (ported from legacy SettingsPage) ─────────────
