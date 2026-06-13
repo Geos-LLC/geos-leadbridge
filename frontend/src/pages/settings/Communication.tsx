@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail, UserCheck,
+  Phone, PhoneCall, MessageSquare, Bell, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle,
 } from 'lucide-react';
 import {
-  SettingCard, FieldRow, Checkbox, ActionLink,
+  SettingCard, FieldRow, ActionLink,
 } from '../../components/automation/ui';
-import { usersApi, templatesApi, thumbtackApi, notificationsApi, followUpApi, type TenantPhoneNumber } from '../../services/api';
-import type { MessageTemplate, NotificationRule, SavedAccount } from '../../types';
+import { usersApi, thumbtackApi, notificationsApi, type TenantPhoneNumber } from '../../services/api';
+import type { NotificationRule, SavedAccount } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
 import { LeadBridgeNumberManager } from '../../components/LeadBridgeNumberManager';
@@ -23,8 +23,6 @@ function formatPhone(e164: string | null): string {
 
 export function SettingsCommunication() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const fromState = { from: location.pathname + location.search, fromLabel: 'Settings · Communication' };
   const user = useAuthStore(s => s.user) as any;
   const authToken = useAuthStore(s => s.token);
   const setAuth = useAuthStore(s => s.setAuth);
@@ -34,10 +32,6 @@ export function SettingsCommunication() {
   const [businessPhoneValue, setBusinessPhoneValue] = useState('');
   const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
   const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
-  const [twoWay, setTwoWay] = useState(true);
-  const [routeReplies, setRouteReplies] = useState(true);
-  const [honorStop, setHonorStop] = useState(true);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [loadingPerBusiness, setLoadingPerBusiness] = useState(true);
@@ -46,25 +40,23 @@ export function SettingsCommunication() {
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
-  // Business Alerts state — cascades across every connected account.
-  // We keep per-account snapshots so toggles can derive an aggregate
-  // (all-on / all-off / mixed) without an extra fetch.
+  // Team SMS Notifications state — a single master switch that cascades the
+  // two underlying owner-side NotificationRule rows (new_lead + customer_reply)
+  // across every connected account. We keep per-account snapshots so the
+  // master can derive an aggregate (all-on / all-off / mixed) without refetch.
   const [newLeadByAccount, setNewLeadByAccount] = useState<Record<string, NotificationRule | null>>({});
   const [customerReplyByAccount, setCustomerReplyByAccount] = useState<Record<string, NotificationRule | null>>({});
-  const [aiHandoffByAccount, setAiHandoffByAccount] = useState<Record<string, boolean>>({});
   const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
-  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | 'ai_handoff' | null>(null);
+  const [savingTeamSms, setSavingTeamSms] = useState<boolean>(false);
 
   useEffect(() => {
     let alive = true;
     Promise.all([
       usersApi.getMyPhoneNumber().catch(() => ({ phoneNumber: null as string | null, allocationId: null, hasPhoneNumber: false })),
-      templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[], count: 0 })),
       thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
       notificationsApi.listTenantPhones().catch(() => ({ success: false, data: [] as TenantPhoneNumber[] })),
-    ]).then(([_phoneRes, tplRes, acctRes, tpnRes]) => {
+    ]).then(([_phoneRes, acctRes, tpnRes]) => {
       if (!alive) return;
-      setTemplates(tplRes.templates || []);
       setAccounts(acctRes.accounts || []);
       setTenantPhones((tpnRes.data || []).filter((p: TenantPhoneNumber) => p.status === 'ACTIVE'));
     }).finally(() => {
@@ -75,36 +67,28 @@ export function SettingsCommunication() {
     return () => { alive = false; };
   }, []);
 
-  // Load the Business Alerts state across EVERY account whenever the
-  // account list arrives. Cascade design — there is no per-account
-  // selector here; the toggles act on all accounts in parallel.
+  // Load the underlying NotificationRule rows across EVERY account whenever
+  // the account list arrives. The Team SMS master switch is derived from
+  // these — no per-account selector lives in this UI.
   useEffect(() => {
     if (accounts.length === 0) return;
     let alive = true;
     setLoadingAlerts(true);
     Promise.all(accounts.map(a =>
-      Promise.all([
-        notificationsApi.getRules(a.id).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
-        followUpApi.getSettings(a.id).catch(() => ({ success: false, settings: undefined })),
-      ]).then(([rulesRes, fuRes]) => ({
-        accountId: a.id,
-        rules: (rulesRes.rules || []) as NotificationRule[],
-        aiOn: !!((fuRes as any)?.settings?.aiConversationEnabled),
-      })),
+      notificationsApi.getRules(a.id)
+        .catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] }))
+        .then(rulesRes => ({ accountId: a.id, rules: (rulesRes.rules || []) as NotificationRule[] })),
     )).then(results => {
       if (!alive) return;
       const newLeadMap: Record<string, NotificationRule | null> = {};
       const replyMap: Record<string, NotificationRule | null> = {};
-      const aiMap: Record<string, boolean> = {};
-      for (const { accountId, rules, aiOn } of results) {
+      for (const { accountId, rules } of results) {
         // Owner-side alerts only — exclude sendToCustomer rules (auto-reply lives on Automation).
         newLeadMap[accountId] = rules.find(r => r.triggerType === 'new_lead' && !r.sendToCustomer) || null;
         replyMap[accountId]   = rules.find(r => r.triggerType === 'customer_reply' && !r.sendToCustomer) || null;
-        aiMap[accountId]      = aiOn;
       }
       setNewLeadByAccount(newLeadMap);
       setCustomerReplyByAccount(replyMap);
-      setAiHandoffByAccount(aiMap);
     }).finally(() => {
       if (alive) setLoadingAlerts(false);
     });
@@ -139,106 +123,104 @@ export function SettingsCommunication() {
     return { allOn: total > 0 && on === total, allOff: on === 0, mixed: on > 0 && on < total, on, total };
   }
 
-  async function cascadeRule(
-    kind: 'new_lead' | 'customer_reply',
-    on: boolean,
-  ) {
-    setSavingRuleKind(kind);
-    const ruleByAccount = kind === 'new_lead' ? newLeadByAccount : customerReplyByAccount;
-    const setter = kind === 'new_lead' ? setNewLeadByAccount : setCustomerReplyByAccount;
-    const defaults = kind === 'new_lead'
-      ? {
-          name: 'Lead Alert - SMS',
-          triggerType: 'new_lead' as const,
-          template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
-        }
-      : {
-          name: 'Customer Reply Alert',
-          triggerType: 'customer_reply' as const,
-          replyTriggerMode: 'every_reply' as const,
-          template: 'Lead {{lead.name}} replied: "{{message}}"',
-        };
+  // Cascade the master Team SMS switch across both owner-side NotificationRule
+  // kinds (new_lead + customer_reply) for every connected account. The two rule
+  // rows are kept in the DB so their templates / `toPhone` / per-account
+  // history survive a toggle off→on round-trip; flipping the switch only
+  // mutates each row's `enabled` field.
+  async function cascadeTeamSms(on: boolean) {
+    setSavingTeamSms(true);
+    const kinds: Array<'new_lead' | 'customer_reply'> = ['new_lead', 'customer_reply'];
+    const defaultsFor = (kind: 'new_lead' | 'customer_reply') =>
+      kind === 'new_lead'
+        ? {
+            name: 'Lead Alert - SMS',
+            triggerType: 'new_lead' as const,
+            template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+          }
+        : {
+            name: 'Customer Reply Alert',
+            triggerType: 'customer_reply' as const,
+            replyTriggerMode: 'every_reply' as const,
+            template: 'Lead {{lead.name}} replied: "{{message}}"',
+          };
+
+    type CascadeResult = {
+      accountId: string;
+      kind: 'new_lead' | 'customer_reply';
+      rule: NotificationRule | null;
+      error: string | null;
+    };
 
     const missingPhone: string[] = [];
-    const results = await Promise.all(accounts.map(async a => {
-      const existing = ruleByAccount[a.id];
-      try {
-        if (existing) {
-          // Idempotent — re-issuing the same enabled value is fine.
-          const res = await notificationsApi.updateRule(a.id, existing.id, { enabled: on });
-          return { accountId: a.id, rule: res.rule, error: null as string | null };
-        }
-        if (!on) {
-          // No rule and target is OFF: nothing to do.
-          return { accountId: a.id, rule: null, error: null };
-        }
-        const toPhone = resolveAlertPhone(a.id);
-        if (!toPhone) {
-          missingPhone.push(a.businessName);
-          return { accountId: a.id, rule: null, error: 'no_phone' };
-        }
-        const res = await notificationsApi.createRule(a.id, {
-          ...defaults,
-          toPhone,
-          enabled: true,
-        });
-        return { accountId: a.id, rule: res.rule, error: null };
-      } catch (err: any) {
-        return { accountId: a.id, rule: existing || null, error: err?.response?.data?.message || err?.message || 'failed' };
+    const ops: Array<Promise<CascadeResult>> = [];
+    for (const a of accounts) {
+      for (const kind of kinds) {
+        const existing = (kind === 'new_lead' ? newLeadByAccount : customerReplyByAccount)[a.id];
+        ops.push((async (): Promise<CascadeResult> => {
+          try {
+            if (existing) {
+              // Idempotent — re-issuing the same enabled value is fine.
+              const res = await notificationsApi.updateRule(a.id, existing.id, { enabled: on });
+              return { accountId: a.id, kind, rule: res.rule, error: null };
+            }
+            if (!on) {
+              // No row to flip off — nothing to do.
+              return { accountId: a.id, kind, rule: null, error: null };
+            }
+            const toPhone = resolveAlertPhone(a.id);
+            if (!toPhone) {
+              missingPhone.push(a.businessName);
+              return { accountId: a.id, kind, rule: null, error: 'no_phone' };
+            }
+            const res = await notificationsApi.createRule(a.id, {
+              ...defaultsFor(kind),
+              toPhone,
+              enabled: true,
+            });
+            return { accountId: a.id, kind, rule: res.rule, error: null };
+          } catch (err: any) {
+            return {
+              accountId: a.id,
+              kind,
+              rule: existing || null,
+              error: err?.response?.data?.message || err?.message || 'failed',
+            };
+          }
+        })());
       }
-    }));
+    }
+    const results = await Promise.all(ops);
 
-    setter(prev => {
+    setNewLeadByAccount(prev => {
       const next = { ...prev };
-      for (const r of results) next[r.accountId] = r.rule;
+      for (const r of results) if (r.kind === 'new_lead') next[r.accountId] = r.rule;
       return next;
     });
-    setSavingRuleKind(null);
+    setCustomerReplyByAccount(prev => {
+      const next = { ...prev };
+      for (const r of results) if (r.kind === 'customer_reply') next[r.accountId] = r.rule;
+      return next;
+    });
+    setSavingTeamSms(false);
 
+    const uniqueMissing = Array.from(new Set(missingPhone));
     const failed = results.filter(r => r.error && r.error !== 'no_phone');
-    if (missingPhone.length > 0) {
+    if (uniqueMissing.length > 0) {
       notify.error(
         'Missing alert phone',
-        `Set an alert phone for ${missingPhone.length} ${missingPhone.length === 1 ? 'business' : 'businesses'} (${missingPhone.slice(0, 3).join(', ')}${missingPhone.length > 3 ? '…' : ''}).`,
+        `Set an alert phone for ${uniqueMissing.length} ${uniqueMissing.length === 1 ? 'business' : 'businesses'} (${uniqueMissing.slice(0, 3).join(', ')}${uniqueMissing.length > 3 ? '…' : ''}).`,
       );
     } else if (failed.length > 0) {
-      notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed to update.`);
+      notify.error('Partial failure', `${failed.length} of ${results.length} updates failed.`);
     } else {
-      notify.success('Saved', on ? `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert on for ${accounts.length} accounts` : `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert off`);
+      notify.success(
+        'Saved',
+        on
+          ? `Team SMS notifications on for ${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}`
+          : 'Team SMS notifications off',
+      );
     }
-  }
-
-  async function cascadeAiHandoff(on: boolean) {
-    setSavingRuleKind('ai_handoff');
-    const results = await Promise.all(accounts.map(async a => {
-      try {
-        await followUpApi.saveSettings(a.id, { aiConversationEnabled: on } as any);
-        return { accountId: a.id, ok: true };
-      } catch (err: any) {
-        return { accountId: a.id, ok: false };
-      }
-    }));
-    setAiHandoffByAccount(prev => {
-      const next = { ...prev };
-      for (const r of results) if (r.ok) next[r.accountId] = on;
-      return next;
-    });
-    setSavingRuleKind(null);
-    const failed = results.filter(r => !r.ok);
-    if (failed.length === 0) {
-      notify.success('Saved', on ? `AI handoff alerts on for ${accounts.length} accounts` : 'AI handoff alerts off');
-    } else if (failed.length === accounts.length) {
-      notify.error('Error', 'Failed to update AI Conversation setting');
-    } else {
-      notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed.`);
-    }
-  }
-
-  function goToTemplate(name: string) {
-    const params = new URLSearchParams({ filter: 'alerts' });
-    const t = templates.find(t => t.name.toLowerCase().includes(name.toLowerCase()));
-    if (t) params.set('highlight', t.id);
-    navigate(`/templates?${params.toString()}`, { state: fromState });
   }
 
   async function reloadTenantPhones() {
@@ -476,90 +458,45 @@ export function SettingsCommunication() {
         )}
       </SettingCard>
 
-      <SettingCard
-        icon={MessageSquare}
-        iconTone="green"
-        title="SMS"
-        subtitle="How Leadbridge sends and receives text messages."
-        enabled={twoWay}
-        onToggle={setTwoWay}
-        contentPad="8px 24px 24px"
-      >
-        <FieldRow icon={Reply} iconTone="green" label="Two-way SMS" sublabel="Customer replies route into Lead Activity.">
-          <Checkbox
-            checked={routeReplies}
-            onChange={setRouteReplies}
-            label="Route customer SMS replies into the lead's thread"
-            sublabel="Replies appear in Lead Activity and trigger automation."
-          />
-        </FieldRow>
-        <FieldRow icon={Shield} iconTone="orange" label="STOP / HELP" sublabel="Compliance keywords required for SMS." noBorder>
-          <Checkbox
-            checked={honorStop}
-            onChange={setHonorStop}
-            label="Automatically honor STOP, UNSUBSCRIBE and HELP"
-            sublabel="Required by carriers. Customers who reply STOP won't receive further texts."
-          />
-        </FieldRow>
-      </SettingCard>
-
-      <LeadBridgeNumberLock feature="SMS business alerts" />
+      <LeadBridgeNumberLock feature="team SMS notifications" />
       <SettingCard
         icon={Bell}
         iconTone="orange"
-        title="Business Alerts"
+        title="Team SMS Notifications"
         subtitle={accounts.length > 0
-          ? `SMS sent to your team about lead activity. Applies to all ${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}.`
-          : 'SMS sent to your team about lead activity.'}
+          ? `Send SMS alerts to your team for important lead activity. Applies to all ${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}.`
+          : 'Send SMS alerts to your team for important lead activity.'}
         contentPad="8px 24px 24px"
       >
         {accounts.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', padding: '12px 0' }}>
-            Connect a source first to configure alerts.
+            Connect a source first to configure notifications.
           </div>
         ) : loadingAlerts ? (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--lb-ink-5)', fontSize: 13, padding: '12px 0' }}>
             <Loader2 size={14} className="animate-spin" /> Loading…
           </div>
         ) : (() => {
-          const newLeadAgg = aggregate(accounts.map(a => !!newLeadByAccount[a.id]?.enabled));
-          const replyAgg = aggregate(accounts.map(a => !!customerReplyByAccount[a.id]?.enabled));
-          const aiAgg = aggregate(accounts.map(a => !!aiHandoffByAccount[a.id]));
+          // Master state spans both underlying rule kinds × all accounts —
+          // "all on" iff every (account, kind) row is enabled; "all off" iff
+          // none are; mixed otherwise.
+          const states: boolean[] = [];
+          for (const a of accounts) {
+            states.push(!!newLeadByAccount[a.id]?.enabled);
+            states.push(!!customerReplyByAccount[a.id]?.enabled);
+          }
+          const agg = aggregate(states);
           return (
-            <>
-              <BusinessAlertRow
-                icon={Mail}
-                iconTone="blue"
-                label="New lead alert"
-                sublabel="When a new lead arrives from any source."
-                agg={newLeadAgg}
-                saving={savingRuleKind === 'new_lead'}
-                onToggle={on => cascadeRule('new_lead', on)}
-                onEditTemplate={() => goToTemplate('Lead Alert')}
-              />
-              <BusinessAlertRow
-                icon={MessageSquare}
-                iconTone="green"
-                label="Customer reply alert"
-                sublabel="When a customer replies to your LeadBridge number."
-                agg={replyAgg}
-                saving={savingRuleKind === 'customer_reply'}
-                onToggle={on => cascadeRule('customer_reply', on)}
-                onEditTemplate={() => goToTemplate('Customer Reply')}
-              />
-              <BusinessAlertRow
-                icon={UserCheck}
-                iconTone="orange"
-                label="AI handoff alert"
-                sublabel="When AI flags the conversation for human takeover. Also enables AI auto-replies in Automation."
-                agg={aiAgg}
-                saving={savingRuleKind === 'ai_handoff'}
-                onToggle={cascadeAiHandoff}
-                onEditTemplate={() => goToTemplate('Ready to Book')}
-                onConfigure={() => navigate('/automation')}
-                noBorder
-              />
-            </>
+            <BusinessAlertRow
+              icon={MessageSquare}
+              iconTone="blue"
+              label="Send SMS notifications to my team"
+              sublabel="When enabled, LeadBridge texts your team about new leads and customer replies. Disabling this does not affect customer-facing SMS, AI replies, STOP compliance, or inbound routing."
+              agg={agg}
+              saving={savingTeamSms}
+              onToggle={cascadeTeamSms}
+              noBorder
+            />
           );
         })()}
       </SettingCard>
@@ -585,18 +522,15 @@ function readAdditionalAssociatePhones(
 }
 
 function BusinessAlertRow({
-  icon: Icon, iconTone, label, sublabel, agg, saving, onToggle,
-  onEditTemplate, onConfigure, noBorder,
+  icon: Icon, iconTone, label, sublabel, agg, saving, onToggle, noBorder,
 }: {
   icon: typeof Bell;
   iconTone: 'blue' | 'green' | 'orange';
   label: string;
   sublabel: string;
-  agg: { allOn: boolean; allOff: boolean; mixed: boolean; on: number; total: number };
+  agg: { allOn: boolean; mixed: boolean; on: number; total: number };
   saving?: boolean;
   onToggle: (v: boolean) => void;
-  onEditTemplate?: () => void;
-  onConfigure?: () => void;
   noBorder?: boolean;
 }) {
   const iconBg = iconTone === 'blue' ? '#dbeafe' : iconTone === 'green' ? '#d1fae5' : '#fed7aa';
@@ -622,7 +556,7 @@ function BusinessAlertRow({
               padding: '2px 8px', borderRadius: 999,
               background: '#fef3c7', color: '#b45309',
               fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
-            }} title={`${agg.on} of ${agg.total} accounts have this alert on`}>
+            }} title={`${agg.on} of ${agg.total} rules currently on`}>
               Mixed · {agg.on}/{agg.total} on
             </span>
           )}
@@ -630,37 +564,6 @@ function BusinessAlertRow({
         <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>{sublabel}</div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        {onEditTemplate && (
-          <button
-            type="button"
-            onClick={onEditTemplate}
-            style={{
-              padding: '5px 10px',
-              background: 'white', color: 'var(--lb-ink-2)',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 11.5, fontFamily: 'inherit', fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Edit template
-          </button>
-        )}
-        {onConfigure && (
-          <button
-            type="button"
-            onClick={onConfigure}
-            style={{
-              padding: '5px 10px',
-              background: 'white', color: 'var(--lb-ink-2)',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 11.5, fontFamily: 'inherit', fontWeight: 500,
-              cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          >
-            Configure
-          </button>
-        )}
         <BusinessAlertToggle agg={agg} saving={!!saving} onToggle={onToggle} />
       </div>
     </div>
