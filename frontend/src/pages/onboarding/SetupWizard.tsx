@@ -4,7 +4,7 @@ import { authApi, onboardingApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
-import type { OnboardingProfile, WizardChecklist, WizardStep, WizardStatus } from '../../types';
+import type { OnboardingConfigSummary, OnboardingProfile, WizardChecklist, WizardStep, WizardStatus } from '../../types';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import { deriveDisplayChecklist } from './SetupProgressCard';
 import WizardShell from './WizardShell';
@@ -35,6 +35,11 @@ export default function SetupWizard() {
   const [profile, setProfile] = useState<OnboardingProfile | null>(user?.onboardingProfile ?? null);
   const [loading, setLoading] = useState(!profile);
   const [saving, setSaving] = useState(false);
+  // Backend rollup for the four stored-only steps. Refreshed alongside
+  // the profile + after every advance so the sidebar tick reflects
+  // whatever the user just saved (e.g. AI Knowledge step saves FAQ via
+  // AccountFaqForm — the next paint should show the green tick).
+  const [configSummary, setConfigSummary] = useState<OnboardingConfigSummary | null>(null);
 
   // Pick the right starting step: prefer the user's last-known
   // currentStep, but skip legacy 'welcome' (it's no longer in the
@@ -54,13 +59,18 @@ export default function SetupWizard() {
   // refresh here is the cheapest way to backfill them.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([onboardingApi.getProfile(), authApi.getProfile().catch(() => null)])
-      .then(([profileRes, freshUser]) => {
+    Promise.all([
+      onboardingApi.getProfile(),
+      authApi.getProfile().catch(() => null),
+      onboardingApi.getConfigSummary().catch(() => null),
+    ])
+      .then(([profileRes, freshUser, summaryRes]) => {
         if (cancelled) return;
         if (profileRes?.profile) {
           setProfile(profileRes.profile);
           setCurrentStep(resolveInitialStep(profileRes.profile));
         }
+        if (summaryRes?.summary) setConfigSummary(summaryRes.summary);
         // Sync the persisted user object so subsequent steps + the
         // Overview progress card both read the same fresh state.
         if (user) {
@@ -88,19 +98,36 @@ export default function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derive checklist for display: when the data behind a step is
-  // gone (no accounts → AI/Pricing/Automation/AI Rules, no website →
-  // Business), drop the stored `done` so the sidebar tick + Overview
-  // card both reflect live state instead of a stamp from earlier.
+  // Derive checklist for display: data wins over the stored stamp.
+  // When the data behind a step is gone (no accounts → AI / Pricing /
+  // Automation / AI Rules, no website → Business, no FAQ → AI, etc.)
+  // we drop the stored `done` so the sidebar tick + Overview card
+  // both reflect live state instead of a stamp from earlier. Inverse
+  // is also true — configuring something from Settings flips the tick
+  // green without the user having to re-walk the wizard.
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const hasWebsite = !!(user?.website && user.website.trim().length > 0);
   const checklist: WizardChecklist = useMemo(
     () => deriveDisplayChecklist(profile?.wizardChecklistStatus ?? {}, {
       accountCount: savedAccounts.length,
       hasWebsite,
+      configSummary,
     }),
-    [profile?.wizardChecklistStatus, savedAccounts.length, hasWebsite],
+    [profile?.wizardChecklistStatus, savedAccounts.length, hasWebsite, configSummary],
   );
+
+  // Pull a fresh config summary. Used after every advance so the
+  // sidebar tick updates as the user saves through each step (e.g.
+  // AI Knowledge writes faqJson via AccountFaqForm and we want that
+  // green tick to land before the user even reaches Pricing).
+  async function refreshConfigSummary() {
+    try {
+      const res = await onboardingApi.getConfigSummary();
+      if (res?.summary) setConfigSummary(res.summary);
+    } catch {
+      /* non-fatal — sidebar will catch up on the next navigation. */
+    }
+  }
 
   // Advance helper — sends a patch with the step we just finished + the
   // next currentStep, then updates local state from the response.
@@ -123,6 +150,11 @@ export default function SetupWizard() {
         const token = localStorage.getItem('token') || '';
         setAuth({ ...user, onboardingProfile: fresh }, token);
       }
+      // Each step writes user-visible data (faq / pricing / follow-up
+      // settings). Re-pull the rollup so the sidebar tick reflects what
+      // just landed — without this, a user who saves the Pricing step
+      // wouldn't see Pricing turn green until the next page mount.
+      void refreshConfigSummary();
     } catch (err: any) {
       notify.error('Could not save', err.response?.data?.message || 'Please try again.');
     } finally {

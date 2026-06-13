@@ -219,4 +219,125 @@ export class OnboardingService {
     }
     return profile;
   }
+
+  // --- Wizard ↔ Settings sync ------------------------------------------
+  // Lightweight config summary used by the wizard sidebar + Overview
+  // progress card to derive the green tick on the four "stored-only"
+  // steps (ai / pricing / automation / ai_rules) from actual data
+  // instead of trusting the user clicked Continue inside the wizard.
+  //
+  // Existing users who configured FAQ / pricing / automation via Settings
+  // should see the wizard tick green automatically; users who deleted
+  // that data should see the tick disappear. Same principle the existing
+  // connect / business derivations follow — data is the source of truth.
+  //
+  // "Configured" is read off the user's first SavedAccount (createdAt asc)
+  // to match the wizard step components which all operate on
+  // savedAccounts[0]. We deliberately only inspect the primary account
+  // because the wizard's "save to all" cascade means once it's set there
+  // it's set everywhere, and we want a single, stable signal.
+  async getConfigSummary(userId: string): Promise<{
+    faqConfigured: boolean;
+    pricingConfigured: boolean;
+    automationConfigured: boolean;
+    aiRulesConfigured: boolean;
+  }> {
+    const primary = await this.prisma.savedAccount.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        faqJson: true,
+        servicePricingJson: true,
+        followUpSettingsJson: true,
+      },
+    });
+
+    if (!primary) {
+      return {
+        faqConfigured: false,
+        pricingConfigured: false,
+        automationConfigured: false,
+        aiRulesConfigured: false,
+      };
+    }
+
+    return {
+      faqConfigured: isFaqConfigured(primary.faqJson),
+      pricingConfigured: isPricingConfigured(primary.servicePricingJson),
+      automationConfigured: isAutomationConfigured(primary.followUpSettingsJson),
+      aiRulesConfigured: isAiRulesConfigured(primary.followUpSettingsJson),
+    };
+  }
+}
+
+// ─── Config "configured?" predicates ──────────────────────────────────
+// These mirror the shape each wizard step writes. They MUST stay aligned
+// with the step components:
+//   ai         → AccountFaqForm  (frontend/src/components/AccountFaqForm.tsx)
+//   pricing    → PricingSetupStep / ServicePricingForm
+//   automation → AutomationLevelStep → followUpApi.saveWizardSettings
+//   ai_rules   → AIRulesStep → followUpApi.saveWizardSettings
+//
+// Each predicate parses the Text JSON column and returns true when the
+// payload looks like a user actually configured something — not just an
+// empty `{}` placeholder.
+
+function safeParse(json: string | null | undefined): any {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+// FAQ is configured when at least one meaningful field has been set away
+// from its default. AccountFaqForm seeds every value field with 'unset'
+// so a stored object with everything still 'unset' should NOT count.
+function isFaqConfigured(json: string | null | undefined): boolean {
+  const f = safeParse(json);
+  if (!f || typeof f !== 'object') return false;
+  const valueKeys = [
+    'insuredAndBonded',
+    'bringsSupplies',
+    'petPolicy',
+    'customerMustBeHome',
+    'sameCleanerForRecurring',
+  ];
+  for (const k of valueKeys) {
+    const v = f[k]?.value;
+    if (typeof v === 'string' && v && v !== 'unset') return true;
+  }
+  if (Array.isArray(f.paymentMethods) && f.paymentMethods.length > 0) return true;
+  if (typeof f.standardScope === 'string' && f.standardScope.trim()) return true;
+  if (typeof f.deepScope === 'string' && f.deepScope.trim()) return true;
+  if (Array.isArray(f.customQA) && f.customQA.some((q: any) => (q?.question || q?.answer || '').toString().trim())) return true;
+  return false;
+}
+
+// Pricing is configured when the table has at least one row. The wizard
+// "Use recommended" path drops in a ~20-row default; any non-empty
+// priceTable means the user has something usable.
+function isPricingConfigured(json: string | null | undefined): boolean {
+  const p = safeParse(json);
+  if (!p || typeof p !== 'object') return false;
+  return Array.isArray(p.priceTable) && p.priceTable.length > 0;
+}
+
+// Automation is configured when the follow-up mode is set. Wizard
+// bundles (basic / recommended / advanced) all write a `mode` value into
+// followUpSettingsJson, so its presence is a reliable "user picked
+// something" signal.
+function isAutomationConfigured(json: string | null | undefined): boolean {
+  const s = safeParse(json);
+  if (!s || typeof s !== 'object') return false;
+  return typeof s.mode === 'string' && s.mode.length > 0;
+}
+
+// AI Rules step writes followUpStrategy (auto / price / qualify / phone)
+// into followUpSettingsJson. Presence = user picked a conversation goal.
+function isAiRulesConfigured(json: string | null | undefined): boolean {
+  const s = safeParse(json);
+  if (!s || typeof s !== 'object') return false;
+  return typeof s.followUpStrategy === 'string' && s.followUpStrategy.length > 0;
 }

@@ -137,3 +137,131 @@ describe('OnboardingService.patchWizard', () => {
     expect(after.wizardSkippedSteps).toEqual(['business']);
   });
 });
+
+// ─── Config summary (Wizard ↔ Settings sync) ─────────────────────────
+// The summary endpoint backs the data-driven sidebar tick for the four
+// stored-only wizard steps. These tests pin the predicates so a
+// schema-shape drift on AccountFaqForm / ServicePricingForm /
+// followUpSettings doesn't silently break the green tick.
+
+function buildSummaryPrisma(account: any | null) {
+  return {
+    savedAccount: {
+      findFirst: jest.fn().mockResolvedValue(account),
+    },
+  } as any;
+}
+
+describe('OnboardingService.getConfigSummary', () => {
+  it('returns all-false when the user has no SavedAccount', async () => {
+    const svc = service(buildSummaryPrisma(null));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary).toEqual({
+      faqConfigured: false,
+      pricingConfigured: false,
+      automationConfigured: false,
+      aiRulesConfigured: false,
+    });
+  });
+
+  it('returns all-false when the primary account has empty JSON columns', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: null,
+      servicePricingJson: null,
+      followUpSettingsJson: null,
+    }));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary).toEqual({
+      faqConfigured: false,
+      pricingConfigured: false,
+      automationConfigured: false,
+      aiRulesConfigured: false,
+    });
+  });
+
+  it('treats an FAQ where every value is the default "unset" as NOT configured', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: JSON.stringify({
+        insuredAndBonded: { value: 'unset' },
+        bringsSupplies: { value: 'unset' },
+        paymentMethods: [],
+        customQA: [],
+      }),
+      servicePricingJson: null,
+      followUpSettingsJson: null,
+    }));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary.faqConfigured).toBe(false);
+  });
+
+  it('marks FAQ configured when at least one value is set away from "unset"', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: JSON.stringify({ insuredAndBonded: { value: 'yes' } }),
+      servicePricingJson: null,
+      followUpSettingsJson: null,
+    }));
+    expect((await svc.getConfigSummary('u-1')).faqConfigured).toBe(true);
+  });
+
+  it('marks FAQ configured when only paymentMethods or scope strings are filled', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: JSON.stringify({ paymentMethods: ['cash'] }),
+      servicePricingJson: null,
+      followUpSettingsJson: null,
+    }));
+    expect((await svc.getConfigSummary('u-1')).faqConfigured).toBe(true);
+  });
+
+  it('marks Pricing configured only when priceTable has at least one row', async () => {
+    const empty = service(buildSummaryPrisma({
+      faqJson: null,
+      servicePricingJson: JSON.stringify({ priceTable: [] }),
+      followUpSettingsJson: null,
+    }));
+    expect((await empty.getConfigSummary('u-1')).pricingConfigured).toBe(false);
+
+    const filled = service(buildSummaryPrisma({
+      faqJson: null,
+      servicePricingJson: JSON.stringify({ priceTable: [{ bed: 1, bath: 1, regular: 100 }] }),
+      followUpSettingsJson: null,
+    }));
+    expect((await filled.getConfigSummary('u-1')).pricingConfigured).toBe(true);
+  });
+
+  it('marks Automation configured when followUpSettingsJson.mode is present', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: null,
+      servicePricingJson: null,
+      followUpSettingsJson: JSON.stringify({ mode: 'auto_send' }),
+    }));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary.automationConfigured).toBe(true);
+    // followUpStrategy is the AI Rules signal — absent here.
+    expect(summary.aiRulesConfigured).toBe(false);
+  });
+
+  it('marks AI Rules configured when followUpSettingsJson.followUpStrategy is present', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: null,
+      servicePricingJson: null,
+      followUpSettingsJson: JSON.stringify({ followUpStrategy: 'qualify' }),
+    }));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary.aiRulesConfigured).toBe(true);
+  });
+
+  it('tolerates malformed JSON without throwing', async () => {
+    const svc = service(buildSummaryPrisma({
+      faqJson: '{not json',
+      servicePricingJson: '[also broken',
+      followUpSettingsJson: 'nope',
+    }));
+    const summary = await svc.getConfigSummary('u-1');
+    expect(summary).toEqual({
+      faqConfigured: false,
+      pricingConfigured: false,
+      automationConfigured: false,
+      aiRulesConfigured: false,
+    });
+  });
+});

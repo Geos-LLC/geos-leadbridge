@@ -2432,6 +2432,17 @@ export const onboardingApi = {
     const { data } = await api.patch('/v1/onboarding/wizard', input);
     return data;
   },
+  // Wizard ↔ Settings sync — boolean rollup of "is the data behind this
+  // step actually configured?" for the four stored-only steps. Cheap
+  // (single SavedAccount read on the backend, four booleans on the wire)
+  // and used to drive the green tick on the sidebar + Overview card.
+  getConfigSummary: async (): Promise<{
+    success: boolean;
+    summary: import('../types').OnboardingConfigSummary;
+  }> => {
+    const { data } = await api.get('/v1/onboarding/config-summary');
+    return data;
+  },
 };
 
 // ─── ServiceFlow Connection (PR-C3) ──────────────────────────────────

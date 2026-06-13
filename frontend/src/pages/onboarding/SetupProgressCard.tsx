@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { authApi, onboardingApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
-import type { OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
+import type { OnboardingConfigSummary, OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
 import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
 
 // Steps that go stale when their underlying data disappears. These
@@ -21,32 +21,42 @@ export interface DisplayChecklistContext {
   accountCount: number;
   /** Whether the user has a non-empty website on file. */
   hasWebsite: boolean;
+  /**
+   * Per-step config rollup from the backend
+   * (`GET /v1/onboarding/config-summary`). When provided, the four
+   * "stored-only" steps (ai / pricing / automation / ai_rules) become
+   * data-driven too: configured-in-Settings shows green without the
+   * user having to re-walk the wizard, and deleted-from-Settings
+   * removes the tick. Optional so legacy callers that haven't been
+   * updated still type-check; in that mode the four steps fall back
+   * to the stored checklist as before.
+   */
+  configSummary?: OnboardingConfigSummary | null;
 }
 
 // Derive the displayed checklist from the persisted wizard state +
-// live "what data does the user actually have?" signals. We treat
-// Connect and Business as data-driven rather than checklist-driven:
+// live "what data does the user actually have?" signals. Wizard
+// progress is derived state; the underlying settings ARE the source
+// of truth, the stored checklist is just a UX cache.
 //
-//   - accountCount > 0  →  connect is done (regardless of stored)
-//   - hasWebsite        →  business is done (regardless of stored)
+// Per-step rules:
 //
-// Why: those two steps have a single hard completion signal (a row
-// exists / a string is set). If we trusted only the stored checklist
-// we'd get false negatives when ConnectStep's auto-mark or the
-// Dashboard's wizard-return effect didn't fire (cache, race, deep
-// link, user-took-a-different-path), AND false positives when the
-// data was deleted but the stamp survived.
+//   connect    — data-driven from accountCount.
+//   business   — data-driven from hasWebsite.
+//   ai         — data-driven from configSummary.faqConfigured.
+//   pricing    — data-driven from configSummary.pricingConfigured.
+//   automation — data-driven from configSummary.automationConfigured.
+//   ai_rules   — data-driven from configSummary.aiRulesConfigured.
 //
-// For ai / pricing / automation / ai_rules we DO trust the stored
-// status because their data lives in a JSON blob whose "configured-
-// enough" judgement isn't trivially derivable. But when the user
-// drops their last SavedAccount, the data behind those steps was
-// cascade-wiped, so we drop the stored 'done' there too.
+// 'skipped' is always preserved — an explicit user "do this later"
+// shouldn't be silently un-skipped by data appearing. The same
+// principle the connect/business derivation already followed; now
+// uniformly applied across all six actionable steps.
 //
-// 'skipped' is always preserved when it would otherwise be 'done' —
-// an explicit user choice shouldn't be silently un-skipped by data
-// appearing. (Reconnecting an account doesn't un-skip AI if you
-// explicitly skipped it; you still see "skipped" on the rail.)
+// When data is gone (account deleted, FAQ wiped, etc.) the stored
+// 'done' is dropped so the rail reflects reality. Connect dropping
+// to 0 also cascade-drops the per-account JSON steps because their
+// underlying data was cascade-wiped with the SavedAccount.
 export function deriveDisplayChecklist(
   stored: WizardChecklist,
   ctx: DisplayChecklistContext | number,
@@ -88,7 +98,38 @@ export function deriveDisplayChecklist(
     delete copy.business;
   }
 
+  // ai / pricing / automation / ai_rules — derive from the backend
+  // config summary when available. Skipped survives (explicit user
+  // choice); otherwise data presence flips the tick green and data
+  // absence drops a stale stored 'done'.
+  //
+  // When summary is missing (haven't fetched yet, or pre-update
+  // caller), leave the stored checklist alone so we don't flicker
+  // the tick off on mount.
+  const summary = context.configSummary;
+  if (summary) {
+    applyDataDerivation(copy, 'ai', summary.faqConfigured);
+    applyDataDerivation(copy, 'pricing', summary.pricingConfigured);
+    applyDataDerivation(copy, 'automation', summary.automationConfigured);
+    applyDataDerivation(copy, 'ai_rules', summary.aiRulesConfigured);
+  }
+
   return copy;
+}
+
+// Apply the data-derivation rule to one step: skipped wins, otherwise
+// data presence promotes to 'done' and data absence drops 'done'.
+function applyDataDerivation(
+  copy: WizardChecklist,
+  step: WizardStep,
+  configured: boolean,
+): void {
+  if (copy[step] === 'skipped') return;
+  if (configured) {
+    copy[step] = 'done';
+  } else if (copy[step] === 'done') {
+    delete copy[step];
+  }
 }
 
 // Setup-progress card shown on Overview. Only renders when the user
@@ -109,13 +150,22 @@ export default function SetupProgressCard() {
   // when the actual URL was cleared.
   const [profile, setProfile] = useState<OnboardingProfile | null>(user?.onboardingProfile ?? null);
   const [website, setWebsite] = useState<string | null>(user?.website ?? null);
+  // Backend config rollup for ai / pricing / automation / ai_rules. Null
+  // until the first fetch completes; deriveDisplayChecklist treats null
+  // as "fall back to stored checklist" so the card doesn't flicker.
+  const [configSummary, setConfigSummary] = useState<OnboardingConfigSummary | null>(null);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([onboardingApi.getProfile(), authApi.getProfile().catch(() => null)])
-      .then(([profileRes, freshUser]) => {
+    Promise.all([
+      onboardingApi.getProfile(),
+      authApi.getProfile().catch(() => null),
+      onboardingApi.getConfigSummary().catch(() => null),
+    ])
+      .then(([profileRes, freshUser, summaryRes]) => {
         if (cancelled) return;
         if (profileRes?.profile) setProfile(profileRes.profile);
         if (freshUser) setWebsite(freshUser.website ?? null);
+        if (summaryRes?.summary) setConfigSummary(summaryRes.summary);
         // Sync persisted auth user so other listeners see the same
         // checklist + website state next render.
         if (user && (profileRes?.profile || freshUser)) {
@@ -144,6 +194,7 @@ export default function SetupProgressCard() {
     const checklist = deriveDisplayChecklist(stored, {
       accountCount: savedAccounts.length,
       hasWebsite: !!website && website.trim().length > 0,
+      configSummary,
     });
     const total = ACTIONABLE_STEPS.length;
     const completed = ACTIONABLE_STEPS.filter(s => checklist[s] === 'done').length;
@@ -170,7 +221,7 @@ export default function SetupProgressCard() {
       isComplete: complete,
       nextStep: next,
     };
-  }, [profile, savedAccounts.length, website]);
+  }, [profile, savedAccounts.length, website, configSummary]);
 
   // Don't render once setup is fully complete — the card is meant as a
   // prompt to finish, not a permanent fixture.
