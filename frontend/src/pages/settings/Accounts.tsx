@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Plug, Plus, AlertTriangle, Info, Download, ChevronDown, ChevronUp, Loader2,
   CheckCircle, AlertCircle, X, RefreshCw, DollarSign, Clock, List, Trash2,
   ArrowUpRight, Pencil,
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
-import { SettingCard, ActionLink, FooterBanner } from '../../components/automation/ui';
+import { SettingCard, FooterBanner } from '../../components/automation/ui';
 import type { SavedAccount } from '../../types';
 import ConnectionModal from '../../components/ConnectionModal';
 import { ServiceFlowConnectionCard } from '../../components/settings/ServiceFlowConnectionCard';
@@ -37,17 +36,13 @@ type BudgetSnapshot = {
 };
 
 export function SettingsAccounts() {
-  const navigate = useNavigate();
   const accounts = useAppStore(s => s.savedAccounts);
   const [modal, setModal] = useState<{ open: boolean; reconnect?: SavedAccount | null }>({ open: false });
 
-  // "Configure" jumps to the modern Automation surface (First Reply tab).
-  // The last-account id is persisted so the destination page can hydrate
-  // its account tab to the row the user clicked.
-  const goConfigure = (a: SavedAccount) => {
-    localStorage.setItem('lb_last_account_id', a.id);
-    navigate('/automation/respond');
-  };
+  // Connected Sources is a connection-management surface only — connect,
+  // reconnect, disconnect, import, sync. All behavior configuration lives
+  // in the other Settings tabs (General, Communication, Hours, AI Playbook,
+  // Templates) and on the Automation pages. No per-source "Configure" jump.
 
   // ── Import & Sync state (ported from legacy SettingsPage) ─────────────
   const ttAccounts   = accounts.filter(a => a.platform === 'thumbtack');
@@ -464,7 +459,6 @@ export function SettingsAccounts() {
                   Connected
                 </span>
               )}
-              <ActionLink onClick={() => goConfigure(a)}>Configure</ActionLink>
             </div>
           ))}
         </div>
