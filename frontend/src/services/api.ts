@@ -726,6 +726,66 @@ export const aiApi = {
   },
 };
 
+// AI Settings Assistant — natural-language settings editor. The frontend
+// treats the `proposal` payload as opaque: store it in component state and
+// echo it back to /apply verbatim. The backend HMAC-verifies it.
+export type AssistantArea =
+  | 'business_information'
+  | 'pricing_guidance'
+  | 'brand_voice'
+  | 'faq'
+  | 'global_custom_instructions';
+
+export type AssistantStatus =
+  | 'apply_ready'
+  | 'needs_clarification'
+  | 'conflict'
+  | 'unsupported';
+
+export interface SignedProposal {
+  id: string;
+  expiresAt: number;
+  userId: string;
+  payload: {
+    target: { area: AssistantArea; storageKey: string };
+    proposedChange: {
+      operation: 'append' | 'replace' | 'set' | 'add_faq';
+      currentValue: string | null;
+      newValue: string;
+      faqEntry?: { question: string; answer: string };
+    };
+    userMessage: string;
+    summary: string;
+    savedAccountId: string | null;
+  };
+  signature: string;
+}
+
+export interface InterpretResponse {
+  status: AssistantStatus;
+  summary: string;
+  proposal?: SignedProposal;
+  clarifyingQuestion?: string;
+  conflict?: { existingRule?: string; newRule?: string; reason?: string };
+  reason?: string;
+}
+
+export const aiSettingsAssistantApi = {
+  interpret: async (
+    message: string,
+    context: { surface?: string; savedAccountId?: string } = {},
+  ): Promise<InterpretResponse> => {
+    const { data } = await api.post('/v1/ai-settings-assistant/interpret', { message, context });
+    return data;
+  },
+  apply: async (
+    proposal: SignedProposal,
+  ): Promise<{ success: boolean; appliedAt: string; auditLogId: string }> => {
+    const { data } = await api.post('/v1/ai-settings-assistant/apply', { proposal });
+    return data;
+  },
+};
+
 export const conversationContextApi = {
   suggestStrategy: async (conversationId: string): Promise<{
     success: boolean;

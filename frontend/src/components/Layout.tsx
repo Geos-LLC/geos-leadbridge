@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
+import { aiSettingsAssistantApi, type SignedProposal, type InterpretResponse } from '../services/api';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
@@ -17,6 +18,48 @@ import ImpersonationBanner from './ImpersonationBanner';
 // guided setup wizard at /onboarding/setup replaces them. The modal
 // files + their backend endpoints are kept for historical data; do not
 // re-import here without an explicit decision.
+
+function AssistantBubble({
+  variant,
+  label,
+  children,
+}: {
+  variant: 'neutral' | 'warn' | 'danger';
+  label: string;
+  children: React.ReactNode;
+}) {
+  const palette = variant === 'danger'
+    ? { bg: 'var(--lb-danger-tint, #fef2f2)', border: 'var(--lb-danger, #dc2626)', text: 'var(--lb-ink-1)' }
+    : variant === 'warn'
+      ? { bg: 'var(--lb-warn-tint, #fef9c3)', border: 'var(--lb-warn, #ca8a04)', text: 'var(--lb-ink-1)' }
+      : { bg: 'var(--lb-ink-10)', border: 'var(--lb-line)', text: 'var(--lb-ink-1)' };
+  return (
+    <div className="self-start" style={{ maxWidth: '95%', width: '100%' }}>
+      <div style={{
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 12,
+        padding: 12,
+        fontSize: 13,
+        color: palette.text,
+      }}>
+        <div style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: palette.border,
+          marginBottom: 4,
+        }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
@@ -43,6 +86,83 @@ export function Layout() {
   const [aiChatOpen, setAiChatOpen] = useState(false);
   const [aiChatInput, setAiChatInput] = useState('');
   const [aiChatFiles, setAiChatFiles] = useState<File[]>([]);
+
+  // Conversation transcript — one entry per user message + assistant reply.
+  // Assistant entries carry either a signed proposal (apply_ready) or a
+  // textual reason (clarification / conflict / unsupported / error).
+  type AssistantTurn =
+    | { kind: 'apply_ready'; proposal: SignedProposal; summary: string; state: 'pending' | 'applying' | 'applied' | 'cancelled'; editedNewValue?: string }
+    | { kind: 'needs_clarification'; question: string }
+    | { kind: 'conflict'; reason: string; existingRule?: string; newRule?: string }
+    | { kind: 'unsupported'; reason: string }
+    | { kind: 'error'; reason: string };
+  type Turn =
+    | { id: string; role: 'user'; content: string }
+    | { id: string; role: 'assistant'; payload: AssistantTurn };
+
+  const [aiChatTurns, setAiChatTurns] = useState<Turn[]>([]);
+  const [aiChatSending, setAiChatSending] = useState(false);
+
+  const sendAiMessage = async () => {
+    const text = aiChatInput.trim();
+    if (!text || aiChatSending) return;
+    const userTurn: Turn = { id: `u_${Date.now()}`, role: 'user', content: text };
+    setAiChatTurns(prev => [...prev, userTurn]);
+    setAiChatInput('');
+    setAiChatSending(true);
+    try {
+      const res: InterpretResponse = await aiSettingsAssistantApi.interpret(text, {
+        surface: 'general',
+        savedAccountId: savedAccounts?.[0]?.id,
+      });
+      const id = `a_${Date.now()}`;
+      let payload: AssistantTurn;
+      if (res.status === 'apply_ready' && res.proposal) {
+        payload = { kind: 'apply_ready', proposal: res.proposal, summary: res.summary, state: 'pending' };
+      } else if (res.status === 'needs_clarification') {
+        payload = { kind: 'needs_clarification', question: res.clarifyingQuestion || res.summary };
+      } else if (res.status === 'conflict') {
+        payload = { kind: 'conflict', reason: res.reason || res.summary, existingRule: res.conflict?.existingRule, newRule: res.conflict?.newRule };
+      } else {
+        payload = { kind: 'unsupported', reason: res.reason || res.summary };
+      }
+      setAiChatTurns(prev => [...prev, { id, role: 'assistant', payload }]);
+    } catch (err: any) {
+      setAiChatTurns(prev => [...prev, {
+        id: `a_${Date.now()}`,
+        role: 'assistant',
+        payload: { kind: 'error', reason: err?.response?.data?.message || err?.message || 'Something went wrong.' },
+      }]);
+    } finally {
+      setAiChatSending(false);
+    }
+  };
+
+  const applyProposalTurn = async (turnId: string) => {
+    const turn = aiChatTurns.find(t => t.id === turnId && t.role === 'assistant');
+    if (!turn || turn.role !== 'assistant' || turn.payload.kind !== 'apply_ready') return;
+    // Mark applying immediately so the Apply button disables.
+    setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'apply_ready'
+      ? { ...t, payload: { ...t.payload, state: 'applying' } } as Turn
+      : t));
+    try {
+      await aiSettingsAssistantApi.apply(turn.payload.proposal);
+      setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'apply_ready'
+        ? { ...t, payload: { ...t.payload, state: 'applied' } } as Turn
+        : t));
+    } catch (err: any) {
+      const reason = err?.response?.data?.message || err?.message || 'Apply failed.';
+      setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant'
+        ? { ...t, payload: { kind: 'error', reason } } as Turn
+        : t));
+    }
+  };
+
+  const cancelProposalTurn = (turnId: string) => {
+    setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'apply_ready'
+      ? { ...t, payload: { ...t.payload, state: 'cancelled' } } as Turn
+      : t));
+  };
 
   const loadAnalytics = useAppStore(state => state.loadAnalytics);
   const systemHealth = useAppStore(state => state.systemHealth);
@@ -697,8 +817,152 @@ export function Layout() {
                   style={{
                     overflowY: 'auto',
                     padding: '12px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
                   }}
-                />
+                >
+                  {aiChatTurns.length === 0 && (
+                    <div style={{ color: 'var(--lb-ink-4)', fontSize: 12.5, textAlign: 'center', padding: '8px 4px' }}>
+                      Describe a settings change in plain language. I'll show you what I'll update before I apply it.
+                    </div>
+                  )}
+                  {aiChatTurns.map(turn => {
+                    if (turn.role === 'user') {
+                      return (
+                        <div key={turn.id} className="self-end" style={{ maxWidth: '85%' }}>
+                          <div style={{
+                            background: 'var(--lb-accent)',
+                            color: 'var(--lb-accent-fg)',
+                            padding: '8px 12px',
+                            borderRadius: 14,
+                            borderTopRightRadius: 4,
+                            fontSize: 13.5,
+                            lineHeight: 1.4,
+                            whiteSpace: 'pre-wrap',
+                          }}>
+                            {turn.content}
+                          </div>
+                        </div>
+                      );
+                    }
+                    const p = turn.payload;
+                    if (p.kind === 'apply_ready') {
+                      const target = p.proposal.payload.target.area
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, c => c.toUpperCase());
+                      const cur = p.proposal.payload.proposedChange.currentValue;
+                      const nxt = p.proposal.payload.proposedChange.newValue;
+                      return (
+                        <div key={turn.id} className="self-start" style={{ maxWidth: '95%', width: '100%' }}>
+                          <div style={{
+                            background: 'var(--lb-surface)',
+                            border: '1px solid var(--lb-line)',
+                            borderRadius: 12,
+                            padding: 12,
+                            fontSize: 13,
+                            color: 'var(--lb-ink-1)',
+                          }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--lb-accent)', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 4 }}>
+                              Proposed change → {target}
+                            </div>
+                            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)', marginBottom: 8 }}>
+                              {p.summary}
+                            </div>
+                            {cur && cur.trim() && (
+                              <details style={{ marginBottom: 8 }}>
+                                <summary style={{ fontSize: 11.5, color: 'var(--lb-ink-4)', cursor: 'pointer' }}>
+                                  Show current value
+                                </summary>
+                                <div style={{ marginTop: 4, fontSize: 12, color: 'var(--lb-ink-3)', whiteSpace: 'pre-wrap', background: 'var(--lb-ink-10)', padding: 8, borderRadius: 8 }}>
+                                  {cur}
+                                </div>
+                              </details>
+                            )}
+                            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginBottom: 4 }}>New text</div>
+                            <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', whiteSpace: 'pre-wrap', background: 'var(--lb-ink-10)', padding: 8, borderRadius: 8, marginBottom: 10 }}>
+                              {nxt}
+                            </div>
+                            {p.state === 'pending' && (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => applyProposalTurn(turn.id)}
+                                  style={{
+                                    fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+                                    background: 'var(--lb-accent)', color: 'var(--lb-accent-fg)', border: 0, cursor: 'pointer',
+                                  }}
+                                >
+                                  Apply
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelProposalTurn(turn.id)}
+                                  style={{
+                                    fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+                                    background: 'transparent', color: 'var(--lb-ink-3)', border: '1px solid var(--lb-line)', cursor: 'pointer',
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                            {p.state === 'applying' && (
+                              <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>Applying…</div>
+                            )}
+                            {p.state === 'applied' && (
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--lb-success, #16a34a)' }}>
+                                ✓ Applied
+                              </div>
+                            )}
+                            {p.state === 'cancelled' && (
+                              <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>Cancelled</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (p.kind === 'needs_clarification') {
+                      return (
+                        <AssistantBubble key={turn.id} variant="neutral" label="Clarification">
+                          {p.question}
+                        </AssistantBubble>
+                      );
+                    }
+                    if (p.kind === 'conflict') {
+                      return (
+                        <AssistantBubble key={turn.id} variant="warn" label="Conflict">
+                          <div>{p.reason}</div>
+                          {p.existingRule && (
+                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--lb-ink-3)' }}>
+                              <strong>Existing:</strong> {p.existingRule}
+                            </div>
+                          )}
+                          {p.newRule && (
+                            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--lb-ink-3)' }}>
+                              <strong>New:</strong> {p.newRule}
+                            </div>
+                          )}
+                        </AssistantBubble>
+                      );
+                    }
+                    if (p.kind === 'unsupported') {
+                      return (
+                        <AssistantBubble key={turn.id} variant="danger" label="Can't apply">
+                          {p.reason}
+                        </AssistantBubble>
+                      );
+                    }
+                    return (
+                      <AssistantBubble key={turn.id} variant="danger" label="Error">
+                        {p.reason}
+                      </AssistantBubble>
+                    );
+                  })}
+                  {aiChatSending && (
+                    <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>Thinking…</div>
+                  )}
+                </div>
 
                 {/* Composer */}
                 <div
@@ -768,8 +1032,15 @@ export function Layout() {
                     <textarea
                       value={aiChatInput}
                       onChange={e => setAiChatInput(e.target.value)}
-                      placeholder="Message AI assistant…"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendAiMessage();
+                        }
+                      }}
+                      placeholder="Describe a settings change…"
                       rows={1}
+                      disabled={aiChatSending}
                       style={{
                         width: '100%',
                         resize: 'none',
@@ -812,16 +1083,17 @@ export function Layout() {
                       </label>
                       <button
                         type="button"
-                        disabled={!aiChatInput.trim() && aiChatFiles.length === 0}
+                        onClick={sendAiMessage}
+                        disabled={!aiChatInput.trim() || aiChatSending}
                         className="flex items-center justify-center transition-all"
                         style={{
                           width: 30,
                           height: 30,
                           borderRadius: 8,
-                          background: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
-                          color: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent-fg)' : 'var(--lb-ink-5)',
+                          background: aiChatInput.trim() && !aiChatSending ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
+                          color: aiChatInput.trim() && !aiChatSending ? 'var(--lb-accent-fg)' : 'var(--lb-ink-5)',
                           border: 0,
-                          cursor: aiChatInput.trim() || aiChatFiles.length > 0 ? 'pointer' : 'not-allowed',
+                          cursor: aiChatInput.trim() && !aiChatSending ? 'pointer' : 'not-allowed',
                         }}
                         aria-label="Send message"
                       >
