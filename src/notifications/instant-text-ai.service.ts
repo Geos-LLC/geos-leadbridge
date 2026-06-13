@@ -3,10 +3,24 @@
  *
  * Generates a short, first-touch SMS body for the Instant Text path
  * (NotificationRule with sendToCustomer=true, triggerType='new_lead').
- * Reuses the same AiService stack the Lead Activity / AI Conversation /
- * Follow-up generators use — same Business Information / FAQ / Pricing
- * Guidance pipeline — wrapped in an SMS-optimized strategy prompt that
- * caps length and tone.
+ *
+ * UNIFIED PROMPT PIPELINE (matches AI Conversation / Review Mode / Follow-ups):
+ *   1. GLOBAL                       (User.globalAiPrompt)
+ *   2. PRIMARY INSTRUCTION          (SMS_FIRST_TOUCH_PROMPT — SMS-specific
+ *                                    length cap + tone constraint)
+ *   3. BASE HARD RULES              (via renderPlaybookBlock)
+ *   4. AI PLAYBOOK V2 (8 sections)  (via renderPlaybookBlock)
+ *   5. REFERENCE: BUSINESS PROFILE  (buildBusinessContextBlock)
+ *   6. REFERENCE: PRICING TABLE     (parsed + range/exact + guard rules,
+ *                                    matching automation.service +
+ *                                    follow-up-generator.service)
+ *   7. REFERENCE: ACCOUNT FAQ       (buildFaqBlock + parseAccountFaq)
+ *
+ * SMS_FIRST_TOUCH_PROMPT is kept as the PRIMARY INSTRUCTION layer — SMS
+ * has unique constraints (1-2 sentences, <240 chars, no markdown) that
+ * the canonical strategy prompts do NOT enforce. The Playbook V2 block
+ * supplies the user-editable HOW (brand voice, pricing guidance,
+ * objection handling, etc.) on top of that constraint.
  *
  * Caller contract (see notifications.service.sendNotificationWithRule):
  *   - Caller decides whether to invoke this based on
@@ -14,19 +28,14 @@
  *   - Failure path is the caller's responsibility — throw on error so the
  *     caller logs `INSTANT_TEXT_AI_FALLBACK_TEMPLATE` and renders the
  *     existing template instead. We never silently return a template.
- *
- * Why a dedicated service:
- *   The First Reply / Follow-up paths run inside the automation engine
- *   and own their own AI call sites. Notifications previously had no
- *   AI dependency — wiring AiService directly into NotificationsService
- *   bloated its constructor and made the SMS rules harder to test in
- *   isolation. This service contains the SMS prompt + context-loading
- *   logic, so changes to first-touch SMS behavior live in one file.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AiService } from '../ai/ai.service';
+import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { buildPriceRangeInstruction } from '../ai/price-range';
+import { buildPricingGuardRules } from '../ai/pricing-guards';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -142,12 +151,61 @@ export class InstantTextAiService {
       }
     }
 
-    // Pricing block — only included when the table is set. The SMS prompt
-    // tells the model to quote ONLY when the customer asks about price.
+    // PRICING block — canonical pattern shared with automation.service +
+    // follow-up-generator.service. Parses the table, lists enabled cleaning
+    // types per row, then appends the range/exact quoting instruction and
+    // the hard guard rules (FargiPro: no quote when bed/bath unknown or
+    // service type is disabled). Previously this path dumped raw JSON,
+    // bypassing all of the above — that drift is closed here.
     let pricingBlock = '';
     if (account.servicePricingJson) {
-      pricingBlock = account.servicePricingJson;
+      try {
+        const p = JSON.parse(account.servicePricingJson);
+        const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+        if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+          let priceQuoteMode: 'range' | 'exact' | undefined;
+          if (account.followUpSettingsJson) {
+            try {
+              const s = JSON.parse(account.followUpSettingsJson);
+              if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
+            } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
+          }
+          const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false;
+          const priceParts: string[] = [];
+          for (const row of p.priceTable.slice(0, 10)) {
+            const legacy = Number(row.sqft) || 0;
+            const sqftMin = Number(row.sqftMin) || legacy;
+            const sqftMax = Number(row.sqftMax) || legacy;
+            const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
+            const prices = enabledTypes.map((t: any) => {
+              const price = Number(row[t.key]) || 0;
+              const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
+              return perSqft && sqftAdjustEnabled
+                ? `${t.label}: $${price} ($${perSqft}/sqft)`
+                : `${t.label}: $${price}`;
+            }).join(', ');
+            let sizeLabel = `${row.bed}BR/${row.bath}BA`;
+            if (sqftMin && sqftMax && sqftMin !== sqftMax) sizeLabel += ` @ ${sqftMin}-${sqftMax} sqft`;
+            else if (midpoint > 0) sizeLabel += ` @ ${midpoint} sqft`;
+            priceParts.push(`  ${sizeLabel} — ${prices}`);
+          }
+          priceParts.push('');
+          priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
+          priceParts.push(buildPricingGuardRules(p));
+          pricingBlock = priceParts.join('\n');
+        }
+      } catch (err: any) {
+        this.logger.warn(`[InstantTextAi] Pricing parse failed for account ${opts.savedAccountId}: ${err?.message}`);
+      }
     }
+
+    // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
+    // Unifies Instant Text with AI Conversation / Review Mode / Follow-ups
+    // so user-edited Playbook sections (brand voice, pricing guidance,
+    // objection handling, etc.) automatically apply to first-touch SMS.
+    const playbookBlock = renderPlaybookBlock({
+      followUpSettingsJson: account.followUpSettingsJson ?? null,
+    });
 
     const accountName = opts.accountName ?? account.businessName ?? undefined;
 
@@ -159,8 +217,9 @@ export class InstantTextAiService {
       globalPrompt: user?.globalAiPrompt ?? undefined,
       strategyPrompt: SMS_FIRST_TOUCH_PROMPT,
       businessBlock,
-      faqBlock,
-      pricingBlock,
+      pricingBlock: pricingBlock || undefined,
+      faqBlock: faqBlock || undefined,
+      playbookBlock: playbookBlock || undefined,
       conversationHistory: [],
       timezone: account.followUpTimezone ?? undefined,
     });

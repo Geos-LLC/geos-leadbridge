@@ -166,7 +166,53 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     expect(generateReply.mock.calls[0][0].globalPrompt).toBe('Always sign off with "—Nadja"');
   });
 
-  it('passes pricing JSON through as pricingBlock when the account has one', async () => {
+  it('builds the canonical PRICING block (parsed rows + range/exact + guard rules) when the table is valid', async () => {
+    // Same pipeline as automation.service / follow-up-generator. The raw
+    // JSON dump that used to live here bypassed range/exact mode and the
+    // FargiPro guard rules — that drift is closed.
+    const pricingJson = JSON.stringify({
+      cleaningTypes: [
+        { key: 'regular', label: 'Regular', enabled: true },
+        { key: 'deep', label: 'Deep', enabled: false },
+      ],
+      priceTable: [
+        { bed: 2, bath: 1, sqftMin: 800, sqftMax: 1000, regular: 150, deep: 220 },
+        { bed: 3, bath: 2, sqftMin: 1200, sqftMax: 1600, regular: 200, deep: 280 },
+      ],
+      sqftAdjustEnabled: true,
+    });
+    const { svc, generateReply } = buildSvc({
+      account: {
+        businessName: 'Test',
+        servicePricingJson: pricingJson,
+        faqJson: null,
+        followUpSettingsJson: JSON.stringify({ priceQuoteMode: 'range' }),
+        followUpTimezone: null,
+        userId: 'user-1',
+      },
+    });
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'how much',
+    });
+    const pricingBlock = generateReply.mock.calls[0][0].pricingBlock;
+    expect(typeof pricingBlock).toBe('string');
+    // Row formatting + enabled-type filtering (Deep is disabled → must not appear)
+    expect(pricingBlock).toContain('2BR/1BA');
+    expect(pricingBlock).toContain('3BR/2BA');
+    expect(pricingBlock).toContain('Regular: $150');
+    expect(pricingBlock).toContain('Regular: $200');
+    expect(pricingBlock).not.toContain('Deep:');
+    // Range-mode quoting instruction (from buildPriceRangeInstruction)
+    expect(pricingBlock).toMatch(/range/i);
+    // Hard guard rules (from buildPricingGuardRules) — defer-on-unknown
+    expect(pricingBlock.toLowerCase()).toContain('do not quote');
+  });
+
+  it('omits pricingBlock entirely when the table has no enabled cleaning types', async () => {
+    // The pre-unification path leaked raw JSON here too. Canonical pattern
+    // returns undefined so the REFERENCE section is dropped cleanly.
     const pricingJson = JSON.stringify({ rooms: { 3: 220 } });
     const { svc, generateReply } = buildSvc({
       account: {
@@ -183,7 +229,63 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
       customerName: 'Sam',
       customerMessage: 'how much',
     });
-    expect(generateReply.mock.calls[0][0].pricingBlock).toBe(pricingJson);
+    expect(generateReply.mock.calls[0][0].pricingBlock).toBeUndefined();
+  });
+
+  it('passes the unified playbookBlock so BASE HARD RULES + Playbook V2 sections apply to first-touch SMS', async () => {
+    // Unifies Instant Text with AI Conversation / Review Mode / Follow-ups.
+    // The renderer always emits the two top-level headers and the 8 HOW
+    // section labels — assert on those rather than any individual default,
+    // which is intentionally tweakable.
+    const { svc, generateReply } = buildSvc();
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'hi',
+    });
+    const playbookBlock = generateReply.mock.calls[0][0].playbookBlock;
+    expect(typeof playbookBlock).toBe('string');
+    expect(playbookBlock).toContain('=== BASE HARD RULES');
+    expect(playbookBlock).toContain('=== AI PLAYBOOK ===');
+    // The 8 HOW section headers from PLAYBOOK_SECTION_LABELS
+    expect(playbookBlock).toContain('[BUSINESS INFORMATION]');
+    expect(playbookBlock).toContain('[PRICING GUIDANCE]');
+    expect(playbookBlock).toContain('[QUALIFICATION GUIDANCE]');
+    expect(playbookBlock).toContain('[BOOKING GUIDANCE]');
+    expect(playbookBlock).toContain('[OBJECTION HANDLING]');
+    expect(playbookBlock).toContain('[HUMAN HANDOFF GUIDANCE]');
+    expect(playbookBlock).toContain('[FOLLOW-UP TONE]');
+    expect(playbookBlock).toContain('[AI PERSONALITY & BRAND VOICE]');
+  });
+
+  it('reflects per-account Playbook V2 custom instructions in the playbookBlock', async () => {
+    // Closes the original drift: a tenant who edits the brand-voice section
+    // in Settings → AI Playbook used to see no effect on Instant Text SMS.
+    const followUpSettingsJson = JSON.stringify({
+      aiPlaybookV2: {
+        personality_brand_voice: {
+          customInstructions: 'Always sign off as "—The Spotless Team".',
+        },
+      },
+    });
+    const { svc, generateReply } = buildSvc({
+      account: {
+        businessName: 'Spotless',
+        servicePricingJson: null,
+        faqJson: null,
+        followUpSettingsJson,
+        followUpTimezone: null,
+        userId: 'user-1',
+      },
+    });
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'hi',
+    });
+    const playbookBlock = generateReply.mock.calls[0][0].playbookBlock;
+    expect(playbookBlock).toContain('—The Spotless Team');
+    expect(playbookBlock).toContain('Business preference (overrides default when they conflict):');
   });
 
   it('collapses internal newlines on the returned body so the SMS stays single-line', async () => {
