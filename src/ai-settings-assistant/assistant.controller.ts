@@ -1,0 +1,44 @@
+import { Body, Controller, Post, UseGuards, Logger } from '@nestjs/common';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AiSettingsAssistantService } from './assistant.service';
+import { ApplyRequest, InterpretRequest } from './assistant.types';
+
+@Controller('v1/ai-settings-assistant')
+@UseGuards(JwtAuthGuard)
+export class AiSettingsAssistantController {
+  private readonly logger = new Logger(AiSettingsAssistantController.name);
+
+  constructor(private readonly service: AiSettingsAssistantService) {}
+
+  /**
+   * Interpret a natural-language settings request. Returns one of four
+   * status variants (apply_ready / needs_clarification / conflict /
+   * unsupported). Only `apply_ready` carries a signed `proposal`; the
+   * frontend echoes that exact object back to /apply.
+   */
+  @Post('interpret')
+  async interpret(
+    @CurrentUser() user: any,
+    @Body() body: InterpretRequest,
+  ) {
+    this.logger.log(
+      `[interpret] user=${user?.id} surface=${body?.context?.surface ?? '-'} acct=${body?.context?.savedAccountId ?? '-'} msgLen=${(body?.message || '').length}`,
+    );
+    return this.service.interpret(user.id, body);
+  }
+
+  /**
+   * Apply a signed proposal. Verifies signature + expiry + user match, runs
+   * a second safety check, writes through the writer, and appends an audit
+   * row. Frontend cannot synthesize a proposal — the only valid input here
+   * is a proposal returned from /interpret.
+   */
+  @Post('apply')
+  async apply(
+    @CurrentUser() user: any,
+    @Body() body: ApplyRequest,
+  ) {
+    return this.service.apply(user.id, body);
+  }
+}

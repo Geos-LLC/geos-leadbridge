@@ -215,6 +215,7 @@ model User {
   sfConnection                SfConnection?
   accountHealthStatuses       AccountHealthStatus[]
   onboardingProfile           OnboardingProfile?
+  settingsChangeAuditLogs     SettingsChangeAuditLog[]
 
   @@map("users")
 }
@@ -2113,4 +2114,36 @@ model PartnerLeadEvent {
   @@index([leadId])
   @@index([eventType])
   @@map("partner_lead_events")
+}
+
+// AI Settings Assistant — audit log for natural-language driven settings
+// changes. Every successful /v1/ai-settings-assistant/apply call appends
+// one row so we can trace which user prompt produced which write, and
+// roll back a specific change by reading `beforeValue`.
+//
+// `area` is the high-level target surface (business_information, faq,
+// pricing_guidance, brand_voice, global_custom_instructions). `target`
+// is the storage key actually written (e.g. the playbook section key, or
+// a literal field name like 'globalAiPrompt'). `savedAccountId` is null
+// for user-scoped writes (globalAiPrompt). `beforeValue` / `afterValue`
+// are the raw string values pre/post-write (truncated to a few KB by
+// the writer, never logged for protected fields).
+model SettingsChangeAuditLog {
+  id             String   @id @default(uuid())
+  userId         String
+  savedAccountId String?
+  area           String   // 'business_information' | 'faq' | 'pricing_guidance' | 'brand_voice' | 'global_custom_instructions'
+  target         String   // storage key — section key for playbook writes, field name for User writes
+  operation      String   // 'append' | 'replace' | 'set' | 'add_faq'
+  userMessage    String   @db.Text // original natural-language request
+  proposalSummary String  @db.Text // one-line summary the assistant returned
+  beforeValue    String?  @db.Text
+  afterValue     String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([savedAccountId])
+  @@map("settings_change_audit_logs")
 }
