@@ -36,6 +36,7 @@ import { AiService } from '../ai/ai.service';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
+import { hydratePricing } from '../users/pricing-hydrate';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -160,9 +161,13 @@ export class InstantTextAiService {
     let pricingBlock = '';
     if (account.servicePricingJson) {
       try {
-        const p = JSON.parse(account.servicePricingJson);
-        const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
-        if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+        // Hydrate: same source-of-truth rules as automation.service /
+        // follow-up-generator / ai.controller — legacy accounts missing
+        // cleaningTypes still emit Deep Cleaning, and explicit 0 prices
+        // are preserved (pricing-guards turns them into a defer rule).
+        const p = hydratePricing(JSON.parse(account.servicePricingJson));
+        const allTypes = p.cleaningTypes;
+        if (p.priceTable.length > 0 && allTypes.length > 0) {
           let priceQuoteMode: 'range' | 'exact' | undefined;
           if (account.followUpSettingsJson) {
             try {
@@ -170,14 +175,14 @@ export class InstantTextAiService {
               if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
             } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
           }
-          const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false;
+          const sqftAdjustEnabled = p.sqftAdjustEnabled !== false;
           const priceParts: string[] = [];
           for (const row of p.priceTable.slice(0, 10)) {
             const legacy = Number(row.sqft) || 0;
             const sqftMin = Number(row.sqftMin) || legacy;
             const sqftMax = Number(row.sqftMax) || legacy;
             const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-            const prices = enabledTypes.map((t: any) => {
+            const prices = allTypes.map((t) => {
               const price = Number(row[t.key]) || 0;
               const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
               return perSqft && sqftAdjustEnabled

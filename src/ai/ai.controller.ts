@@ -8,6 +8,7 @@ import { buildPriceRangeInstruction } from './price-range';
 import { buildBusinessContextBlock } from './business-context';
 import { buildFaqBlock, parseAccountFaq } from './faq-context';
 import { buildPricingGuardRules } from './pricing-guards';
+import { hydratePricing } from '../users/pricing-hydrate';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -241,7 +242,12 @@ export class AiController {
   ): string | null {
     if (!pricingJson) return null;
     try {
-      const p = JSON.parse(pricingJson);
+      // Hydrate up-front so legacy JSON missing cleaningTypes still emits
+      // Deep Cleaning columns (and so explicit 0 prices survive). The
+      // legacy `enabled` flag is intentionally ignored — a service is
+      // "not offered" when its row prices are all 0, which pricing-guards
+      // surfaces as a defer-to-team instruction.
+      const p = hydratePricing(JSON.parse(pricingJson));
       const parts: string[] = ['--- Your Pricing Guide (use these EXACT prices when quoting) ---'];
 
       // Resolve quote mode from AI strategy settings (per-account toggle).
@@ -252,13 +258,13 @@ export class AiController {
           if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
         } catch { /* invalid JSON — fall back to legacy inference */ }
       }
-      const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false; // default ON
+      const sqftAdjustEnabled = p.sqftAdjustEnabled !== false; // default ON
 
       // Price table — emit each row with its sqft range (min/max) and the
       // derived $/sqft per cleaning type (at the midpoint), so the AI scales
       // up only when the lead's sqft exceeds the row's sqftMax.
-      const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
-      if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+      const allTypes = p.cleaningTypes;
+      if (p.priceTable.length > 0 && allTypes.length > 0) {
         parts.push('Base prices by property size (each row covers a sqft range; price applies within that range):');
         for (const row of p.priceTable) {
           // Back-compat: rows saved before the min/max split carry a single `sqft` field.
@@ -266,7 +272,7 @@ export class AiController {
           const sqftMin = Number(row.sqftMin) || legacy;
           const sqftMax = Number(row.sqftMax) || legacy;
           const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-          const prices = enabledTypes.map((t: any) => {
+          const prices = allTypes.map((t) => {
             const price = Number(row[t.key]) || 0;
             const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
             return perSqft && sqftAdjustEnabled

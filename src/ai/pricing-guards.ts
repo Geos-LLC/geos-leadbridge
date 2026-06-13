@@ -8,12 +8,13 @@
  *     went out 2 min after a lead with empty description). The "closest match"
  *     instruction in the old prompt actively encouraged this.
  *
- *  2. Customer requests a cleaning type that the account has DISABLED in
- *     `cleaningTypes` while the priceTable still has prices populated for that
- *     type (FargiPro had `deep.enabled=false` with deep prices filled in). The
- *     old prompt builder filtered disabled types out silently — the AI never
- *     learned the customer's request couldn't be served, so it mapped move-out
- *     onto the next-best enabled type (Regular) and got the row wrong on top.
+ *  2. Customer requests a cleaning type that the account does not currently
+ *     offer. The signal for "not offered" is per-row prices: when EVERY row
+ *     in the priceTable has `Number(row[key]) === 0` (or absent/falsy → 0),
+ *     the service is treated as not offered. The old `cleaningTypes.enabled`
+ *     flag is preserved on disk for back-compat but is no longer consulted —
+ *     a column always renders, and the user "disables" by entering 0 in every
+ *     row. See frontend/src/data/defaultPricing.ts.
  *
  *  3. Bed/bath given doesn't match any row exactly → "closest match" again.
  *
@@ -30,6 +31,7 @@ interface ParsedPricing {
   priceTable?: Array<{ bed?: number; bath?: number; [k: string]: any }>;
 }
 
+/** A type is "offered" when at least one priceTable row prices it > 0. */
 function isPricedInTable(pricing: ParsedPricing, key: string): boolean {
   if (!pricing.priceTable?.length || !key) return false;
   return pricing.priceTable.some((row: any) => Number(row[key]) > 0);
@@ -37,22 +39,34 @@ function isPricedInTable(pricing: ParsedPricing, key: string): boolean {
 
 export function buildPricingGuardRules(pricing: ParsedPricing): string {
   const types: CleaningType[] = Array.isArray(pricing.cleaningTypes) ? pricing.cleaningTypes : [];
-  const enabledLabels = types
-    .filter((t) => t.enabled && t.label)
-    .map((t) => t.label as string);
-  const disabledLabels = types
-    .filter((t) => !t.enabled && t.label && t.key && isPricedInTable(pricing, t.key))
-    .map((t) => t.label as string);
+
+  // Offered = has at least one priced row.
+  // Not offered = type is listed in cleaningTypes (so the user is aware of
+  // it as a possible service) but every row is 0/missing. This is the
+  // explicit "we don't do this — defer to the team" signal.
+  const offeredLabels: string[] = [];
+  const notOfferedLabels: string[] = [];
+  for (const t of types) {
+    if (!t.key || !t.label) continue;
+    if (isPricedInTable(pricing, t.key)) {
+      offeredLabels.push(t.label);
+    } else {
+      // Only emit the "do not quote" clause for types the user has
+      // explicitly listed (cleaningTypes entry exists). A type that's
+      // missing from the table AND missing from cleaningTypes is silent.
+      notOfferedLabels.push(t.label);
+    }
+  }
 
   const lines: string[] = ['--- Pricing Policy (must obey) ---'];
 
-  if (enabledLabels.length > 0) {
-    lines.push(`Services you can quote on (the menu): ${enabledLabels.join(', ')}.`);
+  if (offeredLabels.length > 0) {
+    lines.push(`Services you can quote on (the menu): ${offeredLabels.join(', ')}.`);
   }
 
-  if (disabledLabels.length > 0) {
+  if (notOfferedLabels.length > 0) {
     lines.push(
-      `Services this account does NOT currently offer: ${disabledLabels.join(', ')}. ` +
+      `Services this account does NOT currently offer: ${notOfferedLabels.join(', ')}. ` +
         `If the customer asks for any of these (including common synonyms — e.g. "move-out" / "move-in" ⇄ deep cleaning), ` +
         `DO NOT quote a price. Reply: "Let me confirm with the team whether we can take this on and get back to you shortly." ` +
         `Do NOT silently substitute a different service type.`,

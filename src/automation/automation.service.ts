@@ -26,6 +26,7 @@ import {
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
+import { hydratePricing } from '../users/pricing-hydrate';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -2083,9 +2084,12 @@ export class AutomationService implements OnModuleInit {
         let pricingBlock: string | undefined;
         if (pricingJson && !suppressPricingForQualify) {
           try {
-            const p = JSON.parse(pricingJson);
-            const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
-            if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+            // Hydrate: legacy JSON missing cleaningTypes still emits all
+            // service columns; explicit 0 prices are preserved (and the
+            // pricing-guards layer flips them into a defer-to-team rule).
+            const p = hydratePricing(JSON.parse(pricingJson));
+            const allTypes = p.cleaningTypes;
+            if (p.priceTable.length > 0 && allTypes.length > 0) {
               // Resolve the per-account range/exact toggle stored in followUpSettingsJson.
               let priceQuoteMode: 'range' | 'exact' | undefined;
               if (account?.followUpSettingsJson) {
@@ -2094,7 +2098,7 @@ export class AutomationService implements OnModuleInit {
                   if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
                 } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
               }
-              const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false; // default ON
+              const sqftAdjustEnabled = p.sqftAdjustEnabled !== false; // default ON
               const priceParts: string[] = [];
               for (const row of p.priceTable.slice(0, 10)) {
                 // Back-compat: rows saved before the min/max split carry a single `sqft` field.
@@ -2102,7 +2106,7 @@ export class AutomationService implements OnModuleInit {
                 const sqftMin = Number(row.sqftMin) || legacy;
                 const sqftMax = Number(row.sqftMax) || legacy;
                 const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-                const prices = enabledTypes.map((t: any) => {
+                const prices = allTypes.map((t) => {
                   const price = Number(row[t.key]) || 0;
                   const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
                   return perSqft && sqftAdjustEnabled
@@ -2116,10 +2120,9 @@ export class AutomationService implements OnModuleInit {
               }
               priceParts.push('');
               priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
-              // Hard guards (see pricing-guards.ts). Same rules as the
-              // follow-up generator + ai.controller paths — AI must NOT
-              // quote when bed/bath unknown or when the customer asks for
-              // a disabled service type.
+              // Hard guards (see pricing-guards.ts). AI must NOT quote
+              // when bed/bath unknown or when the customer asks for a
+              // service the account marks not-offered (all-zero column).
               priceParts.push(buildPricingGuardRules(p));
               pricingBlock = priceParts.join('\n');
             }
