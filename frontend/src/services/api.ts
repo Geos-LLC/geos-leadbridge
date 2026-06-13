@@ -740,7 +740,13 @@ export type AssistantStatus =
   | 'apply_ready'
   | 'needs_clarification'
   | 'conflict'
+  | 'noop'
   | 'unsupported';
+
+export type ConflictResolution =
+  | 'keep_existing'
+  | 'replace_conflicting_rule'
+  | 'add_anyway';
 
 export interface SignedProposal {
   id: string;
@@ -753,6 +759,7 @@ export interface SignedProposal {
       currentValue: string | null;
       newValue: string;
       faqEntry?: { question: string; answer: string };
+      conflictOverride?: boolean;
     };
     userMessage: string;
     summary: string;
@@ -761,13 +768,22 @@ export interface SignedProposal {
   signature: string;
 }
 
+export interface ConflictResolutionOption {
+  resolution: ConflictResolution;
+  label: string;
+  proposal?: SignedProposal;
+}
+
 export interface InterpretResponse {
   status: AssistantStatus;
   summary: string;
   proposal?: SignedProposal;
   clarifyingQuestion?: string;
   conflict?: { existingRule?: string; newRule?: string; reason?: string };
+  resolutionOptions?: ConflictResolutionOption[];
   reason?: string;
+  existingRule?: string;
+  newRule?: string;
 }
 
 export const aiSettingsAssistantApi = {

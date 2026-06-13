@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
-import { aiSettingsAssistantApi, type SignedProposal, type InterpretResponse } from '../services/api';
+import { aiSettingsAssistantApi, type SignedProposal, type InterpretResponse, type ConflictResolutionOption, type ConflictResolution } from '../services/api';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
@@ -88,12 +88,21 @@ export function Layout() {
   const [aiChatFiles, setAiChatFiles] = useState<File[]>([]);
 
   // Conversation transcript — one entry per user message + assistant reply.
-  // Assistant entries carry either a signed proposal (apply_ready) or a
-  // textual reason (clarification / conflict / unsupported / error).
+  type ConflictState = 'pending' | 'applying' | 'resolved' | 'cancelled';
   type AssistantTurn =
-    | { kind: 'apply_ready'; proposal: SignedProposal; summary: string; state: 'pending' | 'applying' | 'applied' | 'cancelled'; editedNewValue?: string }
+    | { kind: 'apply_ready'; proposal: SignedProposal; summary: string; state: 'pending' | 'applying' | 'applied' | 'cancelled' }
     | { kind: 'needs_clarification'; question: string }
-    | { kind: 'conflict'; reason: string; existingRule?: string; newRule?: string }
+    | {
+        kind: 'conflict';
+        reason: string;
+        existingRule?: string;
+        newRule?: string;
+        resolutionOptions: ConflictResolutionOption[];
+        state: ConflictState;
+        chosen?: ConflictResolution;
+        resolvedSummary?: string;
+      }
+    | { kind: 'noop'; reason: string; existingRule?: string; newRule?: string }
     | { kind: 'unsupported'; reason: string }
     | { kind: 'error'; reason: string };
   type Turn =
@@ -122,7 +131,21 @@ export function Layout() {
       } else if (res.status === 'needs_clarification') {
         payload = { kind: 'needs_clarification', question: res.clarifyingQuestion || res.summary };
       } else if (res.status === 'conflict') {
-        payload = { kind: 'conflict', reason: res.reason || res.summary, existingRule: res.conflict?.existingRule, newRule: res.conflict?.newRule };
+        payload = {
+          kind: 'conflict',
+          reason: res.reason || res.conflict?.reason || res.summary,
+          existingRule: res.conflict?.existingRule,
+          newRule: res.conflict?.newRule,
+          resolutionOptions: res.resolutionOptions || [],
+          state: 'pending',
+        };
+      } else if (res.status === 'noop') {
+        payload = {
+          kind: 'noop',
+          reason: res.reason || res.summary,
+          existingRule: res.existingRule,
+          newRule: res.newRule,
+        };
       } else {
         payload = { kind: 'unsupported', reason: res.reason || res.summary };
       }
@@ -162,6 +185,50 @@ export function Layout() {
     setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'apply_ready'
       ? { ...t, payload: { ...t.payload, state: 'cancelled' } } as Turn
       : t));
+  };
+
+  // Conflict resolution — the user clicked Keep / Replace / Add anyway on
+  // a conflict card. The signed proposal for the chosen resolution comes
+  // from the server-minted resolutionOptions array; "keep_existing" has
+  // no proposal (pure dismiss). We do NOT mint or mutate proposals here.
+  const resolveConflictTurn = async (turnId: string, option: ConflictResolutionOption) => {
+    const turn = aiChatTurns.find(t => t.id === turnId && t.role === 'assistant');
+    if (!turn || turn.role !== 'assistant' || turn.payload.kind !== 'conflict') return;
+    if (turn.payload.state !== 'pending') return;
+
+    if (option.resolution === 'keep_existing') {
+      setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'conflict'
+        ? { ...t, payload: { ...t.payload, state: 'cancelled', chosen: 'keep_existing' } } as Turn
+        : t));
+      return;
+    }
+
+    if (!option.proposal) return;
+
+    setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'conflict'
+      ? { ...t, payload: { ...t.payload, state: 'applying', chosen: option.resolution } } as Turn
+      : t));
+    try {
+      await aiSettingsAssistantApi.apply(option.proposal);
+      setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'conflict'
+        ? {
+            ...t,
+            payload: {
+              ...t.payload,
+              state: 'resolved',
+              resolvedSummary:
+                option.resolution === 'replace_conflicting_rule'
+                  ? 'Existing rule replaced.'
+                  : 'Added despite conflict.',
+            },
+          } as Turn
+        : t));
+    } catch (err: any) {
+      const reason = err?.response?.data?.message || err?.message || 'Apply failed.';
+      setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant'
+        ? { ...t, payload: { kind: 'error', reason } } as Turn
+        : t));
+    }
   };
 
   const loadAnalytics = useAppStore(state => state.loadAnalytics);
@@ -978,19 +1045,113 @@ export function Layout() {
                     }
                     if (p.kind === 'conflict') {
                       return (
-                        <AssistantBubble key={turn.id} variant="warn" label="Conflict">
-                          <div>{p.reason}</div>
-                          {p.existingRule && (
-                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--lb-ink-3)' }}>
-                              <strong>Existing:</strong> {p.existingRule}
+                        <div key={turn.id} className="self-start" style={{ maxWidth: '95%', width: '100%' }}>
+                          <div style={{
+                            background: 'var(--lb-danger-tint, #fef2f2)',
+                            border: '1px solid var(--lb-danger, #dc2626)',
+                            borderRadius: 12,
+                            padding: 12,
+                            fontSize: 13,
+                            color: 'var(--lb-ink-1)',
+                          }}>
+                            <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+                              <AlertTriangle size={14} style={{ color: 'var(--lb-danger, #dc2626)' }} />
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--lb-danger, #dc2626)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                Conflict with existing rule
+                              </div>
                             </div>
-                          )}
-                          {p.newRule && (
-                            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--lb-ink-3)' }}>
-                              <strong>New:</strong> {p.newRule}
+                            <div style={{ fontSize: 13, lineHeight: 1.4, color: 'var(--lb-ink-1)', marginBottom: 10 }}>
+                              {p.reason}
                             </div>
-                          )}
-                        </AssistantBubble>
+                            {p.existingRule && (
+                              <>
+                                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#991b1b', marginBottom: 4, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                                  Existing rule
+                                </div>
+                                <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', whiteSpace: 'pre-wrap', background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', padding: 8, borderRadius: 8, marginBottom: 8 }}>
+                                  {p.existingRule}
+                                </div>
+                              </>
+                            )}
+                            {p.newRule && (
+                              <>
+                                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#92400e', marginBottom: 4, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                                  New rule you're proposing
+                                </div>
+                                <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', whiteSpace: 'pre-wrap', background: 'var(--lb-warn-tint, #fef9c3)', border: '1px solid var(--lb-warn, #ca8a04)', padding: 8, borderRadius: 8, marginBottom: 10 }}>
+                                  {p.newRule}
+                                </div>
+                              </>
+                            )}
+                            {p.state === 'pending' && p.resolutionOptions.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {p.resolutionOptions.map(opt => {
+                                  const isDestructive = opt.resolution === 'add_anyway';
+                                  const isPrimary = opt.resolution === 'replace_conflicting_rule';
+                                  return (
+                                    <button
+                                      key={opt.resolution}
+                                      type="button"
+                                      onClick={() => resolveConflictTurn(turn.id, opt)}
+                                      style={{
+                                        fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                                        background: isPrimary ? 'var(--lb-accent)' : 'transparent',
+                                        color: isPrimary ? 'var(--lb-accent-fg)' : (isDestructive ? '#991b1b' : 'var(--lb-ink-3)'),
+                                        border: isPrimary ? 0 : `1px solid ${isDestructive ? 'var(--lb-danger, #dc2626)' : 'var(--lb-line)'}`,
+                                      }}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {p.state === 'applying' && (
+                              <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>Applying…</div>
+                            )}
+                            {p.state === 'resolved' && (
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--lb-success, #16a34a)' }}>
+                                ✓ {p.resolvedSummary || 'Applied'}
+                              </div>
+                            )}
+                            {p.state === 'cancelled' && (
+                              <div style={{ fontSize: 12, color: 'var(--lb-ink-4)' }}>
+                                Kept existing rule — no changes.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (p.kind === 'noop') {
+                      return (
+                        <div key={turn.id} className="self-start" style={{ maxWidth: '95%', width: '100%' }}>
+                          <div style={{
+                            background: 'var(--lb-ink-10)',
+                            border: '1px solid var(--lb-line)',
+                            borderRadius: 12,
+                            padding: 12,
+                            fontSize: 13,
+                            color: 'var(--lb-ink-1)',
+                          }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-4)', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 6 }}>
+                              Already covered
+                            </div>
+                            <div style={{ fontSize: 13, lineHeight: 1.4, marginBottom: p.existingRule ? 10 : 0 }}>
+                              {p.reason}
+                            </div>
+                            {p.existingRule && (
+                              <>
+                                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--lb-ink-4)', marginBottom: 4, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                                  Existing rule
+                                </div>
+                                <div style={{ fontSize: 13, color: 'var(--lb-ink-2)', whiteSpace: 'pre-wrap', background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', padding: 8, borderRadius: 8 }}>
+                                  {p.existingRule}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       );
                     }
                     if (p.kind === 'unsupported') {

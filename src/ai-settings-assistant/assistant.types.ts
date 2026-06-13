@@ -31,9 +31,27 @@ export type AssistantStatus =
   | 'apply_ready'
   | 'needs_clarification'
   | 'conflict'
+  | 'noop'
   | 'unsupported';
 
 export type AssistantOperation = 'append' | 'replace' | 'set' | 'add_faq';
+
+/**
+ * Conflict resolution choices presented to the user when a new rule
+ * contradicts an existing one. The frontend gets PRE-SIGNED proposals
+ * (one per applicable option) and echoes the chosen one back to /apply.
+ *
+ * 'keep_existing' carries no proposal — selecting it is a pure dismiss
+ * (no write, no audit). 'replace_conflicting_rule' produces a proposal
+ * with operation='replace' and newValue = current text minus the
+ * conflicting excerpt + new rule. 'add_anyway' produces an append
+ * proposal whose payload carries `conflictOverride: true` so the audit
+ * log records that the user knowingly overrode the warning.
+ */
+export type ConflictResolution =
+  | 'keep_existing'
+  | 'replace_conflicting_rule'
+  | 'add_anyway';
 
 export interface AssistantTarget {
   area: AssistantArea;
@@ -48,6 +66,16 @@ export interface ProposedChange {
   diff?: string;
   /** Only set for `add_faq` — the new Q&A pair the writer will append. */
   faqEntry?: { question: string; answer: string };
+  /**
+   * True when the user is applying this proposal via the "Add anyway"
+   * resolution on a conflict-detected change. Stored verbatim into the
+   * audit log so we can count override events and surface a re-confirm
+   * prompt at read time. Cannot be set by the frontend — the server is
+   * the only party that mints proposals with this flag (during the
+   * conflict response). HMAC signature covers it, so an attacker can't
+   * forge an override flag onto a clean proposal.
+   */
+  conflictOverride?: boolean;
 }
 
 export interface ConflictInfo {
@@ -93,6 +121,19 @@ export interface InterpretRequest {
   };
 }
 
+/**
+ * One pre-signed conflict-resolution option. The frontend renders a
+ * button per entry; on click it POSTs the embedded `proposal` to /apply
+ * unchanged. `keep_existing` carries no proposal because that path is
+ * a pure dismiss — no write, no audit row.
+ */
+export interface ConflictResolutionOption {
+  resolution: ConflictResolution;
+  label: string;
+  /** Server-signed proposal to apply when this resolution is chosen. Omitted for keep_existing. */
+  proposal?: SignedProposal;
+}
+
 export interface InterpretResponse {
   status: AssistantStatus;
   summary: string;
@@ -100,10 +141,16 @@ export interface InterpretResponse {
   proposal?: SignedProposal;
   /** Present when status === 'needs_clarification'. */
   clarifyingQuestion?: string;
-  /** Present when status === 'conflict'. */
+  /** Present when status === 'conflict' or 'noop'. */
   conflict?: ConflictInfo;
-  /** Present when status === 'unsupported' or 'conflict'. */
+  /** Present when status === 'conflict' — the 3 user choices, each carrying a pre-signed proposal (except keep_existing). */
+  resolutionOptions?: ConflictResolutionOption[];
+  /** Present when status === 'unsupported' or 'conflict' or 'noop'. */
   reason?: string;
+  /** Present when status === 'noop' — the existing rule the new request duplicates. */
+  existingRule?: string;
+  /** Present when status === 'noop' — the new request that was deemed already-covered. */
+  newRule?: string;
 }
 
 export interface ApplyRequest {
