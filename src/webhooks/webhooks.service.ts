@@ -20,6 +20,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { TrialService } from '../trial/trial.service';
+import { LeadsService } from '../leads/leads.service';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
@@ -51,6 +52,8 @@ export class WebhooksService {
     private leadCache: LeadCacheService,
     private leadStatusService: LeadStatusService,
     private trialService: TrialService,
+    @Inject(forwardRef(() => LeadsService))
+    private leadsService: LeadsService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -369,6 +372,30 @@ export class WebhooksService {
       this.logger.warn(
         `[trial] consumeLead failed for TT NEW_NEGOTIATION lead=${lead.id} user=${userId}: ${err?.message ?? err}`,
       );
+    });
+
+    // Populate Lead.customerPhoneSubstitute from the TT GET endpoint so
+    // the lead detail panel shows BOTH the webhook-delivered number AND
+    // the GET-delivered number side-by-side. Background: confirmed
+    // 2026-06-13 that TT's webhook delivers a forwarding number rather
+    // than the customer's real phone (same customer appears with
+    // different "phones" on different pro accounts → forwarding pool).
+    // Both webhook and GET return forwarding numbers; exposing both at
+    // least lets operators cross-check the in-Thumbtack-UI number vs
+    // the SMS-forwarding number while we wait for the customer's real
+    // phone to land via an inbound SMS reply.
+    //
+    // Fire-and-forget — must not block webhook ack. populateThumbtack-
+    // Substitute is no-op-safe on every error path (missing creds, 401,
+    // duplicate, same-as-webhook) so we just log on failure.
+    this.leadsService.populateThumbtackSubstitute(userId, lead.id).then((r) => {
+      if (r.updated) {
+        this.logger.log(`[tt-substitute] populated lead=${lead.id}`);
+      }
+      // Skip-reasons get logged only when surprising — `same_as_webhook`
+      // and `already_stored` are quiet because they're expected steady state.
+    }).catch((err) => {
+      this.logger.warn(`[tt-substitute] populate failed lead=${lead.id} err=${err?.message ?? err}`);
     });
 
     // Persist the Partner API status through the canonical write path.
