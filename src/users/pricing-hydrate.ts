@@ -43,7 +43,11 @@ export interface ServicePricing {
   petSurcharge: number;
   orderDiscounts: Array<{ minAmount: number; discount: number }>;
   recurringDiscount: number;
-  priceRange: { minus: { type: string; value: number }; plus: { type: string; value: number } };
+  // Type matches buildPriceRangeInstruction's PriceRangeGap so the hydrated
+  // object can flow directly into the AI prompt builders without a cast.
+  // Storage layer may persist arbitrary strings; the hydrator coerces to
+  // these two literals (defaulting to '%' for anything else).
+  priceRange: { minus: { type: '%' | '$'; value: number }; plus: { type: '%' | '$'; value: number } };
 }
 
 export const DEFAULT_CLEANING_PRICING: ServicePricing = {
@@ -213,10 +217,24 @@ export function hydratePricing(pricing: any): ServicePricing {
     recurringDiscount: hasValue(pricing.recurringDiscount)
       ? Number(pricing.recurringDiscount) || 0
       : DEFAULT_CLEANING_PRICING.recurringDiscount,
-    priceRange:
-      pricing.priceRange && typeof pricing.priceRange === 'object'
-        ? pricing.priceRange
-        : { ...DEFAULT_CLEANING_PRICING.priceRange },
+    priceRange: coercePriceRange(pricing.priceRange),
+  };
+}
+
+/**
+ * Storage may persist `type` as any string (legacy rows, partial saves).
+ * The AI prompt builder requires the strict literal union, so we coerce
+ * here: '$' stays '$', anything else becomes '%' (the safer default).
+ */
+function coercePriceRange(raw: any): ServicePricing['priceRange'] {
+  const def = DEFAULT_CLEANING_PRICING.priceRange;
+  if (!raw || typeof raw !== 'object') return { minus: { ...def.minus }, plus: { ...def.plus } };
+  const toLit = (t: any): '%' | '$' => (t === '$' ? '$' : '%');
+  const m = raw.minus && typeof raw.minus === 'object' ? raw.minus : def.minus;
+  const p = raw.plus && typeof raw.plus === 'object' ? raw.plus : def.plus;
+  return {
+    minus: { type: toLit(m.type), value: Number(m.value) || 0 },
+    plus: { type: toLit(p.type), value: Number(p.value) || 0 },
   };
 }
 
