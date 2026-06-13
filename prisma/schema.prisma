@@ -2139,6 +2139,14 @@ model SettingsChangeAuditLog {
   proposalSummary String  @db.Text // one-line summary the assistant returned
   beforeValue    String?  @db.Text
   afterValue     String?  @db.Text
+  /**
+   * True when the user applied this change despite the conflict detector
+   * flagging it as conflicting with an existing rule (the "Add anyway"
+   * resolution). Null on every other write — never a meaningful "false"
+   * because most writes never hit the conflict detector. Reading this
+   * column powers conflict-override metrics + post-hoc rollback prompts.
+   */
+  conflictOverride Boolean? @map("conflict_override")
   createdAt      DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

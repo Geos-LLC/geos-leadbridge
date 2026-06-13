@@ -8,6 +8,7 @@ import {
   AssistantTarget,
   ApplyRequest,
   ApplyResponse,
+  ConflictResolutionOption,
   InterpretRequest,
   InterpretResponse,
   ProposedChange,
@@ -17,6 +18,12 @@ import { checkUserMessageSafety, checkProposedValueSafety } from './safety-rules
 import { signProposal, verifyProposal } from './proposal-signer';
 import { ClassifierResult, classifyByLlm, classifyByRules } from './classifier';
 import { applyProposal } from './writer';
+import {
+  ConflictDetectorContext,
+  ConflictDetectorResult,
+  detectConflict,
+  openAiLlmCaller,
+} from './conflict-detector';
 
 const AREA_LABELS: Record<AssistantArea, string> = {
   business_information: 'Business Information',
@@ -45,6 +52,14 @@ export class AiSettingsAssistantService {
       this._client = new OpenAI({ apiKey });
     }
     return this._client;
+  }
+
+  /**
+   * Indirection so tests can monkey-patch the conflict detector with a
+   * stub LLM caller. Production uses the real OpenAI-bound caller.
+   */
+  protected async runConflictDetection(ctx: ConflictDetectorContext): Promise<ConflictDetectorResult> {
+    return detectConflict(openAiLlmCaller(this.openai), ctx);
   }
 
   async interpret(userId: string, req: InterpretRequest): Promise<InterpretResponse> {
@@ -138,6 +153,80 @@ export class AiSettingsAssistantService {
       area: result.area,
       storageKey: this.storageKeyFor(result.area),
     };
+
+    // FAQ duplicate check — exact question match (case-insensitive). No
+    // LLM needed for this; FAQ entries are already structured Q&A.
+    if (result.area === 'faq' && result.faqQuestion && currentValue) {
+      try {
+        const parsed = JSON.parse(currentValue);
+        const entries: any[] = Array.isArray(parsed?.entries) ? parsed.entries : [];
+        const target = result.faqQuestion.trim().toLowerCase();
+        const hit = entries.find(e => typeof e?.question === 'string' && e.question.trim().toLowerCase() === target);
+        if (hit) {
+          return {
+            status: 'noop',
+            summary: 'This FAQ already exists.',
+            reason: 'An FAQ with the same question is already saved on this account.',
+            existingRule: `Q: ${hit.question}\nA: ${hit.answer}`,
+            newRule: `Q: ${result.faqQuestion}\nA: ${result.newValue}`,
+          };
+        }
+      } catch { /* faqJson malformed — treat as no existing duplicate */ }
+    }
+
+    // Conflict detection — only for content-comparison areas with
+    // existing text. FAQ skips the LLM comparison (handled above as an
+    // exact-question check); the FAQ blob isn't semantic prose so the
+    // detector would just be noise.
+    if (
+      currentValue &&
+      currentValue.trim() &&
+      result.area !== 'faq'
+    ) {
+      let detection: ConflictDetectorResult;
+      try {
+        detection = await this.runConflictDetection({
+          currentValue,
+          newValue: result.newValue,
+          area: result.area,
+        });
+      } catch (err: any) {
+        // Detector wrapper itself shouldn't throw — the inner detectConflict
+        // already swallows LLM errors. Belt + suspenders: if it does throw,
+        // fall back to compatible-append rather than blocking the user.
+        this.logger.warn(`[interpret] conflict detector errored user=${userId} err=${err?.message || err}`);
+        detection = { verdict: 'compatible', conflictingExcerpt: '', explanation: 'detector errored; falling back to append', fromLlm: false };
+      }
+
+      this.logger.log(
+        `[interpret] conflict-detector user=${userId} area=${result.area} verdict=${detection.verdict} fromLlm=${detection.fromLlm}`,
+      );
+
+      if (detection.verdict === 'duplicate') {
+        return {
+          status: 'noop',
+          summary: 'This is already covered by an existing rule.',
+          reason: detection.explanation,
+          existingRule: detection.conflictingExcerpt,
+          newRule: result.newValue,
+        };
+      }
+
+      if (detection.verdict === 'conflict') {
+        return this.buildConflictResponse({
+          userId,
+          message,
+          target,
+          currentValue,
+          newRuleText: result.newValue,
+          excerpt: detection.conflictingExcerpt,
+          explanation: detection.explanation,
+          savedAccountId,
+        });
+      }
+      // compatible — fall through to apply_ready below.
+    }
+
     const proposedChange: ProposedChange = {
       operation: result.operation as AssistantOperation,
       currentValue,
@@ -196,6 +285,11 @@ export class AiSettingsAssistantService {
       throw err;
     }
 
+    // conflictOverride flows verbatim from the signed payload — only the
+    // server-minted "Add anyway" resolution carries this flag. Tampering
+    // is impossible because the HMAC signature covers the whole payload.
+    const conflictOverride = req.proposal.payload.proposedChange.conflictOverride === true;
+
     const audit = await this.prisma.settingsChangeAuditLog.create({
       data: {
         userId,
@@ -207,17 +301,86 @@ export class AiSettingsAssistantService {
         proposalSummary: req.proposal.payload.summary,
         beforeValue: writeResult.beforeValue,
         afterValue: writeResult.afterValue,
+        conflictOverride: conflictOverride ? true : null,
       },
     });
 
     this.logger.log(
-      `[apply] user=${userId} area=${req.proposal.payload.target.area} storageKey=${writeResult.storageKey} auditId=${audit.id}`,
+      `[apply] user=${userId} area=${req.proposal.payload.target.area} storageKey=${writeResult.storageKey} ` +
+      `auditId=${audit.id}${conflictOverride ? ' conflictOverride=true' : ''}`,
     );
 
     return {
       success: true,
       appliedAt: audit.createdAt.toISOString(),
       auditLogId: audit.id,
+    };
+  }
+
+  private buildConflictResponse(args: {
+    userId: string;
+    message: string;
+    target: AssistantTarget;
+    currentValue: string;
+    newRuleText: string;
+    excerpt: string;
+    explanation: string;
+    savedAccountId: string | null;
+  }): InterpretResponse {
+    const { userId, message, target, currentValue, newRuleText, excerpt, explanation, savedAccountId } = args;
+
+    // Build the "replace conflicting rule" newValue by literal substring
+    // swap. detectConflict guarantees the excerpt is a verbatim substring
+    // of currentValue. If after swap the result is empty / whitespace
+    // (i.e. the excerpt was the entire section), the replacement is just
+    // the new rule.
+    let replacedText = currentValue.split(excerpt).join(newRuleText).trim();
+    if (!replacedText) replacedText = newRuleText;
+    // Collapse the double-blank-line artifact that can show up when the
+    // excerpt was surrounded by paragraph breaks and the swap left them.
+    replacedText = replacedText.replace(/\n{3,}/g, '\n\n');
+
+    const replaceProposal = signProposal(userId, {
+      target,
+      proposedChange: {
+        operation: 'replace',
+        currentValue,
+        newValue: replacedText,
+      },
+      userMessage: message,
+      summary: `Replace conflicting rule in ${AREA_LABELS[target.area]}`,
+      savedAccountId,
+    });
+
+    const addAnywayProposal = signProposal(userId, {
+      target,
+      proposedChange: {
+        operation: 'append',
+        currentValue,
+        newValue: newRuleText,
+        conflictOverride: true,
+      },
+      userMessage: message,
+      summary: `Add to ${AREA_LABELS[target.area]} despite conflict`,
+      savedAccountId,
+    });
+
+    const resolutionOptions: ConflictResolutionOption[] = [
+      { resolution: 'keep_existing', label: 'Keep existing rule' },
+      { resolution: 'replace_conflicting_rule', label: 'Replace existing rule', proposal: replaceProposal },
+      { resolution: 'add_anyway', label: 'Add anyway', proposal: addAnywayProposal },
+    ];
+
+    return {
+      status: 'conflict',
+      summary: 'This conflicts with an existing rule.',
+      reason: explanation,
+      conflict: {
+        existingRule: excerpt,
+        newRule: newRuleText,
+        reason: explanation,
+      },
+      resolutionOptions,
     };
   }
 
