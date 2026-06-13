@@ -1,7 +1,12 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
+import {
+  Plus, Trash2, Save, Loader2, ChevronDown, ChevronRight,
+  Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
+  type LucideIcon,
+} from 'lucide-react';
 import { usersApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
+import { IconTile, type IconTone } from './automation/ui';
 
 // Re-export for downstream imports (Services.tsx, PricingSetupStep.tsx).
 // The canonical definition lives in `../data/defaultPricing` so the wizard
@@ -12,6 +17,86 @@ interface ServicePricingFormProps {
   accountId: string;
   accountName: string;
   saveToAll?: string[]; // array of account IDs to save to (shared pricing mode)
+}
+
+const MONO: CSSProperties = { fontFamily: 'var(--lb-font-mono)' };
+
+const numInputStyle: CSSProperties = {
+  border: '1px solid var(--lb-line)',
+  borderRadius: 8,
+  padding: '6px 8px',
+  fontSize: 12.5,
+  fontFamily: 'var(--lb-font-mono)',
+  color: 'var(--lb-ink-1)',
+  background: 'var(--lb-surface)',
+  outline: 'none',
+  textAlign: 'center',
+};
+
+const textInputStyle: CSSProperties = {
+  border: '1px solid var(--lb-line)',
+  borderRadius: 8,
+  padding: '8px 10px',
+  fontSize: 13,
+  fontFamily: 'var(--lb-font-sans)',
+  color: 'var(--lb-ink-1)',
+  background: 'var(--lb-surface)',
+  outline: 'none',
+};
+
+function SectionPanel({
+  icon, iconTone, title, count, open, onToggle, children,
+}: {
+  icon: LucideIcon;
+  iconTone: IconTone;
+  title: ReactNode;
+  count?: number | string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{
+      background: 'var(--lb-surface)',
+      border: '1.5px solid var(--lb-line)',
+      borderRadius: 14,
+      boxShadow: 'var(--lb-shadow-sm)',
+      overflow: 'hidden',
+    }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 14px',
+          background: 'var(--lb-surface)',
+          border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left',
+        }}
+      >
+        <IconTile icon={icon} tone={iconTone} size="sm" />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</span>
+          {count !== undefined && (
+            <span style={{
+              ...MONO,
+              fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)',
+              background: 'var(--lb-ink-10)',
+              padding: '2px 8px', borderRadius: 999,
+              letterSpacing: 0.02,
+            }}>{count}</span>
+          )}
+        </div>
+        {open ? <ChevronDown size={16} color="var(--lb-ink-5)" /> : <ChevronRight size={16} color="var(--lb-ink-5)" />}
+      </button>
+      {open && (
+        <div style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ServicePricingForm({ accountId, accountName, saveToAll }: ServicePricingFormProps) {
@@ -109,7 +194,17 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
     }
   };
 
-  if (loading) return <div className="flex items-center gap-2 text-sm text-slate-400 py-4"><Loader2 size={16} className="animate-spin" /> Loading pricing...</div>;
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '14px 4px',
+        fontSize: 13, color: 'var(--lb-ink-5)',
+      }}>
+        <Loader2 size={14} className="animate-spin" /> Loading pricing…
+      </div>
+    );
+  }
   if (!pricing) return null;
 
   // Every cleaningType from the (hydrated) pricing renders as a column.
@@ -119,24 +214,44 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   const allTypes = pricing.cleaningTypes || [];
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Service Type Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Service Pricing</h4>
-          <p className="text-[11px] text-slate-400 mt-0.5">{accountName}</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            ...MONO,
+            fontSize: 10.5, fontWeight: 700, color: 'var(--lb-ink-5)',
+            letterSpacing: 0.06, textTransform: 'uppercase',
+          }}>
+            Service Pricing
+          </div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginTop: 2 }}>
+            {accountName}
+          </div>
         </div>
-        <select
-          value={pricing.serviceType}
-          onChange={e => setPricing((p: any) => ({ ...p, serviceType: e.target.value }))}
-          className="text-xs px-2 py-1 border border-slate-200 rounded-lg bg-white"
-        >
-          <option value="cleaning">Cleaning Service</option>
-          <option value="plumbing">Plumbing</option>
-          <option value="landscaping">Landscaping</option>
-          <option value="handyman">Handyman</option>
-          <option value="other">Other Service</option>
-        </select>
+        <div style={{ position: 'relative' }}>
+          <select
+            value={pricing.serviceType}
+            onChange={e => setPricing((p: any) => ({ ...p, serviceType: e.target.value }))}
+            style={{
+              padding: '8px 30px 8px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+              background: 'var(--lb-surface)', color: 'var(--lb-ink-1)',
+              appearance: 'none', cursor: 'pointer', outline: 'none',
+            }}
+          >
+            <option value="cleaning">Cleaning Service</option>
+            <option value="plumbing">Plumbing</option>
+            <option value="landscaping">Landscaping</option>
+            <option value="handyman">Handyman</option>
+            <option value="other">Other Service</option>
+          </select>
+          <ChevronDown size={14} style={{
+            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+            color: 'var(--lb-ink-5)', pointerEvents: 'none',
+          }} />
+        </div>
       </div>
 
       {/* Service Types row removed (2026-06-13). Hiding columns by toggle led
@@ -146,86 +261,110 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
           column. See frontend/src/data/defaultPricing.ts. */}
 
       {/* Square footage adjustment toggle */}
-      <label className="flex items-start gap-2 px-3 py-2 border border-slate-200 rounded-xl cursor-pointer select-none">
+      <label style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        padding: '12px 14px',
+        background: 'var(--lb-surface)',
+        border: '1.5px solid var(--lb-line)',
+        borderRadius: 14,
+        boxShadow: 'var(--lb-shadow-sm)',
+        cursor: 'pointer',
+        userSelect: 'none',
+      }}>
         <input
           type="checkbox"
           checked={pricing.sqftAdjustEnabled !== false}
           onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
-          className="accent-blue-600 w-4 h-4 rounded mt-0.5"
+          style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16, marginTop: 2 }}
         />
-        <div className="flex-1">
-          <div className="text-[12px] font-semibold text-slate-700">Adjust price by square footage</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
-            When the lead's reported sqft exceeds the row's <span className="font-semibold">Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+            Adjust price by square footage
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+            When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
           </div>
         </div>
       </label>
 
       {/* Price Table */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleSection('priceTable')}
-          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          <span>Price Table ({pricing.priceTable?.length || 0} rows)</span>
-          {expandedSections.priceTable ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {expandedSections.priceTable && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[10px]">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500">
-                  <th className="px-2 py-1.5 text-left font-semibold">Bed</th>
-                  <th className="px-2 py-1.5 text-left font-semibold">Bath</th>
-                  <th className="px-2 py-1.5 text-left font-semibold" title="Smallest property size this row's price applies to">Sqft Min</th>
-                  <th className="px-2 py-1.5 text-left font-semibold" title="Largest property size at the row's price — beyond this, AI scales by $/sqft">Sqft Max</th>
-                  {allTypes.map((t: any) => (
-                    <th key={t.key} className="px-2 py-1.5 text-left font-semibold">{t.label}</th>
-                  ))}
-                  {allTypes.map((t: any) => (
-                    <th key={`psf-${t.key}`} className="px-2 py-1.5 text-left font-semibold text-slate-400" title={`${t.label} price per square foot — derived from price ÷ midpoint of the sqft range`}>
-                      $/sqft {t.label.split(' ')[0]}
-                    </th>
-                  ))}
-                  <th className="px-2 py-1.5 w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {pricing.priceTable?.map((row: any, i: number) => {
-                  // Back-compat: rows saved before the min/max split carried a single `sqft` field.
-                  const legacySqft = Number(row.sqft) || 0;
-                  const sqftMin = Number(row.sqftMin) || legacySqft;
-                  const sqftMax = Number(row.sqftMax) || legacySqft;
-                  const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-                  return (
-                  <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/50">
-                    <td className="px-1 py-1">
-                      <input type="number" value={row.bed} min={1} max={10}
+      <SectionPanel
+        icon={Table2}
+        iconTone="gray"
+        title="Price Table"
+        count={`${pricing.priceTable?.length || 0} rows`}
+        open={!!expandedSections.priceTable}
+        onToggle={() => toggleSection('priceTable')}
+      >
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ background: 'var(--lb-ink-10)' }}>
+                <th style={thStyle}>Bed</th>
+                <th style={thStyle}>Bath</th>
+                <th style={thStyle} title="Smallest property size this row's price applies to">Sqft Min</th>
+                <th style={thStyle} title="Largest property size at the row's price — beyond this, AI scales by $/sqft">Sqft Max</th>
+                {allTypes.map((t: any) => (
+                  <th key={t.key} style={thStyle}>{t.label}</th>
+                ))}
+                {allTypes.map((t: any) => (
+                  <th
+                    key={`psf-${t.key}`}
+                    style={{ ...thStyle, color: 'var(--lb-ink-6)' }}
+                    title={`${t.label} price per square foot — derived from price ÷ midpoint of the sqft range`}
+                  >
+                    $/sqft {t.label.split(' ')[0]}
+                  </th>
+                ))}
+                <th style={{ ...thStyle, width: 28 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pricing.priceTable?.map((row: any, i: number) => {
+                // Back-compat: rows saved before the min/max split carried a single `sqft` field.
+                const legacySqft = Number(row.sqft) || 0;
+                const sqftMin = Number(row.sqftMin) || legacySqft;
+                const sqftMax = Number(row.sqftMax) || legacySqft;
+                const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
+                return (
+                  <tr key={i} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                    <td style={tdStyle}>
+                      <input
+                        type="number" value={row.bed} min={1} max={10}
                         onChange={e => updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)}
-                        className="w-10 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                        style={{ ...numInputStyle, width: 44 }}
+                      />
                     </td>
-                    <td className="px-1 py-1">
-                      <input type="number" value={row.bath} min={1} max={10}
+                    <td style={tdStyle}>
+                      <input
+                        type="number" value={row.bath} min={1} max={10}
                         onChange={e => updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)}
-                        className="w-10 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                        style={{ ...numInputStyle, width: 44 }}
+                      />
                     </td>
-                    <td className="px-1 py-1">
-                      <input type="number" value={row.sqftMin ?? ''} min={0} step={50}
+                    <td style={tdStyle}>
+                      <input
+                        type="number" value={row.sqftMin ?? ''} min={0} step={50}
                         onChange={e => updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)}
-                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                        style={{ ...numInputStyle, width: 68 }}
+                      />
                     </td>
-                    <td className="px-1 py-1">
-                      <input type="number" value={row.sqftMax ?? ''} min={0} step={50}
+                    <td style={tdStyle}>
+                      <input
+                        type="number" value={row.sqftMax ?? ''} min={0} step={50}
                         onChange={e => updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)}
-                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                        style={{ ...numInputStyle, width: 68 }}
+                      />
                     </td>
                     {allTypes.map((t: any) => (
-                      <td key={t.key} className="px-1 py-1">
-                        <div className="flex items-center">
-                          <span className="text-slate-400 text-[9px] mr-0.5">$</span>
-                          <input type="number" value={row[t.key] || 0} min={0}
+                      <td key={t.key} style={tdStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--lb-ink-5)', ...MONO }}>$</span>
+                          <input
+                            type="number" value={row[t.key] || 0} min={0}
                             onChange={e => updatePriceCell(i, t.key, parseInt(e.target.value) || 0)}
-                            className="w-14 px-1 py-0.5 border border-slate-200 rounded text-[10px]" />
+                            style={{ ...numInputStyle, width: 60 }}
+                          />
                         </div>
                       </td>
                     ))}
@@ -233,205 +372,242 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                       const price = Number(row[t.key]) || 0;
                       const perSqft = midpoint > 0 ? price / midpoint : 0;
                       return (
-                        <td key={`psf-${t.key}`} className="px-1 py-1">
-                          <span className="text-slate-400 text-[10px]">
+                        <td key={`psf-${t.key}`} style={tdStyle}>
+                          <span style={{ fontSize: 11, color: 'var(--lb-ink-6)', ...MONO }}>
                             {midpoint > 0 ? `$${perSqft.toFixed(3)}` : '—'}
                           </span>
                         </td>
                       );
                     })}
-                    <td className="px-1 py-1">
-                      <button onClick={() => removePriceRow(i)} className="text-slate-300 hover:text-red-500">
-                        <Trash2 size={10} />
+                    <td style={tdStyle}>
+                      <button
+                        type="button"
+                        onClick={() => removePriceRow(i)}
+                        style={iconBtnStyle}
+                        aria-label="Remove row"
+                      >
+                        <Trash2 size={12} />
                       </button>
                     </td>
                   </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <button onClick={addPriceRow}
-              className="w-full px-3 py-1.5 text-[10px] text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-1 border-t border-slate-100">
-              <Plus size={10} /> Add row
-            </button>
-          </div>
-        )}
-      </div>
+                );
+              })}
+            </tbody>
+          </table>
+          <button
+            type="button"
+            onClick={addPriceRow}
+            style={addBtnStyle}
+          >
+            <Plus size={12} /> Add row
+          </button>
+        </div>
+      </SectionPanel>
 
       {/* Frequency Discounts */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleSection('frequency')}
-          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          <span>Frequency Discounts</span>
-          {expandedSections.frequency ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {expandedSections.frequency && (
-          <div className="px-3 py-2 space-y-1.5">
-            {pricing.frequencyDiscounts?.map((fd: any, i: number) => (
-              <div key={fd.key} className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-600">{fd.label}</span>
-                <div className="flex items-center gap-1">
-                  <input type="number" value={fd.discount} min={0} max={50}
-                    onChange={e => updateFreqDiscount(i, parseInt(e.target.value) || 0)}
-                    className="w-12 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
-                  <span className="text-[10px] text-slate-400">%</span>
-                </div>
+      <SectionPanel
+        icon={Repeat}
+        iconTone="purple"
+        title="Frequency Discounts"
+        open={!!expandedSections.frequency}
+        onToggle={() => toggleSection('frequency')}
+      >
+        <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {pricing.frequencyDiscounts?.map((fd: any, i: number) => (
+            <div key={fd.key} style={rowStyle}>
+              <span style={rowLabelStyle}>{fd.label}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="number" value={fd.discount} min={0} max={50}
+                  onChange={e => updateFreqDiscount(i, parseInt(e.target.value) || 0)}
+                  style={{ ...numInputStyle, width: 52 }}
+                />
+                <span style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', ...MONO }}>%</span>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          ))}
+        </div>
+      </SectionPanel>
 
       {/* Add-ons / Extras */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleSection('extras')}
-          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          <span>Add-ons ({pricing.extras?.length || 0})</span>
-          {expandedSections.extras ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {expandedSections.extras && (
-          <div className="px-3 py-2 space-y-1.5">
-            {pricing.extras?.map((ex: any, i: number) => (
-              <div key={ex.key} className="flex items-center gap-2">
-                <input type="text" value={ex.label} placeholder="Add-on name"
-                  onChange={e => updateExtra(i, 'label', e.target.value)}
-                  className="flex-1 px-2 py-1 border border-slate-200 rounded text-[10px]" />
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <span className="text-slate-400 text-[9px]">$</span>
-                  <input type="number" value={ex.price} min={0}
-                    onChange={e => updateExtra(i, 'price', parseInt(e.target.value) || 0)}
-                    className="w-12 px-1 py-1 border border-slate-200 rounded text-[10px] text-center" />
-                </div>
-                <button onClick={() => removeExtra(i)} className="text-slate-300 hover:text-red-500 shrink-0">
-                  <Trash2 size={10} />
-                </button>
+      <SectionPanel
+        icon={PlusCircle}
+        iconTone="blue"
+        title="Add-ons"
+        count={pricing.extras?.length || 0}
+        open={!!expandedSections.extras}
+        onToggle={() => toggleSection('extras')}
+      >
+        <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {pricing.extras?.map((ex: any, i: number) => (
+            <div key={ex.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="text" value={ex.label} placeholder="Add-on name"
+                onChange={e => updateExtra(i, 'label', e.target.value)}
+                style={{ ...textInputStyle, flex: 1, minWidth: 0 }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: 'var(--lb-ink-5)', ...MONO }}>$</span>
+                <input
+                  type="number" value={ex.price} min={0}
+                  onChange={e => updateExtra(i, 'price', parseInt(e.target.value) || 0)}
+                  style={{ ...numInputStyle, width: 60 }}
+                />
               </div>
-            ))}
-            <button onClick={addExtra}
-              className="w-full py-1 text-[10px] text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-1 rounded">
-              <Plus size={10} /> Add extra
-            </button>
-          </div>
-        )}
-      </div>
+              <button
+                type="button"
+                onClick={() => removeExtra(i)}
+                style={iconBtnStyle}
+                aria-label="Remove add-on"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addExtra} style={addBtnInlineStyle}>
+            <Plus size={12} /> Add extra
+          </button>
+        </div>
+      </SectionPanel>
 
       {/* Condition Surcharges + Pet Surcharge */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleSection('surcharges')}
-          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          <span>Surcharges</span>
-          {expandedSections.surcharges ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {expandedSections.surcharges && (
-          <div className="px-3 py-2 space-y-2">
-            <div className="text-[10px] font-semibold text-slate-500">Property Condition</div>
-            {pricing.conditionSurcharges?.map((cs: any, i: number) => (
-              <div key={cs.key} className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-600">{cs.label}</span>
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-400">+$</span>
-                  <input type="number" value={cs.surcharge} min={0}
-                    onChange={e => updateConditionSurcharge(i, parseInt(e.target.value) || 0)}
-                    className="w-14 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
-                </div>
-              </div>
-            ))}
-            <div className="border-t border-slate-100 pt-2 flex items-center justify-between">
-              <span className="text-[11px] text-slate-600">Pet Surcharge</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-400">+$</span>
-                <input type="number" value={pricing.petSurcharge || 0} min={0}
-                  onChange={e => setPricing((p: any) => ({ ...p, petSurcharge: parseInt(e.target.value) || 0 }))}
-                  className="w-14 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
+      <SectionPanel
+        icon={AlertCircle}
+        iconTone="orange"
+        title="Surcharges"
+        open={!!expandedSections.surcharges}
+        onToggle={() => toggleSection('surcharges')}
+      >
+        <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={groupHeadingStyle}>Property Condition</div>
+          {pricing.conditionSurcharges?.map((cs: any, i: number) => (
+            <div key={cs.key} style={rowStyle}>
+              <span style={rowLabelStyle}>{cs.label}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--lb-ink-5)', ...MONO }}>+$</span>
+                <input
+                  type="number" value={cs.surcharge} min={0}
+                  onChange={e => updateConditionSurcharge(i, parseInt(e.target.value) || 0)}
+                  style={{ ...numInputStyle, width: 60 }}
+                />
               </div>
             </div>
+          ))}
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', paddingTop: 10, ...rowStyle }}>
+            <span style={rowLabelStyle}>Pet Surcharge</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--lb-ink-5)', ...MONO }}>+$</span>
+              <input
+                type="number" value={pricing.petSurcharge || 0} min={0}
+                onChange={e => setPricing((p: any) => ({ ...p, petSurcharge: parseInt(e.target.value) || 0 }))}
+                style={{ ...numInputStyle, width: 60 }}
+              />
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      </SectionPanel>
 
       {/* Discounts */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleSection('discounts')}
-          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-        >
-          <span>Discounts</span>
-          {expandedSections.discounts ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {expandedSections.discounts && (
-          <div className="px-3 py-2 space-y-3">
-            {/* Recurring cleaning discount */}
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 mb-1">Recurring Cleaning Discount</div>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-600">Discount for recurring customers</span>
-                <div className="flex items-center gap-1">
-                  <input type="number" value={pricing.recurringDiscount || 0} min={0} max={50}
-                    onChange={e => setPricing((p: any) => ({ ...p, recurringDiscount: parseInt(e.target.value) || 0 }))}
-                    className="w-12 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
-                  <span className="text-[10px] text-slate-400">%</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Order amount discounts */}
-            <div className="border-t border-slate-100 pt-2">
-              <div className="text-[10px] font-semibold text-slate-500 mb-1.5">Order Amount Discounts</div>
-              <div className="space-y-1.5">
-                {(pricing.orderDiscounts || []).map((od: any, i: number) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-500">Over</span>
-                    <div className="flex items-center gap-0.5">
-                      <span className="text-[9px] text-slate-400">$</span>
-                      <input type="number" value={od.minAmount} min={0}
-                        onChange={e => {
-                          const ods = [...(pricing.orderDiscounts || [])];
-                          ods[i] = { ...ods[i], minAmount: parseInt(e.target.value) || 0 };
-                          setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
-                        }}
-                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
-                    </div>
-                    <span className="text-[10px] text-slate-500">→</span>
-                    <div className="flex items-center gap-0.5">
-                      <input type="number" value={od.discount} min={0} max={50}
-                        onChange={e => {
-                          const ods = [...(pricing.orderDiscounts || [])];
-                          ods[i] = { ...ods[i], discount: parseInt(e.target.value) || 0 };
-                          setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
-                        }}
-                        className="w-12 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
-                      <span className="text-[10px] text-slate-400">% off</span>
-                    </div>
-                    <button onClick={() => {
-                      setPricing((p: any) => ({ ...p, orderDiscounts: (p.orderDiscounts || []).filter((_: any, j: number) => j !== i) }));
-                    }} className="text-slate-300 hover:text-red-500">
-                      <Trash2 size={10} />
-                    </button>
-                  </div>
-                ))}
-                <button onClick={() => {
-                  setPricing((p: any) => ({ ...p, orderDiscounts: [...(p.orderDiscounts || []), { minAmount: 0, discount: 0 }] }));
-                }}
-                  className="w-full py-1 text-[10px] text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-1 rounded">
-                  <Plus size={10} /> Add discount tier
-                </button>
+      <SectionPanel
+        icon={BadgePercent}
+        iconTone="green"
+        title="Discounts"
+        open={!!expandedSections.discounts}
+        onToggle={() => toggleSection('discounts')}
+      >
+        <div style={{ padding: '10px 14px 14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Recurring cleaning discount */}
+          <div>
+            <div style={groupHeadingStyle}>Recurring Cleaning Discount</div>
+            <div style={{ ...rowStyle, marginTop: 8 }}>
+              <span style={rowLabelStyle}>Discount for recurring customers</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="number" value={pricing.recurringDiscount || 0} min={0} max={50}
+                  onChange={e => setPricing((p: any) => ({ ...p, recurringDiscount: parseInt(e.target.value) || 0 }))}
+                  style={{ ...numInputStyle, width: 52 }}
+                />
+                <span style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', ...MONO }}>%</span>
               </div>
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Order amount discounts */}
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', paddingTop: 12 }}>
+            <div style={groupHeadingStyle}>Order Amount Discounts</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {(pricing.orderDiscounts || []).map((od: any, i: number) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--lb-ink-5)' }}>Over</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 11, color: 'var(--lb-ink-5)', ...MONO }}>$</span>
+                    <input
+                      type="number" value={od.minAmount} min={0}
+                      onChange={e => {
+                        const ods = [...(pricing.orderDiscounts || [])];
+                        ods[i] = { ...ods[i], minAmount: parseInt(e.target.value) || 0 };
+                        setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
+                      }}
+                      style={{ ...numInputStyle, width: 70 }}
+                    />
+                  </div>
+                  <span style={{ fontSize: 11.5, color: 'var(--lb-ink-5)' }}>→</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="number" value={od.discount} min={0} max={50}
+                      onChange={e => {
+                        const ods = [...(pricing.orderDiscounts || [])];
+                        ods[i] = { ...ods[i], discount: parseInt(e.target.value) || 0 };
+                        setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
+                      }}
+                      style={{ ...numInputStyle, width: 52 }}
+                    />
+                    <span style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', ...MONO }}>% off</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPricing((p: any) => ({ ...p, orderDiscounts: (p.orderDiscounts || []).filter((_: any, j: number) => j !== i) }));
+                    }}
+                    style={iconBtnStyle}
+                    aria-label="Remove discount tier"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setPricing((p: any) => ({ ...p, orderDiscounts: [...(p.orderDiscounts || []), { minAmount: 0, discount: 0 }] }));
+                }}
+                style={addBtnInlineStyle}
+              >
+                <Plus size={12} /> Add discount tier
+              </button>
+            </div>
+          </div>
+        </div>
+      </SectionPanel>
 
       {/* Save Button */}
       <button
+        type="button"
         onClick={handleSave}
         disabled={saving}
-        className="w-full px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          background: saved ? 'var(--lb-success)' : 'var(--lb-accent)',
+          color: 'var(--lb-accent-fg)',
+          fontSize: 13.5, fontWeight: 600, fontFamily: 'inherit',
+          border: 0, borderRadius: 10,
+          cursor: saving ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          opacity: saving ? 0.7 : 1,
+          boxShadow: 'var(--lb-shadow-sm)',
+          transition: 'background 160ms ease',
+        }}
       >
         {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
         {saved ? 'Saved!' : 'Save Pricing'}
@@ -439,3 +615,79 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
     </div>
   );
 }
+
+// ─── Local style helpers ────────────────────────────────────────────────
+
+const thStyle: CSSProperties = {
+  padding: '8px 6px',
+  textAlign: 'left',
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: 'var(--lb-ink-5)',
+  textTransform: 'uppercase',
+  letterSpacing: 0.04,
+  fontFamily: 'var(--lb-font-mono)',
+  whiteSpace: 'nowrap',
+};
+
+const tdStyle: CSSProperties = {
+  padding: '6px 6px',
+  verticalAlign: 'middle',
+};
+
+const rowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+};
+
+const rowLabelStyle: CSSProperties = {
+  fontSize: 13, color: 'var(--lb-ink-2)', fontWeight: 500,
+};
+
+const groupHeadingStyle: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: 'var(--lb-ink-5)',
+  textTransform: 'uppercase',
+  letterSpacing: 0.06,
+  fontFamily: 'var(--lb-font-mono)',
+};
+
+const iconBtnStyle: CSSProperties = {
+  width: 26, height: 26, borderRadius: 6,
+  background: 'transparent',
+  border: '1px solid transparent',
+  color: 'var(--lb-ink-6)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const addBtnStyle: CSSProperties = {
+  width: '100%',
+  padding: '10px 14px',
+  borderTop: '1px solid var(--lb-line-soft)',
+  background: 'var(--lb-surface)',
+  border: 0,
+  borderTopWidth: 1,
+  borderTopStyle: 'solid',
+  borderTopColor: 'var(--lb-line-soft)',
+  color: 'var(--lb-accent)',
+  fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+  cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
+
+const addBtnInlineStyle: CSSProperties = {
+  width: '100%',
+  padding: '8px 12px',
+  background: 'var(--lb-accent-tint)',
+  border: '1px dashed var(--lb-accent-line)',
+  borderRadius: 8,
+  color: 'var(--lb-accent)',
+  fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+  cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
