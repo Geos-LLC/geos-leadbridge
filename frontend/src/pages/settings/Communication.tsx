@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Phone, PhoneCall, MessageSquare, Reply, Shield, Bell, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail, UserCheck,
+  Phone, PhoneCall, MessageSquare, Bell, Check, Zap, Loader2, Building2, Pencil, X, AlertCircle, Mail,
 } from 'lucide-react';
 import {
-  SettingCard, FieldRow, Checkbox, ActionLink,
+  SettingCard, FieldRow, ActionLink,
 } from '../../components/automation/ui';
-import { usersApi, templatesApi, thumbtackApi, notificationsApi, followUpApi, type TenantPhoneNumber } from '../../services/api';
+import { usersApi, templatesApi, thumbtackApi, notificationsApi, type TenantPhoneNumber } from '../../services/api';
 import type { MessageTemplate, NotificationRule, SavedAccount } from '../../types';
 import { useAuthStore } from '../../store/authStore';
 import { notify } from '../../store/notificationStore';
@@ -34,9 +34,6 @@ export function SettingsCommunication() {
   const [businessPhoneValue, setBusinessPhoneValue] = useState('');
   const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
   const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
-  const [twoWay, setTwoWay] = useState(true);
-  const [routeReplies, setRouteReplies] = useState(true);
-  const [honorStop, setHonorStop] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
@@ -46,14 +43,13 @@ export function SettingsCommunication() {
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [overrideError, setOverrideError] = useState<string | null>(null);
 
-  // Business Alerts state — cascades across every connected account.
+  // Notifications state — cascades across every connected account.
   // We keep per-account snapshots so toggles can derive an aggregate
   // (all-on / all-off / mixed) without an extra fetch.
   const [newLeadByAccount, setNewLeadByAccount] = useState<Record<string, NotificationRule | null>>({});
   const [customerReplyByAccount, setCustomerReplyByAccount] = useState<Record<string, NotificationRule | null>>({});
-  const [aiHandoffByAccount, setAiHandoffByAccount] = useState<Record<string, boolean>>({});
   const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
-  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | 'ai_handoff' | null>(null);
+  const [savingRuleKind, setSavingRuleKind] = useState<'new_lead' | 'customer_reply' | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -75,7 +71,7 @@ export function SettingsCommunication() {
     return () => { alive = false; };
   }, []);
 
-  // Load the Business Alerts state across EVERY account whenever the
+  // Load the Notifications state across EVERY account whenever the
   // account list arrives. Cascade design — there is no per-account
   // selector here; the toggles act on all accounts in parallel.
   useEffect(() => {
@@ -83,28 +79,23 @@ export function SettingsCommunication() {
     let alive = true;
     setLoadingAlerts(true);
     Promise.all(accounts.map(a =>
-      Promise.all([
-        notificationsApi.getRules(a.id).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
-        followUpApi.getSettings(a.id).catch(() => ({ success: false, settings: undefined })),
-      ]).then(([rulesRes, fuRes]) => ({
-        accountId: a.id,
-        rules: (rulesRes.rules || []) as NotificationRule[],
-        aiOn: !!((fuRes as any)?.settings?.aiConversationEnabled),
-      })),
+      notificationsApi.getRules(a.id)
+        .catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] }))
+        .then(rulesRes => ({
+          accountId: a.id,
+          rules: (rulesRes.rules || []) as NotificationRule[],
+        })),
     )).then(results => {
       if (!alive) return;
       const newLeadMap: Record<string, NotificationRule | null> = {};
       const replyMap: Record<string, NotificationRule | null> = {};
-      const aiMap: Record<string, boolean> = {};
-      for (const { accountId, rules, aiOn } of results) {
+      for (const { accountId, rules } of results) {
         // Owner-side alerts only — exclude sendToCustomer rules (auto-reply lives on Automation).
         newLeadMap[accountId] = rules.find(r => r.triggerType === 'new_lead' && !r.sendToCustomer) || null;
         replyMap[accountId]   = rules.find(r => r.triggerType === 'customer_reply' && !r.sendToCustomer) || null;
-        aiMap[accountId]      = aiOn;
       }
       setNewLeadByAccount(newLeadMap);
       setCustomerReplyByAccount(replyMap);
-      setAiHandoffByAccount(aiMap);
     }).finally(() => {
       if (alive) setLoadingAlerts(false);
     });
@@ -205,32 +196,6 @@ export function SettingsCommunication() {
       notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed to update.`);
     } else {
       notify.success('Saved', on ? `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert on for ${accounts.length} accounts` : `${kind === 'new_lead' ? 'New lead' : 'Customer reply'} alert off`);
-    }
-  }
-
-  async function cascadeAiHandoff(on: boolean) {
-    setSavingRuleKind('ai_handoff');
-    const results = await Promise.all(accounts.map(async a => {
-      try {
-        await followUpApi.saveSettings(a.id, { aiConversationEnabled: on } as any);
-        return { accountId: a.id, ok: true };
-      } catch (err: any) {
-        return { accountId: a.id, ok: false };
-      }
-    }));
-    setAiHandoffByAccount(prev => {
-      const next = { ...prev };
-      for (const r of results) if (r.ok) next[r.accountId] = on;
-      return next;
-    });
-    setSavingRuleKind(null);
-    const failed = results.filter(r => !r.ok);
-    if (failed.length === 0) {
-      notify.success('Saved', on ? `AI handoff alerts on for ${accounts.length} accounts` : 'AI handoff alerts off');
-    } else if (failed.length === accounts.length) {
-      notify.error('Error', 'Failed to update AI Conversation setting');
-    } else {
-      notify.error('Partial failure', `${failed.length} of ${accounts.length} accounts failed.`);
     }
   }
 
@@ -476,38 +441,11 @@ export function SettingsCommunication() {
         )}
       </SettingCard>
 
-      <SettingCard
-        icon={MessageSquare}
-        iconTone="green"
-        title="SMS"
-        subtitle="How Leadbridge sends and receives text messages."
-        enabled={twoWay}
-        onToggle={setTwoWay}
-        contentPad="8px 24px 24px"
-      >
-        <FieldRow icon={Reply} iconTone="green" label="Two-way SMS" sublabel="Customer replies route into Lead Activity.">
-          <Checkbox
-            checked={routeReplies}
-            onChange={setRouteReplies}
-            label="Route customer SMS replies into the lead's thread"
-            sublabel="Replies appear in Lead Activity and trigger automation."
-          />
-        </FieldRow>
-        <FieldRow icon={Shield} iconTone="orange" label="STOP / HELP" sublabel="Compliance keywords required for SMS." noBorder>
-          <Checkbox
-            checked={honorStop}
-            onChange={setHonorStop}
-            label="Automatically honor STOP, UNSUBSCRIBE and HELP"
-            sublabel="Required by carriers. Customers who reply STOP won't receive further texts."
-          />
-        </FieldRow>
-      </SettingCard>
-
-      <LeadBridgeNumberLock feature="SMS business alerts" />
+      <LeadBridgeNumberLock feature="Notifications" />
       <SettingCard
         icon={Bell}
         iconTone="orange"
-        title="Business Alerts"
+        title="Notifications"
         subtitle={accounts.length > 0
           ? `SMS sent to your team about lead activity. Applies to all ${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}.`
           : 'SMS sent to your team about lead activity.'}
@@ -524,7 +462,6 @@ export function SettingsCommunication() {
         ) : (() => {
           const newLeadAgg = aggregate(accounts.map(a => !!newLeadByAccount[a.id]?.enabled));
           const replyAgg = aggregate(accounts.map(a => !!customerReplyByAccount[a.id]?.enabled));
-          const aiAgg = aggregate(accounts.map(a => !!aiHandoffByAccount[a.id]));
           return (
             <>
               <BusinessAlertRow
@@ -546,17 +483,6 @@ export function SettingsCommunication() {
                 saving={savingRuleKind === 'customer_reply'}
                 onToggle={on => cascadeRule('customer_reply', on)}
                 onEditTemplate={() => goToTemplate('Customer Reply')}
-              />
-              <BusinessAlertRow
-                icon={UserCheck}
-                iconTone="orange"
-                label="AI handoff alert"
-                sublabel="When AI flags the conversation for human takeover. Also enables AI auto-replies in Automation."
-                agg={aiAgg}
-                saving={savingRuleKind === 'ai_handoff'}
-                onToggle={cascadeAiHandoff}
-                onEditTemplate={() => goToTemplate('Ready to Book')}
-                onConfigure={() => navigate('/automation')}
                 noBorder
               />
             </>
