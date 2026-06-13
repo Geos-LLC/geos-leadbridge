@@ -64,10 +64,15 @@ export default function WizardShell({
   const progressPct = Math.round(((currentIndex + 1) / totalSteps) * 100);
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'var(--lb-bg)' }}>
-      {/* Left rail — step list */}
+    <div
+      className="flex overflow-hidden"
+      style={{ height: '100dvh', background: 'var(--lb-bg)' }}
+    >
+      {/* Left rail — step list. Stays put while only the main content
+          scrolls, because the root is locked to viewport height and the
+          aside is a flex column with its own internal scroll on .nav. */}
       <aside
-        className="hidden md:flex md:flex-col shrink-0 border-r"
+        className="hidden md:flex md:flex-col shrink-0 border-r h-full"
         style={{
           width: 260,
           background: 'var(--lb-surface)',
