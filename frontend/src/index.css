@@ -107,3 +107,39 @@ h1, h2, h3, h4 {
     height: auto !important;
   }
 }
+
+/* ─── Responsive: horizontal-scroll tab bars at ≤760px ───
+   Settings tabs, Account tabs, status filters, Follow-up cadence stepper
+   become single-row with hidden scrollbar so children stay full-size and
+   don't wrap unevenly. The Automation Plan Switcher is the exception —
+   primary nav must never be a cut-off scroll, so it stacks vertically. */
+@media (max-width: 760px) {
+  .lb-settings-tabs,
+  .lb-account-tabs {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .lb-settings-tabs > *,
+  .lb-account-tabs > * {
+    flex: 0 0 auto !important;
+  }
+  /* Hide scrollbar but keep functional */
+  .lb-settings-tabs::-webkit-scrollbar,
+  .lb-account-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .lb-settings-tabs,
+  .lb-account-tabs {
+    scrollbar-width: none;
+  }
+
+  /* Plan switcher stacks one segment per row (per spec — primary nav
+     must not scroll horizontally). Each segment becomes full-width. */
+  .lb-plan-switcher {
+    flex-direction: column !important;
+  }
+  .lb-plan-segment {
+    width: 100% !important;
+  }
+}
