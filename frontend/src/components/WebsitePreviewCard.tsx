@@ -54,6 +54,11 @@ export function WebsitePreviewCard({ url, metadata, tone = 'wizard' }: Props) {
               src={m.imageUrl}
               alt={m.title || 'Site preview'}
               loading="lazy"
+              // og:image + Microlink screenshot hosts often 403 hotlinks
+              // when they see a referer for a domain they don't allow.
+              // Strip the referer so the request looks like a direct
+              // visit — restores the thumbnail across most CDNs.
+              referrerPolicy="no-referrer"
               onError={() => setImgFailed(true)}
               className="w-full h-full object-cover object-top"
             />

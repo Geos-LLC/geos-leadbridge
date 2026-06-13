@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone, Sparkles } from 'lucide-react';
-import { notificationsApi, usersApi } from '../../../services/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, DownloadCloud, Globe,
+  Loader2, Phone, Sparkles, Users,
+} from 'lucide-react';
+import { authApi, notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
 import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
+import type { SavedAccount } from '../../../types';
 import { getStepMeta } from '../wizardConfig';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
+import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -26,20 +31,36 @@ interface VerifyOutcome {
   errorMessage?: string;
 }
 
-// Business website step. Now runs the URL through the backend's
-// verifyWebsite endpoint before accepting it:
-//   - Empty input + "I don't have a website" → skipped path (no check)
-//   - Non-empty + reachable → show "We found your site" briefly, save
-//     URL + metadata, advance
-//   - Non-empty + unreachable → inline error with the specific reason,
-//     user can edit and retry, or pick "I don't have a website"
-// The parsed metadata (title / description / phone) is persisted on
-// User.websiteMetadataJson so later wizard steps can pre-fill answers.
+/**
+ * Wizard step 2 — Business contact + website.
+ *
+ * Order matters here. Per spec the section stack runs:
+ *
+ *   1. Business phone   — User.businessPhone, the owner's primary number
+ *      that alerts forward TO and TT registers as the primary associate.
+ *      Pre-populated from signup when provided; per-TT-account associate
+ *      numbers expand below it (same editor that Settings → Communication
+ *      uses).
+ *   2. LeadBridge phone — TenantPhoneNumber, the dedicated outbound number
+ *      LeadBridge sends customer texts/calls FROM.
+ *   3. Website URL      — User.website + websiteMetadataJson. A dedicated
+ *      "Fetch site data" button runs verify + Playbook/FAQ apply WITHOUT
+ *      advancing the wizard, so the user can confirm what we pulled
+ *      before committing to Continue.
+ *   4. Thumbtack profile URLs — one per connected TT account, each with
+ *      its own "Fetch from Thumbtack" button that saves the URL + pulls
+ *      business info into the Playbook on demand.
+ *
+ * "Save & Continue" still does the full verify-if-needed + persist + advance
+ * flow, so users who just type a URL and hit the bottom CTA also get the
+ * old behavior. The Fetch buttons are an upgrade, not a replacement.
+ */
 export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, saving, setSaving }: Props) {
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   const meta = getStepMeta('business');
 
+  // ── Website state ──────────────────────────────────────────────────
   const [value, setValue] = useState<string>(user?.website ?? '');
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
@@ -49,12 +70,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     | { kind: 'valid'; outcome: VerifyOutcome }
   >({ kind: 'idle' });
 
-  // LeadBridge phone — the dedicated number purchased from Twilio via
-  // Sigcore that LeadBridge uses to text/call customers on the user's
-  // behalf. Stored on TenantPhoneNumber, NOT User.businessPhone.
-  // (User.businessPhone is the agent's own phone where alerts forward
-  //  TO; the tenant phone is what alerts/messages get sent FROM.)
+  // ── LeadBridge phone state (TenantPhoneNumber) ─────────────────────
   const savedAccounts = useAppStore(s => s.savedAccounts);
+  const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [phonesLoading, setPhonesLoading] = useState(true);
   const [areaCode, setAreaCode] = useState('');
@@ -65,16 +83,31 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [purchasingPhone, setPurchasingPhone] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
-  // Per-account public Thumbtack profile URL. Moved here from the
-  // Connect step — it's a data-source input, not an OAuth setting.
-  // Without it the Partner API only returns businessID + name + phone,
-  // which gives Pull-from-Thumbtack nothing useful to merge into
-  // playbookSeed.businessInformation.
+  // ── Business phone state (User.businessPhone) ──────────────────────
+  // Pre-populated from signup. Saved via explicit button — same UX as
+  // Settings → General so users see a consistent affordance.
+  const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone ?? '');
+  const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
+  const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
+  const [businessPhoneSavedAt, setBusinessPhoneSavedAt] = useState<number | null>(null);
+  // Per-TT-account associate phones expander. Off by default — the
+  // primary business number is usually enough; teams add additional
+  // crew numbers only when needed.
+  const [showAssociates, setShowAssociates] = useState(false);
+
+  // ── Per-account TT profile URL state ───────────────────────────────
   const [ttUrls, setTtUrls] = useState<Record<string, string>>({});
   const ttUrlsInitialRef = useRef<Record<string, string>>({});
+  // accountId currently running the explicit "Fetch from Thumbtack" pull.
+  const [pullingTtId, setPullingTtId] = useState<string | null>(null);
 
+  const ttAccounts = useMemo(
+    () => savedAccounts.filter(a => a.platform === 'thumbtack'),
+    [savedAccounts],
+  );
+
+  // ── Effects: hydrate everything we render ─────────────────────────
   useEffect(() => {
-    const ttAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
     if (ttAccounts.length === 0) return;
     let cancelled = false;
     Promise.all(
@@ -91,8 +124,35 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts.map(a => a.id).join(',')]);
+  }, [ttAccounts.map(a => a.id).join(',')]);
 
+  useEffect(() => {
+    let cancelled = false;
+    notificationsApi.listTenantPhones()
+      .then(res => {
+        if (cancelled) return;
+        const active = (res.data || []).filter(p => p.status === 'ACTIVE' || p.status === 'GRACE_PERIOD');
+        setTenantPhones(active);
+      })
+      .catch(() => { /* non-fatal — assume no phones and let user provision */ })
+      .finally(() => { if (!cancelled) setPhonesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Keep the input in sync when the auth store refreshes (e.g. after a
+  // background /auth/profile fetch fills in a signup-time businessPhone).
+  useEffect(() => {
+    setBusinessPhone((user as any)?.businessPhone ?? '');
+  }, [(user as any)?.id, (user as any)?.businessPhone]);
+
+  // Auto-clear the "Saved" indicator after the standard 2.2s.
+  useEffect(() => {
+    if (!businessPhoneSavedAt) return;
+    const t = setTimeout(() => setBusinessPhoneSavedAt(null), 2200);
+    return () => clearTimeout(t);
+  }, [businessPhoneSavedAt]);
+
+  // ── TT profile URL save (on blur) ─────────────────────────────────
   const saveTtUrl = async (accountId: string) => {
     const next = (ttUrls[accountId] || '').trim();
     if (next === (ttUrlsInitialRef.current[accountId] || '').trim()) return;
@@ -109,24 +169,8 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    notificationsApi.listTenantPhones()
-      .then(res => {
-        if (cancelled) return;
-        const active = (res.data || []).filter(p => p.status === 'ACTIVE' || p.status === 'GRACE_PERIOD');
-        setTenantPhones(active);
-      })
-      .catch(() => { /* non-fatal — assume no phones and let user provision */ })
-      .finally(() => { if (!cancelled) setPhonesLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
+  // ── LeadBridge phone provisioning ─────────────────────────────────
   async function searchPhones() {
-    // Need at least one SavedAccount to attach the phone to. If the
-    // user got to this step without connecting an account, gently
-    // explain — they can still save the website + come back to phone
-    // setup in Settings.
     if (savedAccounts.length === 0) {
       setPhoneError('Connect an account in the previous step first — phone numbers attach to a specific account.');
       return;
@@ -172,19 +216,53 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
   }
 
-  async function verifyAndContinue() {
-    if (saving) return;
+  // ── Business phone save ───────────────────────────────────────────
+  async function handleSaveBusinessPhone() {
+    setBusinessPhoneError(null);
+    const trimmed = businessPhone.trim();
+    if (trimmed) {
+      const digits = trimmed.replace(/\D/g, '');
+      const valid = digits.length === 10 || (digits.length === 11 && digits.startsWith('1')) || digits.length > 10;
+      if (!valid) {
+        setBusinessPhoneError('Enter a valid phone number');
+        return;
+      }
+    }
+    setSavingBusinessPhone(true);
+    try {
+      await usersApi.updateProfile({ businessPhone: trimmed || undefined });
+      // Refresh the auth cache so the rest of the app reads the new
+      // value without a hard reload.
+      try {
+        const token = localStorage.getItem('token') || '';
+        const fresh: any = await authApi.getProfile();
+        const u = fresh?.user ?? fresh;
+        if (u?.id) setAuth(u, token);
+      } catch { /* silent — the input still shows the new value locally */ }
+      setBusinessPhoneSavedAt(Date.now());
+    } catch (e: any) {
+      setBusinessPhoneError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSavingBusinessPhone(false);
+    }
+  }
+
+  // ── Website verify + apply ────────────────────────────────────────
+  // Shared core used by both the explicit "Fetch site data" button and
+  // the bottom "Save & Continue" button. Returns the verify outcome so
+  // callers can decide what to do next (stay vs. advance).
+  async function runVerifyAndApply(): Promise<VerifyOutcome | null> {
     const url = value.trim();
-    if (url.length === 0) return;
-    setSaving(true);
+    if (!url) return null;
     setVerifyState({ kind: 'checking' });
     try {
       const outcome = await usersApi.verifyWebsite(url);
       if (!outcome.reachable) {
         setVerifyState({ kind: 'invalid', outcome });
-        return;
+        return outcome;
       }
-      // Persist normalized URL + parsed metadata.
+      // Persist normalized URL + parsed metadata immediately so a refresh
+      // (or the bottom Save & Continue) doesn't need to re-verify.
       const { user: updated } = await usersApi.updateProfile({
         website: outcome.normalizedUrl,
         websiteMetadata: outcome.metadata ?? null,
@@ -200,12 +278,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           token,
         );
       }
-
-      // Auto-apply to AI Playbook + FAQ inside the wizard. Both are
-      // best-effort: the data is already saved on the user, so a failure
-      // here doesn't block the wizard. The two applies are independent —
-      // either succeeding is useful — so we run them in parallel and
-      // report a combined toast.
+      // Best-effort apply to AI Playbook + FAQ. Failures here are
+      // non-fatal — the URL + metadata are saved, the user can still
+      // continue.
       if (outcome.metadata?.playbookSeed) {
         setVerifyState({ kind: 'applying' });
         const [playbookRes, faqRes] = await Promise.all([
@@ -231,12 +306,41 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           );
         }
       }
-
       setVerifyState({ kind: 'valid', outcome });
-      await onSaveContinue();
+      return outcome;
     } catch (err: any) {
-      notify.error('Could not save', err.response?.data?.message || 'Please try again.');
+      notify.error('Could not fetch', err.response?.data?.message || 'Please try again.');
       setVerifyState({ kind: 'idle' });
+      return null;
+    }
+  }
+
+  // Explicit "Fetch site data" — verify + apply, NO advance. Lets the
+  // user preview what we pulled before committing.
+  async function fetchSiteData() {
+    if (saving || isBusy) return;
+    setSaving(true);
+    try {
+      await runVerifyAndApply();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function verifyAndContinue() {
+    if (saving) return;
+    const url = value.trim();
+    if (url.length === 0) return;
+    setSaving(true);
+    try {
+      // If the URL hasn't been verified yet (user typed it but didn't
+      // click Fetch), do the full flow inline. If it's already saved +
+      // verified, skip the re-verify and just advance.
+      if (!savedAndVerified) {
+        const outcome = await runVerifyAndApply();
+        if (!outcome || !outcome.reachable) return;
+      }
+      await onSaveContinue();
     } finally {
       setSaving(false);
     }
@@ -246,7 +350,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     if (saving) return;
     setSaving(true);
     try {
-      // Clear any previously-saved URL so it can't haunt later steps.
       const { user: updated } = await usersApi.updateProfile({
         website: null,
         websiteMetadata: null,
@@ -270,15 +373,58 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
   }
 
+  // ── Thumbtack profile pull ────────────────────────────────────────
+  // Saves the URL (if dirty) then asks the backend to pull business info
+  // off the Thumbtack profile and merge it into the Playbook. Same
+  // endpoint Settings → AI Playbook uses; just surfaced per-URL here so
+  // the user sees a 1:1 button for what they just typed.
+  async function fetchFromThumbtack(accountId: string) {
+    const next = (ttUrls[accountId] || '').trim();
+    if (!next) {
+      notify.warning('Paste a URL first', 'Add your public Thumbtack profile URL, then Fetch.');
+      return;
+    }
+    setPullingTtId(accountId);
+    try {
+      // Persist the URL first so the backend has it to read off the
+      // SavedAccount. saveThumbtackProfileUrl is idempotent — a second
+      // call with the same value is a no-op.
+      if (next !== (ttUrlsInitialRef.current[accountId] || '').trim()) {
+        const saveRes = await usersApi.saveThumbtackProfileUrl(accountId, next);
+        if (!saveRes.success) {
+          notify.warning('Could not save URL', saveRes.warning || 'Try again.');
+          return;
+        }
+        ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
+      }
+      const pull = await usersApi.pullBusinessInfoFromAccount('thumbtack', accountId);
+      if (pull.success) {
+        const parts: string[] = [];
+        if (pull.fieldsApplied > 0) parts.push(`${pull.fieldsApplied} field${pull.fieldsApplied === 1 ? '' : 's'}`);
+        if (pull.conflictsRaised > 0) parts.push(`${pull.conflictsRaised} conflict${pull.conflictsRaised === 1 ? '' : 's'} to review`);
+        notify.success(
+          'Pulled from Thumbtack',
+          parts.length > 0
+            ? `Applied ${parts.join(' · ')}. Review on the next step or in Settings → AI Playbook.`
+            : 'No new info to apply — Playbook already had values for what we found.',
+          5000,
+        );
+      } else if (pull.warning) {
+        notify.warning('Pull finished with a warning', pull.warning);
+      }
+    } catch (e: any) {
+      notify.error('Could not fetch', e?.response?.data?.message || e?.message || 'Thumbtack pull failed.');
+    } finally {
+      setPullingTtId(null);
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
   const isApplying = verifyState.kind === 'applying';
   const isBusy = isChecking || isApplying;
   const canSave = trimmed.length > 0 && !isBusy;
-  // Persistent "verified" indicator: the URL in the input matches
-  // what we saved AND we have metadata (which only gets written if
-  // the verify endpoint actually loaded the site). Survives wizard
-  // navigation so revisiting the step doesn't make the user re-prove.
   const savedMetadata = user?.websiteMetadataJson ?? null;
   const savedAndVerified =
     !!user?.website &&
@@ -291,130 +437,110 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
       <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
         {meta.title}
       </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-8 max-w-xl">
+      <p className="text-base text-slate-500 leading-relaxed mb-6 max-w-xl">
         {meta.description}
       </p>
 
-      <div className="space-y-4">
-        <label className="block">
-          <span className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-            <span>Website URL</span>
-            {/* Persistent "verified" badge when the user's saved
-                website matches the value in the input AND we have
-                metadata (proves the site actually loaded for us at
-                some point). Survives navigation back to the step. */}
-            {savedAndVerified && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold normal-case tracking-normal">
-                <CheckCircle2 className="w-3 h-3" />
-                Verified
-              </span>
-            )}
-          </span>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Globe className="w-5 h-5" />
-            </span>
-            <input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="myco.com or https://myco.com"
-              value={value}
-              onChange={e => {
-                setValue(e.target.value);
-                // Any edit clears the previous result so the user sees a
-                // fresh state on the next submit attempt.
-                if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
-                  setVerifyState({ kind: 'idle' });
-                }
-              }}
-              disabled={isChecking}
-              className={`w-full pl-12 pr-4 py-3.5 rounded-2xl border-2 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
-                savedAndVerified ? 'border-emerald-300' : 'border-slate-200'
-              }`}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && canSave) {
-                  e.preventDefault();
-                  void verifyAndContinue();
-                }
-              }}
-            />
+      {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
+      <section className="mt-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Phone className="w-4 h-4 text-slate-500" />
+          <h2 className="text-sm font-extrabold text-slate-900">Business phone</h2>
+        </div>
+        <p className="text-xs text-slate-500 leading-relaxed mb-3">
+          Your primary owner/company number. Used for owner alerts and auto-registered
+          as the primary associate phone on connected Thumbtack businesses.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            value={businessPhone}
+            onChange={e => setBusinessPhone(e.target.value)}
+            placeholder="+1 (555) 010-1234"
+            className="flex-1 min-w-0 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleSaveBusinessPhone();
+              }
+            }}
+          />
+          {businessPhoneSavedAt && !businessPhoneError && (
+            <span className="text-xs font-semibold text-emerald-700">Saved</span>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleSaveBusinessPhone()}
+            disabled={savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed rounded-xl transition-all shrink-0"
+          >
+            {savingBusinessPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {savingBusinessPhone ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {businessPhoneError && (
+          <div className="mt-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+            {businessPhoneError}
           </div>
-          {/* Prominent inline spinner shown while we're talking to the
-              backend. The verify endpoint can take 5-15 seconds (HTML
-              fetch + Microlink screenshot + gpt-4o-mini summary) so a
-              tiny button-label spinner doesn't communicate well — this
-              card sets expectation that work is happening. */}
-          {isBusy && (
-            <div className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <Loader2 className="w-5 h-5 text-slate-500 animate-spin shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <div className="font-bold text-slate-900">
-                  {isApplying ? 'Applying website info to your AI Playbook…' : 'Pulling info from your site…'}
-                </div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  {isApplying
-                    ? 'Filling empty Playbook sections so your AI starts with real context.'
-                    : 'We fetch the page, render a preview, and generate an AI summary. Takes a few seconds.'}
-                </div>
+        )}
+
+        {/* Additional associate numbers — collapsible, TT-only. Same
+            editor Settings → Communication exposes; each entry registers
+            on the matching Thumbtack business's profile. */}
+        {ttAccounts.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={() => setShowAssociates(v => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+            >
+              {showAssociates ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              <Users className="w-3.5 h-3.5" />
+              Add associate numbers (Thumbtack)
+              <span className="text-slate-400 font-normal">— optional, per business</span>
+            </button>
+            {showAssociates && (
+              <div className="mt-3 space-y-4">
+                {ttAccounts.map(acct => {
+                  const initial = parseAdditionalPhones(acct.followUpSettingsJson);
+                  return (
+                    <div key={acct.id}>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                        {acct.businessName || 'Thumbtack business'}
+                      </div>
+                      <AdditionalAssociatePhonesEditor
+                        savedAccountId={acct.id}
+                        initialValue={initial}
+                        onSaved={(next) => {
+                          // Mirror Communication.tsx — write the new list back
+                          // into the cached account's followUpSettingsJson so
+                          // a re-render shows the saved state without a refetch.
+                          setSavedAccounts(
+                            savedAccounts.map((a: SavedAccount) => {
+                              if (a.id !== acct.id) return a;
+                              let parsed: Record<string, any> = {};
+                              try {
+                                parsed = a.followUpSettingsJson ? JSON.parse(a.followUpSettingsJson) : {};
+                              } catch { parsed = {}; }
+                              parsed.additionalAssociatePhones = next;
+                              return { ...a, followUpSettingsJson: JSON.stringify(parsed) };
+                            }),
+                          );
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          )}
-          {/* If the user has a previously-verified site (came back to
-              this step, or refreshed the page) show what we found so
-              they have visible proof the URL really loaded. The Apply
-              button is gone from this surface — auto-apply runs inline
-              when Save & continue is clicked, so the user never has to
-              think about it during the wizard. */}
-          {savedAndVerified && savedMetadata && !isBusy && (
-            <div className="mt-2">
-              <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
-            </div>
-          )}
-        </label>
-
-      </div>
-
-      {/* Thumbtack profile URL — one input per connected TT account.
-          Only rendered when a TT account exists; otherwise nothing to
-          attach a URL to. Same flow as Settings → General. */}
-      {savedAccounts.some(a => a.platform === 'thumbtack') && (
-        <section className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Globe className="w-4 h-4 text-slate-500" />
-            <h2 className="text-sm font-extrabold text-slate-900">Thumbtack profile URL</h2>
-            <span className="text-xs font-normal text-slate-400">(optional)</span>
+            )}
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed mb-3">
-            Paste your public Thumbtack profile so AI can pull services, address, insurance, and pricing. Thumbtack's API alone returns only name and phone.
-          </p>
-          <ul className="space-y-3">
-            {savedAccounts.filter(a => a.platform === 'thumbtack').map(acct => (
-              <li key={acct.id}>
-                <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                  {acct.businessName || 'Thumbtack business'}
-                </label>
-                <input
-                  type="url"
-                  value={ttUrls[acct.id] ?? ''}
-                  onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
-                  onBlur={() => void saveTtUrl(acct.id)}
-                  placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+        )}
+      </section>
 
-      {/* LeadBridge phone number — the dedicated outbound number purchased
-          from Twilio via Sigcore. Lives on TenantPhoneNumber, not on
-          User.businessPhone. Surfaced here because it's the second
-          essential piece of "what does AI use to contact customers"
-          info — the website tells it WHAT to talk about, the number
-          tells customers WHERE the text came from. */}
-      <section className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+      {/* ─── 2. LeadBridge phone (TenantPhoneNumber) ─────────────── */}
+      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
         <div className="flex items-center gap-2 mb-1">
           <Phone className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
@@ -556,43 +682,149 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         )}
       </section>
 
-      {/* Verify result panel — replaces the inline help text once the
-          user has submitted at least once. */}
-      {verifyState.kind === 'invalid' && (
-        <div
-          className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-start gap-3"
-          role="alert"
-        >
-          <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-rose-900">
-              {verifyState.outcome.errorMessage || "We couldn't load that site."}
-            </div>
-            <div className="text-xs text-rose-700 mt-0.5">
-              Double-check the URL, or use <span className="font-semibold">I don't have a website</span> below.
-            </div>
-          </div>
+      {/* ─── 3. Website URL ──────────────────────────────────────── */}
+      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Globe className="w-4 h-4 text-slate-500" />
+          <h2 className="text-sm font-extrabold text-slate-900">Website URL</h2>
+          {savedAndVerified && (
+            <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest">
+              <CheckCircle2 className="w-3 h-3" />
+              Verified
+            </span>
+          )}
         </div>
-      )}
+        <p className="text-xs text-slate-500 leading-relaxed mb-3">
+          We'll pull title, description, and structured business info from your homepage
+          to pre-fill your AI Playbook and FAQ.
+        </p>
 
-      {verifyState.kind === 'valid' && verifyState.outcome.metadata?.title && (
-        <div
-          className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3"
-        >
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-emerald-900 truncate">
-              Found: {verifyState.outcome.metadata.title}
-            </div>
-            {verifyState.outcome.metadata.description && (
-              <div className="text-xs text-emerald-800 mt-0.5 line-clamp-2">
-                {verifyState.outcome.metadata.description}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Globe className="w-4 h-4" />
+            </span>
+            <input
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="myco.com or https://myco.com"
+              value={value}
+              onChange={e => {
+                setValue(e.target.value);
+                if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
+                  setVerifyState({ kind: 'idle' });
+                }
+              }}
+              disabled={isChecking}
+              className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border-2 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
+                savedAndVerified ? 'border-emerald-300' : 'border-slate-200'
+              }`}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && canSave) {
+                  e.preventDefault();
+                  void fetchSiteData();
+                }
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchSiteData()}
+            disabled={!canSave}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
+          >
+            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
+            {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Fetch site data'}
+          </button>
+        </div>
+
+        {isBusy && (
+          <div className="mt-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+            <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <div className="font-bold text-slate-900">
+                {isApplying ? 'Applying website info to your AI Playbook…' : 'Pulling info from your site…'}
               </div>
-            )}
+              <div className="text-slate-500 mt-0.5">
+                {isApplying
+                  ? 'Filling empty Playbook sections so your AI starts with real context.'
+                  : 'We fetch the page, render a preview, and generate an AI summary. Takes a few seconds.'}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
+
+        {verifyState.kind === 'invalid' && (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-start gap-2" role="alert">
+            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+            <div className="min-w-0 text-xs">
+              <div className="font-bold text-rose-900">
+                {verifyState.outcome.errorMessage || "We couldn't load that site."}
+              </div>
+              <div className="text-rose-700 mt-0.5">
+                Double-check the URL, or use <span className="font-semibold">I don't have a website</span> below.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {savedAndVerified && savedMetadata && !isBusy && (
+          <div className="mt-3">
+            <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
+          </div>
+        )}
+      </section>
+
+      {/* ─── 4. Thumbtack profile URLs ───────────────────────────── */}
+      {ttAccounts.length > 0 && (
+        <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Globe className="w-4 h-4 text-slate-500" />
+            <h2 className="text-sm font-extrabold text-slate-900">Thumbtack profile URL</h2>
+            <span className="text-xs font-normal text-slate-400">(optional)</span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+            Paste your public Thumbtack profile so AI can pull services, address, insurance,
+            and pricing. Click <span className="font-semibold">Fetch from Thumbtack</span> to
+            apply the info to your Playbook.
+          </p>
+          <ul className="space-y-3">
+            {ttAccounts.map(acct => {
+              const pulling = pullingTtId === acct.id;
+              const hasUrl = (ttUrls[acct.id] || '').trim().length > 0;
+              return (
+                <li key={acct.id}>
+                  <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                    {acct.businessName || 'Thumbtack business'}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={ttUrls[acct.id] ?? ''}
+                      onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
+                      onBlur={() => void saveTtUrl(acct.id)}
+                      placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
+                      className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void fetchFromThumbtack(acct.id)}
+                      disabled={!hasUrl || pulling || pullingTtId !== null}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
+                    >
+                      {pulling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
+                      {pulling ? 'Fetching…' : 'Fetch'}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
+      {/* ─── Footer actions ──────────────────────────────────────── */}
       <div className="mt-6 flex flex-col sm:flex-row gap-3">
         <button
           type="button"
@@ -618,4 +850,19 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
       </div>
     </div>
   );
+}
+
+// Parse the additionalAssociatePhones list out of a SavedAccount's
+// followUpSettingsJson. Returns [] for any of: null, malformed JSON,
+// missing key, or a non-array value — the editor treats [] as "no
+// rows" and lets the user add new ones.
+function parseAdditionalPhones(json: string | null | undefined): AssociatePhoneEntry[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    const arr = parsed?.additionalAssociatePhones;
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
 }
