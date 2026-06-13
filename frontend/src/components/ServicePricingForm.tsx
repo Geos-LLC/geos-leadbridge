@@ -1,107 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Save, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { usersApi } from '../services/api';
+import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
 
-// Default cleaning pricing based on Spotless Homes structure
-export const DEFAULT_CLEANING_PRICING = {
-  serviceType: 'cleaning',
-  cleaningTypes: [
-    { key: 'regular', label: 'Regular Cleaning', enabled: true },
-    { key: 'deep', label: 'Moving / Deep Cleaning', enabled: true },
-    { key: 'airbnb', label: 'Airbnb Turnaround', enabled: true },
-  ],
-  priceTable: [
-    { bed: 1, bath: 1, sqftMin: 600,  sqftMax: 800,  regular: 129, deep: 179, airbnb: 139 },
-    { bed: 1, bath: 2, sqftMin: 700,  sqftMax: 900,  regular: 129, deep: 179, airbnb: 139 },
-    { bed: 2, bath: 1, sqftMin: 800,  sqftMax: 1000, regular: 139, deep: 179, airbnb: 149 },
-    { bed: 2, bath: 2, sqftMin: 1000, sqftMax: 1200, regular: 139, deep: 189, airbnb: 159 },
-    { bed: 2, bath: 3, sqftMin: 1100, sqftMax: 1300, regular: 149, deep: 199, airbnb: 169 },
-    { bed: 3, bath: 1, sqftMin: 1000, sqftMax: 1200, regular: 149, deep: 209, airbnb: 169 },
-    { bed: 3, bath: 2, sqftMin: 1300, sqftMax: 1600, regular: 159, deep: 219, airbnb: 179 },
-    { bed: 3, bath: 3, sqftMin: 1500, sqftMax: 1800, regular: 169, deep: 229, airbnb: 189 },
-    { bed: 3, bath: 4, sqftMin: 1800, sqftMax: 2200, regular: 179, deep: 239, airbnb: 199 },
-    { bed: 4, bath: 2, sqftMin: 1800, sqftMax: 2200, regular: 189, deep: 259, airbnb: 209 },
-    { bed: 4, bath: 3, sqftMin: 2200, sqftMax: 2600, regular: 209, deep: 279, airbnb: 229 },
-    { bed: 4, bath: 4, sqftMin: 2600, sqftMax: 3000, regular: 229, deep: 309, airbnb: 249 },
-    { bed: 4, bath: 5, sqftMin: 3000, sqftMax: 3600, regular: 249, deep: 339, airbnb: 269 },
-    { bed: 5, bath: 2, sqftMin: 2400, sqftMax: 2800, regular: 239, deep: 319, airbnb: 259 },
-    { bed: 5, bath: 3, sqftMin: 2800, sqftMax: 3400, regular: 249, deep: 329, airbnb: 279 },
-    { bed: 5, bath: 4, sqftMin: 3200, sqftMax: 3800, regular: 269, deep: 349, airbnb: 299 },
-    { bed: 5, bath: 5, sqftMin: 3600, sqftMax: 4200, regular: 289, deep: 369, airbnb: 319 },
-    { bed: 6, bath: 3, sqftMin: 3000, sqftMax: 3600, regular: 289, deep: 379, airbnb: 329 },
-    { bed: 6, bath: 4, sqftMin: 3600, sqftMax: 4200, regular: 309, deep: 389, airbnb: 349 },
-    { bed: 6, bath: 5, sqftMin: 4000, sqftMax: 4800, regular: 329, deep: 409, airbnb: 369 },
-  ],
-  sqftAdjustEnabled: true,
-  frequencyDiscounts: [
-    { key: 'weekly', label: 'Weekly', discount: 15 },
-    { key: 'biweekly', label: 'Every 2 Weeks', discount: 10 },
-    { key: 'monthly', label: 'Monthly', discount: 10 },
-    { key: 'once', label: 'One Time', discount: 0 },
-  ],
-  extras: [
-    { key: 'oven', label: 'Inside Oven', price: 40 },
-    { key: 'fridge', label: 'Inside Fridge', price: 40 },
-    { key: 'cabinet', label: 'Inside Kitchen Cabinets', price: 30 },
-    { key: 'laundry', label: 'Laundry (per load)', price: 20 },
-    { key: 'dishes', label: 'Dishes (1 load included)', price: 20 },
-    { key: 'windows', label: 'Inside Windows (per window)', price: 20 },
-    { key: 'blinds', label: 'Blinds (per window)', price: 10 },
-    { key: 'baseboard', label: 'Baseboard Cleaning (per room)', price: 15 },
-    { key: 'patio_door', label: 'Patio Door', price: 50 },
-    { key: 'patio_garage', label: 'Patio / Garage', price: 50 },
-  ],
-  conditionSurcharges: [
-    { key: 'well_maintained', label: 'Well Maintained', surcharge: 0 },
-    { key: 'fair', label: 'Fair Condition', surcharge: 50 },
-    { key: 'needs_attention', label: 'Needs Attention', surcharge: 100 },
-  ],
-  petSurcharge: 20,
-  orderDiscounts: [
-    { minAmount: 200, discount: 10 },
-    { minAmount: 300, discount: 15 },
-  ],
-  recurringDiscount: 10,
-  priceRange: {
-    minus: { type: '%', value: 10 },
-    plus: { type: '%', value: 10 },
-  },
-};
-
-/**
- * Older saved pricing rows have prices but no sqftMin/sqftMax (those fields
- * didn't exist yet). When the form loads, fill in the defaults from
- * DEFAULT_CLEANING_PRICING based on a (bed, bath) match so existing accounts
- * see populated sqft columns instead of blank cells.
- *
- * Also back-fills `sqftAdjustEnabled` if the saved JSON predates that flag —
- * default ON, matching the form's new-account default.
- */
-function hydrateSqftDefaults(pricing: any): any {
-  if (!pricing || !Array.isArray(pricing.priceTable)) return pricing;
-  const defaults = new Map<string, any>();
-  for (const row of DEFAULT_CLEANING_PRICING.priceTable) {
-    defaults.set(`${row.bed}/${row.bath}`, row);
-  }
-  const hydratedTable = pricing.priceTable.map((row: any) => {
-    const def = defaults.get(`${row.bed}/${row.bath}`);
-    const next = { ...row };
-    // Back-compat: an older single-value `sqft` field becomes both bounds.
-    const legacy = Number(next.sqft) || 0;
-    if (next.sqftMin == null || next.sqftMin === 0) {
-      next.sqftMin = legacy || (def && (def as any).sqftMin) || 0;
-    }
-    if (next.sqftMax == null || next.sqftMax === 0) {
-      next.sqftMax = legacy || (def && (def as any).sqftMax) || 0;
-    }
-    return next;
-  });
-  return {
-    ...pricing,
-    priceTable: hydratedTable,
-    sqftAdjustEnabled: pricing.sqftAdjustEnabled ?? true,
-  };
-}
+// Re-export for downstream imports (Services.tsx, PricingSetupStep.tsx).
+// The canonical definition lives in `../data/defaultPricing` so the wizard
+// preview and AI Playbook share one source of truth.
+export { DEFAULT_CLEANING_PRICING };
 
 interface ServicePricingFormProps {
   accountId: string;
@@ -125,8 +30,8 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
     if (!loadId) return;
     setLoading(true);
     usersApi.getServicePricing(loadId)
-      .then(res => setPricing(hydrateSqftDefaults(res.pricing || DEFAULT_CLEANING_PRICING)))
-      .catch(() => setPricing(DEFAULT_CLEANING_PRICING))
+      .then(res => setPricing(hydratePricing(res.pricing || DEFAULT_CLEANING_PRICING)))
+      .catch(() => setPricing(hydratePricing(DEFAULT_CLEANING_PRICING)))
       .finally(() => setLoading(false));
   }, [loadId]);
 
@@ -207,7 +112,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   if (loading) return <div className="flex items-center gap-2 text-sm text-slate-400 py-4"><Loader2 size={16} className="animate-spin" /> Loading pricing...</div>;
   if (!pricing) return null;
 
-  const enabledTypes = pricing.cleaningTypes?.filter((t: any) => t.enabled) || [];
+  // Every cleaningType from the (hydrated) pricing renders as a column.
+  // Legacy `enabled: false` is preserved on the JSON for back-compat but
+  // does NOT hide a column. The user "disables" a service by entering 0
+  // in every row of that column — see DEFAULT_CLEANING_PRICING comments.
+  const allTypes = pricing.cleaningTypes || [];
 
   return (
     <div className="space-y-4">
@@ -230,27 +139,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
         </select>
       </div>
 
-      {/* Cleaning Types Toggle */}
-      <div>
-        <div className="text-[11px] font-semibold text-slate-600 mb-1.5">Service Types</div>
-        <div className="flex flex-wrap gap-1.5">
-          {pricing.cleaningTypes?.map((ct: any, i: number) => (
-            <button
-              key={ct.key}
-              onClick={() => {
-                const types = [...pricing.cleaningTypes];
-                types[i] = { ...types[i], enabled: !types[i].enabled };
-                setPricing((p: any) => ({ ...p, cleaningTypes: types }));
-              }}
-              className={`text-[10px] px-2 py-1 rounded-lg font-semibold transition-colors ${
-                ct.enabled ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'
-              }`}
-            >
-              {ct.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Service Types row removed (2026-06-13). Hiding columns by toggle led
+          to legacy accounts missing Deep Cleaning entirely from both the form
+          and the AI prompt. The new rule: every service is always a column;
+          to "disable" a service, the user enters 0 for every row of that
+          column. See frontend/src/data/defaultPricing.ts. */}
 
       {/* Square footage adjustment toggle */}
       <label className="flex items-start gap-2 px-3 py-2 border border-slate-200 rounded-xl cursor-pointer select-none">
@@ -286,10 +179,10 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                   <th className="px-2 py-1.5 text-left font-semibold">Bath</th>
                   <th className="px-2 py-1.5 text-left font-semibold" title="Smallest property size this row's price applies to">Sqft Min</th>
                   <th className="px-2 py-1.5 text-left font-semibold" title="Largest property size at the row's price — beyond this, AI scales by $/sqft">Sqft Max</th>
-                  {enabledTypes.map((t: any) => (
+                  {allTypes.map((t: any) => (
                     <th key={t.key} className="px-2 py-1.5 text-left font-semibold">{t.label}</th>
                   ))}
-                  {enabledTypes.map((t: any) => (
+                  {allTypes.map((t: any) => (
                     <th key={`psf-${t.key}`} className="px-2 py-1.5 text-left font-semibold text-slate-400" title={`${t.label} price per square foot — derived from price ÷ midpoint of the sqft range`}>
                       $/sqft {t.label.split(' ')[0]}
                     </th>
@@ -326,7 +219,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                         onChange={e => updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)}
                         className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
                     </td>
-                    {enabledTypes.map((t: any) => (
+                    {allTypes.map((t: any) => (
                       <td key={t.key} className="px-1 py-1">
                         <div className="flex items-center">
                           <span className="text-slate-400 text-[9px] mr-0.5">$</span>
@@ -336,7 +229,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                         </div>
                       </td>
                     ))}
-                    {enabledTypes.map((t: any) => {
+                    {allTypes.map((t: any) => {
                       const price = Number(row[t.key]) || 0;
                       const perSqft = midpoint > 0 ? price / midpoint : 0;
                       return (
