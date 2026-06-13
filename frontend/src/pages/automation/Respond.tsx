@@ -630,102 +630,160 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="Message generation" align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            {/* AI first — AI-first is the product default. */}
-            <OptionCard
-              selected={replyType === 'ai'}
-              onClick={() => onReplyType('ai')}
-              title="AI"
-              body="AI writes a personalized first reply using your Business Information, FAQ, Pricing Guidance, and AI Playbook."
-              icon={Sparkles}
-              mixed={mixedReplyType && replyType === 'ai'}
-              mixedTooltip={tipReplyType}
-            />
-            <OptionCard
-              selected={replyType === 'template'}
-              onClick={() => onReplyType('template')}
-              title="Custom template"
-              body="Send a fixed, pre-written reply."
-              icon={Clipboard}
-              mixed={mixedReplyType && replyType === 'template'}
-              mixedTooltip={tipReplyType}
-            />
-          </div>
-        </FieldRow>
+        {/* AI-first primary surface (2026-06-13 refactor).
 
-        {/* First Reply Instructions —
-              - Template mode: always show the template tile (templates are
-                still the primary user-editable surface for canned replies).
-              - AI mode (normal):  helper copy explaining where behavior
-                comes from + optional advanced-mode link. The custom AI
-                prompt template still saves + still drives runtime — it's
-                just not the recommended editing surface anymore because
-                AI Playbook + Pricing + FAQ now own that content.
-              - AI mode (advanced=1): original prompt-editor tile, exactly
-                as before. Support / power users tuning a per-rule prompt
-                land here. */}
-        <FieldRow label="First Reply Instructions" noBorder>
-          {replyType === 'template' ? (
-            <InfoTile
-              icon={FileText}
-              iconTone="violet"
-              title={firstReplyMessageTpl?.name || 'Default first-reply template'}
-              body={firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.'}
-              badge={{ label: 'Template', tone: 'blue' }}
-              tooltip={firstReplyMessageTpl?.content || undefined}
-              actionLabel="Edit Template"
-              onAction={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
-            />
-          ) : advancedMode ? (
-            <InfoTile
-              icon={FileText}
-              iconTone="violet"
-              title={firstReplyPromptTpl?.name || 'Default first-reply instructions'}
-              body={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.'}
-              badge={{ label: 'AI Prompt — Advanced', tone: 'violet' }}
-              tooltip={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined}
-              actionLabel="Edit Prompt"
-              onAction={() => goTemplate(firstReplyPromptTpl, 'prompts')}
-            />
-          ) : (
-            <div style={{
-              padding: '14px 16px',
-              background: '#f8fafc',
-              border: '1px solid var(--lb-line-soft)',
-              borderRadius: 10,
-              fontSize: 13, color: 'var(--lb-ink-3)',
-              lineHeight: 1.55,
-            }}>
-              <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 8 }}>AI uses:</div>
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
-                {[
-                  'Business Information',
-                  'FAQ',
-                  'Pricing Guidance',
-                  'AI Playbook',
-                  'Conversation history',
-                ].map(item => (
-                  <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <div style={{ marginTop: 12, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12.5 }}>
-                <a
-                  href="/settings?tab=ai-playbook"
-                  style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
-                >Edit AI Playbook</a>
-                <span style={{ color: 'var(--lb-line)' }}>·</span>
-                <a
-                  href={location.pathname + (location.search ? location.search + '&advanced=1' : '?advanced=1')}
-                  style={{ color: 'var(--lb-ink-5)', textDecoration: 'underline' }}
-                >Advanced: edit first-reply prompt</a>
-              </div>
+            The previous UI presented AI and Custom template as two equal
+            OptionCards, which made Templates look like a co-equal default.
+            Templates are an advanced fallback, not a primary choice — so
+            the primary surface is now the AI explainer and the response-method
+            picker lives under Advanced.
+
+            The "Advanced: edit first-reply prompt" link that used to flip
+            on ?advanced=1 has been removed. The prompt editor itself is
+            still reachable via the URL flag (support / power users); it
+            renders inside the Advanced disclosure when both ?advanced=1 is
+            in the URL AND replyType=ai.
+
+            Existing template tenants are preserved bit-for-bit on the
+            backend (no migration, no replyType rewrite); the Advanced
+            disclosure auto-opens when their saved replyType is 'template'
+            so they land on their current selection without hunting. */}
+        <div
+          style={{
+            padding: '14px 16px',
+            background: '#f8fafc',
+            border: '1px solid var(--lb-line-soft)',
+            borderRadius: 10,
+            fontSize: 13, color: 'var(--lb-ink-3)',
+            lineHeight: 1.55,
+          }}
+        >
+          <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+            AI generates personalized replies.
+          </div>
+          <div style={{ fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8 }}>
+            AI automatically uses:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+            {[
+              'Business Information',
+              'FAQ',
+              'Pricing Guidance',
+              'AI Playbook',
+              'Conversation history',
+            ].map(item => (
+              <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 12, fontSize: 12.5 }}>
+            <a
+              href="/settings?tab=ai-playbook"
+              style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+            >Edit AI Playbook →</a>
+          </div>
+        </div>
+
+        {/* Advanced disclosure — Response method picker + (when template
+            selected) the template tile + (when ?advanced=1 is in the URL
+            AND replyType=ai) the legacy custom-prompt tile.
+
+            defaultOpen tracks replyType so existing template tenants land
+            on their current selection without an extra click. Local state
+            inside AdvancedExpand also lets new users expand it once and
+            keep it open while editing. */}
+        <AdvancedExpand
+          title="Advanced"
+          helper="Change how the first reply is generated."
+          defaultOpen={replyType === 'template'}
+        >
+          {/* noBorder is true only when no Template tile or Custom AI prompt
+              tile renders below — i.e. AI selected and the URL advanced flag
+              is off. Otherwise we want a divider between the radio and the
+              tile below it. */}
+          <FieldRow label="Response method" align="top" noBorder={replyType === 'ai' && !advancedMode}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="instant-reply-response-method"
+                  checked={replyType === 'ai'}
+                  onChange={() => onReplyType('ai')}
+                  style={{ marginTop: 3, cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    AI-generated replies
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Recommended. Personalized using the inputs above.
+                  </div>
+                </div>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="instant-reply-response-method"
+                  checked={replyType === 'template'}
+                  onChange={() => onReplyType('template')}
+                  style={{ marginTop: 3, cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    Custom template
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Send a fixed, pre-written reply.
+                  </div>
+                </div>
+              </label>
+              {mixedReplyType && (
+                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic' }}>
+                  {tipReplyType}
+                </div>
+              )}
             </div>
+          </FieldRow>
+
+          {/* Template tile — only when Custom template is the active method.
+              The Custom AI prompt tile only renders for AI mode, so when
+              template is selected this row has no sibling below it and
+              gets noBorder. */}
+          {replyType === 'template' && (
+            <FieldRow label="Template" noBorder>
+              <InfoTile
+                icon={FileText}
+                iconTone="violet"
+                title={firstReplyMessageTpl?.name || 'Default first-reply template'}
+                body={firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.'}
+                badge={{ label: 'Template', tone: 'blue' }}
+                tooltip={firstReplyMessageTpl?.content || undefined}
+                actionLabel="Edit Template"
+                onAction={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
+              />
+            </FieldRow>
           )}
-        </FieldRow>
+
+          {/* Legacy custom AI prompt — still reachable for support / power
+              users via the ?advanced=1 URL flag. Only renders when both
+              the URL flag is set AND replyType=ai; otherwise hidden. */}
+          {advancedMode && replyType === 'ai' && (
+            <FieldRow label="Custom AI prompt" noBorder>
+              <InfoTile
+                icon={FileText}
+                iconTone="violet"
+                title={firstReplyPromptTpl?.name || 'Default first-reply instructions'}
+                body={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.'}
+                badge={{ label: 'AI Prompt — Advanced', tone: 'violet' }}
+                tooltip={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined}
+                actionLabel="Edit Prompt"
+                onAction={() => goTemplate(firstReplyPromptTpl, 'prompts')}
+              />
+            </FieldRow>
+          )}
+        </AdvancedExpand>
       </SettingCard>
 
       {/* Instant Text */}
