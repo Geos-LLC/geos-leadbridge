@@ -7,6 +7,7 @@ import { useAuthStore } from '../../../store/authStore';
 import type { WizardChecklist, WizardStep } from '../../../types';
 import { deriveDisplayChecklist } from '../SetupProgressCard';
 import { WIZARD_STEP_META } from '../wizardConfig';
+import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
   checklist: WizardChecklist;
@@ -93,7 +94,29 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
   );
 
   return (
-    <div className="text-center pt-6">
+    <div className="pt-2">
+      <WizardStepActions>
+        <button
+          type="button"
+          onClick={onFinish}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? 'Finishing…' : 'Go to Dashboard'}
+          {!saving && <ArrowRight className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
+        >
+          <SettingsIcon className="w-4 h-4" />
+          Explore settings
+        </button>
+      </WizardStepActions>
+
+      <div className="text-center">
       <div className="w-16 h-16 mx-auto mb-6 rounded-2xl inline-flex items-center justify-center bg-emerald-100 text-emerald-600 shadow-sm">
         <Check className="w-9 h-9" />
       </div>
@@ -142,25 +165,6 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
         })}
       </ul>
 
-      <div className="mt-10 flex flex-col items-center gap-3">
-        <button
-          type="button"
-          onClick={onFinish}
-          disabled={saving}
-          className="inline-flex items-center gap-2 px-7 py-3.5 bg-blue-600 text-white text-base font-bold rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
-        >
-          {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
-          {saving ? 'Finishing…' : 'Go to Dashboard'}
-          {!saving && <ArrowRight className="w-5 h-5" />}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700 transition-colors"
-        >
-          <SettingsIcon className="w-4 h-4" />
-          Explore settings
-        </button>
       </div>
     </div>
   );

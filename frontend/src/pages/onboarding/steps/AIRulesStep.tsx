@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-  Bot, CircleDollarSign, Loader2, Phone, Sparkles, UserCheck,
+  ArrowRight, Bot, CircleDollarSign, Loader2, Phone, Sparkles, UserCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
 import { followUpApi, usersApi } from '../../../services/api';
 import { notify } from '../../../store/notificationStore';
 import { getStepMeta } from '../wizardConfig';
+import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -161,6 +162,24 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
 
   return (
     <div className="pt-2">
+      <WizardStepActions>
+        <button
+          type="button"
+          onClick={() => void apply()}
+          disabled={saving || loading}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? 'Saving…' : 'Save & Continue'}
+          {!saving && <ArrowRight className="w-4 h-4" />}
+        </button>
+        {savedAccounts.length > 1 && (
+          <span className="text-[11px] text-slate-500">
+            Applies to all connected accounts.
+          </span>
+        )}
+      </WizardStepActions>
+
       <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
         {meta.title}
       </h1>
@@ -244,22 +263,11 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
         </div>
       )}
 
-      <div className="mt-8 flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => void apply()}
-          disabled={saving || loading}
-          className="self-start inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? 'Saving…' : 'Save & Continue'}
-        </button>
-        {savedAccounts.length > 1 && (
-          <p className="text-xs text-slate-400 max-w-md">
-            Applies to all connected accounts. You can customize each account later on AI Conversation.
-          </p>
-        )}
-      </div>
+      {savedAccounts.length > 1 && (
+        <p className="mt-6 text-xs text-slate-400 max-w-md">
+          Applies to all connected accounts. You can customize each account later on AI Conversation.
+        </p>
+      )}
     </div>
   );
 }
