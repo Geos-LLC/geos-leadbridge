@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  PhoneOff, Sparkles, RotateCcw, Plus, ChevronRight,
+  PhoneOff, Sparkles,
   RefreshCw, Clock, UserX, Info, Power,
-  Scale, CircleDollarSign, UserCheck, Calendar, Phone,
 } from 'lucide-react';
 import {
-  SettingCard, SectionCard, FieldRow, OptionCard, InfoTile,
+  SettingCard, SectionCard, FieldRow, OptionCard,
   Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedBadge,
   type IconTone,
 } from '../../components/automation/ui';
@@ -17,18 +16,16 @@ import { useAuthStore } from '../../store/authStore';
 import { formatQuietHoursSummary } from '../../lib/businessHours';
 
 // Strategy meta — mirrors the picker on AutomationConversation. Used to
-// render the AI Strategy tile below with the actual saved strategy for the
-// account instead of a hardcoded "Auto" label. Keep in sync with
-// [Conversation.tsx](Conversation.tsx) and [Respond.tsx](Respond.tsx).
+// Strategy key (followUpStrategy in JSON) is preserved on save but no longer
+// shown in this page's UI per the Automation Simplification: AI-first
+// surfaces (Respond + Followups) don't expose Goal selection — Goals live
+// only on AI Conversation. The type stays for the save-merge logic that
+// reads/writes followUpStrategy from cachedAccount.
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
-const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
-  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
-  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
-  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
-  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
-  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
-};
+// Accept legacy 'hybrid' and 'convert' as valid saved values for back-compat.
+// The backend runtime continues to honour them via STRATEGY_PROMPTS — no DB
+// write happens from this page (Followups preserves prev.followUpStrategy
+// on save).
 const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
@@ -52,20 +49,6 @@ type CachedFollowups = {
 };
 const followupsCache = new Map<string, CachedFollowups>();
 
-const DEFAULT_FOLLOWUP_PLAN: { val: number; unit: string }[] = [
-  { val: 2,  unit: 'min' },
-  { val: 10, unit: 'min' },
-  { val: 1,  unit: 'hour' },
-  { val: 1,  unit: 'day' },
-  { val: 3,  unit: 'days' },
-  { val: 7,  unit: 'days' },
-  { val: 2,  unit: 'weeks' },
-  { val: 1,  unit: 'month' },
-  { val: 3,  unit: 'months' },
-  { val: 6,  unit: 'months' },
-  { val: 1,  unit: 'year' },
-];
-
 export function AutomationFollowups({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -73,12 +56,16 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const accounts = useAppStore(s => s.savedAccounts);
   const isAll = accountId === 'all';
 
-  // Plan check — Convert tier (or active trial) unlocks AI message mode.
-  // Toggling master ON snaps to AI when allowed, otherwise stays on templates.
+  // AI follow-ups are available on every plan as of the AI-First
+  // Simplification (June 2026). Paywalls remain on AI Conversation
+  // (per-goal control on /automation/convert) and other advanced features,
+  // but the AI message-mode itself is free so users can experience AI
+  // before paying for it. canUseAi is kept as `true` here so the existing
+  // call sites keep working without further wiring; the useAuthStore
+  // import remains because other future logic may still need it.
   const user = useAuthStore(s => s.user);
-  const canUseAi =
-    !!user?.trialActive ||
-    user?.subscriptionTier === 'ENTERPRISE';
+  void user; // satisfy unused-locals lint while preserving the import
+  const canUseAi = true;
 
   // Master ON/OFF — single source of truth for follow-ups being active.
   // DB column followUpMode has three states: 'off' | 'suggest' | 'auto_send'.
@@ -90,7 +77,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
   const [messageMode, setMessageMode] = useState<'template' | 'ai'>('ai');
-  const [plan, setPlan] = useState(DEFAULT_FOLLOWUP_PLAN);
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
   const [timezone, setTimezone] = useState('America/New_York');
@@ -436,10 +422,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
 
-  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  // goAiSettings was used by the now-removed Conversation Goal tile. AI
+  // Conversation is still reachable via the sidebar; we don't need a
+  // per-card link from here anymore.
   const goQuietSettings = () => navigate('/settings?tab=hours', { state: fromState });
-  const resetPlan = () => setPlan(DEFAULT_FOLLOWUP_PLAN);
-  const addStep = () => setPlan(p => [...p, { val: 1, unit: 'month' }]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -529,103 +515,106 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow label="Message mode" sublabel="How follow-up messages are composed." align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={messageMode === 'template'}
-              onClick={() => onMessageMode('template')}
-              title="Use custom template"
-              body="Use your saved template for all follow-up messages."
-              mixed={mixedMessage.mixed && messageMode === 'template'}
-              mixedTooltip={mixedMessage.tooltip}
-            />
-            <OptionCard
-              selected={messageMode === 'ai'}
-              onClick={() => onMessageMode('ai')}
-              title="AI (auto)"
-              body="AI writes each message based on the conversation using your strategy."
-              mixed={mixedMessage.mixed && messageMode === 'ai'}
-              mixedTooltip={mixedMessage.tooltip}
-            />
-          </div>
-        </FieldRow>
-
-        <FieldRow label="AI Strategy" sublabel="Used when AI is composing messages." noBorder>
-          {(() => {
-            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
-            return (
-              <InfoTile
-                icon={meta.icon}
-                iconTone={meta.iconTone}
-                title={meta.title}
-                body={meta.body}
-                actionLabel="Edit AI Settings"
-                onAction={goAiSettings}
+        <FieldRow label="Message generation" sublabel="How follow-up messages are composed." align="top" noBorder>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 12 }}>
+              {/* AI first — AI-first is the product default. */}
+              <OptionCard
+                selected={messageMode === 'ai'}
+                onClick={() => onMessageMode('ai')}
+                title="AI"
+                body="AI writes each follow-up from the live conversation."
+                mixed={mixedMessage.mixed && messageMode === 'ai'}
+                mixedTooltip={mixedMessage.tooltip}
               />
-            );
-          })()}
+              <OptionCard
+                selected={messageMode === 'template'}
+                onClick={() => onMessageMode('template')}
+                title="Custom template"
+                body="Use your saved template for all follow-up messages."
+                mixed={mixedMessage.mixed && messageMode === 'template'}
+                mixedTooltip={mixedMessage.tooltip}
+              />
+            </div>
+            {messageMode === 'ai' && (
+              <div style={{
+                padding: '12px 14px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 10,
+                fontSize: 13, color: 'var(--lb-ink-3)',
+                lineHeight: 1.55,
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>AI follow-ups use:</div>
+                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+                  {[
+                    'Conversation history',
+                    'Business Information',
+                    'FAQ',
+                    'Pricing Guidance',
+                    'AI Playbook',
+                  ].map(item => (
+                    <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {messageMode === 'template' && (
+              // Bug fix (2026-06-12): Custom template mode previously showed
+              // no path to manage the underlying templates. Linking to the
+              // Templates library filtered to auto-reply (the bucket the
+              // follow-up step templates land in — see MessageSettings.tsx
+              // getTemplateFilter).
+              <div style={{
+                padding: '12px 14px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 10,
+                fontSize: 13, color: 'var(--lb-ink-3)',
+                lineHeight: 1.55,
+              }}>
+                <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+                  Follow-up templates
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  Each follow-up step uses a saved template. Manage which templates run for which step in your library.
+                </div>
+                <Link
+                  to="/templates?filter=auto-reply"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    color: 'var(--lb-accent)', fontWeight: 600, textDecoration: 'none',
+                  }}
+                >
+                  Manage templates →
+                </Link>
+              </div>
+            )}
+          </div>
         </FieldRow>
       </SectionCard>
 
-      {/* Follow-up plan */}
+      {/* Follow-up plan — read-only summary.
+          The grid that used to live here was UI-only (setPlan touched local
+          React state but no save effect persisted it), so editing the
+          numbers gave users false confidence. The plan itself is driven
+          by the backend follow-up engine seed templates; per-step custom
+          delays are configurable via API (followUpSettingsJson.customStepDelays
+          / customStepEnabled) and exposed elsewhere when needed. */}
       <SectionCard padding="20px 24px 24px">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Follow-up plan
-            </div>
-            <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Follow-up plan
           </div>
-          <button
-            type="button"
-            onClick={resetPlan}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              background: 'transparent', border: 0, cursor: 'pointer',
-              fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-              color: 'var(--lb-accent)', padding: 0,
-            }}
-          >
-            <RotateCcw size={13} /> Reset to defaults
-          </button>
+          <Sparkles size={14} style={{ color: 'var(--lb-accent)' }} />
         </div>
-        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginBottom: 18 }}>
-          AI writes each step from the live conversation. You only set the timing.
-        </div>
-
-        <div style={{
-          display: 'flex', alignItems: 'stretch', gap: 6, flexWrap: 'nowrap',
-          overflowX: 'auto', paddingBottom: 8,
-        }}>
-          {plan.map((step, i) => (
-            <div key={i} style={{ display: 'contents' }}>
-              <PlanStep n={i + 1} val={step.val} unit={step.unit} />
-              {i < plan.length - 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)', paddingTop: 22 }}>
-                  <ChevronRight size={14} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
-            Click any step to edit its timing.
-          </div>
-          <button
-            type="button"
-            onClick={addStep}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '7px 14px',
-              background: 'white', color: 'var(--lb-accent)',
-              border: '1px solid var(--lb-accent-line)', borderRadius: 999,
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-            }}
-          >
-            <Plus size={13} /> Add step
-          </button>
+        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+          LeadBridge follows up with unresponsive leads over an 11-step schedule
+          spanning up to one year. AI writes each step from the live conversation;
+          timing is managed by the system to match standard best practices.
         </div>
       </SectionCard>
 
@@ -655,7 +644,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           tipIcon={Sparkles}
-          tip="AI generates this check-in from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedDeferral.mixed}
           mixedTooltip={mixedDeferral.tooltip}
         />
@@ -669,7 +658,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           tipIcon={Sparkles}
-          tip="AI generates this re-engage from the conversation using your auto strategy. Switch to Custom Template above to write a fixed message instead."
+          tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedHired.mixed}
           mixedTooltip={mixedHired.tooltip}
           noBorder
@@ -682,30 +671,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       />
 
       </>}
-    </div>
-  );
-}
-
-function PlanStep({ n, val, unit }: { n: number; val: number; unit: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 64 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)' }}>
-        #{n}
-      </div>
-      <button
-        type="button"
-        style={{
-          width: 64, padding: '10px 6px',
-          background: 'white', border: '1px solid var(--lb-line)',
-          borderRadius: 10,
-          cursor: 'pointer', fontFamily: 'inherit',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          transition: 'border-color 120ms',
-        }}
-      >
-        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--lb-ink-1)', lineHeight: 1, letterSpacing: '-0.02em' }}>{val}</div>
-        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', lineHeight: 1 }}>{unit}</div>
-      </button>
     </div>
   );
 }

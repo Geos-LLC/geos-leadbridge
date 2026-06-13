@@ -14,6 +14,7 @@ import {
   UseGuards,
   Sse,
   MessageEvent,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
@@ -22,6 +23,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
 import { LeadStatusService } from './lead-status.service';
+import { ConversationRuntimeService } from '../conversation-context/conversation-runtime.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent, merge, interval, from } from 'rxjs';
 import { map, mergeMap, filter as rxFilter } from 'rxjs/operators';
@@ -49,6 +51,11 @@ export class LeadsController {
     private eventEmitter: EventEmitter2,
     private prisma: PrismaService,
     private crmWebhookService: CrmWebhookService,
+    // Wired 2026-06-12 for the V2 AI Conversation Review Mode endpoints —
+    // get / send / discard pending AI suggestions on a thread. ThreadContext
+    // is owned by ConversationContextService; the runtime helper exposes
+    // a typed read/write API over the stateJson bag.
+    private conversationRuntime: ConversationRuntimeService,
   ) {}
 
   /**
@@ -528,6 +535,90 @@ export class LeadsController {
       message: 'Message sent successfully',
       data: result,
     };
+  }
+
+  // ─── V2 AI Conversation Review Mode endpoints (2026-06-12) ───────────────
+  //
+  // When the per-account followUpSettingsJson.aiConversationDeliveryMode is
+  // 'suggest', incoming customer replies trigger AI generation but park the
+  // body as a pending suggestion on ThreadContext.stateJson.pendingAiSuggestion
+  // instead of dispatching. These three endpoints let Lead Activity inspect,
+  // approve (send), or discard the pending draft.
+  //
+  // Sender type on send is 'ai' so the outbound Message row + downstream
+  // observability look identical to an auto-sent AI reply. Clearing the
+  // suggestion is unconditional — once an operator acts on a draft, the
+  // next customer reply is eligible to generate a fresh one.
+
+  @Get(':id/ai-suggestion')
+  async getAiSuggestion(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { threadId: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (!lead.threadId) return { success: true, suggestion: null };
+    const suggestion = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+    return { success: true, suggestion };
+  }
+
+  @Post(':id/ai-suggestion/send')
+  async sendAiSuggestion(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('message') overrideMessage?: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { threadId: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (!lead.threadId) {
+      throw new NotFoundException('Lead has no conversation thread');
+    }
+    const suggestion = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+    if (!suggestion) {
+      throw new NotFoundException('No pending AI suggestion for this lead');
+    }
+    // Body override supports the "Edit & Send" path — the operator tweaked
+    // the wording in Lead Activity before approving. Fall back to the
+    // generated body when no override is sent.
+    const body = (typeof overrideMessage === 'string' && overrideMessage.trim())
+      ? overrideMessage.trim()
+      : suggestion.message;
+    const result = await this.leadsService.sendMessage(user.id, id, body, 'ai');
+    await this.conversationRuntime.clearAiSuggestion(lead.threadId, {
+      leadId: id,
+      userId: user.id,
+    });
+    return { success: true, sent: true, suggestionId: suggestion.id, message: body, data: result };
+  }
+
+  @Post(':id/ai-suggestion/discard')
+  async discardAiSuggestion(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { threadId: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (!lead.threadId) {
+      return { success: true, sent: false, cleared: false };
+    }
+    const existing = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+    if (!existing) {
+      return { success: true, sent: false, cleared: false };
+    }
+    await this.conversationRuntime.clearAiSuggestion(lead.threadId, {
+      leadId: id,
+      userId: user.id,
+    });
+    return { success: true, sent: false, cleared: true, suggestionId: existing.id };
   }
 
   /**

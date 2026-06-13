@@ -27,8 +27,9 @@ import {
   Sparkles,
   AlertTriangle,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion } from '../services/api';
 import { useAppStore } from '../store/appStore';
+import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
@@ -305,11 +306,18 @@ export function Messages() {
   const [threadContextData, setThreadContextData] = useState<{
     systemContext: string; threadState: Record<string, any>;
   } | null>(null);
+  // Per-thread strategy preview row. Narrowed from 5 → 3 to match the new
+  // 4-goal model (Auto / Price / Qualify / Phone). Auto isn't a manual
+  // override target — it means "no override, use suggestStrategy()" — so
+  // it doesn't appear here. Hybrid + Convert removed from the UI; the
+  // backend STRATEGY_PROMPTS still defines them, so any legacy
+  // followUpStrategy='hybrid' / 'convert' value continues to work at
+  // runtime. suggestStrategy() may still return 'hybrid' / 'convert' for
+  // legacy-tuned threads; those just won't get a visible isSuggested
+  // highlight on any button — soft graceful degradation.
   const AI_STRATEGIES = [
-    { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'STRATEGY: HYBRID\n\nUse when:\n- You have enough information to estimate price\n- But still need one key detail OR want to move toward scheduling\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question\n\nThe question MUST:\n- Move toward booking (timing or confirmation)\n- Be simple and direct\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions (e.g. "does that work?")\n\nGoal: Reduce uncertainty and move the lead forward.\nExample style: Price + scheduling-oriented question' },
     { key: 'price', label: 'Price', emoji: '💰', prompt: 'STRATEGY: PRICE ANCHOR\n\nUse when:\n- Customer asks about price directly\n- Or pricing is the main concern\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant\n\nTone:\n- Confident and clear\n\nGoal: Give the customer a number to react to.\nExample style: "For a 1-bedroom home, pricing typically runs around $120-150 depending on condition. This includes kitchen, bathroom, and full surface cleaning."' },
     { key: 'qualify', label: 'Qualify', emoji: '🧠', prompt: 'STRATEGY: QUALIFICATION\n\nUse when:\n- Critical details are missing (home size, timing, condition)\n\nYou MUST:\n- Ask 2-3 specific questions\n- Briefly explain why you need the info\n\nDO NOT:\n- Give pricing\n- Use if enough info is already provided\n\nGoal: Collect only the minimum info needed to move to pricing or booking.\nExample style: "To give you an accurate quote, I just need a couple quick details — how many bedrooms and bathrooms, and what condition is the home in?"' },
-    { key: 'convert', label: 'Convert', emoji: '📞', prompt: 'STRATEGY: CONVERSION\n\nUse when:\n- You have enough information\n- Lead shows intent or urgency\n- Ready to move to booking\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions\n- Delay with unnecessary details\n\nGoal: Get the lead to commit to a time.\nExample style: "For your 1-bedroom home, pricing is typically around $120-150. I have availability tomorrow at 2pm or Thursday morning — which works better?"' },
     { key: 'phone', label: 'Phone', emoji: '📱', prompt: 'STRATEGY: PHONE / ESCALATION\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n- High-intent lead\n\nFlow:\nStep 1 — explain why call is needed:\n- "Every home is a bit different..."\n- "We\'ll prepare an accurate estimate..."\n\nStep 2 — ask for phone naturally:\n- "What\'s the best number to reach you?"\n\nIf hesitation:\n- Offer texting option\n\nStep 3 — confirm next step:\n- "We\'ll call you shortly"\n- OR send booking link if requested\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nTone:\n- Helpful, process-driven, professional\n\nExample style: "Every home is a little different — size and condition affect pricing. We can prepare an accurate estimate for you. What\'s the best number to reach you?"\n\nIf they resist: "No problem, we can text — just need your number to send the estimate and coordinate everything."\n\nIf they want booking: "Absolutely — you can book online here: [link]. We\'ll follow up to confirm details."' },
   ];
   const [resyncingMessages, setResyncingMessages] = useState(false);
@@ -370,6 +378,16 @@ export function Messages() {
   const [fuSuggestions, setFuSuggestions] = useState<any[]>([]);
   const [fuEditMsg, setFuEditMsg] = useState('');
   const [fuEditId, setFuEditId] = useState<string | null>(null);
+  // V2 Review Mode: pending AI draft for the currently selected lead. Comes
+  // from the messages payload (no extra fetch) so it appears on first paint
+  // when the operator opens a thread with a parked draft.
+  const [pendingAiSuggestion, setPendingAiSuggestion] = useState<PendingAiSuggestion | null>(null);
+  const [aiSuggestionBusy, setAiSuggestionBusy] = useState<'sending' | 'discarding' | null>(null);
+  // Leads that currently carry a parked draft. Populated from the same
+  // payload as the active thread (per-lead pending-suggestion map). Drives
+  // the yellow "AI Draft Pending" badge in the lead list. Resets when the
+  // user navigates away from a lead so stale flags don't linger.
+  const [leadsWithPendingDraft, setLeadsWithPendingDraft] = useState<Record<string, true>>({});
   const [fuActionLoading, setFuActionLoading] = useState(false);
 
   // Lead status editor state
@@ -967,6 +985,9 @@ export function Messages() {
     setMessages([]);
     setSmsLogs([]);
     setTimelineEvents([]);
+    // Clear any prior thread's pending draft so the banner doesn't flash the
+    // wrong lead's suggestion while the new payload is in flight.
+    setPendingAiSuggestion(null);
     markLeadAsSeen(lead);
 
     // Initial-request injection — used by both the messages-only first paint and
@@ -999,7 +1020,16 @@ export function Messages() {
       // clicked the lead, tab regained focus, SSE pushed an update). Pair the
       // frontend cache bypass with backend cache bypass so we don't read a
       // 5-min-stale Redis snapshot of the messages thread.
-      const { messages: apiMessages } = await leadsApi.getMessages(lead.id, { fresh: forceRefresh });
+      const { messages: apiMessages, pendingAiSuggestion: pendingDraft } = await leadsApi.getMessages(lead.id, { fresh: forceRefresh });
+      // The draft belongs to the lead we just asked about — if the operator
+      // already navigated away by the time the response arrives, the lead-
+      // switch effect will have cleared it again before this assignment.
+      setPendingAiSuggestion(pendingDraft ?? null);
+      setLeadsWithPendingDraft(prev => {
+        const next = { ...prev };
+        if (pendingDraft) next[lead.id] = true; else delete next[lead.id];
+        return next;
+      });
 
       // Fire-and-forget auto-resync when DB is empty. Previously this awaited
       // resyncMessages + a second getMessages before rendering, blocking the
@@ -2008,6 +2038,28 @@ export function Messages() {
                           </span>
                         );
                       })()}
+                      {/* V2 Review Mode: yellow badge surfacing leads that
+                          have an AI draft waiting for operator approval.
+                          Populated from the per-thread messages payload as
+                          the operator opens leads — so the badge appears on
+                          re-renders after the first visit. */}
+                      {leadsWithPendingDraft[lead.id] && (
+                        <span
+                          title="AI drafted a reply for this lead — open to review"
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          🟡 AI Draft
+                        </span>
+                      )}
                       {/* Refunded badge — surfaces leads where the platform
                           (currently only Thumbtack) reported chargeState='Refunded',
                           which auto-sets Lead.refundedAt + Lead.budgetVoidedAt
@@ -2702,6 +2754,101 @@ export function Messages() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* V2 Review Mode pending AI draft. Shown above the composer
+                when the account opted into 'suggest' delivery and a draft
+                is parked. Send dispatches via /v1/leads/:id/ai-suggestion/send
+                (server uses sendMessage('ai') so the outbound row is
+                indistinguishable from auto-send). Discard clears the parked
+                blob via /discard. Both actions trigger a force-refresh to
+                update the surrounding thread + clear the banner.
+
+                MVP per spec: Send + Discard only. Edit&Send and Regenerate
+                are deferred. */}
+            {pendingAiSuggestion && selectedLead && (
+              <div className="px-3 sm:px-4 pt-3 border-t border-slate-100 bg-amber-50">
+                <div className="flex items-start gap-2 mb-2">
+                  <span className="text-amber-500" aria-hidden>🟡</span>
+                  <div className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                    AI drafted this reply
+                  </div>
+                </div>
+                <p className="text-sm text-slate-700 bg-white border border-amber-200 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
+                  {pendingAiSuggestion.message}
+                </p>
+                <div className="flex gap-2 mt-3 pb-3">
+                  <button
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    disabled={aiSuggestionBusy !== null}
+                    onClick={async () => {
+                      if (!selectedLead) return;
+                      setAiSuggestionBusy('sending');
+                      try {
+                        await leadsApi.sendAiSuggestion(selectedLead.id);
+                        setPendingAiSuggestion(null);
+                        setLeadsWithPendingDraft(prev => {
+                          const next = { ...prev };
+                          delete next[selectedLead.id];
+                          return next;
+                        });
+                        // Refresh the thread so the operator sees the sent
+                        // message appear in the timeline.
+                        delete messageCache.current[selectedLead.id];
+                        await loadMessagesForLead(selectedLead, true);
+                      } catch (err: any) {
+                        console.error('[AI Suggestion] send failed:', err);
+                        // Keep the draft banner visible so the operator can
+                        // retry — pendingAiSuggestion is only cleared on
+                        // success above. Surface the failure as a toast so
+                        // the spinner stopping doesn't look like a no-op.
+                        const detail = err?.response?.data?.message || err?.message || '';
+                        notify.error(
+                          'Failed to send AI draft',
+                          detail
+                            ? `Please try again. (${detail})`
+                            : 'Please try again.',
+                        );
+                      } finally {
+                        setAiSuggestionBusy(null);
+                      }
+                    }}
+                  >
+                    {aiSuggestionBusy === 'sending' ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
+                    Send
+                  </button>
+                  <button
+                    className="px-3 py-2 border border-slate-300 text-slate-700 rounded-lg font-semibold text-sm hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={aiSuggestionBusy !== null}
+                    onClick={async () => {
+                      if (!selectedLead) return;
+                      setAiSuggestionBusy('discarding');
+                      try {
+                        await leadsApi.discardAiSuggestion(selectedLead.id);
+                        setPendingAiSuggestion(null);
+                        setLeadsWithPendingDraft(prev => {
+                          const next = { ...prev };
+                          delete next[selectedLead.id];
+                          return next;
+                        });
+                      } catch (err: any) {
+                        console.error('[AI Suggestion] discard failed:', err);
+                        const detail = err?.response?.data?.message || err?.message || '';
+                        notify.error(
+                          'Failed to discard AI draft',
+                          detail
+                            ? `Please try again. (${detail})`
+                            : 'Please try again.',
+                        );
+                      } finally {
+                        setAiSuggestionBusy(null);
+                      }
+                    }}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Message Input */}
             {canSendMessage ? (
               <div className="p-2 sm:p-4 border-t border-slate-100 bg-white">
@@ -2926,7 +3073,7 @@ export function Messages() {
             {/* AI Strategy Details — shown when a strategy button is clicked */}
             {activeStrategyKey && strategySuggestion && (
               <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Strategy</h4>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Conversation Goal</h4>
                 <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 space-y-2">
                   {/* Active strategy header */}
                   <div className="flex items-center gap-2">

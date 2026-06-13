@@ -3,13 +3,11 @@ import {
   MessageSquareText, MessageCircle, Phone, Clock,
   FileText, ArrowRightLeft, Volume2, Mic, Info,
   Clipboard, Sparkles, User, ArrowRight, PhoneCall,
-  Scale, CircleDollarSign, UserCheck, Calendar,
-  type LucideIcon,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   SettingCard, FieldRow, OptionCard, InfoTile, Checkbox, ActionLink, FooterBanner, MixedBadge, StatusPill,
-  type IconTone,
 } from '../../components/automation/ui';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
@@ -23,15 +21,13 @@ import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../li
 // render the "AI Strategy" tile below with the actual saved strategy for the
 // account instead of a hardcoded "Auto" label. Keep these keys/labels in
 // sync with [Conversation.tsx](Conversation.tsx).
+// Strategy key (followUpStrategy in JSON) is preserved on save but no
+// longer shown in this page's UI per the Automation Simplification:
+// AI-first surfaces (Respond + Followups) don't expose Goal selection.
+// Goals live only on AI Conversation.
 type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
-const STRATEGY_META: Record<StrategyKey, { title: string; body: string; icon: LucideIcon; iconTone: IconTone }> = {
-  auto:    { title: 'Auto',    body: 'AI picks the best strategy based on conversation context.', icon: Sparkles,         iconTone: 'violet' },
-  hybrid:  { title: 'Hybrid',  body: 'Balance between qualifying, converting, and pricing.',      icon: Scale,            iconTone: 'gray'   },
-  price:   { title: 'Price',   body: 'Prioritize giving price ranges proactively.',               icon: CircleDollarSign, iconTone: 'green'  },
-  qualify: { title: 'Qualify', body: 'Ask the right questions to qualify the lead.',              icon: UserCheck,        iconTone: 'orange' },
-  convert: { title: 'Convert', body: 'Focus on booking and moving the lead to action.',           icon: Calendar,         iconTone: 'blue'   },
-  phone:   { title: 'Phone',   body: 'Encourage a phone call with your team.',                    icon: Phone,            iconTone: 'rose'   },
-};
+// Accept legacy 'hybrid' and 'convert' as valid saved values for
+// back-compat. Runtime continues to honour them via STRATEGY_PROMPTS.
 const isStrategyKey = (v: unknown): v is StrategyKey =>
   v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
 
@@ -43,6 +39,15 @@ type CachedAccount = {
   instantTextOn: boolean;
   instantCallOn: boolean;
   replyType: 'ai' | 'template';
+  /**
+   * Instant Text generation mode (V2 — 2026-06-12). Lives in
+   * followUpSettingsJson.instantTextMode. AI = AI-generated SMS via the
+   * notifications.service Instant Text AI path; template = the saved
+   * NotificationRule.template. Missing key → treated as 'template' on
+   * the backend (existing-tenant back-compat); the UI surfaces the saved
+   * value or 'ai' as the visual default for fresh tenants.
+   */
+  instantTextMode: 'ai' | 'template';
   connMode: 'agent-first' | 'parallel';
   textBizHours: boolean;
   callBizHours: boolean;
@@ -59,14 +64,28 @@ const accountCache = new Map<string, CachedAccount>();
 export function AutomationRespond({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const fromState = { from: location.pathname + location.search, fromLabel: 'When a Lead Arrives' };
+  const fromState = { from: location.pathname + location.search, fromLabel: 'First Reply' };
   const accounts = useAppStore(s => s.savedAccounts);
+
+  // Advanced/legacy mode — same gate used by the Advanced Rules card on
+  // AI Conversation. When OFF, the "First Reply Instructions / AI Prompt"
+  // editor is replaced with a helper note (because the prompt now flows
+  // from Conversation Goal + AI Playbook + Pricing Table + FAQ). When
+  // ON via ?advanced=1 or ?debug=1, the editor is restored so support /
+  // power users can still tune the per-rule template directly.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
 
   // Visual + state
   const [instantReplyOn, setInstantReplyOn] = useState(true);
   const [instantTextOn,  setInstantTextOn]  = useState(true);
   const [instantCallOn,  setInstantCallOn]  = useState(true);
   const [replyType, setReplyType] = useState<'template' | 'ai'>('ai');
+  // V2 Instant Text AI default — new tenants land on AI. Existing tenants'
+  // value is hydrated from followUpSettingsJson.instantTextMode below.
+  const [instantTextMode, setInstantTextMode] = useState<'template' | 'ai'>('ai');
   const [textBizHours, setTextBizHours] = useState(true);
   const [callBizHours, setCallBizHours] = useState(true);
   const [connMode, setConnMode] = useState<'agent-first' | 'parallel'>('agent-first');
@@ -116,7 +135,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // account, wiping out their per-account values for untouched settings.
   type RespondField =
     | 'instantReplyOn' | 'replyType'
-    | 'instantTextOn'
+    | 'instantTextOn' | 'instantTextMode'
     | 'instantCallOn' | 'connMode'
     | 'textBizHours' | 'callBizHours';
   const dirtyFieldsRef = useRef<Set<RespondField>>(new Set());
@@ -211,11 +230,20 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             const nl = (allRules.rules || []).find(r => r.savedAccountId === a.id && r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0));
             const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
             const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
+            const rawInstantTextMode = (fuRes?.settings as any)?.instantTextMode;
             const cached: CachedAccount = {
               instantReplyOn: !!nl?.enabled,
               instantTextOn: !!ct?.enabled,
               instantCallOn: !!ccRes.settings?.enabled,
-              replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+              // AI-first default per the Automation Simplification: when no
+              // rule exists yet (fresh tenant) or useAi is unset, default to
+              // 'ai'. Existing rules with useAi=false explicitly opt out and
+              // keep their 'template' choice.
+              replyType: (nl?.useAi === false ? 'template' : 'ai') as 'ai' | 'template',
+              // Visual default 'ai' for new tenants (no saved value yet).
+              // Existing tenants whose seed wrote 'template' or 'ai' get
+              // their saved value back here.
+              instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,
@@ -244,6 +272,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             setInstantTextOn(first.instantTextOn);
             setInstantCallOn(first.instantCallOn);
             setReplyType(first.replyType);
+            setInstantTextMode(first.instantTextMode);
             setConnMode(first.connMode);
             setTextBizHours(first.textBizHours);
             setCallBizHours(first.callBizHours);
@@ -267,11 +296,13 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         const nl = (autoRes.rules || []).find(r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0)) || null;
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer) || null;
         const rawStrategy = (fuRes?.settings as any)?.followUpStrategy;
+        const rawInstantTextMode = (fuRes?.settings as any)?.instantTextMode;
         const cached: CachedAccount = {
           instantReplyOn: !!nl?.enabled,
           instantTextOn: !!ct?.enabled,
           instantCallOn: !!ccRes.settings?.enabled,
           replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
+          instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
           textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
           callBizHours: hoursRes?.callDuringBusinessHours ?? true,
@@ -290,6 +321,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setInstantTextOn(cached.instantTextOn);
           setInstantCallOn(cached.instantCallOn);
           setReplyType(cached.replyType);
+          setInstantTextMode(cached.instantTextMode);
           setConnMode(cached.connMode);
           setTextBizHours(cached.textBizHours);
           setCallBizHours(cached.callBizHours);
@@ -313,7 +345,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, connMode, textBizHours, callBizHours]);
+  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, instantTextMode, connMode, textBizHours, callBizHours]);
 
   // markDirty-wrapped setters — each one records both the dirty flag AND the
   // specific field name so the save only writes that field's endpoint.
@@ -321,6 +353,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const onInstantTextOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextOn');  setInstantTextOn(v); };
   const onInstantCallOn  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantCallOn');  setInstantCallOn(v); };
   const onReplyType      = (v: 'ai' | 'template')           => { dirtyRef.current = true; dirtyFieldsRef.current.add('replyType');      setReplyType(v); };
+  const onInstantTextMode = (v: 'ai' | 'template')          => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextMode'); setInstantTextMode(v); };
   const onConnMode       = (v: 'agent-first' | 'parallel')  => { dirtyRef.current = true; dirtyFieldsRef.current.add('connMode');       setConnMode(v); };
   const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('textBizHours');   setTextBizHours(v); };
   const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('callBizHours');   setCallBizHours(v); };
@@ -340,6 +373,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       instantTextOn:  fields.has('instantTextOn')  ? instantTextOn  : (prev?.instantTextOn  ?? instantTextOn),
       instantCallOn:  fields.has('instantCallOn')  ? instantCallOn  : (prev?.instantCallOn  ?? instantCallOn),
       replyType:      fields.has('replyType')      ? replyType      : (prev?.replyType      ?? replyType),
+      instantTextMode: fields.has('instantTextMode') ? instantTextMode : (prev?.instantTextMode ?? instantTextMode),
       connMode:       fields.has('connMode')       ? connMode       : (prev?.connMode       ?? connMode),
       textBizHours:   fields.has('textBizHours')   ? textBizHours   : (prev?.textBizHours   ?? textBizHours),
       callBizHours:   fields.has('callBizHours')   ? callBizHours   : (prev?.callBizHours   ?? callBizHours),
@@ -396,6 +430,19 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         const ct = (notifRes.rules || []).find(r => r.triggerType === 'new_lead' && r.sendToCustomer);
         if (ct) await notificationsApi.updateRule(id, ct.id, { enabled: instantTextOn });
       })());
+    }
+
+    // 2b. Instant Text AI mode — followUpSettingsJson.instantTextMode.
+    // Saved separately from the on/off toggle because the backend stores
+    // them on different rows (NotificationRule.enabled vs SavedAccount
+    // followUpSettingsJson). Existing tenants without the key get
+    // 'template' behavior at runtime; writing 'ai' or 'template' here
+    // explicitly opts them into the new generation path.
+    if (fields.has('instantTextMode')) {
+      ops.push(
+        followUpApi.saveWizardSettings(id, { instantTextMode })
+          .catch(() => undefined),
+      );
     }
 
     // 3. Instant Call — call-connect settings (only the touched keys).
@@ -473,9 +520,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
   const _textBizMix   = getMixed('textBizHours', v => v ? 'Only during business hours' : 'Anytime');
   const _callBizMix   = getMixed('callBizHours', v => v ? 'Only during business hours' : 'Anytime');
-  const _strategyMix  = getMixed('followUpStrategy', v => STRATEGY_META[v as StrategyKey]?.title || String(v));
-  const mixedStrategy = _strategyMix.mixed;
-  const tipStrategy   = _strategyMix.tooltip;
+  // followUpStrategy mixed detection removed with the Conversation Goal
+  // tile. Per-account strategy still persists in followUpSettingsJson; it's
+  // just no longer surfaced on this AI-first page.
   const mixedTextBizHours = _textBizMix.mixed;
   const mixedCallBizHours = _callBizMix.mixed;
   const tipTextBizHours   = _textBizMix.tooltip;
@@ -495,7 +542,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // step or expose it for a future feature.
   void perAccount;
 
-  const goAiSettings = () => navigate('/automation/convert', { state: fromState });
+  // goAiSettings was used by the now-removed Conversation Goal tile. AI
+  // Conversation is still reachable via the sidebar.
   const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
   // Deep-link to Templates with a specific row highlighted + tab preselected.
   // Filter values match TemplateFilter on the Templates page; 'prompts' is
@@ -582,80 +630,160 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         mixedTooltip={tipInstantReply}
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="Reply type" align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={replyType === 'template'}
-              onClick={() => onReplyType('template')}
-              title="Use template"
-              body="Send a pre-written reply."
-              icon={Clipboard}
-              mixed={mixedReplyType && replyType === 'template'}
-              mixedTooltip={tipReplyType}
-            />
-            <OptionCard
-              selected={replyType === 'ai'}
-              onClick={() => onReplyType('ai')}
-              title="Let AI write it"
-              body="AI will write a personalized first reply."
-              icon={Sparkles}
-              mixed={mixedReplyType && replyType === 'ai'}
-              mixedTooltip={tipReplyType}
-            />
-          </div>
-        </FieldRow>
+        {/* AI-first primary surface (2026-06-13 refactor).
 
-        <FieldRow
-          label={
-            mixedStrategy ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                AI Strategy <MixedBadge tooltip={tipStrategy} />
-              </span>
-            ) : 'AI Strategy'
-          }
+            The previous UI presented AI and Custom template as two equal
+            OptionCards, which made Templates look like a co-equal default.
+            Templates are an advanced fallback, not a primary choice — so
+            the primary surface is now the AI explainer and the response-method
+            picker lives under Advanced.
+
+            The "Advanced: edit first-reply prompt" link that used to flip
+            on ?advanced=1 has been removed. The prompt editor itself is
+            still reachable via the URL flag (support / power users); it
+            renders inside the Advanced disclosure when both ?advanced=1 is
+            in the URL AND replyType=ai.
+
+            Existing template tenants are preserved bit-for-bit on the
+            backend (no migration, no replyType rewrite); the Advanced
+            disclosure auto-opens when their saved replyType is 'template'
+            so they land on their current selection without hunting. */}
+        <div
+          style={{
+            padding: '14px 16px',
+            background: '#f8fafc',
+            border: '1px solid var(--lb-line-soft)',
+            borderRadius: 10,
+            fontSize: 13, color: 'var(--lb-ink-3)',
+            lineHeight: 1.55,
+          }}
         >
-          {(() => {
-            const meta = STRATEGY_META[followUpStrategy] || STRATEGY_META.auto;
-            return (
-              <InfoTile
-                icon={meta.icon}
-                iconTone={meta.iconTone}
-                title={meta.title}
-                body={meta.body}
-                actionLabel="Edit AI Settings"
-                onAction={goAiSettings}
-              />
-            );
-          })()}
-        </FieldRow>
+          <div style={{ fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+            AI generates personalized replies.
+          </div>
+          <div style={{ fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8 }}>
+            AI automatically uses:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+            {[
+              'Business Information',
+              'FAQ',
+              'Pricing Guidance',
+              'AI Playbook',
+              'Conversation history',
+            ].map(item => (
+              <li key={item} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>✓</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 12, fontSize: 12.5 }}>
+            <a
+              href="/settings?tab=ai-playbook"
+              style={{ color: 'var(--lb-accent)', fontWeight: 600 }}
+            >Edit AI Playbook →</a>
+          </div>
+        </div>
 
-        <FieldRow label="First Reply Instructions" noBorder>
-          <InfoTile
-            icon={FileText}
-            iconTone="violet"
-            title={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.name || 'Default first-reply instructions')
-                : (firstReplyMessageTpl?.name || 'Default first-reply template')
-            }
-            body={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.')
-                : (firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.')
-            }
-            badge={replyType === 'ai' ? { label: 'AI Prompt', tone: 'violet' } : { label: 'Template', tone: 'blue' }}
-            tooltip={
-              replyType === 'ai'
-                ? (firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined)
-                : (firstReplyMessageTpl?.content || undefined)
-            }
-            actionLabel={replyType === 'ai' ? 'Edit Prompt' : 'Edit Template'}
-            onAction={() => goTemplate(
-              replyType === 'ai' ? firstReplyPromptTpl : firstReplyMessageTpl,
-              replyType === 'ai' ? 'prompts' : 'auto-reply',
-            )}
-          />
-        </FieldRow>
+        {/* Advanced disclosure — Response method picker + (when template
+            selected) the template tile + (when ?advanced=1 is in the URL
+            AND replyType=ai) the legacy custom-prompt tile.
+
+            defaultOpen tracks replyType so existing template tenants land
+            on their current selection without an extra click. Local state
+            inside AdvancedExpand also lets new users expand it once and
+            keep it open while editing. */}
+        <AdvancedExpand
+          title="Advanced"
+          helper="Change how the first reply is generated."
+          defaultOpen={replyType === 'template'}
+        >
+          {/* noBorder is true only when no Template tile or Custom AI prompt
+              tile renders below — i.e. AI selected and the URL advanced flag
+              is off. Otherwise we want a divider between the radio and the
+              tile below it. */}
+          <FieldRow label="Response method" align="top" noBorder={replyType === 'ai' && !advancedMode}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="instant-reply-response-method"
+                  checked={replyType === 'ai'}
+                  onChange={() => onReplyType('ai')}
+                  style={{ marginTop: 3, cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    AI-generated replies
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Recommended. Personalized using the inputs above.
+                  </div>
+                </div>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="instant-reply-response-method"
+                  checked={replyType === 'template'}
+                  onChange={() => onReplyType('template')}
+                  style={{ marginTop: 3, cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                    Custom template
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+                    Send a fixed, pre-written reply.
+                  </div>
+                </div>
+              </label>
+              {mixedReplyType && (
+                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic' }}>
+                  {tipReplyType}
+                </div>
+              )}
+            </div>
+          </FieldRow>
+
+          {/* Template tile — only when Custom template is the active method.
+              The Custom AI prompt tile only renders for AI mode, so when
+              template is selected this row has no sibling below it and
+              gets noBorder. */}
+          {replyType === 'template' && (
+            <FieldRow label="Template" noBorder>
+              <InfoTile
+                icon={FileText}
+                iconTone="violet"
+                title={firstReplyMessageTpl?.name || 'Default first-reply template'}
+                body={firstReplyMessageTpl?.content || 'Pre-written reply sent when a new lead arrives.'}
+                badge={{ label: 'Template', tone: 'blue' }}
+                tooltip={firstReplyMessageTpl?.content || undefined}
+                actionLabel="Edit Template"
+                onAction={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
+              />
+            </FieldRow>
+          )}
+
+          {/* Legacy custom AI prompt — still reachable for support / power
+              users via the ?advanced=1 URL flag. Only renders when both
+              the URL flag is set AND replyType=ai; otherwise hidden. */}
+          {advancedMode && replyType === 'ai' && (
+            <FieldRow label="Custom AI prompt" noBorder>
+              <InfoTile
+                icon={FileText}
+                iconTone="violet"
+                title={firstReplyPromptTpl?.name || 'Default first-reply instructions'}
+                body={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || 'How AI should write the first reply.'}
+                badge={{ label: 'AI Prompt — Advanced', tone: 'violet' }}
+                tooltip={firstReplyPromptTpl?.content || newLeadRule?.aiSystemPrompt || undefined}
+                actionLabel="Edit Prompt"
+                onAction={() => goTemplate(firstReplyPromptTpl, 'prompts')}
+              />
+            </FieldRow>
+          )}
+        </AdvancedExpand>
       </SettingCard>
 
       {/* Instant Text */}
@@ -696,16 +824,68 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow icon={FileText} iconTone="green" label="SMS Template" noBorder>
-          <InfoTile
-            title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
-            body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
-            badge={{ label: 'Template', tone: 'green' }}
-            tooltip={ctTpl?.content || customerTextRule?.template || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(ctTpl, 'auto-reply')}
-          />
+        {/* V2 Message generation picker (2026-06-12).
+            Backend wiring: NotificationsService.sendNotificationWithRule
+            reads followUpSettingsJson.instantTextMode at send time. 'ai'
+            → InstantTextAiService.generateInstantTextBody; 'template' or
+            missing → existing render path. Failures fall back to template
+            with INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker. */}
+        <FieldRow label="Message generation" align="top">
+          <div style={{ display: 'flex', gap: 12 }}>
+            <OptionCard
+              selected={instantTextMode === 'ai'}
+              onClick={() => onInstantTextMode('ai')}
+              title="AI"
+              body="AI writes a short text using your Business Information, FAQ, Pricing Guidance, and the lead details."
+              icon={Sparkles}
+            />
+            <OptionCard
+              selected={instantTextMode === 'template'}
+              onClick={() => onInstantTextMode('template')}
+              title="Custom template"
+              body="Send a fixed, pre-written SMS."
+              icon={Clipboard}
+            />
+          </div>
         </FieldRow>
+
+        {/* Compact template preview — only when Custom template is selected. */}
+        {instantTextMode === 'template' && (
+          <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
+            <InfoTile
+              title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
+              body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+              badge={{ label: 'Template', tone: 'green' }}
+              tooltip={ctTpl?.content || customerTextRule?.template || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(ctTpl, 'auto-reply')}
+            />
+          </FieldRow>
+        )}
+
+        {/* Advanced: show the template tile even when AI is selected so
+            support/power users can inspect / edit the fallback body. The
+            same template runs when AI generation throws — see
+            INSTANT_TEXT_AI_FALLBACK_TEMPLATE in
+            notifications.service.sendNotificationWithRule. */}
+        {instantTextMode === 'ai' && advancedMode && (
+          <AdvancedExpand
+            title="Fallback / custom SMS template"
+            helper="Used when Custom Template is selected or if AI generation fails."
+            defaultOpen={true}
+          >
+            <FieldRow icon={FileText} iconTone="green" label="SMS template" noBorder>
+              <InfoTile
+                title={ctTpl?.name || customerTextRule?.name || 'CT - Auto Reply'}
+                body={ctTpl?.content || customerTextRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request…'}
+                badge={{ label: 'Template', tone: 'green' }}
+                tooltip={ctTpl?.content || customerTextRule?.template || undefined}
+                actionLabel="Edit Template"
+                onAction={() => goTemplate(ctTpl, 'auto-reply')}
+              />
+            </FieldRow>
+          </AdvancedExpand>
+        )}
       </SettingCard>
 
       {/* Instant Call */}
@@ -774,32 +954,48 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           </div>
         </FieldRow>
 
-        <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
-          <InfoTile
-            title={whisperTpl?.name || 'CC - Agent Whisper'}
-            body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
-            badge={{ label: 'Template', tone: 'violet' }}
-            tooltip={callSettings?.agentWhisperMessage || whisperTpl?.content || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(whisperTpl, 'call-connect')}
-          />
-        </FieldRow>
+        {/* Advanced call messages — Agent Whisper + Voicemail editors hidden
+            by default per the Automation Simplification (2026-06-12). The
+            default templates work for most teams; power users + support
+            reach the editors here. Runtime is unchanged: the saved
+            template values are still read from callSettings on every
+            call-connect, regardless of whether this section is open. */}
+        <AdvancedExpand
+          title="Advanced call messages"
+          helper="Default call messages work for most teams. Edit only if you need custom wording for the agent whisper or voicemail."
+          defaultOpen={advancedMode}
+        >
+          <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
+            <InfoTile
+              title={whisperTpl?.name || 'CC - Agent Whisper'}
+              body={callSettings?.agentWhisperMessage || whisperTpl?.content || 'You have a new lead for {category}. Customer name: {customerName}…'}
+              badge={{ label: 'Template', tone: 'violet' }}
+              tooltip={callSettings?.agentWhisperMessage || whisperTpl?.content || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(whisperTpl, 'call-connect')}
+            />
+          </FieldRow>
 
-        <FieldRow icon={Mic} iconTone="violet" label="Voicemail Message" noBorder>
-          <InfoTile
-            title={voicemailTpl?.name || 'CC - Voicemail TTS'}
-            body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
-            badge={{ label: 'Template', tone: 'violet' }}
-            tooltip={callSettings?.leadVoicemailMessage || voicemailTpl?.content || undefined}
-            actionLabel="Edit Template"
-            onAction={() => goTemplate(voicemailTpl, 'call-connect')}
-          />
-        </FieldRow>
+          <FieldRow icon={Mic} iconTone="violet" label="Voicemail Message" noBorder>
+            <InfoTile
+              title={voicemailTpl?.name || 'CC - Voicemail TTS'}
+              body={callSettings?.leadVoicemailMessage || voicemailTpl?.content || 'Hi {customerName}, this is {accountName}. We tried to reach you…'}
+              badge={{ label: 'Template', tone: 'violet' }}
+              tooltip={callSettings?.leadVoicemailMessage || voicemailTpl?.content || undefined}
+              actionLabel="Edit Template"
+              onAction={() => goTemplate(voicemailTpl, 'call-connect')}
+            />
+          </FieldRow>
+        </AdvancedExpand>
       </SettingCard>
 
       <FooterBanner
         icon={Info}
-        body={<>Templates can be managed in <Link to="/templates" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Templates</Link>.</>}
+        body={
+          <>
+            Templates can be managed in <Link to="/templates" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Templates</Link>.
+          </>
+        }
       />
     </div>
   );
@@ -820,6 +1016,58 @@ function ConnDiagram({ kind }: { kind: 'serial' | 'parallel' }) {
       <User size={14} />
       <ArrowRight size={12} style={{ color: 'var(--lb-ink-6)' }} />
       <User size={14} />
+    </div>
+  );
+}
+
+/**
+ * Collapsible "Advanced" section for Instant Text + Instant Call.
+ *
+ * The Automation Simplification (2026-06-12) hides the SMS template tile
+ * and the Agent Whisper + Voicemail editors from the normal First Reply
+ * page. Power users + support reach them via this expand. Auto-opens when
+ * ?advanced=1 or ?debug=1 is in the URL (driven by the parent `defaultOpen`).
+ *
+ * Local React state controls open/close so a user who manually expanded
+ * the section in a normal session keeps it open while they edit, without
+ * needing the URL param.
+ */
+function AdvancedExpand({
+  title, helper, defaultOpen, children,
+}: {
+  title: string;
+  helper: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState<boolean>(!!defaultOpen);
+  return (
+    <div style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%',
+          padding: '12px 0',
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-2)' }}>{title}</div>
+          {helper && (
+            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.5 }}>
+              {helper}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'inline-flex', color: 'var(--lb-ink-5)', flexShrink: 0, marginLeft: 12 }}>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </div>
+      </button>
+      {open && <div style={{ paddingBottom: 4 }}>{children}</div>}
     </div>
   );
 }

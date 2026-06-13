@@ -13,9 +13,15 @@ import { PlatformFactory } from './platform.factory';
 import { PlatformService } from './platform.service';
 import { LeadsModule } from '../leads/leads.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 
 @Module({
-  imports: [ConfigModule, forwardRef(() => LeadsModule), forwardRef(() => NotificationsModule)],
+  imports: [
+    ConfigModule,
+    forwardRef(() => LeadsModule),
+    forwardRef(() => NotificationsModule),
+    ConversationContextModule,
+  ],
   controllers: [ThumbtackController, YelpController, PlatformsController],
   providers: [ThumbtackAdapter, YelpAdapter, PlatformFactory, PlatformService],
   exports: [PlatformFactory, PlatformService, YelpAdapter],

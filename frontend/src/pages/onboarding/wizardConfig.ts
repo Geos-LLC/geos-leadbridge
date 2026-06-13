@@ -38,9 +38,9 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   },
   {
     slug: 'ai',
-    label: 'AI',
-    title: 'Teach AI about your business',
-    description: 'A few facts AI uses when replying to leads.',
+    label: 'FAQ',
+    title: 'Your business FAQ',
+    description: 'Answers AI uses verbatim when leads ask. Pre-filled from your website where possible.',
     countsTowardChecklist: true,
   },
   {
@@ -60,8 +60,8 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'ai_rules',
     label: 'AI Rules',
-    title: 'AI stop & handoff rules',
-    description: 'When AI should stop replying and when to alert your team.',
+    title: 'AI goal & reply availability',
+    description: 'What AI is trying to achieve in each conversation, and when it can reply.',
     countsTowardChecklist: true,
   },
   {

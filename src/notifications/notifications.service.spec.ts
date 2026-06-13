@@ -102,6 +102,14 @@ describe('NotificationsService', () => {
       // Tests don't assert on TC writes in this suite; the freshness contract
       // is covered in conversation-context.service.spec.ts.
       recordMessage: jest.fn().mockResolvedValue(undefined),
+    } as any, {
+      // InstantTextAiService stub — wired 2026-06-12 for AI SMS generation.
+      // These tests assert behavior under the existing template path so we
+      // never invoke this stub; the AI path is covered in
+      // instant-text-ai.service.spec.ts. Default-mode resolution for the
+      // SavedAccount lookups in this suite is 'template' (no
+      // followUpSettingsJson seeded), so the AI branch is skipped anyway.
+      generateInstantTextBody: jest.fn().mockResolvedValue('AI generated body'),
     } as any);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls

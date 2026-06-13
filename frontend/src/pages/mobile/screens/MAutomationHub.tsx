@@ -75,7 +75,7 @@ export default function MAutomationHub() {
       <MSection title="Modes">
         <MCard>
           <MAutoCard
-            title="When a Lead Arrives" sub="First reply when a lead lands"
+            title="First Reply" sub="What AI does when a new lead lands"
             badge={{ label: 'Respond', bg: '#dcfce7', fg: '#15803d' }}
             icon="zap" color="var(--success)" bg="var(--success-tint)"
             status={respondStatus}

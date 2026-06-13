@@ -19,13 +19,15 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
-import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
+import { OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
+import { resolveActiveGoal } from '../ai/goal-resolver';
 import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone, stripLeadingTimestampPrefix } from '../ai/time-context';
 import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -132,37 +134,32 @@ export class FollowUpGeneratorService {
     const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 100 });
     const threadState = await this.conversationContext.getThreadState(conversationId);
 
-    // Step 2: Determine strategy
-    //   Priority: thread override > account default > suggestStrategy() > fallback 'hybrid'
-    let strategyKey = 'hybrid';
-    let strategyReason = '';
-    let customStrategyPrompt: string | null = null;
-
-    // Check account-level strategy setting (user configured in follow-up settings)
+    // Step 2: Determine Conversation Goal via the shared resolver. Same
+    // chain Lead Arrives + AI Conversation now use — `auto` calls
+    // suggestStrategy(); explicit account choices win; thread override
+    // applies when account is auto/empty; hybrid fallback if nothing
+    // resolves. See src/ai/goal-resolver.ts for the full priority.
     const accountSettings = await this.getAccountFollowUpSettings(conversationId);
-    if (accountSettings?.followUpStrategy && accountSettings.followUpStrategy !== 'auto') {
-      strategyKey = accountSettings.followUpStrategy;
-      strategyReason = 'account default';
-      if (accountSettings.followUpStrategyPrompt) {
-        customStrategyPrompt = accountSettings.followUpStrategyPrompt;
-      }
-    } else if (threadState?.activeStrategy && STRATEGY_PROMPTS[threadState.activeStrategy]) {
-      // Manual override from thread — respect it
-      strategyKey = threadState.activeStrategy;
-      strategyReason = 'manual override';
-    } else {
-      // Use suggestStrategy() to pick the best strategy from thread context
-      const suggestion = await this.conversationContext.suggestStrategy(conversationId);
-      if (suggestion) {
-        strategyKey = suggestion.suggested;
-        strategyReason = suggestion.reason;
-      }
-    }
-
-    const strategyPrompt = customStrategyPrompt || STRATEGY_PROMPTS[strategyKey] || STRATEGY_PROMPTS.hybrid;
+    const resolved = await resolveActiveGoal(
+      {
+        threadActiveStrategy: threadState?.activeStrategy ?? null,
+        accountFollowUpStrategy: accountSettings?.followUpStrategy ?? null,
+        accountFollowUpStrategyPrompt: accountSettings?.followUpStrategyPrompt ?? null,
+        conversationId,
+      },
+      {
+        suggestStrategy: (id: string) =>
+          this.conversationContext.suggestStrategy(id),
+      },
+    );
+    const strategyKey = resolved.goalKey ?? 'hybrid';
+    const strategyPrompt = resolved.strategyPrompt;
     const objectiveFlavor = OBJECTIVE_FLAVORS[step.objective] || '';
 
-    this.logger.log(`[FollowUpGenerator] Strategy: ${strategyKey} (${strategyReason}), objective: ${step.objective}`);
+    this.logger.log(
+      `[FollowUpGenerator] Goal: ${strategyKey} via ${resolved.source} ` +
+      `(${resolved.reason}), objective: ${step.objective}`,
+    );
 
     // Step 3: Load pricing context and lead details
     let pricingContext = '';
@@ -195,6 +192,15 @@ export class FollowUpGeneratorService {
     let businessContext = '';
     let urgencyContext = '';
     let playbookBlock = '';
+    // Qualification REFERENCE block. Only emitted when the resolved strategy
+    // is 'price' or 'qualify' AND the tenant has saved a non-empty
+    // `qualificationV2.requiredFields` array. Existing accounts without
+    // that key keep the legacy hardcoded priority order from STRATEGY_PROMPTS.qualify.
+    const qualificationBlockBody: string = buildQualificationBlockForStrategy(
+      strategyKey,
+      accountSettings?.qualificationV2?.requiredFields,
+      accountSettings?.qualificationV2?.customFields,
+    );
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
@@ -385,6 +391,14 @@ export class FollowUpGeneratorService {
 
     if (urgencyContext) {
       systemParts.push('', '=== REFERENCE: URGENCY ===', urgencyContext);
+    }
+
+    if (qualificationBlockBody) {
+      systemParts.push(
+        '',
+        '=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===',
+        qualificationBlockBody,
+      );
     }
 
     if (context?.systemContext) {

@@ -55,9 +55,13 @@ function buildPrisma(ownerUserId: string) {
 
 function makeService(prisma: any): AutomationService {
   // Cast to any — only the methods exercised here need to be functional.
+  // The AutomationService constructor takes 15 injected deps; this test
+  // only exercises the prisma path so the remaining 14 are stubbed.
+  // If the constructor adds a new dep, append another `{} as any` here.
   return new AutomationService(
     prisma,
     {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+    {} as any, {} as any, {} as any, {} as any,
   );
 }
 

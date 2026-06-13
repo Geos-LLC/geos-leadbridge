@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Globe, Loader2, Phone, Sparkles } from 'lucide-react';
 import { notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
@@ -6,6 +6,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import { getStepMeta } from '../wizardConfig';
+import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 
 interface Props {
   // Both callbacks ultimately funnel through the WizardShell action
@@ -20,7 +21,7 @@ interface Props {
 interface VerifyOutcome {
   reachable: boolean;
   normalizedUrl: string;
-  metadata?: { title?: string; description?: string; phone?: string };
+  metadata?: { title?: string; description?: string; phone?: string; imageUrl?: string; summary?: string };
   errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
   errorMessage?: string;
 }
@@ -43,6 +44,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
     | { kind: 'checking' }
+    | { kind: 'applying' }
     | { kind: 'invalid'; outcome: VerifyOutcome }
     | { kind: 'valid'; outcome: VerifyOutcome }
   >({ kind: 'idle' });
@@ -62,6 +64,50 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const [searchingPhone, setSearchingPhone] = useState(false);
   const [purchasingPhone, setPurchasingPhone] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  // Per-account public Thumbtack profile URL. Moved here from the
+  // Connect step — it's a data-source input, not an OAuth setting.
+  // Without it the Partner API only returns businessID + name + phone,
+  // which gives Pull-from-Thumbtack nothing useful to merge into
+  // playbookSeed.businessInformation.
+  const [ttUrls, setTtUrls] = useState<Record<string, string>>({});
+  const ttUrlsInitialRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const ttAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
+    if (ttAccounts.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      ttAccounts.map(a => usersApi.getThumbtackProfileUrl(a.id)
+        .then(res => ({ id: a.id, url: res.url ?? '' }))
+        .catch(() => ({ id: a.id, url: '' })),
+      ),
+    ).then(results => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const r of results) next[r.id] = r.url;
+      setTtUrls(prev => ({ ...next, ...prev })); // preserve in-flight edits
+      ttUrlsInitialRef.current = { ...next };
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedAccounts.map(a => a.id).join(',')]);
+
+  const saveTtUrl = async (accountId: string) => {
+    const next = (ttUrls[accountId] || '').trim();
+    if (next === (ttUrlsInitialRef.current[accountId] || '').trim()) return;
+    try {
+      const res = await usersApi.saveThumbtackProfileUrl(accountId, next || null);
+      if (!res.success) {
+        notify.warning('Could not save URL', res.warning || 'Try again.');
+        return;
+      }
+      ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
+      notify.success('Saved', 'AI will use this when pulling business info.', 2500);
+    } catch (e: any) {
+      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -154,6 +200,38 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           token,
         );
       }
+
+      // Auto-apply to AI Playbook + FAQ inside the wizard. Both are
+      // best-effort: the data is already saved on the user, so a failure
+      // here doesn't block the wizard. The two applies are independent —
+      // either succeeding is useful — so we run them in parallel and
+      // report a combined toast.
+      if (outcome.metadata?.playbookSeed) {
+        setVerifyState({ kind: 'applying' });
+        const [playbookRes, faqRes] = await Promise.all([
+          usersApi.applyPlaybookSeed('fill_empty').catch((e: any) => {
+            console.warn('[BusinessWebsiteStep] playbook apply failed:', e?.message || e);
+            return null;
+          }),
+          usersApi.applyFaqFromWebsiteSeed().catch((e: any) => {
+            console.warn('[BusinessWebsiteStep] faq apply failed:', e?.message || e);
+            return null;
+          }),
+        ]);
+        const playbookFilled = playbookRes?.success ? playbookRes.filled : 0;
+        const faqFilled = faqRes?.success ? faqRes.filled : 0;
+        if (playbookFilled > 0 || faqFilled > 0) {
+          const parts: string[] = [];
+          if (playbookFilled > 0) parts.push(`${playbookFilled} AI Playbook section${playbookFilled === 1 ? '' : 's'}`);
+          if (faqFilled > 0) parts.push(`${faqFilled} FAQ field${faqFilled === 1 ? '' : 's'}`);
+          notify.success(
+            'Applied from your website',
+            `Filled ${parts.join(' and ')}. Review on the next step or in Settings → AI Playbook.`,
+            5000,
+          );
+        }
+      }
+
       setVerifyState({ kind: 'valid', outcome });
       await onSaveContinue();
     } catch (err: any) {
@@ -194,7 +272,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
 
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
-  const canSave = trimmed.length > 0 && !isChecking;
+  const isApplying = verifyState.kind === 'applying';
+  const isBusy = isChecking || isApplying;
+  const canSave = trimmed.length > 0 && !isBusy;
   // Persistent "verified" indicator: the URL in the input matches
   // what we saved AND we have metadata (which only gets written if
   // the verify endpoint actually loaded the site). Survives wizard
@@ -260,27 +340,73 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               }}
             />
           </div>
+          {/* Prominent inline spinner shown while we're talking to the
+              backend. The verify endpoint can take 5-15 seconds (HTML
+              fetch + Microlink screenshot + gpt-4o-mini summary) so a
+              tiny button-label spinner doesn't communicate well — this
+              card sets expectation that work is happening. */}
+          {isBusy && (
+            <div className="mt-3 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <Loader2 className="w-5 h-5 text-slate-500 animate-spin shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <div className="font-bold text-slate-900">
+                  {isApplying ? 'Applying website info to your AI Playbook…' : 'Pulling info from your site…'}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {isApplying
+                    ? 'Filling empty Playbook sections so your AI starts with real context.'
+                    : 'We fetch the page, render a preview, and generate an AI summary. Takes a few seconds.'}
+                </div>
+              </div>
+            </div>
+          )}
           {/* If the user has a previously-verified site (came back to
               this step, or refreshed the page) show what we found so
-              they have visible proof the URL really loaded. */}
-          {savedAndVerified && savedMetadata && !isChecking && (
-            <div className="mt-2 px-3 py-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-xs">
-              {savedMetadata.title && (
-                <div className="font-bold text-emerald-900 truncate">{savedMetadata.title}</div>
-              )}
-              {savedMetadata.description && (
-                <div className="text-emerald-700 mt-0.5 line-clamp-2">{savedMetadata.description}</div>
-              )}
-              {savedMetadata.phone && (
-                <div className="text-emerald-600 mt-1 font-mono text-[11px]">
-                  Phone found on site: {savedMetadata.phone}
-                </div>
-              )}
+              they have visible proof the URL really loaded. The Apply
+              button is gone from this surface — auto-apply runs inline
+              when Save & continue is clicked, so the user never has to
+              think about it during the wizard. */}
+          {savedAndVerified && savedMetadata && !isBusy && (
+            <div className="mt-2">
+              <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
             </div>
           )}
         </label>
 
       </div>
+
+      {/* Thumbtack profile URL — one input per connected TT account.
+          Only rendered when a TT account exists; otherwise nothing to
+          attach a URL to. Same flow as Settings → General. */}
+      {savedAccounts.some(a => a.platform === 'thumbtack') && (
+        <section className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Globe className="w-4 h-4 text-slate-500" />
+            <h2 className="text-sm font-extrabold text-slate-900">Thumbtack profile URL</h2>
+            <span className="text-xs font-normal text-slate-400">(optional)</span>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+            Paste your public Thumbtack profile so AI can pull services, address, insurance, and pricing. Thumbtack's API alone returns only name and phone.
+          </p>
+          <ul className="space-y-3">
+            {savedAccounts.filter(a => a.platform === 'thumbtack').map(acct => (
+              <li key={acct.id}>
+                <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                  {acct.businessName || 'Thumbtack business'}
+                </label>
+                <input
+                  type="url"
+                  value={ttUrls[acct.id] ?? ''}
+                  onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
+                  onBlur={() => void saveTtUrl(acct.id)}
+                  placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* LeadBridge phone number — the dedicated outbound number purchased
           from Twilio via Sigcore. Lives on TenantPhoneNumber, not on
@@ -474,13 +600,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           disabled={!canSave}
           className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
-          {isChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {verifyState.kind === 'checking' ? 'Checking your site…' : (saving ? 'Saving…' : 'Save & Continue')}
+          {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {verifyState.kind === 'checking'
+            ? 'Checking your site…'
+            : verifyState.kind === 'applying'
+              ? 'Applying to Playbook…'
+              : (saving ? 'Saving…' : 'Save & Continue')}
         </button>
         <button
           type="button"
           onClick={() => void skipNoWebsite()}
-          disabled={isChecking}
+          disabled={isBusy}
           className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all"
         >
           I don't have a website

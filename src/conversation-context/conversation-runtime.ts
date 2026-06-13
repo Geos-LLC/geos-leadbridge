@@ -56,6 +56,11 @@ export const AI_STATUS_REASONS = {
   CRM_TERMINAL_LEGACY: 'crm_terminal_status_legacy',
   AI_REPLY_SENT: 'ai_reply_sent',
   AI_REPLY_SCHEDULED: 'ai_reply_scheduled',
+  // V2 goal completion stops — fired when a per-goal "Stop AI + Notify Team"
+  // selection is honored at runtime. These are independent of the legacy
+  // CLASSIFIER_AGREED stop (which Price still uses via aiStopOnPriceAgreed).
+  GOAL_QUALIFY_COMPLETE: 'goal_qualify_complete',
+  GOAL_PHONE_COMPLETE: 'goal_phone_complete',
 } as const;
 
 export const CONVERSATION_STATE_REASONS = {
@@ -70,6 +75,8 @@ export const CONVERSATION_STATE_REASONS = {
   CLASSIFIER_DEFERRING: 'classifier_deferring',
   SF_TERMINAL: 'sf_terminal',
   CRM_TERMINAL_LEGACY: 'crm_terminal_status_legacy',
+  GOAL_QUALIFY_COMPLETE: 'goal_qualify_complete',
+  GOAL_PHONE_COMPLETE: 'goal_phone_complete',
 } as const;
 
 export function isConversationState(s: string | null | undefined): s is ConversationState {

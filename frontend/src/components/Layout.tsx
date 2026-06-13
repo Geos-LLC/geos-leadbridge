@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
-  AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
+  AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
-  DollarSign,
+  DollarSign, Sparkles, Paperclip, Send, X,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -40,6 +40,9 @@ export function Layout() {
   const { user, logout, impersonatingUser } = useAuthStore();
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [aiChatOpen, setAiChatOpen] = useState(false);
+  const [aiChatInput, setAiChatInput] = useState('');
+  const [aiChatFiles, setAiChatFiles] = useState<File[]>([]);
 
   const loadAnalytics = useAppStore(state => state.loadAnalytics);
   const systemHealth = useAppStore(state => state.systemHealth);
@@ -78,12 +81,11 @@ export function Layout() {
       label: 'Automation',
       path: '/automation',
       children: [
-        { label: 'When a Lead Arrives', path: '/automation/respond', hint: 'Respond',  tone: 'green' },
+        { label: 'First Reply',         path: '/automation/respond', hint: 'Respond',  tone: 'green' },
         { label: 'Follow-ups',          path: '/automation/engage',  hint: 'Engage',   tone: 'purple' },
         { label: 'AI Conversation',     path: '/automation/convert', hint: 'Convert',  tone: 'blue' },
       ],
     },
-    { icon: <FileText size={15} />,    label: 'Templates',     path: '/templates' },
     { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/insights' },
     // Partner Network Beta lives under Settings → Partner Network (last tab)
     // while in beta. The top-level /partner-network/* routes remain available
@@ -113,7 +115,7 @@ export function Layout() {
   // user can always get back to where they came from with one click.
   const navState = (location.state || null) as { from?: string; fromLabel?: string } | null;
   const backLabelFor = (path: string): string => {
-    if (path.startsWith('/automation/respond')) return 'When a Lead Arrives';
+    if (path.startsWith('/automation/respond')) return 'First Reply';
     if (path.startsWith('/automation/engage')) return 'Follow-ups';
     if (path.startsWith('/automation/convert')) return 'AI Conversation';
     if (path.startsWith('/automation')) return 'Automation';
@@ -484,7 +486,26 @@ export function Layout() {
                     </h1>
                   )}
                 </div>
-                <div className="flex items-center gap-3" />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/onboarding/setup')}
+                    className="flex items-center justify-center hover:scale-105 transition-all"
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 999,
+                      background: 'var(--lb-ink-10)',
+                      color: 'var(--lb-ink-2)',
+                      border: '1px solid var(--lb-line)',
+                      cursor: 'pointer',
+                    }}
+                    title="Open setup guide"
+                    aria-label="Open setup guide"
+                  >
+                    <GraduationCap size={17} />
+                  </button>
+                </div>
               </div>
             </header>
           )}
@@ -562,26 +583,260 @@ export function Layout() {
 
           <Outlet />
 
-          {/* Floating "resume setup" button — opens the guided setup
-              wizard so users can finish onboarding from any page. */}
-          <button
-            onClick={() => navigate('/onboarding/setup')}
-            className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 999,
-              background: 'var(--lb-accent)',
-              color: 'var(--lb-accent-fg)',
-              border: 0,
-              cursor: 'pointer',
-              boxShadow: 'var(--lb-shadow-md)',
-            }}
-            title="Open setup guide"
-            aria-label="Open setup guide"
-          >
-            <GraduationCap size={18} />
-          </button>
+          {/* Floating AI assistant trigger — bottom-right. */}
+          {!aiChatOpen && (
+            <button
+              type="button"
+              onClick={() => setAiChatOpen(true)}
+              className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 999,
+                background: 'var(--lb-accent)',
+                color: 'var(--lb-accent-fg)',
+                border: 0,
+                cursor: 'pointer',
+                boxShadow: 'var(--lb-shadow-md)',
+              }}
+              title="Open AI assistant"
+              aria-label="Open AI assistant"
+            >
+              <Sparkles size={18} />
+            </button>
+          )}
+
+          {/* AI Assistant chat panel — UI only, no backend wiring yet. */}
+          {aiChatOpen && (
+            <>
+              <div
+                onClick={() => setAiChatOpen(false)}
+                className="fixed inset-0 z-40"
+                style={{ background: 'rgba(0,0,0,0.25)' }}
+                aria-hidden
+              />
+              <div
+                className="fixed z-50 flex flex-col"
+                role="dialog"
+                aria-label="AI assistant chat"
+                style={{
+                  bottom: 20,
+                  right: 20,
+                  height: 'min(620px, calc(100vh - 40px))',
+                  width: 'min(440px, calc(100vw - 40px))',
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 18,
+                  boxShadow: '0 24px 60px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.06)',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Header */}
+                <div
+                  className="flex items-center justify-between"
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: '1px solid var(--lb-line)',
+                  }}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="flex items-center justify-center"
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 10,
+                        background: 'var(--lb-accent)',
+                        color: 'var(--lb-accent-fg)',
+                      }}
+                    >
+                      <Sparkles size={15} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                        AI Assistant
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          color: 'var(--lb-accent)',
+                          background: 'var(--lb-ink-10)',
+                          padding: '2px 6px',
+                          borderRadius: 999,
+                        }}
+                      >
+                        Beta
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAiChatOpen(false)}
+                    className="flex items-center justify-center hover:bg-[var(--lb-ink-10)] transition-colors"
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      background: 'transparent',
+                      color: 'var(--lb-ink-4)',
+                      border: 0,
+                      cursor: 'pointer',
+                    }}
+                    aria-label="Close AI assistant"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Conversation area */}
+                <div
+                  className="flex-1"
+                  style={{
+                    overflowY: 'auto',
+                    padding: '12px 16px',
+                  }}
+                />
+
+                {/* Composer */}
+                <div
+                  style={{
+                    padding: '10px 12px 12px',
+                    borderTop: '1px solid var(--lb-line)',
+                    background: 'var(--lb-surface)',
+                  }}
+                >
+                  {aiChatFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5" style={{ marginBottom: 8 }}>
+                      {aiChatFiles.map((f, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-1.5"
+                          style={{
+                            fontSize: 12,
+                            padding: '4px 8px 4px 6px',
+                            borderRadius: 8,
+                            background: 'var(--lb-ink-10)',
+                            color: 'var(--lb-ink-2)',
+                            border: '1px solid var(--lb-line)',
+                          }}
+                        >
+                          <Paperclip size={11} style={{ color: 'var(--lb-ink-4)' }} />
+                          <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {f.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAiChatFiles(prev => prev.filter((_, idx) => idx !== i))}
+                            style={{
+                              background: 'transparent',
+                              border: 0,
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--lb-ink-4)',
+                              display: 'inline-flex',
+                            }}
+                            aria-label={`Remove ${f.name}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div
+                    className="flex flex-col"
+                    style={{
+                      background: 'var(--lb-surface)',
+                      border: '1px solid var(--lb-line)',
+                      borderRadius: 14,
+                      padding: '6px 8px 6px 10px',
+                      transition: 'border-color 120ms, box-shadow 120ms',
+                    }}
+                    onFocusCapture={e => {
+                      e.currentTarget.style.borderColor = 'var(--lb-accent)';
+                      e.currentTarget.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)';
+                    }}
+                    onBlurCapture={e => {
+                      e.currentTarget.style.borderColor = 'var(--lb-line)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  >
+                    <textarea
+                      value={aiChatInput}
+                      onChange={e => setAiChatInput(e.target.value)}
+                      placeholder="Message AI assistant…"
+                      rows={1}
+                      style={{
+                        width: '100%',
+                        resize: 'none',
+                        background: 'transparent',
+                        border: 0,
+                        outline: 'none',
+                        fontSize: 14,
+                        color: 'var(--lb-ink-1)',
+                        fontFamily: 'inherit',
+                        padding: '6px 2px',
+                        maxHeight: 140,
+                        lineHeight: 1.5,
+                      }}
+                    />
+                    <div className="flex items-center justify-between" style={{ marginTop: 2 }}>
+                      <label
+                        className="flex items-center justify-center hover:bg-[var(--lb-ink-10)] transition-colors"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
+                          color: 'var(--lb-ink-4)',
+                          cursor: 'pointer',
+                        }}
+                        title="Attach files"
+                        aria-label="Attach files"
+                      >
+                        <Paperclip size={15} />
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={e => {
+                            const list = e.target.files;
+                            if (!list) return;
+                            setAiChatFiles(prev => [...prev, ...Array.from(list)]);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!aiChatInput.trim() && aiChatFiles.length === 0}
+                        className="flex items-center justify-center transition-all"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
+                          background: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
+                          color: aiChatInput.trim() || aiChatFiles.length > 0 ? 'var(--lb-accent-fg)' : 'var(--lb-ink-5)',
+                          border: 0,
+                          cursor: aiChatInput.trim() || aiChatFiles.length > 0 ? 'pointer' : 'not-allowed',
+                        }}
+                        aria-label="Send message"
+                      >
+                        <Send size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 10.5, color: 'var(--lb-ink-5)', textAlign: 'center', marginTop: 8 }}>
+                    AI Assistant is in beta — answers may be incomplete.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </main>
     </div>

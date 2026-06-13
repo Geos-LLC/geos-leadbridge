@@ -5,6 +5,7 @@
 
 import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
 import { withCronLock } from '../common/utils/cron-lock';
@@ -84,6 +85,37 @@ function sanitizeSavedAccount(raw: any, tokenDead: boolean): SafeSavedAccount {
   };
 }
 
+function normalizeE164(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (digits.length > 10) return `+${digits}`;
+  return null;
+}
+
+function normalizeAdditionalAssociatePhones(
+  raw: Array<{ id?: string; phoneNumber: string; label?: string }> | undefined,
+): Array<{ id: string; phoneNumber: string; label?: string }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: Array<{ id: string; phoneNumber: string; label?: string }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry.phoneNumber !== 'string') continue;
+    const phone = normalizeE164(entry.phoneNumber);
+    if (!phone) continue;
+    if (seen.has(phone)) continue;
+    seen.add(phone);
+    const id =
+      typeof entry.id === 'string' && entry.id.length > 0
+        ? entry.id
+        : `aap_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+    const label = typeof entry.label === 'string' ? entry.label.trim().slice(0, 80) : undefined;
+    out.push(label ? { id, phoneNumber: phone, label } : { id, phoneNumber: phone });
+  }
+  return out;
+}
+
 @Injectable()
 export class PlatformService {
   private readonly logger = new Logger(PlatformService.name);
@@ -102,6 +134,7 @@ export class PlatformService {
     private trialService: TrialService,
     private cache: CacheService,
     private leadCache: LeadCacheService,
+    private eventEmitter: EventEmitter2,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -669,12 +702,10 @@ export class PlatformService {
 
     await this.invalidateSavedAccountsCache(userId);
 
-    // Auto-register agent phone as Thumbtack associate phone (allows calling without access code)
-    try {
-      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
-    } catch (err: any) {
-      console.warn(`[PlatformService] Associate phone registration failed (non-blocking): ${err.message}`);
-    }
+    // Auto-register agent phone + LB number as Thumbtack associate phones
+    // (allows calling without access code, and lets the LB number act as a
+    // fallback sender when the customer's real phone isn't available).
+    await this.syncAccountPhonesToThumbtack(userId, businessId, credentials, adapter);
 
     return {
       webhookId: result.webhookId,
@@ -705,7 +736,9 @@ export class PlatformService {
 
     const agentPhone = account?.agentPhoneOverride || user?.businessPhone;
     if (!agentPhone) {
-      console.log(`[PlatformService] No agent phone set for user ${userId}, skipping Thumbtack associate phone registration`);
+      this.logger.log(
+        `[tt.associate-phone] skip-owner reason=no_agent_phone userId=${userId} businessId=${businessId}`,
+      );
       return;
     }
 
@@ -718,8 +751,176 @@ export class PlatformService {
       credentials = creds;
     }
 
-    console.log(`[PlatformService] Registering agent phone ${agentPhone} as Thumbtack associate for business ${businessId}`);
-    await adapter.registerAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
+    const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
+    this.logger.log(
+      `[tt.associate-phone] owner ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${agentPhone} name="LeadBridge Agent"`,
+    );
+  }
+
+  /**
+   * Register the user's LeadBridge dedicated number (TenantPhoneNumber) as a
+   * Thumbtack associate phone for this business. This is the substitute /
+   * fallback number used when the customer's real phone isn't available — TT
+   * needs it whitelisted on the business for the proxy call/text path to honor
+   * it as a legitimate pro-side sender.
+   *
+   * Per-account fallback chain: account-scoped TPN → unassigned → any-active
+   * (matches `resolveBotPhone`). Skips silently if the user has no LB number
+   * provisioned yet.
+   */
+  async registerLeadBridgeNumberWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true },
+    });
+    if (!account) return;
+
+    const lbPhone = await this.notificationsService.resolveBotPhone(userId, account.id);
+    if (!lbPhone) {
+      this.logger.log(
+        `[tt.associate-phone] skip-lb reason=no_lb_number userId=${userId} businessId=${businessId} savedAccountId=${account.id}`,
+      );
+      return;
+    }
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, lbPhone, 'LeadBridge Number');
+    this.logger.log(
+      `[tt.associate-phone] lb ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${lbPhone} name="LeadBridge Number"`,
+    );
+  }
+
+  /**
+   * Register both the agent's business phone and the LeadBridge dedicated
+   * number as Thumbtack associate phones for this business. Each call is
+   * independent — a failure of one does not block the other.
+   */
+  async syncAccountPhonesToThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    try {
+      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      this.logger.warn(
+        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
+    }
+    try {
+      await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      this.logger.warn(
+        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
+    }
+    try {
+      await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      this.logger.warn(
+        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+      );
+    }
+  }
+
+  /**
+   * Register every entry in
+   * `SavedAccount.followUpSettingsJson.additionalAssociatePhones` as a
+   * Thumbtack associate phone on the given business. Idempotent via
+   * ensureAssociatePhone. Skips silently when the account has none.
+   *
+   * Per-business scope — only reads from the SavedAccount tied to this exact
+   * businessId, never from siblings. Adding a number to Jacksonville stays
+   * on Jacksonville and does NOT leak to Tampa / St Pete / etc.
+   *
+   * Legacy User.additionalAssociatePhonesJson is NOT read here (intentional).
+   * Old user-level data stays dormant; new writes go to SavedAccount.
+   */
+  async registerAdditionalAssociatePhonesWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { followUpSettingsJson: true },
+    });
+    if (!account?.followUpSettingsJson) return;
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(account.followUpSettingsJson);
+    } catch {
+      return;
+    }
+    const raw = parsed?.additionalAssociatePhones as
+      | Array<{ id?: string; phoneNumber: string; label?: string }>
+      | null
+      | undefined;
+    if (!Array.isArray(raw) || raw.length === 0) return;
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    for (const entry of raw) {
+      if (!entry || typeof entry.phoneNumber !== 'string') continue;
+      const phone = entry.phoneNumber;
+      const name = (entry.label && entry.label.trim()) || 'LeadBridge Associate';
+      try {
+        const { registered } = await adapter.ensureAssociatePhone(credentials, businessId, phone, name);
+        this.logger.log(
+          `[tt.associate-phone] additional ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${phone} name="${name}"`,
+        );
+      } catch (err: any) {
+        // One bad entry shouldn't stop the rest of the list.
+        this.logger.warn(
+          `[tt.associate-phone] additional failed businessId=${businessId} phone=${phone} name="${name}" message="${err?.message ?? err}"`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Register the user's LeadBridge dedicated number on every connected
+   * Thumbtack business. Used when the LB number is provisioned, reassigned,
+   * or restored — at those moments the TPN row changed and we want every
+   * TT business to pick up the new resolveBotPhone() result.
+   */
+  async syncLeadBridgeNumberToAllThumbtack(userId: string): Promise<void> {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId, platform: 'thumbtack' },
+      select: { businessId: true },
+    });
+    for (const account of accounts) {
+      if (!account.businessId) continue;
+      try {
+        await this.registerLeadBridgeNumberWithThumbtack(userId, account.businessId);
+      } catch (err: any) {
+        this.logger.warn(
+          `[tt.associate-phone] lb sync-all-failed businessId=${account.businessId} userId=${userId} message="${err?.message ?? err}"`,
+        );
+      }
+    }
   }
 
   /**
@@ -1011,6 +1212,16 @@ export class PlatformService {
       this.logger.warn(`[saveAccount] Trial init failed for ${userId}: ${err.message}`);
     });
 
+    // Emit a domain event so UsersService can silently seed
+    // businessInformation from the freshly-connected account. Decoupled to
+    // avoid a Users <-> Platforms circular dep. Listener is async / fire-
+    // and-forget; failures are non-fatal — the account is saved either way.
+    this.eventEmitter.emit('platform.account.connected', {
+      userId,
+      savedAccountId: savedAccount.id,
+      platform,
+    });
+
     // Invalidate AFTER commit so a concurrent reader cannot repopulate the cache
     // from pre-commit state.
     await this.invalidateSavedAccountsCache(userId);
@@ -1237,14 +1448,53 @@ export class PlatformService {
         name: 'Auto-Reply to Customer',
         triggerType: 'new_lead',
         sendToCustomer: true,
+        // `useAi` lives on AutomationRule, not NotificationRule. The
+        // AI-first default for First Reply is enforced in the frontend
+        // fallback (frontend/.../automation/Respond.tsx) — when no
+        // AutomationRule exists for a fresh account, the page defaults
+        // replyType to 'ai' instead of 'template'.
         template: customerTemplate,
         delayMinutes: 0,
         enabled: true,
       },
     });
 
+    // V2 Instant Text AI default (2026-06-12).
+    //
+    // New accounts default to AI-generated SMS for Instant Text. The
+    // resolver in notifications.service.resolveInstantTextMode treats a
+    // missing instantTextMode key as 'template' (existing-tenant
+    // back-compat), so we write 'ai' EXPLICITLY here for new tenants.
+    // Existing tenants whose seedOrInherit was already called keep the
+    // missing-key/'template' behavior until they save the toggle from
+    // the Respond page.
+    //
+    // Merge-don't-replace: followUpSettingsJson may already carry other
+    // keys (goal flags, qualification config) from the seed-or-inherit
+    // path that ran for an earlier account on the same tenant.
+    try {
+      const existingAccount = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { followUpSettingsJson: true },
+      });
+      const merged = {
+        ...(existingAccount?.followUpSettingsJson
+          ? JSON.parse(existingAccount.followUpSettingsJson)
+          : {}),
+        instantTextMode: 'ai',
+      };
+      await this.prisma.savedAccount.update({
+        where: { id: savedAccountId },
+        data: { followUpSettingsJson: JSON.stringify(merged) },
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `[seedOrInheritNotificationSettings] Failed to seed instantTextMode='ai' for ${savedAccountId}: ${err?.message ?? err}`,
+      );
+    }
+
     this.logger.log(
-      `[seedOrInheritNotificationSettings] Seeded first-account defaults for ${savedAccountId} (businessPhone=${user?.businessPhone ? 'set' : 'unset'})`,
+      `[seedOrInheritNotificationSettings] Seeded first-account defaults for ${savedAccountId} (businessPhone=${user?.businessPhone ? 'set' : 'unset'}, instantTextMode=ai)`,
     );
   }
 
@@ -1570,8 +1820,42 @@ export class PlatformService {
 
   /**
    * Update a saved account
+   *
+   * `additionalAssociatePhones` is per-account and merged into
+   * `followUpSettingsJson.additionalAssociatePhones`. Numbers are E.164-
+   * normalized and dedup'd by phone. After save, fires
+   * `syncAccountPhonesToThumbtack` for this business so newly-added entries
+   * land on TT — but only for THIS business (per-business scope is the whole
+   * point of moving the storage from User-level to SavedAccount-level).
    */
-  async updateSavedAccount(userId: string, accountId: string, updates: { emailHint?: string; agentPhoneOverride?: string | null }): Promise<void> {
+  async updateSavedAccount(
+    userId: string,
+    accountId: string,
+    updates: {
+      emailHint?: string;
+      agentPhoneOverride?: string | null;
+      additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
+    },
+  ): Promise<void> {
+    let nextFollowUpSettingsJson: string | undefined;
+    if (updates.additionalAssociatePhones !== undefined) {
+      const current = await this.prisma.savedAccount.findFirst({
+        where: { id: accountId, userId },
+        select: { followUpSettingsJson: true },
+      });
+      let parsed: Record<string, any> = {};
+      if (current?.followUpSettingsJson) {
+        try {
+          parsed = JSON.parse(current.followUpSettingsJson) ?? {};
+          if (typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
+        } catch {
+          parsed = {};
+        }
+      }
+      parsed.additionalAssociatePhones = normalizeAdditionalAssociatePhones(updates.additionalAssociatePhones);
+      nextFollowUpSettingsJson = JSON.stringify(parsed);
+    }
+
     await this.prisma.savedAccount.updateMany({
       where: {
         id: accountId,
@@ -1580,20 +1864,25 @@ export class PlatformService {
       data: {
         ...(updates.emailHint !== undefined && { emailHint: updates.emailHint }),
         ...(updates.agentPhoneOverride !== undefined && { agentPhoneOverride: updates.agentPhoneOverride }),
+        ...(nextFollowUpSettingsJson !== undefined && { followUpSettingsJson: nextFollowUpSettingsJson }),
       },
     });
 
-    // If phone changed on a Thumbtack account, register as associate phone (non-blocking)
-    if (updates.agentPhoneOverride) {
-      const account = await this.prisma.savedAccount.findFirst({
-        where: { id: accountId, userId, platform: 'thumbtack' },
-        select: { businessId: true },
-      });
-      if (account?.businessId) {
-        this.registerAgentPhoneWithThumbtack(userId, account.businessId, null, null).catch(err =>
-          console.warn(`[PlatformService] Associate phone update failed (non-blocking): ${err.message}`),
-        );
-      }
+    const ttBusinessId = (await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId, platform: 'thumbtack' },
+      select: { businessId: true },
+    }))?.businessId;
+
+    // Sync TT associate phones (per-business) when EITHER the override changed
+    // OR the additional list changed. ensureAssociatePhone is idempotent so
+    // overlapping triggers don't duplicate POSTs. Non-blocking — TT failures
+    // log but don't break the profile save.
+    if (ttBusinessId && (updates.agentPhoneOverride || updates.additionalAssociatePhones !== undefined)) {
+      this.syncAccountPhonesToThumbtack(userId, ttBusinessId, null, null).catch((err) =>
+        this.logger.warn(
+          `[tt.associate-phone] post-save sync-failed businessId=${ttBusinessId} userId=${userId} message="${err?.message ?? err}"`,
+        ),
+      );
     }
 
     await this.invalidateSavedAccountsCache(userId);

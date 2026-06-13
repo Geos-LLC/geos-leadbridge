@@ -2330,7 +2330,7 @@ export function Services() {
                       {(() => {
                         const modes: Array<{ key: 'custom' | 'auto'; emoji: string; label: string; active: string; desc: string }> = [
                           { key: 'custom', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
-                          { key: 'auto',   emoji: '🟣', label: 'AI', active: '#7c3aed', desc: 'AI generates the reply using your AI Strategy (top of page)' },
+                          { key: 'auto',   emoji: '🟣', label: 'AI', active: '#7c3aed', desc: 'AI generates the reply using your Conversation Goal (top of page)' },
                         ];
                         const uiMode: 'custom' | 'auto' = replyMode === 'custom' ? 'custom' : 'auto';
                         return modes.map(m => {
@@ -2556,9 +2556,9 @@ export function Services() {
                             <Zap className="w-4 h-4 text-violet-500 shrink-0" />
                             <div className="flex-1 min-w-0 text-xs">
                               <div className="font-semibold text-slate-700">
-                                AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
+                                Conversation Goal: <span className="text-violet-700 capitalize">{fuStrategy}</span>
                               </div>
-                              <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Instant Reply Mode</span> is set to AI. Set globally in <span className="font-semibold">AI Strategy</span> above.</div>
+                              <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Instant Reply Mode</span> is set to AI. Set globally in <span className="font-semibold">Conversation Goal</span> above.</div>
                             </div>
                             <button
                               type="button"
@@ -2967,7 +2967,7 @@ export function Services() {
                         <div className="font-semibold text-slate-700">
                           AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
                         </div>
-                        <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Follow-up Mode</span> is set to AI. Set globally in <span className="font-semibold">AI Strategy</span> above.</div>
+                        <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Follow-up Mode</span> is set to AI. Set globally in <span className="font-semibold">Conversation Goal</span> above.</div>
                       </div>
                       <button
                         type="button"
@@ -2987,7 +2987,7 @@ export function Services() {
                         {(() => {
                           const modes: Array<{ key: 'template' | 'ai'; emoji: string; label: string; active: string; desc: string }> = [
                             { key: 'template', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved templates literally — no AI generation' },
-                            { key: 'ai',       emoji: '🟣', label: 'AI',              active: '#7c3aed', desc: 'AI generates each step from the conversation using your AI Strategy' },
+                            { key: 'ai',       emoji: '🟣', label: 'AI',              active: '#7c3aed', desc: 'AI generates each step from the conversation using your Conversation Goal' },
                           ];
                           return modes.map(m => {
                             const isActive = fuReplyType === m.key;
@@ -3495,20 +3495,26 @@ export function Services() {
                       preserved so the smaller "Strategy: qualify" badges in
                       those other sections still scroll to this editor. */}
                   {(() => {
-                    const STRATEGIES: Array<{ key: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'; emoji: string; label: string; desc: string }> = [
-                      { key: 'auto',    emoji: '🤖', label: 'Auto',    desc: 'AI picks the strategy per conversation' },
-                      { key: 'hybrid',  emoji: '⚖️', label: 'Hybrid',  desc: 'Acknowledge + one question; price only if asked' },
+                    // Legacy /automation-classic page. Narrowed to the
+                    // 4-goal model (Auto/Price/Qualify/Phone) to match the
+                    // primary AutomationConversation surface. Hybrid and
+                    // Convert are no longer selectable here either —
+                    // they're still supported as runtime back-compat for
+                    // tenants who saved one of those values before the
+                    // narrowing, but cannot be picked anew. See
+                    // src/ai/goal-resolver.ts for the resolver-level
+                    // normalization that maps Auto-routed hybrid/convert
+                    // suggestions to qualify.
+                    const STRATEGIES: Array<{ key: 'auto' | 'price' | 'qualify' | 'phone'; emoji: string; label: string; desc: string }> = [
+                      { key: 'auto',    emoji: '🤖', label: 'Auto',    desc: 'AI picks the goal per conversation' },
                       { key: 'price',   emoji: '💰', label: 'Price',   desc: 'Lead with a price range from your pricing table' },
                       { key: 'qualify', emoji: '🧠', label: 'Qualify', desc: 'Ask for missing detail (size, condition); no pricing' },
-                      { key: 'convert', emoji: '📅', label: 'Convert', desc: 'Push toward scheduling; price only if asked' },
                       { key: 'phone',   emoji: '📱', label: 'Phone',   desc: 'Escalate to a call; no quoting' },
                     ];
                     const STRATEGY_PROMPT_PREVIEWS: Record<string, string> = {
-                      hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Acknowledge the customer\'s specific request (reference their details)\n- Move forward with EXACTLY ONE question (timing or confirmation)\n\nDO NOT:\n- Volunteer a price unless the customer asks about price or budget\n- Ask more than one question\n\nIf the customer asks about price, use the pricing table to answer accurately.',
-                      price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on the pricing table for the customer\'s BR/BA\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Invent prices unrelated to the table',
-                      qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 1-2 specific questions about the missing critical detail (e.g. square footage, condition, timing)\n- Briefly explain why you need it\n\nDO NOT:\n- Volunteer pricing — qualification comes first\n- Ask about info the customer already provided',
-                      convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Push toward scheduling (ask what time works, or offer a broad window matching your turnaround)\n\nDO NOT:\n- Volunteer a price unless the customer asks (the goal here is closing on time, not on price)\n- Claim a SPECIFIC time slot is open\n- Ask open-ended questions',
-                      phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed (without quoting a number)\n- Ask for the best phone number naturally\n\nDO NOT:\n- Volunteer a price\n- Push phone too early or sound forceful',
+                      price: 'GOAL: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on the pricing table for the customer\'s BR/BA\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Invent prices unrelated to the table',
+                      qualify: 'GOAL: QUALIFICATION\n\nYou MUST:\n- Ask 1-2 specific questions about the missing critical detail (e.g. square footage, condition, timing)\n- Briefly explain why you need it\n\nDO NOT:\n- Volunteer pricing — qualification comes first\n- Ask about info the customer already provided',
+                      phone: 'GOAL: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed (without quoting a number)\n- Ask for the best phone number naturally\n\nDO NOT:\n- Volunteer a price\n- Push phone too early or sound forceful',
                     };
                     return (
                     <div data-tour="ai-strategy-card" className="rounded-2xl border border-violet-100 bg-violet-50/30 overflow-hidden">
@@ -3516,7 +3522,7 @@ export function Services() {
                         <Zap className="w-4 h-4 text-violet-500 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">AI Strategy</span>
+                            <span className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">Conversation Goal</span>
                             <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[9px] font-semibold uppercase tracking-wide">Applies everywhere</span>
                           </div>
                           <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
@@ -3525,8 +3531,8 @@ export function Services() {
                         </div>
                       </div>
                       <div className="px-4 py-3 space-y-3">
-                        <p className="text-[11px] text-slate-500">Pick the goal for each reply. Only <span className="font-semibold text-slate-700">Price</span> volunteers a price proactively — the other strategies stay focused on their own goal and only quote when the customer asks.</p>
-                        <p className="text-[11px] text-slate-400 italic">AI Strategy controls how AI writes replies. Human takeover rules are configured below.</p>
+                        <p className="text-[11px] text-slate-500">Pick the goal for each reply. Only <span className="font-semibold text-slate-700">Price</span> volunteers a price proactively — the other goals stay focused on their own outcome and only quote when the customer asks.</p>
+                        <p className="text-[11px] text-slate-400 italic">Conversation Goal controls how AI writes replies. Human takeover rules are configured below.</p>
                         <div className="flex flex-wrap gap-1.5">
                           {STRATEGIES.map(s => (
                             <button key={s.key}
@@ -3535,7 +3541,7 @@ export function Services() {
                                 setFuStrategyPrompt('');
                                 quickSaveSettings(
                                   { followUpStrategy: s.key, followUpStrategyPrompt: null },
-                                  { successMsg: `Strategy: ${s.label}`, fanout: true },
+                                  { successMsg: `Goal: ${s.label}`, fanout: true },
                                 );
                               }}
                               className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-500 border-slate-200 hover:border-violet-200'}`}
@@ -3545,11 +3551,11 @@ export function Services() {
                           ))}
                         </div>
                         {fuStrategy === 'auto' ? (
-                          <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
+                          <p className="text-[11px] text-slate-400">AI picks the best goal based on conversation context.</p>
                         ) : (
                           <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap relative group">
                             {fuStrategyPrompt || `${STRATEGY_PROMPT_PREVIEWS[fuStrategy] || ''}\n\n(Using backend default — click the pencil to customize.)`}
-                            <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || STRATEGY_PROMPT_PREVIEWS[fuStrategy] || '', type: `fu-strategy-${fuStrategy}` })}
+                            <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `Conversation Goal — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || STRATEGY_PROMPT_PREVIEWS[fuStrategy] || '', type: `fu-strategy-${fuStrategy}` })}
                               className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
@@ -3677,11 +3683,11 @@ export function Services() {
                               <input type="checkbox" checked={handoffTriggerWantsLiveContact} onChange={e => setHandoffTriggerWantsLiveContact(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
                               Wants live contact
                             </label>
-                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when AI Strategy is set to Phone, or the lead has no usable phone number yet.">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when Conversation Goal is set to Phone, or the lead has no usable phone number yet.">
                               <input type="checkbox" checked={handoffTriggerProvidedPhone} onChange={e => setHandoffTriggerProvidedPhone(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
                               Provided phone number
                             </label>
-                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when AI Strategy is set to Qualify, or price quote mode is Exact.">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when Conversation Goal is set to Qualify, or price quote mode is Exact.">
                               <input type="checkbox" checked={handoffTriggerProvidedSquareFootage} onChange={e => setHandoffTriggerProvidedSquareFootage(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
                               Provided square footage
                             </label>

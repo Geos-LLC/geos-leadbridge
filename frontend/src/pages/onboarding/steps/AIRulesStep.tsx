@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Bell, Eye, FileText, Loader2, Shield } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import {
+  Bot, CircleDollarSign, Loader2, Phone, Sparkles, UserCheck,
+  type LucideIcon,
+} from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
-import { followUpApi } from '../../../services/api';
+import { followUpApi, usersApi } from '../../../services/api';
 import { notify } from '../../../store/notificationStore';
 import { getStepMeta } from '../wizardConfig';
 
@@ -12,115 +14,129 @@ interface Props {
   setSaving: (v: boolean) => void;
 }
 
-// Default values mirror what the backend already treats as "on" when
-// followUpSettingsJson is missing the key. Showing them as defaults
-// here lets the user confirm the standard behavior without having to
-// understand every stop / handoff trigger up-front.
-const DEFAULT_STOP_RULES = {
-  aiStopOnOptOut: true,
-  aiStopOnBooked: true,
-  aiStopOnPriceAgreed: true,
-};
+/**
+ * Wizard step 7 — AI Rules.
+ *
+ * Post-AI-First-Simplification (June 2026), this step owns the two
+ * conversation-level controls that used to live elsewhere:
+ *
+ *   1. Goal — what the AI is trying to achieve in each conversation.
+ *      Auto / Price / Qualify / Phone, matching the Conversation page
+ *      picker. Persists to `followUpSettingsJson.followUpStrategy`.
+ *
+ *   2. Auto Reply Availability — when AI can reply automatically.
+ *      Always (24/7) vs Outside business hours. Moved here from the
+ *      wizard's Automation step because it's a conversation rule, not
+ *      a timing knob. Persists to `followUpSettingsJson.followUpAvailability`.
+ *
+ * The legacy Stop Rules + Handoff Triggers controls are gone. Per the
+ * Conversation page V2 spec, those collapsed into goal completion
+ * actions ("Continue AI + Notify" / "Stop AI + Notify") which the user
+ * configures on /automation/convert per goal, not at the tenant level.
+ */
+type GoalKey = 'auto' | 'price' | 'qualify' | 'phone';
 
-const DEFAULT_HANDOFF_TRIGGERS = {
-  handoffTriggerAgreed: true,
-  handoffTriggerWantsLiveContact: true,
-  handoffTriggerProvidedPhone: true,
-  handoffTriggerProvidedSquareFootage: true,
-  handoffTriggerQualificationComplete: true,
-};
+interface GoalMeta {
+  key: GoalKey;
+  title: string;
+  body: string;
+  icon: LucideIcon;
+  iconColor: string;
+}
 
-// Mirror of automation.service.ts default — kept here so the preview
-// drawer can render the manager-alert without round-tripping. When the
-// user edits the template later it lives in Templates, not here.
-const DEFAULT_HANDOFF_TEMPLATE = 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"';
+const GOALS: GoalMeta[] = [
+  {
+    key: 'auto',
+    title: 'Auto',
+    body: 'AI automatically chooses the best approach for each conversation.',
+    icon: Sparkles,
+    iconColor: 'text-violet-600',
+  },
+  {
+    key: 'price',
+    title: 'Price',
+    body: 'Focus on pricing questions and quotes.',
+    icon: CircleDollarSign,
+    iconColor: 'text-emerald-600',
+  },
+  {
+    key: 'qualify',
+    title: 'Qualify',
+    body: 'Focus on collecting information and moving toward booking.',
+    icon: UserCheck,
+    iconColor: 'text-amber-600',
+  },
+  {
+    key: 'phone',
+    title: 'Phone',
+    body: 'Focus on getting the customer onto a call.',
+    icon: Phone,
+    iconColor: 'text-rose-600',
+  },
+];
 
-const STOP_RULES_META = [
-  {
-    key: 'aiStopOnOptOut',
-    label: 'Customer asks not to be contacted',
-    description: 'AI detects opt-out language like "stop", "don\'t text me", or "unsubscribe" and immediately stops sending.',
-  },
-  {
-    key: 'aiStopOnBooked',
-    label: 'Job is booked or confirmed',
-    description: 'When the customer says they\'ve hired you (or someone else), AI stops sending follow-ups.',
-  },
-  {
-    key: 'aiStopOnPriceAgreed',
-    label: 'Customer agrees on price — hand off to manager',
-    description: 'Once the customer accepts your quote, AI stops replying so your team can take the call and close the booking.',
-  },
-] as const;
-
-const HANDOFF_TRIGGERS_META = [
-  {
-    key: 'handoffTriggerAgreed',
-    label: 'Ready to book',
-    description: 'Customer accepts your proposal or asks to schedule — clear buying intent.',
-  },
-  {
-    key: 'handoffTriggerWantsLiveContact',
-    label: 'Wants live contact',
-    description: 'Customer asks for a call, meeting, or your phone number ("call me", "Zoom at 3", etc.).',
-  },
-  {
-    key: 'handoffTriggerProvidedPhone',
-    label: 'Provided phone number',
-    description: 'Customer shared their phone — a strong signal they want to be called.',
-  },
-  {
-    key: 'handoffTriggerProvidedSquareFootage',
-    label: 'Provided square footage',
-    description: 'Customer answered the sqft question, so AI has enough info to price the job.',
-  },
-  {
-    key: 'handoffTriggerQualificationComplete',
-    label: 'Qualification complete',
-    description: 'Customer has answered every required intake question — the lead is ready for your team.',
-  },
-] as const;
-
-// The always-on terminal-status guard. Surfaced as a locked row so
-// users understand WHY AI never sends on done/scheduled/archived
-// leads — the rule is hard-coded in follow-up-engine for safety and
-// isn't a per-account toggle.
-const TERMINAL_STATUS_DESCRIPTION =
-  'Once the lead status is set to done, scheduled, hired, or archived in your CRM, AI never sends again. Hard-coded for safety and can\'t be turned off.';
-
-// Step 7 — AI Rules. Summary view of the AI stop conditions and
-// human-takeover triggers, all of which already exist as keys on
-// SavedAccount.followUpSettingsJson. We deliberately do NOT show the
-// alert template editor here — template editing belongs on the
-// Templates page. The "Preview manager alerts →" drawer renders the
-// default template content read-only so the user knows what their
-// dispatcher will see.
-//
-// "Lead is done / scheduled / archived" is intentionally shown as a
-// locked "always on" row — the terminal-status guard is hard-coded in
-// follow-up-engine and not user-controllable. Surfacing it here keeps
-// the rule set complete without misleading users that they can toggle
-// it off.
 export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props) {
-  const navigate = useNavigate();
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const meta = getStepMeta('ai_rules');
 
-  const [stopRules, setStopRules] = useState({ ...DEFAULT_STOP_RULES });
-  const [handoffTriggers, setHandoffTriggers] = useState({ ...DEFAULT_HANDOFF_TRIGGERS });
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [goal, setGoal] = useState<GoalKey>('auto');
+  const [availability, setAvailability] = useState<'always' | 'active_hours'>('always');
+  const [businessHoursLabel, setBusinessHoursLabel] = useState<string>('Mon–Fri, 9:00 AM – 6:00 PM');
+  const [loading, setLoading] = useState(true);
 
-  const cascadeNote = savedAccounts.length > 1;
+  // Hydrate from the first connected account's saved settings so a
+  // returning user sees what they had. Falls back to defaults (auto,
+  // always) when nothing is on file or no account is connected.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const bh = await usersApi.getBusinessHours().catch(() => null);
+        if (!cancelled && bh?.schedule) {
+          const mf = [bh.schedule.mon, bh.schedule.tue, bh.schedule.wed, bh.schedule.thu, bh.schedule.fri];
+          const allSame = mf.every(v => v && v.start === mf[0]?.start && v.end === mf[0]?.end);
+          if (allSame && mf[0]) {
+            setBusinessHoursLabel(`Mon–Fri, ${fmtTime(mf[0].start)} – ${fmtTime(mf[0].end)}`);
+          }
+        }
+        if (savedAccounts.length === 0) return;
+        const res = await followUpApi.getSettings(savedAccounts[0].id).catch(() => null);
+        if (cancelled) return;
+        const s = (res as any)?.settings ?? {};
+        const savedGoal = s?.followUpStrategy;
+        // Conversation page V2 remaps legacy 'hybrid' → 'auto' and
+        // 'convert' → 'qualify' for display; we do the same here.
+        const remapped: GoalKey =
+          savedGoal === 'price' || savedGoal === 'qualify' || savedGoal === 'phone'
+            ? savedGoal
+            : savedGoal === 'convert' ? 'qualify'
+            : 'auto';
+        setGoal(remapped);
+        const a = s?.followUpAvailability;
+        setAvailability(a === 'active_hours' ? 'active_hours' : 'always');
+      } catch {
+        /* non-fatal */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function apply() {
     if (saving) return;
-    const payload = { ...stopRules, ...handoffTriggers };
     setSaving(true);
     try {
       if (savedAccounts.length === 0) {
         await onSaveContinue();
         return;
       }
+      const payload = {
+        followUpStrategy: goal,
+        followUpAvailability: availability,
+      };
       let firstError: any = null;
       for (const acct of savedAccounts) {
         try {
@@ -130,8 +146,10 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
         }
       }
       if (firstError) {
-        const msg = firstError.response?.data?.message || 'Some accounts did not save — you can re-apply from the Automation page.';
-        notify.error('Partial save', msg);
+        notify.error(
+          'Partial save',
+          firstError.response?.data?.message || 'Some accounts did not save — you can re-apply from AI Conversation later.',
+        );
       }
       await onSaveContinue();
     } catch (err: any) {
@@ -150,191 +168,133 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
         {meta.description}
       </p>
 
-      {/* Stop rules */}
-      <section className="mb-8">
-        <h2 className="flex items-center gap-2 text-sm font-extrabold text-slate-900 mb-3">
-          <Shield className="w-4 h-4 text-slate-500" />
-          AI stops replying when
-        </h2>
-        <ul className="space-y-2">
-          {STOP_RULES_META.map(({ key, label, description }) => {
-            const checked = stopRules[key];
-            return (
-              <RuleRow
-                key={key}
-                label={label}
-                description={description}
-                checked={checked}
-                onChange={v => setStopRules(prev => ({ ...prev, [key]: v }))}
-                disabled={saving}
-              />
-            );
-          })}
-          <RuleRow
-            label="Lead is done, scheduled, or archived"
-            description={TERMINAL_STATUS_DESCRIPTION}
-            checked
-            locked
-          />
-        </ul>
-      </section>
+      {loading ? (
+        <div className="py-12 text-center text-sm text-slate-400">
+          <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Conversation Goal — 4 cards, Auto first as the recommended default. */}
+          <section>
+            <div className="mb-3">
+              <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Conversation Goal</h2>
+              <p className="text-xs text-slate-500 mt-0.5">What AI is trying to achieve in each conversation. You can change this anytime on AI Conversation.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {GOALS.map(g => {
+                const active = goal === g.key;
+                const Icon = g.icon;
+                return (
+                  <button
+                    key={g.key}
+                    type="button"
+                    onClick={() => setGoal(g.key)}
+                    disabled={saving}
+                    className={`flex items-start gap-3 p-4 rounded-2xl border-2 text-left transition-all ${
+                      active ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200 bg-white hover:border-slate-300'
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    <span className={`w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 ${g.iconColor} shrink-0`}>
+                      <Icon className="w-4 h-4" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-extrabold text-slate-900">{g.title}</div>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{g.body}</p>
+                    </div>
+                    <span
+                      aria-hidden
+                      className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 flex items-center justify-center ${
+                        active ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
+                      }`}
+                    >
+                      {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-      {/* Handoff triggers */}
-      <section>
-        <h2 className="flex items-center gap-2 text-sm font-extrabold text-slate-900 mb-3">
-          <Bell className="w-4 h-4 text-slate-500" />
-          Notify your team when AI detects
-        </h2>
-        <ul className="space-y-2">
-          {HANDOFF_TRIGGERS_META.map(({ key, label, description }) => {
-            const checked = handoffTriggers[key];
-            return (
-              <RuleRow
-                key={key}
-                label={label}
-                description={description}
-                checked={checked}
-                onChange={v => setHandoffTriggers(prev => ({ ...prev, [key]: v }))}
-                disabled={saving}
+          {/* Auto Reply Availability — moved here from Automation. */}
+          <section>
+            <div className="flex items-start gap-3 mb-3">
+              <span className="w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 text-slate-600 shrink-0">
+                <Bot className="w-4 h-4" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Auto Reply Availability</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Choose when AI can reply automatically.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <RadioRow
+                label="Always (24/7)"
+                description="AI replies to leads at any time, day or night."
+                checked={availability === 'always'}
+                onSelect={() => setAvailability('always')}
               />
-            );
-          })}
-        </ul>
-        <button
-          type="button"
-          onClick={() => setPreviewOpen(true)}
-          disabled={saving}
-          className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-40"
-        >
-          <Eye className="w-4 h-4" />
-          Preview manager alerts
-        </button>
-      </section>
+              <RadioRow
+                label="Outside of business hours"
+                description={`AI replies only outside your business hours window. (${businessHoursLabel})`}
+                checked={availability === 'active_hours'}
+                onSelect={() => setAvailability('active_hours')}
+              />
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col gap-3">
         <button
           type="button"
           onClick={() => void apply()}
-          disabled={saving}
+          disabled={saving || loading}
           className="self-start inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
           {saving ? 'Saving…' : 'Save & Continue'}
         </button>
-        {cascadeNote && (
+        {savedAccounts.length > 1 && (
           <p className="text-xs text-slate-400 max-w-md">
-            Applies to all connected accounts. You can customize each account later on the Automation page.
+            Applies to all connected accounts. You can customize each account later on AI Conversation.
           </p>
         )}
       </div>
-
-      {previewOpen && (
-        <div
-          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-          onClick={() => setPreviewOpen(false)}
-        >
-          <div
-            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-7"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 inline-flex items-center justify-center">
-                <FileText className="w-4 h-4" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-base font-extrabold text-slate-900 tracking-tight">
-                  Manager alert — preview
-                </div>
-                <div className="text-xs text-slate-500">
-                  Default template. Edit in Templates to customize.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPreviewOpen(false)}
-                className="text-sm font-semibold text-slate-400 hover:text-slate-700"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700 font-mono leading-relaxed">
-              {DEFAULT_HANDOFF_TEMPLATE}
-            </div>
-
-            <div className="mt-4 text-xs text-slate-500 leading-relaxed">
-              <strong className="text-slate-700">Variables:</strong>
-              {' '}<code className="px-1 rounded bg-slate-100">{'{{lead.name}}'}</code> is the customer name,
-              {' '}<code className="px-1 rounded bg-slate-100">{'{{intent}}'}</code> is a short reason like
-              {' '}"ready to book" or "wants live call", and
-              {' '}<code className="px-1 rounded bg-slate-100">{'{{message}}'}</code> is the first ~200 chars of
-              {' '}the customer's message.
-            </div>
-
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPreviewOpen(false)}
-                className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPreviewOpen(false);
-                  navigate('/templates');
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-              >
-                Edit in Templates
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-interface RuleRowProps {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange?: (v: boolean) => void;
-  disabled?: boolean;
-  locked?: boolean;
-}
-
-function RuleRow({ label, description, checked, onChange, disabled, locked }: RuleRowProps) {
+function RadioRow({
+  label, description, checked, onSelect,
+}: { label: string; description?: string; checked: boolean; onSelect: () => void }) {
   return (
-    <li
-      className={`flex items-start gap-3 px-4 py-3 rounded-2xl border ${
-        locked ? 'border-slate-100 bg-slate-50/60' : 'border-slate-200 bg-white'
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full text-left px-3 py-3 rounded-lg border-2 transition-colors ${
+        checked ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200 bg-white hover:border-slate-300'
       }`}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled || locked}
-        onChange={locked || !onChange ? undefined : e => onChange(e.target.checked)}
-        className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500/20 disabled:opacity-60 shrink-0"
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-sm font-semibold ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
-            {label}
-          </span>
-          {locked && (
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              Always on
-            </span>
-          )}
+      <div className="flex items-start gap-3">
+        <span className={`w-4 h-4 rounded-full border-2 shrink-0 mt-0.5 flex items-center justify-center ${
+          checked ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
+        }`}>
+          {checked && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+        </span>
+        <div>
+          <div className="text-sm font-semibold text-slate-900">{label}</div>
+          {description && <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</div>}
         </div>
-        <p className={`text-xs leading-snug mt-1 ${locked ? 'text-slate-400' : 'text-slate-500'}`}>
-          {description}
-        </p>
       </div>
-    </li>
+    </button>
   );
+}
+
+function fmtTime(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+  if (!m) return hhmm;
+  const h = parseInt(m[1], 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${m[2]} ${ampm}`;
 }

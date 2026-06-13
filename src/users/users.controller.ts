@@ -60,6 +60,10 @@ export class UsersController {
       businessPhone?: string;
       website?: string | null;
       websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+      // additionalAssociatePhones moved to PATCH /v1/thumbtack/saved-accounts/:id
+      // (per-business, stored on SavedAccount.followUpSettingsJson). The legacy
+      // User.additionalAssociatePhonesJson column stays in schema for backfill /
+      // archival reads but accepts no new writes from this endpoint.
     },
   ) {
     return this.usersService.updateProfile(req.user.id, body);
@@ -74,6 +78,104 @@ export class UsersController {
   @Post('me/website/verify')
   async verifyWebsite(@Request() req: any, @Body() body: { url?: string }) {
     return this.usersService.verifyWebsite(body?.url ?? '');
+  }
+
+  /**
+   * Apply the structured Playbook seed (from `User.websiteMetadataJson.
+   * playbookSeed`) to every connected SavedAccount's `aiPlaybookV2`.
+   *
+   * mode: 'fill_empty' (default) only sets sections whose customInstructions
+   *       is empty / blank — protects user-typed text.
+   *       'replace' overwrites every supported section unconditionally.
+   *
+   * The call is idempotent in fill_empty mode (re-applying the same seed
+   * to an already-filled section is a no-op).
+   *
+   * POST /v1/users/me/website/apply-playbook
+   */
+  @Post('me/website/apply-playbook')
+  async applyPlaybookSeed(
+    @Request() req: any,
+    @Body() body: { mode?: 'fill_empty' | 'replace' },
+  ) {
+    return this.usersService.applyPlaybookSeedToAccounts(
+      req.user.id,
+      body?.mode === 'replace' ? 'replace' : 'fill_empty',
+    );
+  }
+
+  /**
+   * Apply the website seed's businessInformation fields into each
+   * connected SavedAccount's `faqJson`. Always fill-empty — never
+   * overwrites a user-typed FAQ answer. Targets the 4 FAQ fields
+   * derivable from a marketing site: insuredAndBonded, bringsSupplies,
+   * petPolicy, paymentMethods.
+   *
+   * POST /v1/users/me/website/apply-faq
+   */
+  @Post('me/website/apply-faq')
+  async applyFaqFromSeed(@Request() req: any) {
+    return this.usersService.applyFaqFromWebsiteSeed(req.user.id);
+  }
+
+  /**
+   * Pull business-info from a connected SavedAccount and merge into the
+   * canonical seed. Used by the "Pull from Thumbtack / Pull from Yelp"
+   * buttons on Settings → General and called automatically when a new
+   * platform is connected.
+   *
+   * POST /v1/users/me/business-info/pull-from/:platform/:savedAccountId
+   *   platform = 'thumbtack' | 'yelp'
+   */
+  @Post('me/business-info/pull-from/:platform/:savedAccountId')
+  async pullBusinessInfoFromAccount(
+    @Request() req: any,
+    @Param('platform') platform: string,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const normalized = platform === 'yelp' ? 'yelp' : platform === 'thumbtack' ? 'thumbtack' : null;
+    if (!normalized) throw new BadRequestException(`Unsupported platform: ${platform}`);
+    return this.usersService.seedBusinessInfoFromAccount(req.user.id, savedAccountId, normalized);
+  }
+
+  /**
+   * Save the tenant's public Thumbtack profile URL onto a SavedAccount.
+   * Used to enable the website-scrape path for Thumbtack pulls — the
+   * Partner API alone returns only minimal data, but the public profile
+   * page has the full picture (services, address, insurance, pricing).
+   *
+   * PATCH /v1/users/me/saved-accounts/:savedAccountId/thumbtack-profile-url
+   *   body: { url: string | null }
+   *     - url=null clears the saved value
+   *     - url must be a thumbtack.com URL; rejected otherwise with a
+   *       structured warning so the frontend can surface a clean error
+   */
+  @Patch('me/saved-accounts/:savedAccountId/thumbtack-profile-url')
+  async saveThumbtackProfileUrl(
+    @Request() req: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: { url?: string | null },
+  ) {
+    return this.usersService.saveThumbtackProfileUrl(
+      req.user.id,
+      savedAccountId,
+      body?.url ?? null,
+    );
+  }
+
+  /**
+   * Read the saved Thumbtack profile URL for a SavedAccount. Used by
+   * Settings → General to hydrate the input field on page mount.
+   *
+   * GET /v1/users/me/saved-accounts/:savedAccountId/thumbtack-profile-url
+   *   response: { url: string | null }
+   */
+  @Get('me/saved-accounts/:savedAccountId/thumbtack-profile-url')
+  async getThumbtackProfileUrl(
+    @Request() req: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    return this.usersService.getThumbtackProfileUrl(req.user.id, savedAccountId);
   }
 
   /**

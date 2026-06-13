@@ -69,6 +69,12 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
     }
   }, [savedAccounts.length, alreadyDone, onMarkDone]);
 
+  // The per-account public Thumbtack profile URL input used to live here.
+  // It moved to the Business Website step (and Settings → General already
+  // has its own copy) so onboarding's "where do my business facts come
+  // from" surface owns all of it — this Connect step is about OAuth
+  // wiring, not data sourcing.
+
   function openConnectionModal() {
     // Tell Dashboard "if you see ?connected=… on your next mount,
     // assume the user wants to be back in the wizard." Cleared by
@@ -105,27 +111,33 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
             {savedAccounts.map(acct => (
               <li
                 key={acct.id}
-                className="flex items-center gap-3 px-4 py-3 rounded-2xl border"
+                className="flex flex-col gap-3 px-4 py-3 rounded-2xl border"
                 style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line-soft)' }}
               >
-                <PlatformBadge platform={acct.platform} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">
-                    {acct.businessName || 'Untitled business'}
+                <div className="flex items-center gap-3">
+                  <PlatformBadge platform={acct.platform} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">
+                      {acct.businessName || 'Untitled business'}
+                    </div>
+                    <div className="text-xs text-slate-400 capitalize">{acct.platform}</div>
                   </div>
-                  <div className="text-xs text-slate-400 capitalize">{acct.platform}</div>
+                  {acct.webhookId ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Needs attention
+                    </span>
+                  )}
                 </div>
-                {acct.webhookId ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Connected
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    Needs attention
-                  </span>
-                )}
+                {/* Thumbtack profile URL input moved to the Business
+                    Website step — it's a data-source input, not an OAuth
+                    setting. Connect this step intentionally keeps just
+                    the OAuth list. */}
               </li>
             ))}
           </ul>

@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
@@ -11,6 +11,8 @@ import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { InstantTextAiService } from './instant-text-ai.service';
+import { PlatformService } from '../platforms/platform.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -202,6 +204,18 @@ export class NotificationsService {
     // freshness guard sees a stale outbound timestamp and the badge stays
     // red after operator replies via rule SMS.
     private conversationContext: ConversationContextService,
+    // Wired 2026-06-12 — Instant Text AI generation. Used inside
+    // sendNotificationWithRule when the account's followUpSettingsJson
+    // resolves instantTextMode='ai' on a sendToCustomer=true rule.
+    // Failures fall back to the existing template path with a
+    // INSTANT_TEXT_AI_FALLBACK_TEMPLATE log marker.
+    private instantTextAi: InstantTextAiService,
+    // forwardRef: PlatformService → NotificationsService (resolveBotPhone)
+    // already exists, so this back-edge needs lazy resolution. Used by
+    // TenantPhoneNumber purchase/assign/restore to re-sync the LB number
+    // as a TT associate phone after the resolveBotPhone() result changes.
+    @Inject(forwardRef(() => PlatformService))
+    private platformService: PlatformService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -1426,8 +1440,52 @@ export class NotificationsService {
     const platformLabel = rule?.sendToCustomer
       ? ''
       : (context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '');
+
+    // V2 Instant Text AI generation (2026-06-12).
+    //
+    // When the per-account followUpSettingsJson.instantTextMode === 'ai'
+    // AND this is a customer-facing rule, generate the SMS body via
+    // AiService instead of rendering the saved template. Failures fall
+    // through to the existing template path with a structured warn log
+    // — INSTANT_TEXT_AI_FALLBACK_TEMPLATE — so customers always receive
+    // a message even if OpenAI is down or the prompt context is invalid.
+    //
+    // Mode resolution (intentionally narrow):
+    //   - missing key  → 'template' (preserves existing-tenant behavior)
+    //   - 'template'   → template
+    //   - 'ai'         → AI (with template fallback on failure)
+    // platform.service.seedOrInheritNotificationSettings writes 'ai'
+    // explicitly for new tenants so they default to AI immediately.
+    let aiGeneratedBody: string | null = null;
+    if (rule?.sendToCustomer && savedAccountId && leadId) {
+      const instantTextMode = await this.resolveInstantTextMode(savedAccountId);
+      if (instantTextMode === 'ai') {
+        try {
+          aiGeneratedBody = await this.instantTextAi.generateInstantTextBody({
+            savedAccountId,
+            customerName: lead.customerName || 'there',
+            customerMessage: lead.message || '',
+            category: lead.category ?? undefined,
+            accountName: context.accountName,
+          });
+          this.logger.log(
+            `[INSTANT_TEXT_AI] generated ${aiGeneratedBody.length} chars for lead ${leadId} account ${savedAccountId}`,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[INSTANT_TEXT_AI_FALLBACK_TEMPLATE] AI generation failed for lead ${leadId} account ${savedAccountId}: ${err?.message ?? err}`,
+          );
+          aiGeneratedBody = null;
+        }
+      }
+    }
+
     let messageBody: string;
-    if (template) {
+    if (aiGeneratedBody) {
+      // AI path skips platform-label prepending — first-touch SMS to a
+      // customer never carries the internal [TT] / [Yelp] marker.
+      messageBody = aiGeneratedBody;
+    } else if (template) {
       const rendered = this.renderTemplate(template, lead, context.accountName);
       const alreadyHasPlatform = /yelp|thumbtack|\[tt\]|\[yelp\]/i.test(rendered.split('\n')[0] || '');
       messageBody = alreadyHasPlatform ? rendered : `${platformLabel}${rendered}`;
@@ -1794,6 +1852,31 @@ export class NotificationsService {
       });
 
       return { success: false, error: error.message || 'Failed to send test notification' };
+    }
+  }
+
+  /**
+   * Resolve the per-account Instant Text generation mode (V2 — 2026-06-12).
+   *
+   * Reads `followUpSettingsJson.instantTextMode` for the SavedAccount.
+   * Returns `'ai'` when the key is explicitly set to that string; every
+   * other case ('template', undefined, missing JSON, invalid JSON, account
+   * not found) returns `'template'` so existing tenants without the key
+   * stay on the existing template path — per the spec's migration-safety
+   * rule. New accounts get `'ai'` written explicitly by
+   * platform.service.seedOrInheritNotificationSettings.
+   */
+  private async resolveInstantTextMode(savedAccountId: string): Promise<'ai' | 'template'> {
+    try {
+      const account = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return 'template';
+      const parsed = JSON.parse(account.followUpSettingsJson);
+      return parsed?.instantTextMode === 'ai' ? 'ai' : 'template';
+    } catch {
+      return 'template';
     }
   }
 
@@ -2870,7 +2953,7 @@ export class NotificationsService {
    * Resolve the bot phone (dedicated TenantPhoneNumber) for sending SMS.
    * Fallback chain: account-scoped → unassigned (null savedAccountId) → any active number for user.
    */
-  private async resolveBotPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
+  async resolveBotPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
     // 1. Account-scoped number
     if (savedAccountId) {
       const scoped = await this.prisma.tenantPhoneNumber.findFirst({
@@ -3248,6 +3331,15 @@ export class NotificationsService {
     });
 
     this.logger.log(`[purchaseTenantPhone] Created tenant phone: ${tenantPhone.id} — ${phoneNumber}`);
+
+    // Register the new LB number as an associate phone on every connected
+    // Thumbtack business so TT honors it as a legitimate pro-side sender
+    // for the customer-phone-missing fallback flow. Non-blocking — if TT is
+    // down or the user has no TT accounts, the provisioning still succeeds.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(userId).catch((err) =>
+      this.logger.warn(`[purchaseTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone };
   }
 
@@ -3388,6 +3480,14 @@ export class NotificationsService {
     });
 
     this.logger.log(`[assignTenantPhone] ${tenantPhone.phoneNumber} → account=${savedAccountId ?? 'unassigned'}`);
+
+    // Reassignment changes what resolveBotPhone() returns for at least one
+    // TT business. Re-sync the LB number on every TT account so each picks up
+    // the new account-scoped / shared resolution.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(tenantPhone.userId).catch((err) =>
+      this.logger.warn(`[assignTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone: updated };
   }
 
@@ -3452,6 +3552,14 @@ export class NotificationsService {
     });
 
     this.logger.log(`[restoreTenantPhone] ${tenantPhone.phoneNumber} → ACTIVE`);
+
+    // Restoring a number from grace period puts it back in resolveBotPhone()'s
+    // pool. Re-sync the LB number on every TT account so the restored number
+    // is again whitelisted as a substitute sender.
+    this.platformService.syncLeadBridgeNumberToAllThumbtack(tenantPhone.userId).catch((err) =>
+      this.logger.warn(`[restoreTenantPhone] LB-number TT sync failed (non-blocking): ${err?.message ?? err}`),
+    );
+
     return { success: true, tenantPhone: updated };
   }
 }

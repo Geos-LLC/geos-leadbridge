@@ -1181,30 +1181,91 @@ export class AutomationService implements OnModuleInit {
           }
           return;
         }
-        // `agreed` and `wants_live_contact` are handoff intents:
-        // maybeFireHandoffAlert above just paged the operator. The AI must
-        // stop so the human takes over cleanly — having both reply at once
-        // is the Savanna 2026-05-13 regression: customer said "Yes, I
-        // believe I already confirmed the cleaning for 5/21 at 10am" and
-        // the AI followed with "Thanks for confirming, all set!" because
-        // `aiStopOnPriceAgreed` defaulted falsy. Switched to `!== false` to
-        // match every other terminal-intent stop (aiStopOnOptOut,
-        // aiStopOnBooked, aiStopOnDeferral), and folded wants_live_contact
-        // into the same gate — both are "human takes over now" signals.
-        if ((intent === 'agreed' || intent === 'wants_live_contact')
-            && aiRules.aiStopOnPriceAgreed !== false) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — classifier=${intent} conf=${classification.confidence.toFixed(2)} (manager paged)`);
+        // SYSTEM EVENT — customer explicitly requested live contact.
+        // Always stops the AI + always notifies (handoff alert SMS already
+        // fired via maybeFireHandoffAlert above). NOT gated by any
+        // per-goal Continue/Stop toggle — the customer asked for a human
+        // and muting that signal would be hostile.
+        //
+        // Split from the `agreed` path in V2 (2026-06-12). Previously
+        // these two intents shared the `aiStopOnPriceAgreed !== false`
+        // gate, which meant Price="Continue AI + Notify Team" silently
+        // disabled the wants_live_contact stop too. That coupling
+        // contradicted the V2 spec where wants_live_contact is a
+        // non-configurable system event.
+        if (intent === 'wants_live_contact') {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — system event: wants_live_contact (conf=${classification.confidence.toFixed(2)})`);
           if (lead?.threadId) {
-            const isWantsLive = intent === 'wants_live_contact';
             await this.conversationRuntime.setState(lead.threadId, {
               aiStatus: 'stopped_booked',
-              aiStatusReason: isWantsLive
-                ? AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
-                : AI_STATUS_REASONS.CLASSIFIER_AGREED,
-              conversationState: isWantsLive ? 'human_handling' : 'booked_in_lb',
-              conversationStateReason: isWantsLive
-                ? CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT
-                : CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_WANTS_LIVE_CONTACT,
+            });
+          }
+          return;
+        }
+
+        // PRICE GOAL COMPLETION — customer agrees on price. Stop is
+        // gated by `aiStopOnPriceAgreed` (the Price goal's Continue/Stop
+        // radio in V2). Default true preserves the Savanna 2026-05-13
+        // regression fix: customer said "Yes, I already confirmed the
+        // cleaning for 5/21 at 10am" and the AI followed up with
+        // "Thanks for confirming, all set!" because the field defaulted
+        // falsy. `!== false` matches every other terminal-intent stop.
+        if (intent === 'agreed' && aiRules.aiStopOnPriceAgreed !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — Price goal complete (agreed) conf=${classification.confidence.toFixed(2)}`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.CLASSIFIER_AGREED,
+              conversationState: 'booked_in_lb',
+              conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_AGREED,
+            });
+          }
+          return;
+        }
+        // V2 goal completion stops (2026-06-12).
+        //
+        // The Conversation Goals V2 model gives each per-goal completion
+        // its own "Continue AI + Notify Team" vs "Stop AI + Notify Team"
+        // choice. Price already had this via `aiStopOnPriceAgreed` above.
+        // Qualify and Phone get the same shape via two new JSON keys:
+        //
+        //   goalQualifyStopOnComplete  — stop after handoff.reason='qualification_complete'
+        //   goalPhoneStopOnComplete    — stop after handoff.reason='provided_phone_number'
+        //
+        // Both default to undefined/false — existing tenants whose
+        // followUpSettingsJson doesn't carry the keys see no behavior
+        // change. The handoff alert SMS fires independently via
+        // maybeFireHandoffAlert earlier; these gates only decide whether
+        // the AI ALSO falls silent after that event.
+        const isQualifyComplete = classification.handoff?.shouldHandoff
+          && classification.handoff.reason === 'qualification_complete'
+          && (aiRules as any).goalQualifyStopOnComplete === true;
+        if (isQualifyComplete) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.GOAL_QUALIFY_COMPLETE,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_QUALIFY_COMPLETE,
+            });
+          }
+          return;
+        }
+        const isPhoneComplete = classification.handoff?.shouldHandoff
+          && classification.handoff.reason === 'provided_phone_number'
+          && (aiRules as any).goalPhoneStopOnComplete === true;
+        if (isPhoneComplete) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Phone goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          if (lead?.threadId) {
+            await this.conversationRuntime.setState(lead.threadId, {
+              aiStatus: 'stopped_booked',
+              aiStatusReason: AI_STATUS_REASONS.GOAL_PHONE_COMPLETE,
+              conversationState: 'human_handling',
+              conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_PHONE_COMPLETE,
             });
           }
           return;
@@ -1358,6 +1419,29 @@ export class AutomationService implements OnModuleInit {
       // A separate reply-count cap was unused (no UI), redundant, and
       // surfaced no clear use case the existing stop paths don't cover.
 
+      // V2 Review Mode (2026-06-12): per-account
+      // followUpSettingsJson.aiConversationDeliveryMode. 'suggest' parks
+      // the generated reply as a pending AI suggestion on
+      // ThreadContext.stateJson instead of dispatching. Missing key or
+      // any other value → 'auto_send' (existing behavior).
+      const aiConversationDeliveryMode: 'suggest' | 'auto_send' =
+        (aiRules as any).aiConversationDeliveryMode === 'suggest' ? 'suggest' : 'auto_send';
+
+      // Dedup gate: skip generation entirely when a pending AI
+      // suggestion already exists for this conversation. The operator
+      // must approve (sends + clears) or discard (just clears) before
+      // AI generates again. Without this, every burst of customer
+      // follow-up messages would queue duplicate suggestions.
+      if (aiConversationDeliveryMode === 'suggest' && lead?.threadId) {
+        const existing = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+        if (existing) {
+          this.logger.log(
+            `[AI_SUGGEST] dedup — suggestion ${existing.id} already pending for thread ${lead.threadId}`,
+          );
+          return;
+        }
+      }
+
       // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage.
       // When `aiDeferredSendAt` was set by the OBH gate above, translate it
       // to `delayMinutes` so scheduleAutomatedMessage writes a persistent
@@ -1384,6 +1468,9 @@ export class AutomationService implements OnModuleInit {
         activeHoursTimezone: savedAccount.followUpTimezone,
         stopOnCustomerReply: true,
         replyTriggerMode: 'every_reply' as const,
+        // Propagated to executePendingMessage — see the suggest-mode
+        // fork right before leadsService.sendMessage().
+        deliveryMode: aiConversationDeliveryMode,
       };
 
       await this.scheduleAutomatedMessage(syntheticRule, enrichedContext);
@@ -1842,6 +1929,10 @@ export class AutomationService implements OnModuleInit {
       }
 
       let messageToSend: string;
+      // Hoisted so the V2 Review-Mode suggest fork (below) can tag the
+      // parked suggestion with the goal that was actually used. Only the
+      // AI branch assigns it; template branch leaves it undefined.
+      let effectiveStrategyKeyOuter: string | undefined;
 
       if (rule.useAi) {
         // Try thread context first (summary + state + recent messages).
@@ -1928,36 +2019,35 @@ export class AutomationService implements OnModuleInit {
           } catch { /* invalid JSON */ }
         }
 
-        // PRIMARY INSTRUCTION — strategy prompt resolution.
-        // Priority (highest to lowest):
-        //   1. rule.replyMode='price' → force Price strategy (legacy Instant
-        //      Reply override; future UI no longer sets this but old rows still might)
-        //   2. rule.promptTemplate.content → explicit per-rule template (e.g. user
-        //      edits the First Reply prompt for this specific automation)
-        //   3. accountFollowUpStrategyPrompt → user's customized text for the
-        //      central strategy (when they edited the AI Strategy preview)
-        //   4. STRATEGY_PROMPTS[accountFollowUpStrategy] → central strategy default
-        //   5. rule.aiSystemPrompt → legacy free-form prompt on the rule
-        //   6. STRATEGY_PROMPTS.hybrid → ultimate fallback
-        const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
+        // PRIMARY INSTRUCTION — delegated to the shared goal resolver so
+        // Lead Arrives + AI Conversation share one priority chain with the
+        // follow-up generator. The resolver also auto-routes when the
+        // account goal is `auto` (calls suggestStrategy on the thread).
+        const { resolveActiveGoal } = require('../ai/goal-resolver');
         const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
-        let strategyPrompt: string;
-        let effectiveStrategyKey: string | undefined;
-        if (ruleReplyMode === 'price') {
-          strategyPrompt = STRATEGY_PROMPTS.price;
-          effectiveStrategyKey = 'price';
-        } else if (rule.promptTemplate?.content) {
-          strategyPrompt = rule.promptTemplate.content;
-        } else if (accountFollowUpStrategyPrompt) {
-          strategyPrompt = accountFollowUpStrategyPrompt;
-          effectiveStrategyKey = accountFollowUpStrategy;
-        } else if (accountFollowUpStrategy && accountFollowUpStrategy !== 'auto' && STRATEGY_PROMPTS[accountFollowUpStrategy]) {
-          strategyPrompt = STRATEGY_PROMPTS[accountFollowUpStrategy];
-          effectiveStrategyKey = accountFollowUpStrategy;
-        } else {
-          strategyPrompt = rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
-          if (!rule.aiSystemPrompt) effectiveStrategyKey = 'hybrid';
-        }
+        const resolvedGoal = await resolveActiveGoal(
+          {
+            ruleForcePrice: ruleReplyMode === 'price',
+            rulePromptOverride: rule.promptTemplate?.content ?? null,
+            ruleLegacyPrompt: rule.aiSystemPrompt ?? null,
+            threadActiveStrategy: threadCtx?.threadState?.activeStrategy ?? null,
+            accountFollowUpStrategy,
+            accountFollowUpStrategyPrompt,
+            conversationId: lead.threadId ?? null,
+          },
+          {
+            suggestStrategy: (id: string) =>
+              this.conversationContext.suggestStrategy(id),
+          },
+        );
+        const strategyPrompt: string = resolvedGoal.strategyPrompt;
+        const effectiveStrategyKey: string | undefined =
+          resolvedGoal.goalKey ?? undefined;
+        effectiveStrategyKeyOuter = effectiveStrategyKey;
+        this.logger.log(
+          `[AI] Goal resolved for ${pendingId}: ${effectiveStrategyKey ?? '(rule prompt)'} ` +
+          `via ${resolvedGoal.source} — ${resolvedGoal.reason}`,
+        );
         // Qualify never quotes — suppress the pricing REFERENCE so the model
         // isn't tempted to volunteer a number after the customer answers a
         // qualifying question.
@@ -2054,6 +2144,28 @@ export class AutomationService implements OnModuleInit {
             })
           : '';
 
+        // REFERENCE: Qualification required fields (Price / Qualify only).
+        // Read from followUpSettingsJson.qualificationV2.requiredFields. The
+        // helper returns '' when the strategy doesn't warrant it OR when the
+        // tenant has no saved fields — both cases preserve legacy behavior
+        // (the qualify-strategy prompt's hardcoded priority continues to drive
+        // the conversation). See src/ai/qualification-context.ts.
+        const { buildQualificationBlockForStrategy } = require('../ai/qualification-context');
+        let qualificationRequiredFields: unknown = undefined;
+        let qualificationCustomFields: unknown = undefined;
+        if (account?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(account.followUpSettingsJson);
+            qualificationRequiredFields = s?.qualificationV2?.requiredFields;
+            qualificationCustomFields = s?.qualificationV2?.customFields;
+          } catch { /* invalid JSON */ }
+        }
+        const qualificationBlock: string = buildQualificationBlockForStrategy(
+          effectiveStrategyKey,
+          qualificationRequiredFields,
+          qualificationCustomFields,
+        );
+
         // Generate reply via OpenAI. Pass current time + timezone so the model
         // knows whether previously offered slots have passed and how big the
         // gaps between messages are.
@@ -2072,6 +2184,7 @@ export class AutomationService implements OnModuleInit {
           pricingBlock,
           faqBlock,
           playbookBlock: playbookBlock || undefined,
+          qualificationBlock: qualificationBlock || undefined,
           conversationHistory,
           leadDetails,
           currentTime: new Date(),
@@ -2108,6 +2221,53 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(`[executePendingMessage] skip — pending=${pendingId} already claimed (status != 'pending')`);
           return;
         }
+      }
+
+      // V2 Review Mode (2026-06-12): when the synthetic AI rule carries
+      // `deliveryMode='suggest'` (set in handleCustomerReply when the
+      // account opted into Review mode), park the body as a pending
+      // suggestion on ThreadContext.stateJson instead of dispatching.
+      // Operator approves via /v1/leads/:id/ai-suggestion/{send,discard} —
+      // the send endpoint calls leadsService.sendMessage with the same
+      // body, so the outbound write path is byte-identical to auto-send.
+      //
+      // Dedup: handleCustomerReply already checked for an existing
+      // pending suggestion + skipped scheduling if one existed. We
+      // re-check here defensively to handle the race where a sibling
+      // runner arrived between the handleCustomerReply check and this
+      // point.
+      if ((rule as any).deliveryMode === 'suggest' && lead.threadId) {
+        const existingSuggestion = await this.conversationRuntime.getAiSuggestion(lead.threadId);
+        if (existingSuggestion) {
+          this.logger.log(
+            `[AI_SUGGEST] race-skip — pending suggestion ${existingSuggestion.id} already exists for thread ${lead.threadId}`,
+          );
+          return;
+        }
+        const { randomUUID } = require('crypto');
+        const suggestionId = randomUUID();
+        // Resolve the latest customer message id for dedup-by-source.
+        let sourceMessageId: string | null = null;
+        try {
+          const latest = await this.prisma.message.findFirst({
+            where: { conversationId: lead.threadId, sender: 'customer' },
+            orderBy: { sentAt: 'desc' },
+            select: { id: true },
+          });
+          sourceMessageId = latest?.id ?? null;
+        } catch { /* best-effort — dedup falls through */ }
+        await this.conversationRuntime.setAiSuggestion(lead.threadId, {
+          id: suggestionId,
+          message: messageToSend,
+          goal: effectiveStrategyKeyOuter ?? null,
+          reason: 'customer_reply',
+          sourceMessageId,
+        });
+        this.logger.log(
+          `[AI_SUGGEST] parked suggestion ${suggestionId} for thread ${lead.threadId} ` +
+          `(${messageToSend.length} chars, sourceMessageId=${sourceMessageId ?? 'null'})`,
+        );
+        return;
       }
 
       // Send the message

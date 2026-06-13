@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
@@ -33,7 +34,6 @@ import { notify } from '../../store/notificationStore';
 import AccountFaqForm from '../../components/AccountFaqForm';
 import ServicePricingForm from '../../components/ServicePricingForm';
 import {
-  PLAYBOOK_SECTION_ORDER,
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
   SECTION_DEFAULT_PROMPTS,
@@ -56,6 +56,16 @@ const SECTION_ICONS: Record<PlaybookSectionKey, LucideIcon> = {
 
 export function SettingsAiPlaybook() {
   const accounts = useAppStore(s => s.savedAccounts);
+
+  // Advanced/legacy mode (?advanced=1 or ?debug=1) — exposes the 5 legacy
+  // sections (Qualification, Booking, Handoff, Objection Handling,
+  // Follow-up Tone) that still emit at runtime via the backend renderer
+  // but are no longer part of the normal Playbook UI. Each carries a
+  // "preserved for compatibility" badge so it's obvious they're legacy.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
   const [v2, setV2] = useState<PlaybookV2Storage>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,7 +106,11 @@ export function SettingsAiPlaybook() {
 
   const onSectionChange = (section: PlaybookSectionKey, value: string) => {
     dirtyRef.current.add(section);
-    setV2(prev => ({ ...prev, [section]: { customInstructions: value } }));
+    // Editing implicitly clears `suggestedFromWebsite` — the user is taking
+    // ownership of this section. The badge above the card disappears as
+    // soon as `suggestedFromWebsite` flips to false in local state, and the
+    // save fan-out writes the cleared flag back to every account.
+    setV2(prev => ({ ...prev, [section]: { customInstructions: value, suggestedFromWebsite: false } }));
   };
 
   const handleSave = async () => {
@@ -136,44 +150,121 @@ export function SettingsAiPlaybook() {
         </SectionCard>
       )}
 
-      {/* === HOW sections — 8 cards with default + custom === */}
-      {accounts.length > 0 && PLAYBOOK_SECTION_ORDER.map(section => {
-        // Pricing Guidance is special — also embeds the pricing TABLE editor
-        if (section === 'pricing_guidance') {
-          return (
-            <PricingGuidanceCard
-              key={section}
-              value={v2[section]?.customInstructions ?? ''}
-              onChange={v => onSectionChange(section, v)}
-              accountId={accounts[0].id}
-              accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
-              accountIds={accounts.map(a => a.id)}
-            />
-          );
-        }
-        return (
-          <HowSectionCard
-            key={section}
-            section={section}
-            value={v2[section]?.customInstructions ?? ''}
-            onChange={v => onSectionChange(section, v)}
-          />
-        );
-      })}
+      {/* === Cards rendered in Playbook V2.5 order — simplified to 4 ===
+            Visible Playbook now answers two business-owner questions:
+            "What should AI know about my company?" and "What business
+            rules should AI follow?" Communication Style & Brand Voice
+            (personality_brand_voice) moved to advanced mode along with
+            the other legacy sections — friendly/professional/local
+            behavior is already in BASE_HARD_RULES and the system prompt,
+            users rarely know what to enter, and future personalization
+            will happen via the AI assistant chat. Every backend section
+            key still exists and still emits at runtime; only the UI
+            surface narrows.
 
-      {/* === FAQ section (between qualification_guidance and booking_guidance? — per UI, FAQ is right
-            after Pricing in spec. Render after Pricing in the section order, but in V2 the prompt
-            block only emits the 8 HOW sections; FAQ data is injected as REFERENCE block at runtime.) === */}
-      {accounts.length > 0 && (
+            Visible cards (4 total):
+              1. Business Information
+              2. FAQ
+              3. Pricing Guidance (with embedded Pricing Table)
+              4. Global Custom Instructions
+
+            Advanced-mode cards (when ?advanced=1 / ?debug=1):
+              - Qualification Guidance
+              - Booking Guidance
+              - Human Handoff Guidance
+              - Objection Handling
+              - Follow-up Tone
+              - Communication Style & Brand Voice
+                (backend key: personality_brand_voice) */}
+
+      {accounts.length > 0 && <>
+        {/* 1. Business Information */}
+        <HowSectionCard
+          section="business_information"
+          value={v2.business_information?.customInstructions ?? ''}
+          onChange={v => onSectionChange('business_information', v)}
+          isSuggested={!!v2.business_information?.suggestedFromWebsite}
+        />
+
+        {/* 2. FAQ */}
         <FaqCard
           accountId={accounts[0].id}
           accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
           accountIds={accounts.map(a => a.id)}
         />
-      )}
 
-      {/* === Global Custom Instructions card — surfaces User.globalAiPrompt === */}
-      {accounts.length > 0 && <GlobalCustomInstructionsCard />}
+        {/* 3. Pricing Guidance (with embedded Pricing Table) */}
+        <PricingGuidanceCard
+          value={v2.pricing_guidance?.customInstructions ?? ''}
+          onChange={v => onSectionChange('pricing_guidance', v)}
+          accountId={accounts[0].id}
+          accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
+          accountIds={accounts.map(a => a.id)}
+          isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
+        />
+
+        {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
+              These 5 backend section keys still emit their default prompts
+              at runtime via src/ai/section-default-prompts.ts; the textareas
+              accept user customInstructions and the runtime renderer still
+              reads them. They're hidden from the normal user UI because
+              workflow logic now lives in Automation → AI Conversation
+              Goals and tone/follow-up logic folded into the visible
+              Communication Style card below. Advanced/support users can
+              still hand-tune the underlying prompts here. */}
+        {advancedMode && (
+          <>
+            <AdvancedSectionsBanner />
+            <HowSectionCard
+              section="qualification_guidance"
+              value={v2.qualification_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('qualification_guidance', v)}
+              legacyAdvanced
+            />
+            <HowSectionCard
+              section="booking_guidance"
+              value={v2.booking_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('booking_guidance', v)}
+              legacyAdvanced
+              isSuggested={!!v2.booking_guidance?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="human_handoff_guidance"
+              value={v2.human_handoff_guidance?.customInstructions ?? ''}
+              onChange={v => onSectionChange('human_handoff_guidance', v)}
+              legacyAdvanced
+              isSuggested={!!v2.human_handoff_guidance?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="objection_handling"
+              value={v2.objection_handling?.customInstructions ?? ''}
+              onChange={v => onSectionChange('objection_handling', v)}
+              legacyAdvanced
+              isSuggested={!!v2.objection_handling?.suggestedFromWebsite}
+            />
+            <HowSectionCard
+              section="followup_tone"
+              value={v2.followup_tone?.customInstructions ?? ''}
+              onChange={v => onSectionChange('followup_tone', v)}
+              legacyAdvanced
+            />
+            {/* Communication Style & Brand Voice — moved to advanced in V2.5.
+                Backend key still personality_brand_voice; the runtime
+                renderer still consults customInstructions if set, so a
+                legacy account that saved tone notes keeps them active. */}
+            <HowSectionCard
+              section="personality_brand_voice"
+              value={v2.personality_brand_voice?.customInstructions ?? ''}
+              onChange={v => onSectionChange('personality_brand_voice', v)}
+              legacyAdvanced
+              isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
+            />
+          </>
+        )}
+
+        {/* 4. Global Custom Instructions — surfaces User.globalAiPrompt */}
+        <GlobalCustomInstructionsCard />
+      </>}
 
       {/* Footer save button */}
       {accounts.length > 0 && (
@@ -215,10 +306,10 @@ function HelpBlock() {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            Define how AI communicates with customers
+            AI Playbook controls HOW AI communicates
           </div>
           <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            Timing, automation, follow-ups, stop rules, and notifications are configured in <a href="/automation/respond" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation settings</a>.
+            <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation</a> controls <em>WHAT</em> AI is trying to achieve and <em>WHEN</em> conversations are handed to your team.
           </div>
         </div>
       </div>
@@ -226,14 +317,27 @@ function HelpBlock() {
   );
 }
 
-// ─── HOW section card — generic for 7 of the 8 HOW sections ───────────────
+// ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange,
+  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
 }: {
   section: PlaybookSectionKey;
   value: string;
   onChange: (v: string) => void;
+  /** When true, render a "Managed with Conversation Goals, still used by AI."
+   *  badge at the top of the card. The customInstructions textarea remains
+   *  editable since these prompts continue to take effect at runtime — the
+   *  Goal-level setup in Automation just controls WHEN/WHAT, not HOW. */
+  managedByGoals?: boolean;
+  /** Set by the website Apply-to-Playbook flow. Shows the "Suggested from
+   *  website" pill. Goes away on first edit (parent clears the flag). */
+  isSuggested?: boolean;
+  /** Render the section with an "Advanced — preserved for compatibility"
+   *  badge, used for the 5 legacy sections exposed only in ?advanced=1
+   *  mode (qualification_guidance, booking_guidance, etc.). The textarea
+   *  is fully editable; behavior is unchanged. */
+  legacyAdvanced?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -242,6 +346,9 @@ function HowSectionCard({
       title={PLAYBOOK_SECTION_UI_LABELS[section]}
       subtitle={PLAYBOOK_SECTION_SUBTITLES[section]}
     >
+      {isSuggested && <SuggestedFromWebsiteBadge />}
+      {managedByGoals && <ManagedByGoalsBadge />}
+      {legacyAdvanced && <LegacyAdvancedBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS[section]} />
       <CustomInstructionsEditor
         value={value}
@@ -253,16 +360,84 @@ function HowSectionCard({
   );
 }
 
+function LegacyAdvancedBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#fef3c7',
+      border: '1px solid #fde68a',
+      borderRadius: 8,
+      fontSize: 12, color: '#92400e',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Info size={13} style={{ flexShrink: 0 }} />
+      <span><strong>Advanced prompt section</strong> — preserved for compatibility. Still emitted at runtime; edit only if you know what you need.</span>
+    </div>
+  );
+}
+
+function AdvancedSectionsBanner() {
+  return (
+    <SectionCard padding="14px 20px">
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <Info size={16} style={{ color: '#92400e', flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
+          <strong>Advanced legacy sections.</strong> These prompt sections still emit at runtime but are no longer part of the normal Playbook UI. Their workflow logic now lives in <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation Goals</a>. Edit below only for support / power-user tuning.
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function SuggestedFromWebsiteBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#fef7f0',
+      border: '1px solid #fde0c8',
+      borderRadius: 8,
+      fontSize: 12, color: '#9a5b1e',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Sparkles size={13} style={{ flexShrink: 0, color: '#c8771b' }} />
+      <span><strong>✨ Suggested from website</strong> — review and edit. Your changes replace this suggestion.</span>
+    </div>
+  );
+}
+
+function ManagedByGoalsBadge() {
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: '8px 12px',
+      background: '#eff6ff',
+      border: '1px solid #c3d4ff',
+      borderRadius: 8,
+      fontSize: 12, color: 'var(--lb-accent)',
+      display: 'flex', alignItems: 'center', gap: 8,
+      lineHeight: 1.4,
+    }}>
+      <Info size={13} style={{ flexShrink: 0 }} />
+      <span><strong>Managed with Conversation Goals</strong>, still used by AI. The WHEN/WHAT for this scenario is configured in <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation</a>. The HOW (wording / tone) below still takes effect at runtime.</span>
+    </div>
+  );
+}
+
 // ─── Pricing Guidance — HOW textarea + ServicePricingForm embed ──────────
 
 function PricingGuidanceCard({
-  value, onChange, accountId, accountName, accountIds,
+  value, onChange, accountId, accountName, accountIds, isSuggested,
 }: {
   value: string;
   onChange: (v: string) => void;
   accountId: string;
   accountName: string;
   accountIds: string[];
+  isSuggested?: boolean;
 }) {
   return (
     <PlaybookSectionShell
@@ -270,6 +445,7 @@ function PricingGuidanceCard({
       title={PLAYBOOK_SECTION_UI_LABELS.pricing_guidance}
       subtitle={PLAYBOOK_SECTION_SUBTITLES.pricing_guidance}
     >
+      {isSuggested && <SuggestedFromWebsiteBadge />}
       <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS.pricing_guidance} />
       <CustomInstructionsEditor
         value={value}

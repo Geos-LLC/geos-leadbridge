@@ -4,9 +4,9 @@ import { AlertTriangle, ArrowRight } from 'lucide-react';
 import { notificationsApi, type TenantPhoneNumber } from '../services/api';
 
 // Module-scope cache so all three banner mount sites share a single fetch.
-// TTL is small — when the user buys a number from /settings/communication
-// we want the banner to disappear without a hard reload. callers can flush
-// by importing clearLeadBridgeNumberCache().
+// TTL is small — when the user buys a number from the Settings →
+// Communication tab we want the banner to disappear without a hard
+// reload. callers can flush by importing clearLeadBridgeNumberCache().
 let cache: { hasNumber: boolean; checkedAt: number } | null = null;
 const CACHE_TTL_MS = 30_000;
 
@@ -74,7 +74,7 @@ export function LeadBridgeNumberLock({ feature }: { feature: string }) {
       </div>
       <button
         type="button"
-        onClick={() => navigate('/settings/communication')}
+        onClick={() => navigate('/settings?tab=communication')}
         style={{
           display: 'inline-flex',
           alignItems: 'center',

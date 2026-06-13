@@ -35,6 +35,7 @@ function buildController(opts: {
     eventEmitter,
     prisma,
     /* crmWebhookService */ {} as any,
+    /* conversationRuntime */ {} as any,
   );
   return { controller, eventEmitter, prisma, findFirstCalls };
 }

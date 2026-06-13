@@ -43,7 +43,10 @@ export const PLAYBOOK_SECTION_UI_LABELS: Record<PlaybookSectionKey, string> = {
   objection_handling:     'Objection Handling',
   human_handoff_guidance: 'Human Handoff Guidance',
   followup_tone:          'Follow-up Tone',
-  personality_brand_voice: 'AI Personality & Brand Voice',
+  // Backend section key stays `personality_brand_voice` (the prompt block
+  // header is still 'AI PERSONALITY & BRAND VOICE'). Only the user-facing
+  // UI label changes to align with the V2.4 simplification.
+  personality_brand_voice: 'Communication Style & Brand Voice',
 };
 
 /** One-line description shown under each card title in the UI. */
@@ -85,7 +88,13 @@ export const SECTION_DEFAULT_PROMPTS: Record<PlaybookSectionKey, string> = {
 };
 
 export type PlaybookV2Storage = {
-  [K in PlaybookSectionKey]?: { customInstructions: string };
+  [K in PlaybookSectionKey]?: {
+    customInstructions: string;
+    /** Set by the website Apply-to-Playbook flow. Cleared the moment the
+     *  user edits the section's textarea. Drives the "Suggested from
+     *  website" pill in the AI Playbook page. */
+    suggestedFromWebsite?: boolean;
+  };
 };
 
 /** Threshold values for the soft length warning on the editor. */

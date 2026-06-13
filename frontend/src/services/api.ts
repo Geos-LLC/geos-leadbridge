@@ -209,6 +209,60 @@ export const authApi = {
   },
 };
 
+/**
+ * Structured facts extracted from a verified website, keyed by Playbook V2
+ * section. Source for later FAQ + AI Playbook auto-fill. Every field is
+ * optional; the backend drops empty sections before saving.
+ */
+export interface PlaybookSeed {
+  businessInformation?: {
+    serviceArea?: string;
+    teamSize?: string;
+    yearsInBusiness?: string;
+    ownerName?: string;
+    suppliesPolicy?: string;
+    petsPolicy?: string;
+    paymentMethods?: string[];
+    officeLocations?: string[];
+    insurance?: string;
+    bonding?: string;
+    licensing?: string;
+    guarantees?: string;
+    ecoFriendly?: string;
+  };
+  pricingGuidance?: {
+    pricingModel?: string;
+    startingPrices?: Array<{ service: string; price: string }>;
+    whatsIncluded?: string;
+    discounts?: string;
+  };
+  bookingGuidance?: {
+    bookingChannels?: string[];
+    leadTime?: string;
+    schedulingNotes?: string;
+  };
+  objectionHandling?: {
+    trustSignals?: string[];
+  };
+  humanHandoffGuidance?: {
+    phones?: string[];
+    emails?: string[];
+    addresses?: string[];
+  };
+  personalityBrandVoice?: {
+    toneNotes?: string;
+  };
+}
+
+export interface WebsiteMetadataPayload {
+  title?: string;
+  description?: string;
+  phone?: string;
+  imageUrl?: string;
+  summary?: string;
+  playbookSeed?: PlaybookSeed;
+}
+
 // Health issue type from backend
 export interface HealthIssue {
   code: 'no_webhooks' | 'not_connected';
@@ -350,7 +404,14 @@ export const thumbtackApi = {
     const { data } = await api.delete(`/v1/thumbtack/saved-accounts/${id}?deleteLeads=${deleteLeads}`);
     return data;
   },
-  updateSavedAccount: async (id: string, updates: { emailHint?: string; agentPhoneOverride?: string | null }): Promise<{ success: boolean }> => {
+  updateSavedAccount: async (
+    id: string,
+    updates: {
+      emailHint?: string;
+      agentPhoneOverride?: string | null;
+      additionalAssociatePhones?: Array<{ id?: string; phoneNumber: string; label?: string }>;
+    },
+  ): Promise<{ success: boolean }> => {
     const { data } = await api.patch(`/v1/thumbtack/saved-accounts/${id}`, updates);
     return data;
   },
@@ -387,6 +448,20 @@ export interface MessageAttachment {
 }
 
 // Message type for API responses
+// V2 Review Mode: parked AI draft awaiting operator approval. Stored on
+// ThreadContext.stateJson.pendingAiSuggestion server-side. `goal` carries
+// the resolved conversation goal at generation time (qualify, phone, etc.)
+// and is purely informational; the runtime does not consult it on send.
+export interface PendingAiSuggestion {
+  id: string;
+  message: string;
+  goal: string | null;
+  reason: string;
+  sourceMessageId: string | null;
+  createdAt: string;
+  status: 'pending';
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -430,9 +505,27 @@ export const leadsApi = {
     const { data } = await api.get(`/v1/thumbtack/leads/${id}`);
     return data;
   },
-  getMessages: async (leadId: string, opts?: { fresh?: boolean }): Promise<{ messages: ApiMessage[]; count: number }> => {
+  getMessages: async (leadId: string, opts?: { fresh?: boolean }): Promise<{
+    messages: ApiMessage[];
+    count: number;
+    // V2 Review Mode (2026-06-12). Non-null when this lead's account has
+    // aiConversationDeliveryMode='suggest' AND a draft is parked on the
+    // thread. Lead Activity surfaces it as a banner above the composer.
+    pendingAiSuggestion?: PendingAiSuggestion | null;
+  }> => {
     const qs = opts?.fresh ? '?fresh=1' : '';
     const { data } = await api.get(`/v1/thumbtack/leads/${leadId}/messages${qs}`);
+    return data;
+  },
+  // V2 Review Mode approval actions. Both clear the parked draft; send
+  // dispatches it via leadsService.sendMessage('ai') so observability is
+  // byte-identical to an auto-sent reply.
+  sendAiSuggestion: async (leadId: string): Promise<{ success: boolean; sent: boolean; suggestionId: string }> => {
+    const { data } = await api.post(`/v1/leads/${leadId}/ai-suggestion/send`, {});
+    return data;
+  },
+  discardAiSuggestion: async (leadId: string): Promise<{ success: boolean; cleared: boolean }> => {
+    const { data } = await api.post(`/v1/leads/${leadId}/ai-suggestion/discard`, {});
     return data;
   },
   sendMessage: async (leadId: string, message: string): Promise<{ success: boolean }> => {
@@ -1392,7 +1485,7 @@ export const usersApi = {
       name?: string;
       businessPhone?: string;
       website?: string | null;
-      websiteMetadata?: { title?: string; description?: string; phone?: string } | null;
+      websiteMetadata?: WebsiteMetadataPayload | null;
     },
   ): Promise<{
     success: boolean;
@@ -1402,7 +1495,8 @@ export const usersApi = {
       email: string;
       businessPhone?: string | null;
       website?: string | null;
-      websiteMetadataJson?: { title?: string; description?: string; phone?: string } | null;
+      websiteMetadataJson?: WebsiteMetadataPayload | null;
+      additionalAssociatePhonesJson?: Array<{ id: string; phoneNumber: string; label?: string }> | null;
     };
   }> => {
     const { data } = await api.patch('/v1/users/me', updates);
@@ -1411,18 +1505,89 @@ export const usersApi = {
   // Onboarding wizard's Business step calls this before saving the URL.
   // The backend normalizes ("myco.com" → "https://myco.com"), runs an
   // SSRF guard, fetches with a timeout, and extracts <title> + meta
-  // description + a likely phone number. If unreachable, returns a
-  // typed errorCode so the UI can show a specific message.
+  // description + a likely phone number + og:image / screenshot, then
+  // asks gpt-4o-mini for a prose summary AND a structured Playbook seed
+  // (per-section facts ready for FAQ/Playbook auto-fill).
+  // If unreachable, returns a typed errorCode so the UI can show a
+  // specific message.
   verifyWebsite: async (
     url: string,
   ): Promise<{
     reachable: boolean;
     normalizedUrl: string;
-    metadata?: { title?: string; description?: string; phone?: string };
+    metadata?: WebsiteMetadataPayload;
     errorCode?: 'invalid_url' | 'private_host' | 'dns_not_found' | 'connection_refused' | 'timeout' | 'http_error' | 'unreachable';
     errorMessage?: string;
   }> => {
     const { data } = await api.post('/v1/users/me/website/verify', { url });
+    return data;
+  },
+  // Apply the structured Playbook seed (extracted by verifyWebsite) to every
+  // connected SavedAccount's aiPlaybookV2. 'fill_empty' is the safe default —
+  // user-typed text in each section is preserved. 'replace' overwrites every
+  // supported section. Returns counts so the UI can show "4 filled, 2 skipped".
+  applyPlaybookSeed: async (
+    mode: 'fill_empty' | 'replace',
+  ): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    overwritten: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/website/apply-playbook', { mode });
+    return data;
+  },
+  // Apply the website seed's businessInformation block into each connected
+  // SavedAccount's FAQ (insuredAndBonded, bringsSupplies, petPolicy,
+  // paymentMethods). Always fill-empty; never overwrites a user-typed FAQ.
+  applyFaqFromWebsiteSeed: async (): Promise<{
+    success: boolean;
+    accountsAffected: number;
+    filled: number;
+    skipped: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/website/apply-faq');
+    return data;
+  },
+  /** Pull business-info from a connected SavedAccount and merge into the
+   *  canonical seed. Non-destructive — conflicting fields (existing != new
+   *  on a non-website-only field) are queued in `pendingConflicts` for the
+   *  Resolve modal to surface; nothing is overwritten silently. */
+  pullBusinessInfoFromAccount: async (
+    platform: 'thumbtack' | 'yelp',
+    savedAccountId: string,
+  ): Promise<{
+    success: boolean;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post(`/v1/users/me/business-info/pull-from/${platform}/${savedAccountId}`);
+    return data;
+  },
+  /** Save the tenant's public Thumbtack profile URL on a SavedAccount.
+   *  Enables the website-scrape path for TT pulls — the Partner API alone
+   *  only returns businessID/name/phone/image. Pass `url=null` to clear. */
+  saveThumbtackProfileUrl: async (
+    savedAccountId: string,
+    url: string | null,
+  ): Promise<{ success: boolean; url: string | null; warning?: string }> => {
+    const { data } = await api.patch(
+      `/v1/users/me/saved-accounts/${savedAccountId}/thumbtack-profile-url`,
+      { url },
+    );
+    return data;
+  },
+  /** Read the saved public Thumbtack profile URL for hydrating the input. */
+  getThumbtackProfileUrl: async (
+    savedAccountId: string,
+  ): Promise<{ url: string | null }> => {
+    const { data } = await api.get(
+      `/v1/users/me/saved-accounts/${savedAccountId}/thumbtack-profile-url`,
+    );
     return data;
   },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
