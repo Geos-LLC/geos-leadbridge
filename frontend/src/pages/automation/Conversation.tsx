@@ -10,8 +10,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
-  SectionCard, SettingCard, FieldRow, OptionCard, ToggleRow,
+  SectionCard, FieldRow, OptionCard, ToggleRow,
   Radio, IconTile, ActionLink, AutoBadge, StatusPill,
+  PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
 import { followUpApi, usersApi } from '../../services/api';
@@ -743,18 +744,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           interactive, but the user can see what they'd unlock. */}
       <UpgradeOverlay tier="convert">
 
-      <SettingCard
-        icon={Power}
-        iconTone="violet"
-        title="AI Conversation"
-        subtitle={aiOn
-          ? 'AI replies to customers automatically based on your Conversation Goal. Applies to all connected accounts.'
-          : canUseAi
-            ? 'Turn on to let AI handle customer conversations end-to-end. Applies to all connected accounts.'
-            : 'Turn on to let AI handle customer conversations end-to-end. Applies to all connected accounts.'}
-        enabled={aiOn}
-        onToggle={onAiToggle}
-      />
+      {/* Master enable moved to the page-shell PlanSwitcher (Phase 3 design
+          refresh). When off + the user has the Convert tier, show the
+          empty state instead of the controls. Non-Convert users still see
+          the controls behind UpgradeOverlay so they know what they'd unlock. */}
+      {!aiOn && canUseAi ? (
+        <PlanOffEmptyState
+          planLabel="AI Conversation"
+          icon={Power}
+          onTurnOn={() => onAiToggle(true)}
+          description="Turn on to let AI handle customer conversations end-to-end. Applies to all connected accounts."
+        />
+      ) : null}
 
       {!(aiOn || !canUseAi) ? null : <>
 

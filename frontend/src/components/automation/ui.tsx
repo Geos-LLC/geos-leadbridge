@@ -741,3 +741,69 @@ export function FooterBanner({ icon: Icon, body }: { icon: LucideIcon; body: Rea
     </div>
   );
 }
+
+// ===================================================================
+// PlanOffEmptyState — shown when a plan's master enable is off and the
+// plan-switcher in the page shell carries the toggle. Replaces the old
+// in-page master SettingCard at the top of each plan body.
+// ===================================================================
+export function PlanOffEmptyState({
+  planLabel, icon: Icon, onTurnOn, description,
+}: {
+  planLabel: string;
+  icon: LucideIcon;
+  onTurnOn: () => void;
+  description?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 12,
+        padding: '56px 24px',
+        background: 'var(--lb-surface)',
+        border: '1.5px solid var(--lb-line)',
+        borderRadius: 14,
+        boxShadow: 'var(--lb-shadow-sm)',
+        textAlign: 'center',
+      }}
+    >
+      <div
+        style={{
+          width: 46, height: 46, borderRadius: 999,
+          background: 'var(--lb-ink-10)',
+          color: 'var(--lb-ink-5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <Icon size={22} />
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+        {planLabel} is off
+      </div>
+      {description && (
+        <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', maxWidth: 420, lineHeight: 1.5 }}>
+          {description}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onTurnOn}
+        style={{
+          marginTop: 4,
+          padding: '8px 16px',
+          background: 'var(--lb-accent)',
+          color: 'var(--lb-accent-fg)',
+          border: 0,
+          borderRadius: 999,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          fontSize: 13.5,
+          fontWeight: 600,
+        }}
+      >
+        Turn on {planLabel}
+      </button>
+    </div>
+  );
+}

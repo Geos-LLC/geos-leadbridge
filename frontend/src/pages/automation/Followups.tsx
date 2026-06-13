@@ -7,6 +7,7 @@ import {
 import {
   SettingCard, SectionCard, FieldRow, OptionCard,
   Dropdown, ActionLink, IconTile, FooterBanner, StatusPill, MixedBadge,
+  PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
 import type { LucideIcon } from 'lucide-react';
@@ -451,7 +452,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       deviants.map(d => `  • ${d.account.businessName || d.account.platform}: ${fmt(d.cached[key])}`).join('\n');
     return { mixed: true, tooltip };
   }
-  const mixedMaster   = getMixedF('followUpsOn', v => v ? 'On' : 'Off');
+  // mixedMaster previously fed the in-page master SettingCard which moved
+  // to the shell PlanSwitcher in the 2026-06-13 design refresh. Kept the
+  // helper call shape inline-deleted; the mixed-state badge for the master
+  // toggle now belongs on the shell (Phase 4 follow-up).
   const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
   const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
   const mixedQuiet    = getMixedF('quietOn', v => v ? 'On' : 'Off');
@@ -550,23 +554,18 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      {/* Master Follow-ups toggle — single source of truth for whether
-          follow-ups run at all. OFF writes followUpMode='off'; ON snaps to
-          'auto_send' (and AI message mode when the plan allows). Other
-          cards below are hidden until the master is ON, matching the
-          legacy Services page behavior. */}
-      <SettingCard
-        icon={Power}
-        iconTone="violet"
-        title="Follow-ups"
-        subtitle={followUpsOn
-          ? 'Automatically follow up with leads who stop responding.'
-          : 'Turn on to start following up with leads who stop responding.'}
-        enabled={followUpsOn}
-        onToggle={onFollowUpsOn}
-        mixed={mixedMaster.mixed}
-        mixedTooltip={mixedMaster.tooltip}
-      />
+      {/* Master Follow-ups toggle moved to the page-shell PlanSwitcher
+          (Phase 3 design refresh). When OFF, show the centered empty
+          state instead of the controls. Writing OFF still goes through
+          followUpMode='off' via the legacy onFollowUpsOn handler. */}
+      {!followUpsOn ? (
+        <PlanOffEmptyState
+          planLabel="Follow-ups"
+          icon={Power}
+          onTurnOn={() => onFollowUpsOn(true)}
+          description="Turn on to start following up with leads who stop responding."
+        />
+      ) : null}
 
       {!followUpsOn ? null : <>
 
