@@ -30,12 +30,9 @@ const ApiTest = lazy(() => import('./pages/ApiTest').then(m => ({ default: m.Api
 const RuntimeDebug = lazy(() => import('./pages/RuntimeDebug'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const SettingsPage = lazy(() => import('./pages/settings'));
-const SettingsPageLegacy = lazy(() => import('./pages/SettingsPage'));
-// SettingsCommunication (legacy 1396-line page) is no longer mounted —
-// the /settings/communication route now redirects to /settings?tab=communication.
-// The file itself is kept on disk until Call Connect + Test Text + per-account
-// alert templates are ported into the modern Communication tab; see
-// chore/ui-cleanup-legacy-removal for the remaining follow-ups.
+// Legacy /settings-classic + the full-page /settings/communication view
+// have been removed. The /settings/communication redirect below stays so
+// old bookmarks and deep links resolve to the canonical surface.
 const AutomationPage = lazy(() => import('./pages/automation').then(m => ({ default: m.AutomationPage })));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
@@ -190,14 +187,9 @@ function App() {
               <Route path="/api-test" element={<ApiTest />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/settings-classic" element={<SettingsPageLegacy />} />
-              {/* Legacy /settings/communication route — superseded by the
-                  modern Settings tab shell. Redirect any deep-link or
-                  bookmarked URL to the canonical surface so users never
-                  land on the legacy 1396-line page. The SettingsCommunication
-                  file is kept until Call Connect / Test Text / per-account
-                  alert templates are ported into the modern Communication
-                  tab; see chore/ui-cleanup-legacy-removal. */}
+              {/* /settings/communication redirect — bookmark back-compat.
+                  The legacy full-page Communication view is gone; live
+                  config lives under the Communication tab inside /settings. */}
               <Route path="/settings/communication" element={<Navigate to="/settings?tab=communication" replace />} />
               <Route path="/invite/accept" element={<AcceptInvite />} />
               <Route path="/billing" element={<Navigate to="/settings" />} />
