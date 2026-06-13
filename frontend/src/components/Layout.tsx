@@ -853,6 +853,12 @@ export function Layout() {
                         .replace(/\b\w/g, c => c.toUpperCase());
                       const cur = p.proposal.payload.proposedChange.currentValue;
                       const nxt = p.proposal.payload.proposedChange.newValue;
+                      const op = p.proposal.payload.proposedChange.operation;
+                      const hasExisting = !!(cur && cur.trim());
+                      const isReplacing = hasExisting && (op === 'replace' || op === 'set');
+                      const overrideLabel = isReplacing
+                        ? 'This will replace your existing rules'
+                        : 'This will be added to your existing rules';
                       return (
                         <div key={turn.id} className="self-start" style={{ maxWidth: '95%', width: '100%' }}>
                           <div style={{
@@ -869,18 +875,59 @@ export function Layout() {
                             <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)', marginBottom: 8 }}>
                               {p.summary}
                             </div>
-                            {cur && cur.trim() && (
-                              <details style={{ marginBottom: 8 }}>
-                                <summary style={{ fontSize: 11.5, color: 'var(--lb-ink-4)', cursor: 'pointer' }}>
-                                  Show current value
-                                </summary>
-                                <div style={{ marginTop: 4, fontSize: 12, color: 'var(--lb-ink-3)', whiteSpace: 'pre-wrap', background: 'var(--lb-ink-10)', padding: 8, borderRadius: 8 }}>
+                            {hasExisting && (
+                              <div
+                                className="flex items-start gap-2"
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  color: isReplacing ? '#991b1b' : '#92400e',
+                                  background: isReplacing ? 'var(--lb-danger-tint, #fef2f2)' : 'var(--lb-warn-tint, #fef9c3)',
+                                  border: `1px solid ${isReplacing ? 'var(--lb-danger, #dc2626)' : 'var(--lb-warn, #ca8a04)'}`,
+                                  padding: '6px 10px',
+                                  borderRadius: 8,
+                                  marginBottom: 10,
+                                  lineHeight: 1.35,
+                                }}
+                              >
+                                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                                <span>{overrideLabel}. Review both before applying.</span>
+                              </div>
+                            )}
+                            {hasExisting && (
+                              <>
+                                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--lb-ink-4)', marginBottom: 4, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                                  Current rule
+                                </div>
+                                <div style={{
+                                  fontSize: 13,
+                                  color: 'var(--lb-ink-2)',
+                                  whiteSpace: 'pre-wrap',
+                                  background: 'var(--lb-ink-10)',
+                                  border: '1px solid var(--lb-line)',
+                                  padding: 8,
+                                  borderRadius: 8,
+                                  marginBottom: 8,
+                                  textDecoration: isReplacing ? 'line-through' : 'none',
+                                  opacity: isReplacing ? 0.7 : 1,
+                                }}>
                                   {cur}
                                 </div>
-                              </details>
+                              </>
                             )}
-                            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginBottom: 4 }}>New text</div>
-                            <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', whiteSpace: 'pre-wrap', background: 'var(--lb-ink-10)', padding: 8, borderRadius: 8, marginBottom: 10 }}>
+                            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--lb-ink-4)', marginBottom: 4, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                              {hasExisting ? (isReplacing ? 'Replacing with' : 'Adding') : 'New text'}
+                            </div>
+                            <div style={{
+                              fontSize: 13,
+                              color: 'var(--lb-ink-1)',
+                              whiteSpace: 'pre-wrap',
+                              background: hasExisting ? 'rgba(34,197,94,0.08)' : 'var(--lb-ink-10)',
+                              border: hasExisting ? '1px solid rgba(34,197,94,0.45)' : '1px solid var(--lb-line)',
+                              padding: 8,
+                              borderRadius: 8,
+                              marginBottom: 10,
+                            }}>
                               {nxt}
                             </div>
                             {p.state === 'pending' && (
