@@ -142,4 +142,13 @@ h1, h2, h3, h4 {
   .lb-plan-segment {
     width: 100% !important;
   }
+
+  /* Conversation Goal 4-up grid reflows to 2 columns per spec. */
+  .lb-strategy-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Qualify Required-information 3-up grid reflows to 2 columns. */
+  .lb-required-info-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
 }

@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
-  SectionCard, FieldRow, OptionCard, ToggleRow,
+  SectionCard, OptionCard, ToggleRow,
   Radio, IconTile, ActionLink, AutoBadge, StatusPill,
   PlanOffEmptyState,
   type IconTone,
@@ -759,40 +759,41 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
       {!(aiOn || !canUseAi) ? null : <>
 
-      {/* ───── 1. Conversation Goal ───────────────────────────────────────── */}
+      {/* ───── 1. Conversation Goal — header on top, 4-card grid below ─── */}
       <SectionCard padding="22px 24px 24px">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 18 }}>
           <IconTile icon={Target} tone="violet" size="lg" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>Conversation Goal</div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              What AI is trying to achieve with each reply.<br />
-              Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.<br /><br />
-              How AI <em>speaks</em> while pursuing the goal is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
+              What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
+              How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
             </div>
           </div>
-          <div style={{
+        </div>
+        <div
+          className="lb-strategy-grid"
+          style={{
             display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
-            flex: '0 0 560px',
-          }}>
-            {STRATEGIES.map(s => (
-              <StrategyCard
-                key={s.k}
-                selected={strategy === s.k}
-                onClick={() => onStrategy(s.k)}
-                icon={s.icon}
-                iconTone={s.iconTone}
-                title={s.title}
-                body={s.body}
-                recommended={s.recommended}
-                mixed={mixedStrategy.mixed && strategy === s.k}
-                mixedTooltip={mixedStrategy.tooltip}
-              />
-            ))}
-          </div>
+          }}
+        >
+          {STRATEGIES.map(s => (
+            <StrategyCard
+              key={s.k}
+              selected={strategy === s.k}
+              onClick={() => onStrategy(s.k)}
+              icon={s.icon}
+              iconTone={s.iconTone}
+              title={s.title}
+              body={s.body}
+              recommended={s.recommended}
+              mixed={mixedStrategy.mixed && strategy === s.k}
+              mixedTooltip={mixedStrategy.tooltip}
+            />
+          ))}
         </div>
       </SectionCard>
 
@@ -1044,7 +1045,7 @@ function StrategyCard({
   iconTone: IconTone;
   title: string;
   body: string;
-  /** Show a small "Recommended" pill above the title. Used on Auto. */
+  /** Show a small "REC" pill in the card's top-right. Used on Auto. */
   recommended?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
@@ -1056,39 +1057,40 @@ function StrategyCard({
       title={mixed ? mixedTooltip : undefined}
       style={{
         position: 'relative',
-        textAlign: 'left', padding: '14px 12px 14px',
+        textAlign: 'left', padding: '14px 16px 16px',
         background: mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
         border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
-        borderRadius: 10,
+        borderRadius: 12,
         cursor: 'pointer', fontFamily: 'inherit',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10,
         transition: 'border-color 120ms, background 120ms',
         boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
       }}
     >
-      <div style={{ position: 'absolute', top: 8, left: 8 }}>
-        <Radio selected={selected} />
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 8, width: '100%',
+      }}>
+        <IconTile icon={icon} tone={iconTone} size="md" />
+        {recommended && !mixed && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+            padding: '3px 8px', borderRadius: 999,
+            background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+            textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+            border: '1px solid #a7f3d0',
+          }}>
+            REC
+          </span>
+        )}
+        {mixed && (
+          <span style={{ color: '#d97706', marginTop: 4 }}>
+            <AlertTriangle size={14} />
+          </span>
+        )}
       </div>
-      {recommended && !mixed && (
-        <div style={{
-          position: 'absolute', top: 6, right: 6,
-          fontSize: 9, fontWeight: 700, letterSpacing: 0.05,
-          padding: '2px 6px', borderRadius: 999,
-          background: '#ede9fe', color: '#6d28d9',
-          textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
-        }}>
-          Recommended
-        </div>
-      )}
-      {mixed && (
-        <div style={{ position: 'absolute', top: 6, right: 6, color: '#d97706' }}>
-          <AlertTriangle size={12} />
-        </div>
-      )}
-      <div style={{ height: 6 }} />
-      <IconTile icon={icon} tone={iconTone} size="md" />
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</div>
-      <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', textAlign: 'center', lineHeight: 1.4 }}>{body}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.45 }}>{body}</div>
     </button>
   );
 }
@@ -1133,253 +1135,160 @@ function GoalSetupCard({
   priceMode: 'range' | 'exact';
   onPriceMode: (v: 'range' | 'exact') => void;
   mixedPriceMode: { mixed: boolean; tooltip?: string };
-  /** Sanitized list of selected snake_case field keys, in catalog order. */
   qualificationRequiredFields: string[];
-  /** Single-field toggle. Owns dirty-tracking + canonical sort. */
   toggleQualificationField: (key: string) => void;
-  /** User-defined Qualify fields (Pets, Gate code, etc). */
   qualificationCustomFields: QualificationCustomField[];
   addCustomField: () => void;
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
   removeCustomField: (id: string) => void;
 }) {
+  // Auto + Phone goals have no per-goal setup card per design — Auto routes
+  // to whichever sub-goal applies, Phone behavior is fully driven by the
+  // global rules. Only Price and Qualify render dedicated setup cards.
+  if (strategy !== 'price' && strategy !== 'qualify') return null;
 
-  // Display metadata for the 4 visible goals. Legacy 'hybrid' / 'convert'
-  // never reach this card because parseSettings remaps them to 'auto' /
-  // 'qualify' for display. The Record entries below cover all 6 keys for
-  // type completeness, but only auto/price/qualify/phone are reachable.
-  const titleByStrategy: Record<StrategyKey, string> = {
-    auto:    'Auto',
-    hybrid:  'Auto',           // unreachable — remapped in parseSettings
-    price:   'Price Goal Setup',
-    qualify: 'Qualify Goal Setup',
-    convert: 'Qualify Goal Setup', // unreachable — remapped in parseSettings
-    phone:   'Phone Goal Setup',
-  };
-  const iconByStrategy: Record<StrategyKey, LucideIcon> = {
-    auto: Sparkles, hybrid: Sparkles, price: CircleDollarSign, qualify: UserCheck, convert: UserCheck, phone: Phone,
-  };
-  const toneByStrategy: Record<StrategyKey, IconTone> = {
-    auto: 'violet', hybrid: 'violet', price: 'green', qualify: 'orange', convert: 'orange', phone: 'rose',
-  };
-  const Icon = iconByStrategy[strategy];
+  // ─── Price goal setup ────────────────────────────────────────────────
+  if (strategy === 'price') {
+    return (
+      <SectionCard padding="22px 24px 22px">
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Price goal setup
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
+            How AI quotes when a customer asks about price.
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <OptionCard
+            selected={priceMode === 'range'}
+            onClick={() => onPriceMode('range')}
+            title="Price range"
+            body="Give a typical range (e.g. $1,200–$1,800)."
+            mixed={mixedPriceMode.mixed && priceMode === 'range'}
+            mixedTooltip={mixedPriceMode.tooltip}
+          />
+          <OptionCard
+            selected={priceMode === 'exact'}
+            onClick={() => onPriceMode('exact')}
+            title="Exact quote"
+            body="Quote a single number from your pricing table."
+            mixed={mixedPriceMode.mixed && priceMode === 'exact'}
+            mixedTooltip={mixedPriceMode.tooltip}
+          />
+        </div>
+      </SectionCard>
+    );
+  }
 
-  // Required Information is QUALIFY-only. Price uses the Pricing Table +
-  // Pricing Guidance (Playbook) — its qualification logic is "ask only what's
-  // needed to quote accurately," not a configurable required-fields list.
-  // Backend gate in qualification-context.ts mirrors this: only qualify
-  // strategy injects the QUALIFICATION REQUIRED FIELDS reference block.
-  const showRequiredInfo = strategy === 'qualify';
-
+  // ─── Qualify goal: Required information ──────────────────────────────
   return (
-    <SectionCard padding="22px 24px 24px">
-      {/* Goal header + description */}
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
-        <IconTile icon={Icon} tone={toneByStrategy[strategy]} size="lg" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-            {titleByStrategy[strategy]}
-          </div>
-          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.6 }}>
-            {strategy === 'auto' && (
-              <>
-                AI automatically chooses the best approach based on the conversation.
-                <div style={{ marginTop: 8, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  Examples:
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-                    <li>Customer asks about price → <strong>Price behavior</strong></li>
-                    <li>Customer explores options → <strong>Qualify behavior</strong></li>
-                    <li>Customer requests a call → <strong>Phone behavior</strong></li>
-                  </ul>
-                </div>
-              </>
-            )}
-            {strategy === 'price' && (
-              <>
-                Focus on providing pricing information.
-                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  <strong>Goal completion:</strong> the customer agrees with the price.
-                </div>
-              </>
-            )}
-            {strategy === 'qualify' && (
-              <>
-                Focus on collecting the information needed before quoting or booking.
-                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  <strong>Goal completion:</strong> lead is qualified when all required information is collected.
-                </div>
-              </>
-            )}
-            {strategy === 'phone' && (
-              <>
-                Focus on collecting the customer's phone number so your team can call them.
-                <div style={{ marginTop: 6, fontSize: 13, color: 'var(--lb-ink-3)' }}>
-                  <strong>Goal completion:</strong> the customer provides a phone number.
-                </div>
-              </>
-            )}
-          </div>
+    <SectionCard padding="22px 24px 22px">
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+          Required information
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
+          AI collects these before quoting or booking.
         </div>
       </div>
 
-      {/* Required Information — Price + Qualify only. Wired to
-          followUpSettingsJson.qualificationV2.requiredFields. Selected
-          keys are injected into the AI prompt for Price and Qualify
-          goals; existing tenants without saved values fall through to
-          legacy hardcoded priorities. */}
-      {showRequiredInfo && (
-        <div style={{
-          marginBottom: 16,
-          padding: '14px 16px',
-          background: '#f8fafc',
-          border: '1px solid var(--lb-line-soft)',
-          borderRadius: 10,
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
-            letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10,
-            fontFamily: 'var(--lb-font-mono)',
-          }}>
-            Required Information
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 10 }}>
-            {QUALIFICATION_FIELDS.map(field => {
-              const checked = qualificationRequiredFields.includes(field.key);
-              return (
-                <label key={field.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  fontSize: 13.5, color: 'var(--lb-ink-2)', cursor: 'pointer',
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleQualificationField(field.key)}
-                    style={{ accentColor: 'var(--lb-accent)' }}
-                  />
-                  {field.label}
-                </label>
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-            AI will collect the selected information before marking the lead as qualified.
-          </div>
+      <div
+        className="lb-required-info-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 10,
+          marginBottom: 12,
+        }}
+      >
+        {QUALIFICATION_FIELDS.map(field => {
+          const checked = qualificationRequiredFields.includes(field.key);
+          return (
+            <RequiredInfoCheckbox
+              key={field.key}
+              checked={checked}
+              label={field.label}
+              onToggle={() => toggleQualificationField(field.key)}
+            />
+          );
+        })}
+      </div>
 
-          {/* Custom Required Fields — tenant-defined items beyond the
-              built-in catalog. Each row carries a label, optional helper
-              question (AI auto-generates one if empty), and a required
-              toggle. Saved alongside requiredFields under
-              followUpSettingsJson.qualificationV2.customFields. */}
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--lb-line-soft)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
-                letterSpacing: 0.06, textTransform: 'uppercase',
-                fontFamily: 'var(--lb-font-mono)',
-              }}>
-                Custom Required Fields
-              </div>
-              <button
-                type="button"
-                onClick={addCustomField}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '4px 10px',
-                  background: 'white', color: 'var(--lb-accent)',
-                  border: '1px solid var(--lb-accent-line)', borderRadius: 999,
-                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                }}
-              >
-                <Plus size={12} /> Add field
-              </button>
-            </div>
+      <button
+        type="button"
+        onClick={addCustomField}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '8px 14px',
+          background: 'var(--lb-surface)', color: 'var(--lb-ink-3)',
+          border: '1px dashed var(--lb-line)', borderRadius: 999,
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+        }}
+      >
+        <Plus size={13} /> Add custom field
+      </button>
 
-            {qualificationCustomFields.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-                Add fields like <em>Pets</em>, <em>Gate code</em>, or <em>Move-in date</em>. If you leave the helper question empty, AI will phrase a natural question from the label.
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {qualificationCustomFields.map(field => (
-                  <CustomFieldRow
-                    key={field.id}
-                    field={field}
-                    onLabelChange={v => updateCustomField(field.id, { label: v })}
-                    onQuestionChange={v => updateCustomField(field.id, { question: v })}
-                    onRequiredChange={v => updateCustomField(field.id, { required: v })}
-                    onRemove={() => removeCustomField(field.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+      {qualificationCustomFields.length > 0 && (
+        <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+          {qualificationCustomFields.map(field => (
+            <CustomFieldRow
+              key={field.id}
+              field={field}
+              onLabelChange={v => updateCustomField(field.id, { label: v })}
+              onQuestionChange={v => updateCustomField(field.id, { question: v })}
+              onRequiredChange={v => updateCustomField(field.id, { required: v })}
+              onRemove={() => removeCustomField(field.id)}
+            />
+          ))}
         </div>
       )}
-
-      {/* Price-specific: Pricing Table + Pricing Guidance note +
-          priceQuoteMode (Range / Exact). The Price goal has no Required
-          Information list — pricing behavior is driven by the Pricing Table
-          (in AI Playbook → Pricing Guidance) plus the Range/Exact mode below.
-          See backlog note in the commit history for the planned Advanced
-          Pricing Rules section (sqft calc, recurring discount, minimum,
-          trainee tier, dispatcher-confirm rules). */}
-      {strategy === 'price' && (
-        <>
-          <div style={{
-            marginBottom: 16,
-            padding: '12px 14px',
-            background: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            borderRadius: 10,
-            fontSize: 12.5, color: '#065f46',
-            display: 'flex', alignItems: 'flex-start', gap: 10,
-            lineHeight: 1.55,
-          }}>
-            <Info size={14} style={{ color: '#059669', flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <strong>AI uses your <a href="/settings?tab=ai-playbook" style={{ color: '#047857', fontWeight: 600 }}>Pricing Table and Pricing Guidance from AI Playbook</a>.</strong> If details are missing, AI asks only what is needed to quote accurately.
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <FieldRow
-              label={
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  How AI quotes price <Info size={12} style={{ color: 'var(--lb-ink-6)' }} />
-                </span>
-              }
-              sublabel="Choose how AI presents pricing when it volunteers a price."
-              align="top"
-              noBorder
-            >
-              <div style={{ display: 'flex', gap: 12 }}>
-                <OptionCard
-                  selected={priceMode === 'range'}
-                  onClick={() => onPriceMode('range')}
-                  title="Range"
-                  body="AI gives a price range and tells the customer the dispatcher will confirm the exact number."
-                  mixed={mixedPriceMode.mixed && priceMode === 'range'}
-                  mixedTooltip={mixedPriceMode.tooltip}
-                />
-                <OptionCard
-                  selected={priceMode === 'exact'}
-                  onClick={() => onPriceMode('exact')}
-                  title="Exact"
-                  body="AI gives an exact price when it has enough information."
-                  mixed={mixedPriceMode.mixed && priceMode === 'exact'}
-                  mixedTooltip={mixedPriceMode.tooltip}
-                />
-              </div>
-            </FieldRow>
-          </div>
-        </>
-      )}
-
-      {/* V2.1 (2026-06-13): per-goal "When Goal Is Reached" radio was
-          removed from this card. Completion behavior is now an
-          account-level setting rendered by <GoalCompletionBehaviorCard>
-          in the parent JSX — see commit log. */}
     </SectionCard>
+  );
+}
+
+// ─── Required-info checkbox tile ─────────────────────────────────────────
+// Card-style checkbox row per the Qualify-goal screenshot: rounded border,
+// blue check icon when on, full-width clickable area.
+function RequiredInfoCheckbox({
+  checked, label, onToggle,
+}: {
+  checked: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 14px',
+        background: 'var(--lb-surface)',
+        border: '1.5px solid ' + (checked ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        borderRadius: 10,
+        cursor: 'pointer', fontFamily: 'inherit',
+        textAlign: 'left',
+        transition: 'border-color 120ms, background 120ms',
+      }}
+    >
+      <span
+        style={{
+          width: 18, height: 18, borderRadius: 5,
+          background: checked ? 'var(--lb-accent)' : 'var(--lb-surface)',
+          border: '1.5px solid ' + (checked ? 'var(--lb-accent)' : '#cbd5e1'),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {checked && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        )}
+      </span>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</span>
+    </button>
   );
 }
 
@@ -1409,78 +1318,45 @@ function GoalCompletionBehaviorCard({
   mixedTooltip: string;
 }) {
   return (
-    <SectionCard padding="22px 24px 24px">
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
-        <IconTile icon={Target} tone="blue" size="lg" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Goal Completion Behavior
-            </div>
-            {mixed && (
-              <span
-                title={mixedTooltip || 'Differs across accounts'}
-                style={{
-                  fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                  background: '#fef3c7', color: '#92400e',
-                  letterSpacing: 0.05, textTransform: 'uppercase',
-                  fontFamily: 'var(--lb-font-mono)',
-                  whiteSpace: 'pre-line',
-                }}
-              >
-                Mixed
-              </span>
-            )}
+    <SectionCard padding="22px 24px 22px">
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            When the goal is reached
           </div>
-          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            Choose what AI does after it reaches a goal.
-          </div>
+          {mixed && (
+            <span
+              title={mixedTooltip || 'Differs across accounts'}
+              style={{
+                fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                background: '#fef3c7', color: '#92400e',
+                letterSpacing: 0.05, textTransform: 'uppercase',
+                fontFamily: 'var(--lb-font-mono)',
+                whiteSpace: 'pre-line',
+              }}
+            >
+              Mixed
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
+          What AI does once it achieves the conversation goal.
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <OptionCard
           selected={mode === 'continue'}
           onClick={() => onChange('continue')}
-          title="Continue AI + Notify Team"
-          body="AI keeps replying after the goal is reached. Your team is notified."
+          title="Continue AI + notify team"
+          body="AI keeps replying after the goal is reached; your team is notified."
         />
         <OptionCard
           selected={mode === 'stop'}
           onClick={() => onChange('stop')}
-          title="Stop AI + Notify Team"
-          body="AI stops after the goal is reached. Your team takes over."
+          title="Stop AI + notify team"
+          body="AI pauses once the goal is reached and hands off to your team."
         />
-      </div>
-
-      <div style={{
-        padding: '12px 14px',
-        background: '#f8fafc',
-        border: '1px solid var(--lb-line-soft)',
-        borderRadius: 10,
-        fontSize: 12.5, color: 'var(--lb-ink-3)',
-        lineHeight: 1.55,
-      }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 6, fontFamily: 'var(--lb-font-mono)' }}>
-          Applies to
-        </div>
-        <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
-          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
-            <span>Price agreed</span>
-          </li>
-          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
-            <span>Qualified lead</span>
-          </li>
-          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--lb-success)', fontWeight: 700 }}>•</span>
-            <span>Phone provided</span>
-          </li>
-        </ul>
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--lb-line-soft)', color: 'var(--lb-ink-5)' }}>
-          <strong style={{ color: 'var(--lb-ink-3)' }}>Auto goal:</strong> uses whichever goal AI detects. This setting still applies when that goal is reached.
-        </div>
       </div>
     </SectionCard>
   );
