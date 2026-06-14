@@ -1,7 +1,13 @@
 import { ArrowLeft, ArrowRight, Check, Loader2, SkipForward, X } from 'lucide-react';
+import { createContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WizardChecklist, WizardStep } from '../../types';
 import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
+
+// Portal target for step-rendered action buttons. WizardStepActions reads
+// this and portals its children into the shell header so the buttons sit
+// next to Back / Exit instead of as a sticky shelf in the step body.
+export const WizardHeaderSlotContext = createContext<HTMLDivElement | null>(null);
 
 interface WizardShellProps {
   currentStep: WizardStep;
@@ -63,6 +69,11 @@ export default function WizardShell({
 }: WizardShellProps) {
   const navigate = useNavigate();
   const handleExit = onExit ?? (() => navigate('/overview'));
+  // Portal target for step-rendered action buttons (Save & Continue,
+  // "I don't have a website", etc). Captured by ref-callback so the
+  // first paint already has the DOM node and step children can portal
+  // into it without a render delay.
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   const currentIndex = getStepIndex(currentStep);
   const totalSteps = WIZARD_STEP_META.length;
   // % shown in the header — counts welcome + done so the bar moves on the
@@ -216,12 +227,15 @@ export default function WizardShell({
             </button>
           )}
 
-          {/* Step-owned action slot. When a step renders its own custom
-              buttons (e.g. "I don't have a website" + Save & Continue),
-              they land here. The default Skip/Continue is suppressed
-              whenever headerActions is provided. */}
+          {/* Step-owned action slot. Steps wrap their buttons in
+              <WizardStepActions> which portals them into the
+              headerSlot ref below. The headerActions prop is the
+              legacy/static fallback when a step doesn't use the
+              portal. The default Skip/Continue is suppressed whenever
+              either a portal child or static headerActions exists. */}
+          <div ref={setHeaderSlot} className="flex items-center gap-2" />
           {headerActions ? (
-            <div className="flex items-center gap-2 flex-wrap">{headerActions}</div>
+            <div className="flex items-center gap-2">{headerActions}</div>
           ) : !hideActions ? (
             <>
               {onSkip && (
@@ -261,7 +275,11 @@ export default function WizardShell({
 
         {/* Step body */}
         <main className="flex-1 px-6 md:px-10 py-8 md:py-12 overflow-y-auto">
-          <div className="max-w-2xl mx-auto">{children}</div>
+          <div className="max-w-2xl mx-auto">
+            <WizardHeaderSlotContext.Provider value={headerSlot}>
+              {children}
+            </WizardHeaderSlotContext.Provider>
+          </div>
         </main>
       </div>
     </div>

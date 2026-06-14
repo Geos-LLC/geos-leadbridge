@@ -1,29 +1,32 @@
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { WizardHeaderSlotContext } from './WizardShell';
 
 /**
- * Sticky action-button row for the top of a wizard step body.
+ * Step-rendered action buttons (Save & Continue + siblings like
+ * "I don't have a website", "Preview default pricing", "Go to
+ * Dashboard"). Children are portaled into the WizardShell header
+ * slot so the buttons sit on a single top row next to Back / Exit,
+ * not as a floating sticky shelf above the step body.
  *
- * The WizardShell header owns Back / Exit / progress. Steps that need
- * their own Save & Continue (and siblings like "I don't have a website",
- * "Preview default pricing") render those buttons here at the TOP of
- * their body content. The `sticky top-0` keeps them visible while the
- * user scrolls a long step like Automation, so the primary CTA is
- * always one click away.
+ * Before this refactor (2026-06-13), the buttons rendered inline as
+ * a `sticky top-0` bar at the top of the step body — fine in the
+ * full-page route but visually disconnected from the shell header
+ * in the in-app Setup modal (940x640 frame). The portal keeps the
+ * buttons exactly where the header puts everything else.
  *
- * Lives just below the shell's sticky header — z-index sits one notch
- * lower so the shell header still wins if they ever overlap during a
- * resize transition.
+ * Fallback: if the context value is null (e.g. WizardStepActions
+ * mounted outside a WizardShell, or before first paint), the
+ * children render inline as a no-op block so nothing disappears.
  */
 export function WizardStepActions({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="sticky top-0 z-[5] -mx-6 md:-mx-10 px-6 md:px-10 py-3 mb-6 flex items-center gap-3 flex-wrap backdrop-blur-sm"
-      style={{
-        background: 'rgba(255, 255, 255, 0.94)',
-        borderBottom: '1px solid var(--lb-line-soft)',
-      }}
-    >
-      {children}
-    </div>
-  );
+  const slot = useContext(WizardHeaderSlotContext);
+  if (!slot) {
+    return (
+      <div className="flex items-center gap-3 mb-6">
+        {children}
+      </div>
+    );
+  }
+  return createPortal(children, slot);
 }
