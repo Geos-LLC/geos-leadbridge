@@ -142,8 +142,18 @@ function App() {
             {/* Setup wizard runs OUTSIDE the Layout — it owns the full
                 viewport (left rail with step list, top progress bar,
                 bottom action bar) and intentionally has no app sidebar /
-                trial banner so users can focus on setup. */}
-            <Route path="/onboarding/setup" element={<SetupWizard />} />
+                trial banner so users can focus on setup. WizardShell
+                fills its parent (h-full), so the route wraps it in a
+                100dvh container; the in-app Setup modal in Layout.tsx
+                wraps the same component in a 640px dialog. */}
+            <Route
+              path="/onboarding/setup"
+              element={
+                <div style={{ height: '100dvh' }}>
+                  <SetupWizard />
+                </div>
+              }
+            />
 
             {/* Mobile design preview — protected, no Layout (mobile app
                 owns its own shell + bottom tab bar). */}

@@ -72,8 +72,8 @@ export default function WizardShell({
 
   return (
     <div
-      className="flex overflow-hidden"
-      style={{ height: '100dvh', background: 'var(--lb-bg)' }}
+      className="flex overflow-hidden h-full w-full"
+      style={{ background: 'var(--lb-bg)' }}
     >
       {/* Left rail — step list. Stays put while only the main content
           scrolls, because the root is locked to viewport height and the
