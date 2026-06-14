@@ -14,7 +14,7 @@
  *   - Platform-agnostic (Yelp, Thumbtack, future platforms)
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
@@ -59,10 +59,14 @@ export class FollowUpGeneratorService {
     // Optional so unit tests that direct-instantiate the service don't need to
     // wire monitoring. Production DI always populates it via the global module.
     @Optional() private readonly monitoring: MonitoringService | null = null,
-    // ServiceProfile resolver (Phase 1b adoption). Optional so existing
-    // unit tests that bypass DI continue to work; the resolver-using
-    // branches no-op (no profile lookup) when the dep is absent.
-    @Optional() private readonly serviceProfile: ServiceProfileService | null = null,
+    // ServiceProfile resolver (Phase 1b adoption). @Inject + @Optional
+    // is the right Nest spelling — bare @Optional sometimes resolves to
+    // null even when the provider IS wired (the optional flag suppresses
+    // the diagnostic Nest would otherwise log). Explicit token closes
+    // that.
+    @Optional()
+    @Inject(ServiceProfileService)
+    private readonly serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   private get openai(): OpenAI | null {
