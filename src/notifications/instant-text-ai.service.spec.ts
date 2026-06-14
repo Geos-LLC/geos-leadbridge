@@ -418,3 +418,246 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     ).rejects.toThrow(/OpenAI 429 rate limited/);
   });
 });
+
+describe('InstantTextAiService — ServiceProfile resolver adoption (Phase 1b)', () => {
+  // Builds the service with an injected resolver mock. The 4 cases below
+  // exercise: resolved-path, legacy fallback (no resolver), aiPaused
+  // short-circuit, and the Spotless-shape cross-cutting fixture.
+
+  type ResolverReturn = {
+    pricingJson: string | null;
+    faqJson: string | null;
+    aiInstructionsJson: string | null;
+    aiPaused: boolean;
+    profileId: string | null;
+    source: 'service_profile' | 'legacy_saved_account';
+    fieldSources: {
+      pricing: 'service_profile' | 'legacy_saved_account' | 'none';
+      faq: 'service_profile' | 'legacy_saved_account' | 'none';
+      aiInstructions: 'service_profile' | 'legacy_saved_account' | 'none';
+    };
+  };
+
+  function buildWithResolver(opts: {
+    account?: any;
+    user?: any;
+    resolverReturn?: ResolverReturn;
+    resolverThrows?: Error;
+    withoutResolver?: boolean;
+  } = {}) {
+    const account = opts.account ?? {
+      id: 'sa-1',
+      businessName: 'Spotless Homes',
+      // Sensible defaults so the default test exercises the happy path.
+      servicePricingJson: JSON.stringify({
+        cleaningTypes: [{ key: 'standard', label: 'Standard Cleaning' }],
+        priceTable: [{ bed: 3, bath: 2, sqftMin: 1500, sqftMax: 1700, standard: 219 }],
+      }),
+      // AccountFaq is an OBJECT with structured fields — see
+      // src/ai/faq-context.ts. The `customQA` array is what `buildFaqBlock`
+      // surfaces as "Q: ... — A: ..." lines.
+      faqJson: JSON.stringify({
+        customQA: [{ question: 'Do you bring supplies?', answer: 'Yes' }],
+      }),
+      serviceOverridesJson: null,
+      followUpSettingsJson: null,
+      followUpTimezone: 'America/New_York',
+      userId: 'user-1',
+    };
+
+    const prisma = {
+      savedAccount: { findUnique: jest.fn().mockResolvedValue(account) },
+      user: {
+        findUnique: jest.fn().mockResolvedValue(opts.user ?? { globalAiPrompt: null, name: 'Owner' }),
+      },
+    } as any;
+
+    const generateReply = jest.fn().mockResolvedValue('Hi Sam!');
+    const ai = { generateReply } as any;
+
+    const resolveEffectivePromptInputs = jest.fn();
+    if (opts.resolverThrows) {
+      resolveEffectivePromptInputs.mockRejectedValue(opts.resolverThrows);
+    } else {
+      resolveEffectivePromptInputs.mockResolvedValue(
+        opts.resolverReturn ?? {
+          // Default: resolver returns the account's own values verbatim,
+          // i.e. equivalent to the legacy-fallback path.
+          pricingJson: account.servicePricingJson,
+          faqJson: account.faqJson,
+          aiInstructionsJson: null,
+          aiPaused: false,
+          profileId: null,
+          source: 'legacy_saved_account',
+          fieldSources: {
+            pricing: 'legacy_saved_account',
+            faq: 'legacy_saved_account',
+            aiInstructions: 'none',
+          },
+        },
+      );
+    }
+    const serviceProfile = opts.withoutResolver
+      ? null
+      : ({ resolveEffectivePromptInputs } as any);
+
+    const svc = new InstantTextAiService(prisma, ai, serviceProfile);
+    return { svc, generateReply, resolveEffectivePromptInputs, account };
+  }
+
+  it('case 8: uses ServiceProfile pricing+FAQ when resolver returns service_profile', async () => {
+    const profilePricing = JSON.stringify({
+      cleaningTypes: [{ key: 'standard', label: 'Standard Cleaning' }],
+      priceTable: [{ bed: 3, bath: 2, sqftMin: 1500, sqftMax: 1700, standard: 249 }], // distinctive value
+    });
+    const profileFaq = JSON.stringify({
+      customQA: [{ question: 'Profile-side FAQ?', answer: 'Profile answer' }],
+    });
+    const { svc, generateReply } = buildWithResolver({
+      resolverReturn: {
+        pricingJson: profilePricing,
+        faqJson: profileFaq,
+        aiInstructionsJson: null,
+        aiPaused: false,
+        profileId: 'prof-default',
+        source: 'service_profile',
+        fieldSources: { pricing: 'service_profile', faq: 'service_profile', aiInstructions: 'none' },
+      },
+    });
+
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'How much for a deep clean?',
+    });
+
+    const ctx = generateReply.mock.calls[0][0];
+    // Distinctive $249 from the profile-side pricing proves the wiring.
+    expect(ctx.pricingBlock).toContain('$249');
+    expect(ctx.faqBlock).toContain('Profile-side FAQ');
+  });
+
+  it('case 9: legacy fallback works — no resolver wired, account values flow through', async () => {
+    const { svc, generateReply } = buildWithResolver({ withoutResolver: true });
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'hi',
+    });
+    const ctx = generateReply.mock.calls[0][0];
+    // $219 from the default account fixture (servicePricingJson).
+    expect(ctx.pricingBlock).toContain('$219');
+    expect(ctx.faqBlock).toContain('Do you bring supplies');
+  });
+
+  it('case (extra): aiPaused short-circuits with SERVICE_PROFILE_AI_PAUSED error', async () => {
+    const { svc, generateReply } = buildWithResolver({
+      resolverReturn: {
+        pricingJson: null,
+        faqJson: null,
+        aiInstructionsJson: null,
+        aiPaused: true,
+        profileId: 'prof-draft',
+        source: 'service_profile',
+        fieldSources: { pricing: 'none', faq: 'none', aiInstructions: 'none' },
+      },
+    });
+
+    let caught: any;
+    try {
+      await svc.generateInstantTextBody({
+        savedAccountId: 'sa-1',
+        customerName: 'Sam',
+        customerMessage: 'hi',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught.message).toContain('service_profile_ai_paused');
+    expect(caught.code).toBe('SERVICE_PROFILE_AI_PAUSED');
+    // Critical: AiService.generateReply must NOT have been called.
+    expect(generateReply).not.toHaveBeenCalled();
+  });
+
+  it('case 10/Spotless: profile pricing + SA FAQ + SA aiPlaybookV2 — mixed sources route correctly', async () => {
+    // Reproduces the Spotless-shape situation: profile has pricing
+    // (from backfill), profile FAQ was inherited as null, sibling SA
+    // carries the canonical FAQ, and SA followUpSettingsJson holds the
+    // tenant's V2 customInstructions. The resolver's per-field fallback
+    // produces a mixed result; the SMS path must route each field
+    // independently. This is the runtime safety the spec asked for.
+    const profilePricing = JSON.stringify({
+      cleaningTypes: [{ key: 'standard', label: 'Standard Cleaning' }],
+      priceTable: [{ bed: 3, bath: 2, sqftMin: 1500, sqftMax: 1700, standard: 299 }],
+    });
+    const saFaq = JSON.stringify({
+      customQA: [{ question: 'SA fallback FAQ supplies?', answer: 'Yes we do' }],
+    });
+    // The V2 section keys are enumerated in section-default-prompts.ts —
+    // 'personality_brand_voice' is the canonical key. Custom instructions
+    // surface in the playbook block as "Business preference: …".
+    const saAiV2 = JSON.stringify({
+      personality_brand_voice: { customInstructions: 'Stay warm and conversational.' },
+    });
+
+    const { svc, generateReply } = buildWithResolver({
+      account: {
+        id: 'sa-tampa',
+        businessName: 'Spotless Tampa',
+        servicePricingJson: profilePricing,
+        faqJson: saFaq,
+        serviceOverridesJson: null,
+        followUpSettingsJson: JSON.stringify({ aiPlaybookV2: JSON.parse(saAiV2) }),
+        followUpTimezone: 'America/New_York',
+        userId: 'user-1',
+      },
+      resolverReturn: {
+        pricingJson: profilePricing, // profile won
+        faqJson: saFaq, // per-field fallback to SA
+        aiInstructionsJson: saAiV2, // per-field fallback extracted V2 from followUpSettingsJson
+        aiPaused: false,
+        profileId: 'prof-default',
+        source: 'service_profile',
+        fieldSources: {
+          pricing: 'service_profile',
+          faq: 'legacy_saved_account',
+          aiInstructions: 'legacy_saved_account',
+        },
+      },
+    });
+
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-tampa',
+      customerName: 'Sam',
+      customerMessage: 'cost for a 3BR/2BA deep clean?',
+    });
+
+    const ctx = generateReply.mock.calls[0][0];
+    // Profile pricing won.
+    expect(ctx.pricingBlock).toContain('$299');
+    // SA FAQ won via per-field fallback.
+    expect(ctx.faqBlock).toContain('SA fallback FAQ supplies');
+    // SA's V2 customInstructions reached the playbook block.
+    expect(ctx.playbookBlock).toContain('Stay warm and conversational');
+  });
+
+  it('case 11: resolver is invoked with the correct LeadForResolver synthesis', async () => {
+    // Defensive against future refactors — InstantTextAi has no Lead in
+    // its signature, so the synthetic LeadForResolver it builds is the
+    // only thing the resolver gets. Pin the userId + category propagation.
+    const { svc, resolveEffectivePromptInputs } = buildWithResolver();
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'hi',
+      category: 'House Cleaning',
+    });
+    expect(resolveEffectivePromptInputs).toHaveBeenCalledTimes(1);
+    const [leadArg, saArg] = resolveEffectivePromptInputs.mock.calls[0];
+    expect(leadArg.userId).toBe('user-1');
+    expect(leadArg.category).toBe('House Cleaning');
+    expect(saArg.id).toBe('sa-1');
+  });
+});

@@ -30,7 +30,7 @@
  *     existing template instead. We never silently return a template.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
@@ -38,6 +38,8 @@ import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
+import { ServiceProfileService } from '../service-profile/service-profile.service';
+import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -107,6 +109,10 @@ export class InstantTextAiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
+    // ServiceProfile resolver (Phase 1b adoption). Optional so unit tests
+    // that direct-instantiate the service don't have to wire the new dep
+    // — falls through to legacy reads when absent.
+    @Optional() private readonly serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   /**
@@ -118,9 +124,11 @@ export class InstantTextAiService {
     const account = await this.prisma.savedAccount.findUnique({
       where: { id: opts.savedAccountId },
       select: {
+        id: true,
         businessName: true,
         servicePricingJson: true,
         faqJson: true,
+        serviceOverridesJson: true,
         followUpSettingsJson: true,
         followUpTimezone: true,
         userId: true,
@@ -133,6 +141,59 @@ export class InstantTextAiService {
       where: { id: account.userId },
       select: { globalAiPrompt: true, name: true },
     });
+
+    // ServiceProfile resolver (Phase 1b adoption). Instant Text has no
+    // Lead object on the call signature, so we synthesize the minimal
+    // LeadForResolver shape from opts — the resolver only needs userId
+    // for profile lookup and category for mapping match. `id` is purely
+    // a log handle.
+    //
+    // Optional dep: when not wired (legacy unit tests), profileInputs
+    // stays null and the legacy account reads below win unchanged.
+    const profileInputs = this.serviceProfile
+      ? await this.serviceProfile.resolveEffectivePromptInputs(
+          {
+            id: `instant-text:${opts.savedAccountId}`,
+            userId: account.userId,
+            category: opts.category ?? null,
+            categoryId: null,
+          },
+          {
+            id: account.id,
+            servicePricingJson: account.servicePricingJson,
+            faqJson: account.faqJson,
+            serviceOverridesJson: account.serviceOverridesJson,
+            followUpSettingsJson: account.followUpSettingsJson,
+          },
+        )
+      : null;
+
+    // Draft profile short-circuit. Caller (notifications.service) catches
+    // any throw and renders the existing template instead — matching the
+    // INSTANT_TEXT_AI_FALLBACK_TEMPLATE contract documented in the file
+    // header. The lead/notification log is unaffected; only the AI
+    // generation is skipped.
+    if (profileInputs?.aiPaused) {
+      this.logger.log(
+        `[service-profile] AI paused — skipping reply path=instant_text ` +
+        `savedAccountId=${opts.savedAccountId} userId=${account.userId} ` +
+        `profileId=${profileInputs.profileId} reason=service_profile_ai_paused`,
+      );
+      const err = new Error(
+        `service_profile_ai_paused: profileId=${profileInputs.profileId} userId=${account.userId}`,
+      );
+      (err as any).code = 'SERVICE_PROFILE_AI_PAUSED';
+      throw err;
+    }
+
+    // Effective values from the resolver, with safe fallback to account
+    // direct reads when resolver isn't wired (legacy unit test path).
+    const effectivePricingJson = profileInputs?.pricingJson ?? account.servicePricingJson;
+    const effectiveFaqJson = profileInputs?.faqJson ?? account.faqJson;
+    const effectivePlaybookSettingsJson = buildPlaybookSettingsForRenderer(
+      profileInputs?.aiInstructionsJson ?? null,
+      account.followUpSettingsJson ?? null,
+    );
 
     // Business context — reuse the same helper First Reply uses so the
     // brand voice / scheduling guidance stays in lockstep. SMS first-touch
@@ -151,11 +212,13 @@ export class InstantTextAiService {
     });
 
     // FAQ block — verified answers the AI uses verbatim when relevant.
+    // Resolver-supplied: profile FAQ when populated, else SavedAccount
+    // FAQ via per-field fallback (Spotless-shape safety).
     let faqBlock = '';
-    if (account.faqJson) {
+    if (effectiveFaqJson) {
       try {
         const { buildFaqBlock, parseAccountFaq } = require('../ai/faq-context');
-        faqBlock = buildFaqBlock(parseAccountFaq(account.faqJson));
+        faqBlock = buildFaqBlock(parseAccountFaq(effectiveFaqJson));
       } catch (err: any) {
         this.logger.warn(`[InstantTextAi] FAQ parse failed for account ${opts.savedAccountId}: ${err?.message}`);
       }
@@ -168,13 +231,14 @@ export class InstantTextAiService {
     // service type is disabled). Previously this path dumped raw JSON,
     // bypassing all of the above — that drift is closed here.
     let pricingBlock = '';
-    if (account.servicePricingJson) {
+    if (effectivePricingJson) {
       try {
         // Hydrate: same source-of-truth rules as automation.service /
         // follow-up-generator / ai.controller — legacy accounts missing
         // cleaningTypes still emit Deep Cleaning, and explicit 0 prices
         // are preserved (pricing-guards turns them into a defer rule).
-        const p = hydratePricing(JSON.parse(account.servicePricingJson));
+        // Resolver-supplied: profile pricingJson when populated.
+        const p = hydratePricing(JSON.parse(effectivePricingJson));
         const allTypes = p.cleaningTypes;
         if (p.priceTable.length > 0 && allTypes.length > 0) {
           let priceQuoteMode: 'range' | 'exact' | undefined;
@@ -217,8 +281,10 @@ export class InstantTextAiService {
     // Unifies Instant Text with AI Conversation / Review Mode / Follow-ups
     // so user-edited Playbook sections (brand voice, pricing guidance,
     // objection handling, etc.) automatically apply to first-touch SMS.
+    // Resolver-supplied: profile aiInstructionsJson spliced over legacy
+    // settings (or pure legacy when profile field empty).
     const playbookBlock = renderPlaybookBlock({
-      followUpSettingsJson: account.followUpSettingsJson ?? null,
+      followUpSettingsJson: effectivePlaybookSettingsJson,
     });
 
     // Deterministic quote + price-intent guard — same pricing engine
@@ -229,7 +295,7 @@ export class InstantTextAiService {
     // base-price calculation falls back to "missing inputs" and the
     // LLM asks rather than guessing.
     const { quoteBlock, priceIntentBlock } = this.buildQuoteAndIntent({
-      pricingJson: account.servicePricingJson,
+      pricingJson: effectivePricingJson,
       leadRawJson: opts.leadRawJson,
       customerMessage: opts.customerMessage,
     });
