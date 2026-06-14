@@ -57,6 +57,17 @@ export interface AiReplyContext {
    * clarifying question instead of quoting. Optional.
    */
   quoteBlock?: string;
+  /**
+   * RUNTIME GUARD — PRICE INTENT ENFORCEMENT. Built by
+   * src/pricing/price-intent.ts:buildPriceIntentBlock when the latest
+   * customer message contains a price-seeking token AND the engine
+   * produced a meaningful calculation. Renders ABOVE PRIMARY INSTRUCTION
+   * with an explicit "this overrides PRIMARY and PLAYBOOK for this
+   * single reply" header — closes the Peter Pidochev 2026-06-10 class
+   * of bug where a softer "give a price range if you have enough info"
+   * template instruction beat the strict PRICE strategy. Optional.
+   */
+  priceIntentBlock?: string;
   /** REFERENCE — per-account FAQ (insurance, supplies, pets, payment, scope, etc.). Optional. */
   faqBlock?: string;
   /** REFERENCE — urgency context (customer urgency × business capability). Optional. */
@@ -162,6 +173,15 @@ export class AiService {
     // `=== PLAYBOOK ===` header — see playbook-renderer.ts.
     if (ctx.playbookBlock?.trim()) {
       sections.push(ctx.playbookBlock.trim());
+    }
+    // PRICE INTENT ENFORCEMENT — runtime guard. Renders LAST among the
+    // directive sections so it is the most recently-stated, most
+    // specific instruction the model sees before the REFERENCE blocks.
+    // Combined with the BASE HARD RULES clause that calls this header
+    // out as authoritative, it overrides any softer template / strategy
+    // language. See src/pricing/price-intent.ts.
+    if (ctx.priceIntentBlock?.trim()) {
+      sections.push(`=== PRICE INTENT ENFORCEMENT (runtime guard — overrides PRIMARY INSTRUCTION and PLAYBOOK for THIS reply) ===\n${ctx.priceIntentBlock.trim()}`);
     }
     if (referenceBlocks.length > 0) {
       sections.push(referenceBlocks.join('\n\n'));

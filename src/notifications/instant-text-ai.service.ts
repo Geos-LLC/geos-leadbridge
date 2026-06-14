@@ -37,7 +37,7 @@ import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
-import { buildQuoteFromContext } from '../pricing/pricing-engine';
+import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -221,13 +221,14 @@ export class InstantTextAiService {
       followUpSettingsJson: account.followUpSettingsJson ?? null,
     });
 
-    // Deterministic quote — same pricing engine that runs in AI
-    // Conversation / Review Mode / Follow-ups. On first-touch SMS there
-    // is no conversation history (the customer's message IS the only
-    // turn), so the engine sees customerMessage + platform-derived facts.
-    // If `leadRawJson` was not passed in, base-price calculation falls
-    // back to "missing inputs" and the LLM asks rather than guessing.
-    const quoteBlock = this.buildQuoteBlock({
+    // Deterministic quote + price-intent guard — same pricing engine
+    // that runs in AI Conversation / Review Mode / Follow-ups. On
+    // first-touch SMS there is no conversation history (the customer's
+    // message IS the only turn), so the engine sees customerMessage +
+    // platform-derived facts. If `leadRawJson` was not passed in,
+    // base-price calculation falls back to "missing inputs" and the
+    // LLM asks rather than guessing.
+    const { quoteBlock, priceIntentBlock } = this.buildQuoteAndIntent({
       pricingJson: account.servicePricingJson,
       leadRawJson: opts.leadRawJson,
       customerMessage: opts.customerMessage,
@@ -245,6 +246,7 @@ export class InstantTextAiService {
       businessBlock,
       pricingBlock: pricingBlock || undefined,
       quoteBlock: quoteBlock || undefined,
+      priceIntentBlock: priceIntentBlock || undefined,
       faqBlock: faqBlock || undefined,
       playbookBlock: playbookBlock || undefined,
       conversationHistory: [],
@@ -260,20 +262,23 @@ export class InstantTextAiService {
 
   /**
    * Run the deterministic pricing engine for the first-touch SMS context.
-   * Pure helper — parses pricing + lead JSON, calls buildQuoteFromContext,
-   * returns the reference block or empty string when nothing to inject.
+   * Pure helper — parses pricing + lead JSON, calls
+   * computeQuoteAndIntent, returns BOTH the calculated-quote reference
+   * block AND the runtime price-intent enforcement block. Empty strings
+   * when the engine has nothing meaningful to inject.
    */
-  private buildQuoteBlock(opts: {
+  private buildQuoteAndIntent(opts: {
     pricingJson: string | null;
     leadRawJson: string | null | undefined;
     customerMessage: string;
-  }): string {
-    if (!opts.pricingJson) return '';
+  }): { quoteBlock: string; priceIntentBlock: string } {
+    const empty = { quoteBlock: '', priceIntentBlock: '' };
+    if (!opts.pricingJson) return empty;
     let pricing;
     try {
       pricing = hydratePricing(JSON.parse(opts.pricingJson));
     } catch {
-      return '';
+      return empty;
     }
     const leadDetails = this.extractLeadDetails(opts.leadRawJson);
     let additionalInfo: string | null = null;
@@ -284,17 +289,20 @@ export class InstantTextAiService {
       } catch {}
     }
     try {
-      const built = buildQuoteFromContext({
+      const built = computeQuoteAndIntent({
         pricing,
         leadDetails,
         customerMessage: opts.customerMessage,
         conversationHistory: null,
         additionalInfo,
       });
-      return built ?? '';
+      return {
+        quoteBlock: built.quoteBlock ?? '',
+        priceIntentBlock: built.priceIntentBlock ?? '',
+      };
     } catch (err: any) {
       this.logger.warn(`[InstantTextAi] quote engine threw: ${err?.message}`);
-      return '';
+      return empty;
     }
   }
 
