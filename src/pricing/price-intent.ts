@@ -69,6 +69,15 @@ export function detectPriceIntent(message: string | null | undefined): boolean {
   return false;
 }
 
+/**
+ * Spec-spelling alias for `detectPriceIntent`. The Price Intent
+ * Enforcement spec (Peter Pidochev 2026-06-10 follow-up) names the
+ * helper `isPriceSeekingMessage`. Same regex set — exposed under both
+ * names so call-site readability matches the spec the implementation
+ * pins.
+ */
+export const isPriceSeekingMessage = detectPriceIntent;
+
 export interface PriceIntentInput {
   /** Latest customer message — the only turn the guard cares about. */
   customerMessage?: string | null;
@@ -104,7 +113,7 @@ export function buildPriceIntentBlock(input: PriceIntentInput): string | null {
     );
     lines.push(
       'DO NOT ask for scheduling, square footage, or any qualifying detail before quoting. ' +
-      'Give the number first, then optionally one short sentence offering to schedule.',
+      'Give the number first. You may ask one follow-up question AFTER the quote if needed (typically a short offer to schedule).',
     );
     lines.push(
       'This instruction overrides any softer "give a price range if you have enough info" wording in the PRIMARY INSTRUCTION or template — the system already verified the inputs and computed the number. Use it verbatim.',

@@ -17,7 +17,8 @@
 
 import { hydratePricing } from '../users/pricing-hydrate';
 import { calculateQuote, computeQuoteAndIntent } from './pricing-engine';
-import { detectPriceIntent, buildPriceIntentBlock } from './price-intent';
+import { detectPriceIntent, isPriceSeekingMessage, buildPriceIntentBlock } from './price-intent';
+import { STRATEGY_PROMPTS } from '../ai/strategy-prompts';
 
 const pricing = hydratePricing(null); // DEFAULT_CLEANING_PRICING
 
@@ -212,5 +213,91 @@ describe('computeQuoteAndIntent (facade)', () => {
     expect(out.priceIntentBlock).toBeTruthy();
     expect(out.priceIntentBlock).toMatch(/missing inputs/i);
     expect(out.priceIntentBlock).toMatch(/do not ask about scheduling/i);
+  });
+});
+
+describe('isPriceSeekingMessage (spec-spelling alias)', () => {
+  it('is the same function as detectPriceIntent (identity check)', () => {
+    expect(isPriceSeekingMessage).toBe(detectPriceIntent);
+  });
+
+  it('agrees with detectPriceIntent on the documented vocabulary', () => {
+    expect(isPriceSeekingMessage('Can you send me a price estimate?')).toBe(true);
+    expect(isPriceSeekingMessage('how much?')).toBe(true);
+    expect(isPriceSeekingMessage('when can you come?')).toBe(false);
+  });
+});
+
+describe('strategy alignment — guard fires regardless of which strategy prompt is PRIMARY', () => {
+  // Spec test #6: strategy=price + price ask → guard aligns with strategy.
+  //   The PRICE_ANCHOR strategy says "lead with a price range"; the guard
+  //   says the same thing with a deterministic number. The two never
+  //   conflict — the guard tightens the strategy, doesn't fight it.
+  it('#6: strategy=price + customer asks price → guard fires AND strategy prompt also says "lead with a price range"', () => {
+    const out = computeQuoteAndIntent({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: 'Can you send me a price estimate?',
+    });
+    expect(out.priceIntentBlock).toBeTruthy();
+    expect(out.priceIntentBlock).toMatch(/lead this reply with the calculated quote/i);
+    // The strategy prompt the goal-resolver would have selected for this
+    // account also says to lead with a price range. The guard is a
+    // stricter, deterministic version of the same intent.
+    expect(STRATEGY_PROMPTS.price.toLowerCase()).toMatch(/lead with a price range/);
+  });
+
+  // Spec test #7: strategy=qualify is the ONE strategy that normally
+  // refuses to quote (it's the info-gathering ladder). But when the
+  // customer EXPLICITLY asks about price AND we have a calculated
+  // total, the runtime guard wins — the customer's direct ask beats
+  // the strategy's general policy of "never quote".
+  it("#7: strategy=qualify + customer asks price → guard STILL fires even though the strategy itself never quotes", () => {
+    const out = computeQuoteAndIntent({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: 'What is your estimate for this job?',
+    });
+    expect(out.priceIntentBlock).toBeTruthy();
+    expect(out.priceIntentBlock).toContain('$219'); // 3/2 deep = 219
+    expect(out.priceIntentBlock).toMatch(/lead this reply with the calculated quote/i);
+    // Document the conflict the guard explicitly resolves: qualify
+    // strategy's hardcoded "Quote even if the customer EXPLICITLY asks
+    // the price — Qualify never quotes" rule. The runtime guard
+    // overrides this for THIS reply because the customer is asking AND
+    // the system has the number.
+    expect(STRATEGY_PROMPTS.qualify).toMatch(/Quote even if the customer EXPLICITLY asks/i);
+  });
+
+  it("non-price message under any strategy → guard returns null (strategy continues to drive the reply)", () => {
+    const out = computeQuoteAndIntent({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: 'Do you bring your own supplies?',
+    });
+    // Even though we have a fully-priceable lead, the customer's question
+    // isn't about price — guard stays out of it.
+    expect(out.priceIntentBlock).toBeNull();
+  });
+});
+
+describe('wording compliance — guard text includes spec phrasing', () => {
+  it("ready-quote branch includes 'You may ask one follow-up question AFTER the quote'", () => {
+    // The spec calls out this exact affordance: model is free to ask
+    // ONE follow-up question after quoting (e.g. "Would you like to
+    // schedule a time?"). Pin the wording so a later refactor can't
+    // silently remove it and turn the guard into a hard one-line cap.
+    const calculation = calculateQuote({
+      pricing,
+      serviceType: 'deep',
+      bedrooms: 3,
+      bathrooms: 2,
+      extras: [],
+    });
+    const block = buildPriceIntentBlock({
+      customerMessage: 'how much for a 3 bed 2 bath deep clean?',
+      calculation,
+    })!;
+    expect(block).toMatch(/you may ask one follow-up question after the quote/i);
   });
 });
