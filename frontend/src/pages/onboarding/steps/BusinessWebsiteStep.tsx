@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, DownloadCloud, Globe,
   Loader2, Phone, Sparkles, Users,
@@ -95,36 +95,35 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   // crew numbers only when needed.
   const [showAssociates, setShowAssociates] = useState(false);
 
-  // ── Per-account TT profile URL state ───────────────────────────────
-  const [ttUrls, setTtUrls] = useState<Record<string, string>>({});
-  const ttUrlsInitialRef = useRef<Record<string, string>>({});
-  // accountId currently running the explicit "Fetch from Thumbtack" pull.
-  const [pullingTtId, setPullingTtId] = useState<string | null>(null);
+  // ── Unified profile URL state ──────────────────────────────────────
+  // Detected platform from the LAST successful apply — drives the badge
+  // next to the section header. Null when the user hasn't yet applied
+  // anything (or when the URL was cleared).
+  const [detectedPlatform, setDetectedPlatform] = useState<'thumbtack' | 'yelp' | 'website' | null>(
+    user?.website ? 'website' : null,
+  );
 
   const ttAccounts = useMemo(
     () => savedAccounts.filter(a => a.platform === 'thumbtack'),
     [savedAccounts],
   );
 
-  // ── Effects: hydrate everything we render ─────────────────────────
+  // Hydrate the unified field from whichever source has a saved value
+  // (TT/Yelp publicProfileUrl > User.website). The hook also re-applies
+  // when accounts change so a freshly-connected TT account immediately
+  // populates the field if its URL was saved out-of-band.
   useEffect(() => {
-    if (ttAccounts.length === 0) return;
     let cancelled = false;
-    Promise.all(
-      ttAccounts.map(a => usersApi.getThumbtackProfileUrl(a.id)
-        .then(res => ({ id: a.id, url: res.url ?? '' }))
-        .catch(() => ({ id: a.id, url: '' })),
-      ),
-    ).then(results => {
-      if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const r of results) next[r.id] = r.url;
-      setTtUrls(prev => ({ ...next, ...prev })); // preserve in-flight edits
-      ttUrlsInitialRef.current = { ...next };
-    });
+    usersApi.getBusinessProfileUrl()
+      .then(res => {
+        if (cancelled) return;
+        if (res.url && !value.trim()) setValue(res.url);
+        if (res.platform) setDetectedPlatform(res.platform);
+      })
+      .catch(() => { /* non-fatal — leave empty and let the user type */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ttAccounts.map(a => a.id).join(',')]);
+  }, [savedAccounts.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,23 +150,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     const t = setTimeout(() => setBusinessPhoneSavedAt(null), 2200);
     return () => clearTimeout(t);
   }, [businessPhoneSavedAt]);
-
-  // ── TT profile URL save (on blur) ─────────────────────────────────
-  const saveTtUrl = async (accountId: string) => {
-    const next = (ttUrls[accountId] || '').trim();
-    if (next === (ttUrlsInitialRef.current[accountId] || '').trim()) return;
-    try {
-      const res = await usersApi.saveThumbtackProfileUrl(accountId, next || null);
-      if (!res.success) {
-        notify.warning('Could not save URL', res.warning || 'Try again.');
-        return;
-      }
-      ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
-      notify.success('Saved', 'AI will use this when pulling business info.', 2500);
-    } catch (e: any) {
-      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
-    }
-  };
 
   // ── LeadBridge phone provisioning ─────────────────────────────────
   async function searchPhones() {
@@ -247,65 +229,65 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
   }
 
-  // ── Website verify + apply ────────────────────────────────────────
-  // Shared core used by both the explicit "Fetch site data" button and
-  // the bottom "Save & Continue" button. Returns the verify outcome so
-  // callers can decide what to do next (stay vs. advance).
+  // ── Unified verify + apply ────────────────────────────────────────
+  // Backend detects platform from hostname and routes to the right
+  // pipeline (TT fan-out + scrape / Yelp fan-out + scrape / generic
+  // verifyWebsite + Playbook + FAQ). Returns a VerifyOutcome-shaped
+  // result so the existing "saved & verified" UI stays.
   async function runVerifyAndApply(): Promise<VerifyOutcome | null> {
     const url = value.trim();
     if (!url) return null;
     setVerifyState({ kind: 'checking' });
     try {
-      const outcome = await usersApi.verifyWebsite(url);
-      if (!outcome.reachable) {
+      const res = await usersApi.applyBusinessProfileUrl(url);
+      if (!res.success || !res.savedUrl) {
+        const outcome: VerifyOutcome = {
+          reachable: false,
+          normalizedUrl: url,
+          errorMessage: res.warning || "We couldn't load that link.",
+        };
         setVerifyState({ kind: 'invalid', outcome });
         return outcome;
       }
-      // Persist normalized URL + parsed metadata immediately so a refresh
-      // (or the bottom Save & Continue) doesn't need to re-verify.
-      const { user: updated } = await usersApi.updateProfile({
-        website: outcome.normalizedUrl,
-        websiteMetadata: outcome.metadata ?? null,
-      });
-      if (user) {
+      setDetectedPlatform(res.platform);
+      // Generic website path also updates the cached User.website so the
+      // preview card renders. TT / Yelp paths store on SavedAccount.
+      if (res.platform === 'website' && user) {
         const token = localStorage.getItem('token') || '';
         setAuth(
           {
             ...user,
-            website: updated.website ?? null,
-            websiteMetadataJson: updated.websiteMetadataJson ?? null,
+            website: res.savedUrl,
+            websiteMetadataJson: (res.websiteMetadata as any) ?? null,
           },
           token,
         );
       }
-      // Best-effort apply to AI Playbook + FAQ. Failures here are
-      // non-fatal — the URL + metadata are saved, the user can still
-      // continue.
-      if (outcome.metadata?.playbookSeed) {
-        setVerifyState({ kind: 'applying' });
-        const [playbookRes, faqRes] = await Promise.all([
-          usersApi.applyPlaybookSeed('fill_empty').catch((e: any) => {
-            console.warn('[BusinessWebsiteStep] playbook apply failed:', e?.message || e);
-            return null;
-          }),
-          usersApi.applyFaqFromWebsiteSeed().catch((e: any) => {
-            console.warn('[BusinessWebsiteStep] faq apply failed:', e?.message || e);
-            return null;
-          }),
-        ]);
-        const playbookFilled = playbookRes?.success ? playbookRes.filled : 0;
-        const faqFilled = faqRes?.success ? faqRes.filled : 0;
-        if (playbookFilled > 0 || faqFilled > 0) {
-          const parts: string[] = [];
-          if (playbookFilled > 0) parts.push(`${playbookFilled} AI Playbook section${playbookFilled === 1 ? '' : 's'}`);
-          if (faqFilled > 0) parts.push(`${faqFilled} FAQ field${faqFilled === 1 ? '' : 's'}`);
-          notify.success(
-            'Applied from your website',
-            `Filled ${parts.join(' and ')}. Review on the next step or in Settings → AI Playbook.`,
-            5000,
-          );
-        }
+      // Notify on apply outcome — same UX as the prior split flow.
+      const platformWord =
+        res.platform === 'thumbtack' ? 'Thumbtack' :
+        res.platform === 'yelp' ? 'Yelp' :
+        'your website';
+      if (res.fieldsApplied > 0) {
+        notify.success(
+          `Pulled from ${platformWord}`,
+          `Filled ${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'}. Review on the next step or in Settings → AI Playbook.`,
+          5000,
+        );
+      } else if (res.platform !== 'website') {
+        // TT / Yelp scrape returned nothing extractable — surface as a
+        // soft warning so the user isn't confused by a silent no-op.
+        notify.info?.(
+          `${platformWord} link saved`,
+          "We didn't pull new info this time — the page may be light on structured details. Your AI still works.",
+          4500,
+        );
       }
+      const outcome: VerifyOutcome = {
+        reachable: true,
+        normalizedUrl: res.savedUrl,
+        metadata: res.websiteMetadata as any,
+      };
       setVerifyState({ kind: 'valid', outcome });
       return outcome;
     } catch (err: any) {
@@ -373,52 +355,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     }
   }
 
-  // ── Thumbtack profile pull ────────────────────────────────────────
-  // Saves the URL (if dirty) then asks the backend to pull business info
-  // off the Thumbtack profile and merge it into the Playbook. Same
-  // endpoint Settings → AI Playbook uses; just surfaced per-URL here so
-  // the user sees a 1:1 button for what they just typed.
-  async function fetchFromThumbtack(accountId: string) {
-    const next = (ttUrls[accountId] || '').trim();
-    if (!next) {
-      notify.warning('Paste a URL first', 'Add your public Thumbtack profile URL, then Fetch.');
-      return;
-    }
-    setPullingTtId(accountId);
-    try {
-      // Persist the URL first so the backend has it to read off the
-      // SavedAccount. saveThumbtackProfileUrl is idempotent — a second
-      // call with the same value is a no-op.
-      if (next !== (ttUrlsInitialRef.current[accountId] || '').trim()) {
-        const saveRes = await usersApi.saveThumbtackProfileUrl(accountId, next);
-        if (!saveRes.success) {
-          notify.warning('Could not save URL', saveRes.warning || 'Try again.');
-          return;
-        }
-        ttUrlsInitialRef.current = { ...ttUrlsInitialRef.current, [accountId]: next };
-      }
-      const pull = await usersApi.pullBusinessInfoFromAccount('thumbtack', accountId);
-      if (pull.success) {
-        const parts: string[] = [];
-        if (pull.fieldsApplied > 0) parts.push(`${pull.fieldsApplied} field${pull.fieldsApplied === 1 ? '' : 's'}`);
-        if (pull.conflictsRaised > 0) parts.push(`${pull.conflictsRaised} conflict${pull.conflictsRaised === 1 ? '' : 's'} to review`);
-        notify.success(
-          'Pulled from Thumbtack',
-          parts.length > 0
-            ? `Applied ${parts.join(' · ')}. Review on the next step or in Settings → AI Playbook.`
-            : 'No new info to apply — Playbook already had values for what we found.',
-          5000,
-        );
-      } else if (pull.warning) {
-        notify.warning('Pull finished with a warning', pull.warning);
-      }
-    } catch (e: any) {
-      notify.error('Could not fetch', e?.response?.data?.message || e?.message || 'Thumbtack pull failed.');
-    } finally {
-      setPullingTtId(null);
-    }
-  }
-
   // ── Derived ───────────────────────────────────────────────────────
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
@@ -457,7 +393,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           disabled={isBusy}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
         >
-          I don't have a website
+          I don't have one
         </button>
       </WizardStepActions>
 
@@ -704,11 +640,25 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         )}
       </section>
 
-      {/* ─── 3. Website URL ──────────────────────────────────────── */}
+      {/* ─── 3. Business profile or website URL (unified) ────────
+          One field, three behaviors. Backend detects platform from
+          hostname:
+            - thumbtack.com → fan out to every connected TT account,
+              save as publicProfileUrl, run TT scrape.
+            - yelp.com → same for Yelp accounts.
+            - any other host → save as User.website + verify + apply
+              Playbook + FAQ.
+          Replaces the two prior sections (Website URL + Thumbtack
+          profile URLs). */}
       <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
         <div className="flex items-center gap-2 mb-1">
           <Globe className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">Website URL</h2>
+          <h2 className="text-sm font-extrabold text-slate-900">Business profile or website</h2>
+          {detectedPlatform && (
+            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold uppercase tracking-widest">
+              {platformLabel(detectedPlatform)}
+            </span>
+          )}
           {savedAndVerified && (
             <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest">
               <CheckCircle2 className="w-3 h-3" />
@@ -717,8 +667,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           )}
         </div>
         <p className="text-xs text-slate-500 leading-relaxed mb-3">
-          We'll pull title, description, and structured business info from your homepage
-          to pre-fill your AI Playbook and FAQ.
+          Paste your <span className="font-semibold">Thumbtack profile</span>,{' '}
+          <span className="font-semibold">Yelp business page</span>, or{' '}
+          <span className="font-semibold">your website</span> — whichever has the most
+          info about your business. We auto-detect the source and pull services,
+          location, insurance, pricing, and more into your AI Playbook + FAQ.
         </p>
 
         <div className="flex items-center gap-2">
@@ -730,7 +683,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               type="text"
               inputMode="url"
               autoComplete="url"
-              placeholder="myco.com or https://myco.com"
+              placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
               value={value}
               onChange={e => {
                 setValue(e.target.value);
@@ -757,7 +710,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
           >
             {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
-            {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Fetch site data'}
+            {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Fetch'}
           </button>
         </div>
 
@@ -766,12 +719,12 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
             <div className="text-xs">
               <div className="font-bold text-slate-900">
-                {isApplying ? 'Applying website info to your AI Playbook…' : 'Pulling info from your site…'}
+                {isApplying ? 'Applying to your AI Playbook…' : 'Pulling info…'}
               </div>
               <div className="text-slate-500 mt-0.5">
                 {isApplying
-                  ? 'Filling empty Playbook sections so your AI starts with real context.'
-                  : 'We fetch the page, render a preview, and generate an AI summary. Takes a few seconds.'}
+                  ? 'Filling empty Playbook + FAQ sections so your AI starts with real context.'
+                  : 'We fetch the page, generate an AI summary, and pre-fill what we can. Takes a few seconds.'}
               </div>
             </div>
           </div>
@@ -782,72 +735,32 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
             <div className="min-w-0 text-xs">
               <div className="font-bold text-rose-900">
-                {verifyState.outcome.errorMessage || "We couldn't load that site."}
+                {verifyState.outcome.errorMessage || "We couldn't load that link."}
               </div>
               <div className="text-rose-700 mt-0.5">
-                Double-check the URL, or use <span className="font-semibold">I don't have a website</span> below.
+                Double-check the URL, or use <span className="font-semibold">I don't have one</span> below.
               </div>
             </div>
           </div>
         )}
 
-        {savedAndVerified && savedMetadata && !isBusy && (
+        {savedAndVerified && savedMetadata && !isBusy && detectedPlatform === 'website' && (
           <div className="mt-3">
             <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
           </div>
         )}
       </section>
 
-      {/* ─── 4. Thumbtack profile URLs ───────────────────────────── */}
-      {ttAccounts.length > 0 && (
-        <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Globe className="w-4 h-4 text-slate-500" />
-            <h2 className="text-sm font-extrabold text-slate-900">Thumbtack profile URL</h2>
-            <span className="text-xs font-normal text-slate-400">(optional)</span>
-          </div>
-          <p className="text-xs text-slate-500 leading-relaxed mb-3">
-            Paste your public Thumbtack profile so AI can pull services, address, insurance,
-            and pricing. Click <span className="font-semibold">Fetch from Thumbtack</span> to
-            apply the info to your Playbook.
-          </p>
-          <ul className="space-y-3">
-            {ttAccounts.map(acct => {
-              const pulling = pullingTtId === acct.id;
-              const hasUrl = (ttUrls[acct.id] || '').trim().length > 0;
-              return (
-                <li key={acct.id}>
-                  <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                    {acct.businessName || 'Thumbtack business'}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      value={ttUrls[acct.id] ?? ''}
-                      onChange={e => setTtUrls(prev => ({ ...prev, [acct.id]: e.target.value }))}
-                      onBlur={() => void saveTtUrl(acct.id)}
-                      placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
-                      className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void fetchFromThumbtack(acct.id)}
-                      disabled={!hasUrl || pulling || pullingTtId !== null}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
-                    >
-                      {pulling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
-                      {pulling ? 'Fetching…' : 'Fetch'}
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
     </div>
   );
+}
+
+// Friendly badge label for the detected platform. Lives at the bottom
+// alongside the other small helpers so the JSX section stays tight.
+function platformLabel(p: 'thumbtack' | 'yelp' | 'website'): string {
+  if (p === 'thumbtack') return 'Thumbtack profile';
+  if (p === 'yelp') return 'Yelp business page';
+  return 'Website';
 }
 
 // Parse the additionalAssociatePhones list out of a SavedAccount's

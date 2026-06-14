@@ -1166,12 +1166,35 @@ export class UsersService {
         });
       }
     } else if (source === 'yelp') {
-      patch = await fetchYelpBusinessInfo({
-        userId,
-        savedAccountId,
-        platformService: this.platformService,
-        prisma: this.prisma,
-      });
+      // Same precedence as Thumbtack: if the tenant has pasted a public
+      // Yelp business-page URL into the unified Business profile URL
+      // field, prefer scraping that page (richer than the Fusion API for
+      // marketing-facing fields like services + about-us copy). The URL
+      // is stored under the same `publicProfileUrl` key on the Yelp
+      // SavedAccount so callers can read / write both platforms with one
+      // shape. Falls through to the Fusion API on miss.
+      const yelpProfileUrl = await this.readPublicProfileUrl(userId, savedAccountId, 'yelp');
+      if (yelpProfileUrl) {
+        try {
+          const verify = await this.verifyWebsite(yelpProfileUrl);
+          if (verify.reachable && verify.metadata?.playbookSeed?.businessInformation) {
+            patch = verify.metadata.playbookSeed.businessInformation;
+            this.logger.log(`[seedBusinessInfoFromAccount] scraped Yelp profile url=${yelpProfileUrl} fields=${Object.keys(patch).join(',')}`);
+          } else {
+            this.logger.warn(`[seedBusinessInfoFromAccount] Yelp profile scrape returned no playbookSeed for ${yelpProfileUrl}`);
+          }
+        } catch (err: any) {
+          this.logger.warn(`[seedBusinessInfoFromAccount] Yelp profile scrape failed for ${yelpProfileUrl}: ${err?.message || err}`);
+        }
+      }
+      if (!patch || Object.keys(patch).length === 0) {
+        patch = await fetchYelpBusinessInfo({
+          userId,
+          savedAccountId,
+          platformService: this.platformService,
+          prisma: this.prisma,
+        });
+      }
     }
     if (!patch || Object.keys(patch).length === 0) {
       return { success: false, fieldsApplied: 0, conflictsRaised: 0, warning: 'No data returned from ' + source };
@@ -1218,8 +1241,25 @@ export class UsersService {
    * other follow-up / AI settings on the account.
    */
   private async readThumbtackProfileUrl(userId: string, savedAccountId: string): Promise<string | undefined> {
+    return this.readPublicProfileUrl(userId, savedAccountId, 'thumbtack');
+  }
+
+  /**
+   * Platform-agnostic reader for the per-account public profile URL the
+   * tenant pasted in Settings → General / wizard. Used by Thumbtack and
+   * Yelp seed paths. Stored under
+   * `SavedAccount.followUpSettingsJson.publicProfileUrl` for both
+   * platforms — the JSON blob avoids a schema migration and Yelp's
+   * `publicProfileUrl` key never collides with TT's because the row's
+   * `platform` discriminates.
+   */
+  private async readPublicProfileUrl(
+    userId: string,
+    savedAccountId: string,
+    platform: 'thumbtack' | 'yelp',
+  ): Promise<string | undefined> {
     const account = await this.prisma.savedAccount.findFirst({
-      where: { id: savedAccountId, userId, platform: 'thumbtack' },
+      where: { id: savedAccountId, userId, platform },
       select: { followUpSettingsJson: true },
     });
     if (!account?.followUpSettingsJson) return undefined;
@@ -1292,6 +1332,231 @@ export class UsersService {
 
     this.logger.log(`[saveThumbtackProfileUrl] userId=${userId} acct=${savedAccountId} url=${cleaned ? cleaned.slice(0, 60) + '...' : '(cleared)'}`);
     return { success: true, url: cleaned };
+  }
+
+  /**
+   * Unified Business profile URL handler.
+   *
+   * The wizard's Business step and Settings → General both expose a SINGLE
+   * URL field. The user may paste:
+   *   - a Thumbtack profile URL (thumbtack.com/…) →
+   *       saved as `publicProfileUrl` on EVERY connected TT SavedAccount,
+   *       then seedBusinessInfoFromAccount runs against the first TT
+   *       account so the Playbook fills.
+   *   - a Yelp business URL (yelp.com/biz/…) →
+   *       same fan-out, but for Yelp accounts. Same scrape pipeline.
+   *   - any other domain →
+   *       saved as User.website, then verifyWebsite + apply playbook/FAQ
+   *       runs the standard generic-site flow.
+   *
+   * Platform detection is hostname-based (case-insensitive, .endsWith).
+   * Passing url=null clears whatever was saved (per-platform OR
+   * User.website — caller must know which to clear; today we clear
+   * User.website only, the TT/Yelp keys clear via the legacy
+   * saveThumbtackProfileUrl endpoint or the unified endpoint's pass of
+   * an empty string on a known platform).
+   *
+   * Returns a structured response so the frontend can render a
+   * "platform detected" badge and show the result of the scrape.
+   */
+  async applyBusinessProfileUrl(
+    userId: string,
+    rawUrl: string,
+  ): Promise<{
+    success: boolean;
+    platform: 'thumbtack' | 'yelp' | 'website';
+    savedUrl: string | null;
+    accountsAffected: number;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    websiteMetadata?: VerifyWebsiteResult['metadata'];
+    warning?: string;
+  }> {
+    const trimmed = (rawUrl ?? '').trim();
+    if (!trimmed) {
+      return {
+        success: false,
+        platform: 'website',
+        savedUrl: null,
+        accountsAffected: 0,
+        fieldsApplied: 0,
+        conflictsRaised: 0,
+        warning: 'No URL provided.',
+      };
+    }
+
+    // Parse + classify. We accept "thumbtack.com/…" without scheme — the
+    // normalizer handles it, then we re-read the hostname.
+    const normalized = this.normalizeWebsiteUrl(trimmed);
+    if (!normalized) {
+      return {
+        success: false,
+        platform: 'website',
+        savedUrl: null,
+        accountsAffected: 0,
+        fieldsApplied: 0,
+        conflictsRaised: 0,
+        warning: "That doesn't look like a valid URL.",
+      };
+    }
+    let host = '';
+    try { host = new URL(normalized).hostname.toLowerCase(); } catch { /* normalize guaranteed valid */ }
+
+    const platform: 'thumbtack' | 'yelp' | 'website' =
+      host.endsWith('thumbtack.com') ? 'thumbtack' :
+      host.endsWith('yelp.com') ? 'yelp' :
+      'website';
+
+    if (platform === 'website') {
+      // Generic site path — same flow as the existing Settings → Business
+      // website. Verify, persist on User, run Playbook + FAQ apply.
+      const verify = await this.verifyWebsite(normalized);
+      if (!verify.reachable) {
+        return {
+          success: false,
+          platform,
+          savedUrl: null,
+          accountsAffected: 0,
+          fieldsApplied: 0,
+          conflictsRaised: 0,
+          warning: verify.errorMessage || "We couldn't load that site.",
+          websiteMetadata: verify.metadata,
+        };
+      }
+      await this.updateProfile(userId, {
+        website: verify.normalizedUrl,
+        websiteMetadata: verify.metadata ?? null,
+      });
+      // Best-effort Playbook + FAQ seeding. Failures here are non-fatal:
+      // the URL+metadata are already persisted; the user can re-run from
+      // Settings if anything else goes wrong.
+      let fieldsApplied = 0;
+      try {
+        if (verify.metadata?.playbookSeed) {
+          const playbook = await this.applyPlaybookSeedToAccounts(userId, 'fill_empty');
+          // applyPlaybookSeedToAccounts counts in `linesAdded` (lines of
+          // custom instructions written across all accounts); applyFaq…
+          // counts in `filled` (FAQ fields). Treat them as parallel
+          // contributions to the same surface counter.
+          if (playbook?.success && typeof playbook.linesAdded === 'number') fieldsApplied += playbook.linesAdded;
+        }
+      } catch (err: any) {
+        this.logger.warn(`[applyBusinessProfileUrl] playbook apply failed for ${verify.normalizedUrl}: ${err?.message || err}`);
+      }
+      try {
+        if (verify.metadata?.playbookSeed) {
+          const faq = await this.applyFaqFromWebsiteSeed(userId);
+          if (faq?.success && typeof faq.filled === 'number') fieldsApplied += faq.filled;
+        }
+      } catch (err: any) {
+        this.logger.warn(`[applyBusinessProfileUrl] faq apply failed for ${verify.normalizedUrl}: ${err?.message || err}`);
+      }
+      return {
+        success: true,
+        platform,
+        savedUrl: verify.normalizedUrl,
+        accountsAffected: 0,
+        fieldsApplied,
+        conflictsRaised: 0,
+        websiteMetadata: verify.metadata,
+      };
+    }
+
+    // Platform path — TT or Yelp. Fan out to every connected account of
+    // that platform, save the URL on each, then run the existing
+    // seedBusinessInfoFromAccount pipeline so the playbook/FAQ fill from
+    // the scrape. We deliberately ignore non-matching accounts — a user
+    // with TT-Jacksonville + TT-Tampa pasting one URL applies it to both.
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId, platform },
+      select: { id: true, followUpSettingsJson: true },
+    });
+    if (accounts.length === 0) {
+      return {
+        success: false,
+        platform,
+        savedUrl: null,
+        accountsAffected: 0,
+        fieldsApplied: 0,
+        conflictsRaised: 0,
+        warning: `No connected ${platform === 'thumbtack' ? 'Thumbtack' : 'Yelp'} account — connect one first.`,
+      };
+    }
+
+    // Persist the URL onto every account first so a later pull (manual
+    // or onPlatformAccountConnected) sees the same value.
+    for (const acct of accounts) {
+      let settings: Record<string, any> = {};
+      if (acct.followUpSettingsJson) {
+        try { settings = JSON.parse(acct.followUpSettingsJson) || {}; } catch { settings = {}; }
+      }
+      settings.publicProfileUrl = normalized;
+      await this.prisma.savedAccount.update({
+        where: { id: acct.id },
+        data: { followUpSettingsJson: JSON.stringify(settings) },
+      });
+    }
+
+    // Now run the seed pipeline. We run against the first account only —
+    // the scrape produces a userId-scoped patch that merges into the same
+    // bizInfo blob regardless of which account triggered it; running per
+    // account would double-merge conflicts.
+    let fieldsApplied = 0;
+    let conflictsRaised = 0;
+    try {
+      const seed = await this.seedBusinessInfoFromAccount(userId, accounts[0].id, platform);
+      if (seed?.success) {
+        fieldsApplied = seed.fieldsApplied ?? 0;
+        conflictsRaised = seed.conflictsRaised ?? 0;
+      }
+    } catch (err: any) {
+      this.logger.warn(`[applyBusinessProfileUrl] seed failed for ${platform} url=${normalized}: ${err?.message || err}`);
+    }
+
+    this.logger.log(`[applyBusinessProfileUrl] userId=${userId} platform=${platform} accounts=${accounts.length} fieldsApplied=${fieldsApplied} url=${normalized.slice(0, 60)}…`);
+    return {
+      success: true,
+      platform,
+      savedUrl: normalized,
+      accountsAffected: accounts.length,
+      fieldsApplied,
+      conflictsRaised,
+    };
+  }
+
+  /**
+   * Resolve the "current" Business profile URL for the unified field.
+   * Returns whichever source has a saved value, with platform context so
+   * the UI can render a badge. Resolution order:
+   *   1. Any TT account with `publicProfileUrl` set → tt URL
+   *   2. Any Yelp account with `publicProfileUrl` set → yelp URL
+   *   3. User.website if set → website
+   * Returns `{ url: null }` when nothing is saved.
+   */
+  async getBusinessProfileUrl(userId: string): Promise<{
+    url: string | null;
+    platform: 'thumbtack' | 'yelp' | 'website' | null;
+  }> {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId, platform: { in: ['thumbtack', 'yelp'] } },
+      select: { platform: true, followUpSettingsJson: true },
+    });
+    for (const platform of ['thumbtack', 'yelp'] as const) {
+      const match = accounts.find(a => a.platform === platform);
+      if (!match?.followUpSettingsJson) continue;
+      try {
+        const settings = JSON.parse(match.followUpSettingsJson) || {};
+        const url = settings.publicProfileUrl;
+        if (typeof url === 'string' && url.trim().length > 0) {
+          return { url: url.trim(), platform };
+        }
+      } catch { /* try next */ }
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { website: true } });
+    if (user?.website && user.website.trim().length > 0) {
+      return { url: user.website.trim(), platform: 'website' };
+    }
+    return { url: null, platform: null };
   }
 
   // ---------------------------------------------------------------------

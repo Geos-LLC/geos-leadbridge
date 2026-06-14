@@ -179,6 +179,41 @@ export class UsersController {
   }
 
   /**
+   * Unified Business profile URL handler — wizard + Settings → General
+   * both call this. Accepts a Thumbtack profile URL, a Yelp business
+   * URL, or any other website. The service detects the platform from
+   * hostname:
+   *   - thumbtack.com → save as `publicProfileUrl` on every connected TT
+   *     account, then run the TT seed pipeline.
+   *   - yelp.com → same fan-out for Yelp accounts.
+   *   - any other host → save as User.website + verify + apply Playbook
+   *     and FAQ seeds.
+   *
+   * POST /v1/users/me/business-url/apply
+   *   body: { url: string }
+   *   returns: { success, platform, savedUrl, accountsAffected, fieldsApplied,
+   *             conflictsRaised, websiteMetadata?, warning? }
+   */
+  @Post('me/business-url/apply')
+  async applyBusinessProfileUrl(@Request() req: any, @Body() body: { url?: string }) {
+    return this.usersService.applyBusinessProfileUrl(req.user.id, body?.url ?? '');
+  }
+
+  /**
+   * Resolve the current Business profile URL for the unified field —
+   * used by both the wizard step and Settings → General to hydrate the
+   * input on mount. Resolution order: TT publicProfileUrl > Yelp
+   * publicProfileUrl > User.website.
+   *
+   * GET /v1/users/me/business-url
+   *   returns: { url: string | null, platform: 'thumbtack' | 'yelp' | 'website' | null }
+   */
+  @Get('me/business-url')
+  async getBusinessProfileUrl(@Request() req: any) {
+    return this.usersService.getBusinessProfileUrl(req.user.id);
+  }
+
+  /**
    * Get the user's global AI prompt
    * GET /v1/users/me/ai-prompt
    */
