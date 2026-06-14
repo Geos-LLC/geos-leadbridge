@@ -1,6 +1,5 @@
 import { Construction } from 'lucide-react';
 import type { WizardStep } from '../../../types';
-import { getStepMeta } from '../wizardConfig';
 
 interface Props {
   step: WizardStep;
@@ -8,20 +7,12 @@ interface Props {
 
 // Temporary body for wizard steps whose real implementation lands in a
 // later PR (Connect / Business / AI / Pricing / Automation / AI Rules).
-// Renders the step's title + description plus a "coming soon" note. The
-// Continue / Skip / Back actions live in WizardShell, so this component
-// only needs to fill the content area — the user can still walk through
-// all 8 steps end-to-end and the progress fields persist correctly.
-export default function PlaceholderStep({ step }: Props) {
-  const meta = getStepMeta(step);
+// Title + description are rendered by WizardShell — this component only
+// fills the content area with the "coming soon" note.
+export default function PlaceholderStep({ step: _step }: Props) {
   return (
     <div className="pt-2">
-      <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-3">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-8 max-w-xl">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       <div
         className="rounded-2xl p-6 border border-dashed flex items-start gap-4"

@@ -5,7 +5,6 @@ import { useAppStore } from '../../../store/appStore';
 import { usersApi } from '../../../services/api';
 import { notify } from '../../../store/notificationStore';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../../../data/defaultPricing';
-import { getStepMeta } from '../wizardConfig';
 import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
@@ -43,7 +42,7 @@ type Choice = 'default' | 'manual';
 export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving, setSaving }: Props) {
   const navigate = useNavigate();
   const savedAccounts = useAppStore(s => s.savedAccounts);
-  const meta = getStepMeta('pricing');
+  // Title + description live in WizardShell header (2026-06-13 redesign).
   const [choice, setChoice] = useState<Choice>('default');
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -123,12 +122,7 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
         )}
       </WizardStepActions>
 
-      <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-8 max-w-xl">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       <div className="space-y-3">
         <PricingChoiceCard

@@ -6,7 +6,6 @@ import { useAppStore } from '../../../store/appStore';
 import { useAuthStore } from '../../../store/authStore';
 import type { WizardChecklist, WizardStep } from '../../../types';
 import { deriveDisplayChecklist } from '../SetupProgressCard';
-import { WIZARD_STEP_META } from '../wizardConfig';
 import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
@@ -33,8 +32,7 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
   const storeAccounts = useAppStore(s => s.savedAccounts);
   const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
 
-  // Pull the human title from the shared config to avoid drift.
-  const meta = WIZARD_STEP_META.find(m => m.slug === 'done')!;
+  // Title + description live in WizardShell header (2026-06-13 redesign).
 
   // The checklist passed in by SetupWizard is already derived against
   // its view of user state. But Done is the last step the user sees,
@@ -120,12 +118,7 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
       <div className="w-16 h-16 mx-auto mb-6 rounded-2xl inline-flex items-center justify-center bg-emerald-100 text-emerald-600 shadow-sm">
         <Check className="w-9 h-9" />
       </div>
-      <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight mb-3">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed max-w-md mx-auto">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       <ul className="mt-10 mx-auto max-w-sm text-left space-y-2">
         {COMPLETION_ITEMS.map(({ step, label }) => {

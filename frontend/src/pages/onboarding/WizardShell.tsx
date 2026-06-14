@@ -1,56 +1,63 @@
-import { ArrowLeft, ArrowRight, Check, Loader2, SkipForward, X } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Sparkles, X } from 'lucide-react';
 import { createContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WizardChecklist, WizardStep } from '../../types';
 import { WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
-// Portal target for step-rendered action buttons. WizardStepActions reads
-// this and portals its children into the shell header so the buttons sit
-// next to Back / Exit instead of as a sticky shelf in the step body.
+// Portal target for step-rendered action buttons. WizardStepActions
+// reads this and portals its children into the shell footer so the
+// Save & Continue button + siblings sit on the same row as Back, per
+// the LeadBridgeDesignUpdated design. Name kept ("Header") for
+// historical reasons — semantically it's "the wizard's action slot."
 export const WizardHeaderSlotContext = createContext<HTMLDivElement | null>(null);
 
 interface WizardShellProps {
   currentStep: WizardStep;
   checklist: WizardChecklist;
   children: React.ReactNode;
-  // Action bar — now rendered in the sticky top header (no bottom
-  // footer). Steps that need custom action buttons (e.g. "I don't
-  // have a website", "Use default pricing") pass them via
-  // `headerActions` instead of relying on onSkip/onContinue.
   onBack?: () => void;
   onSkip?: () => void;
   onContinue?: () => void;
   continueLabel?: string;
   continueDisabled?: boolean;
   saving?: boolean;
-  // Hide the default Skip/Continue in the header. Steps that own
-  // their own actions either pass `headerActions` (rendered next to
-  // Back + Exit) or render their CTA inside the step body.
+  /** Hide the default Skip/Continue in the footer. Steps that own
+      their own actions use WizardStepActions to portal them into the
+      same footer slot. */
   hideActions?: boolean;
-  // Step-specific action buttons rendered in the sticky top header,
-  // between Back and Exit. Use this to surface a step's Save & Continue
-  // (and any siblings like Skip manual / I don't have a website) at the
-  // top of the screen, where the rest of the wizard navigation lives.
+  /** Legacy static slot — kept for callers that don't use the portal. */
   headerActions?: React.ReactNode;
-  // Sidebar jump. Optional — when provided, the left-rail step rows
-  // become clickable buttons that jump to the chosen step. The
-  // container is responsible for the actual PATCH + state update.
+  /** Sidebar jump. Optional — when provided, the left-rail step rows
+      become clickable buttons that jump to the chosen step. */
   onStepClick?: (step: WizardStep) => void;
-  // Restart-from-scratch handler. When provided, the sidebar shows a
-  // "Restart setup" link under the "Skip for later" link so users
-  // can wipe their wizard progress without finding it in Settings.
+  /** Restart-from-scratch handler. When provided, the rail shows a
+      tiny "Restart setup" link under the bottom info line. */
   onRestart?: () => void;
-  // Override the default Exit / Skip-for-later behavior. By default
-  // both call navigate('/overview') — when mounted inside the in-app
-  // Setup modal (Layout.tsx), the parent supplies onExit so the modal
-  // can close in place instead of routing away.
+  /** Override the default Exit / close behavior. By default the X
+      navigates to /overview — when mounted inside the in-app Setup
+      modal (Layout.tsx), the parent supplies onExit so the modal
+      can close in place instead of routing away. */
   onExit?: () => void;
 }
 
-// Shared chrome for the 8-step setup wizard. Renders the left rail with
-// step list + progress, a top bar with "Skip for later → exit", and the
-// bottom action bar (Back / Skip this step / Continue). Step bodies
-// render into `children`.
+/**
+ * Wizard shell — matches the LeadBridgeDesignUpdated layout:
+ *  - Left rail (248px) on a navy gradient with sparkles + "Setup
+ *    wizard" + step counter on top, a numbered step list in the
+ *    middle, and a "You can reopen this wizard…" footer line at
+ *    the bottom.
+ *  - Right content pane: title + description + X close in the top
+ *    header, a thin 3px progress bar below it, the step body
+ *    scrolling inside an `--lb-bg`-tinted region, and a bottom
+ *    footer with Back (left) and Continue/Finish (right). Step
+ *    bodies that need their own action buttons portal them into
+ *    the same footer slot via WizardStepActions.
+ *
+ * The shell fills its parent (h-full + w-full). The route mount
+ * wraps it in a 100dvh container; the in-app modal in Layout.tsx
+ * wraps it in a 940x640 rounded dialog. Both layouts work without
+ * touching the shell.
+ */
 export default function WizardShell({
   currentStep,
   checklist,
@@ -69,82 +76,92 @@ export default function WizardShell({
 }: WizardShellProps) {
   const navigate = useNavigate();
   const handleExit = onExit ?? (() => navigate('/overview'));
+
   // Portal target for step-rendered action buttons (Save & Continue,
-  // "I don't have a website", etc). Captured by ref-callback so the
-  // first paint already has the DOM node and step children can portal
-  // into it without a render delay.
-  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
+  // "I don't have a website", "Preview default pricing", "Go to
+  // Dashboard"). Lives in the bottom footer right-side; captured via
+  // useState so the DOM node is available when steps mount.
+  const [footerSlot, setFooterSlot] = useState<HTMLDivElement | null>(null);
+
   const currentIndex = getStepIndex(currentStep);
   const totalSteps = WIZARD_STEP_META.length;
-  // % shown in the header — counts welcome + done so the bar moves on the
-  // first and last clicks too. The Overview card uses a separate metric
-  // (actionable steps only) for "X of 6 complete".
+  const currentMeta = WIZARD_STEP_META[currentIndex];
+  // Progress bar % — counts welcome + done so the bar moves on the first
+  // and last clicks too.
   const progressPct = Math.round(((currentIndex + 1) / totalSteps) * 100);
 
   return (
-    <div
-      className="flex overflow-hidden h-full w-full"
-      style={{ background: 'var(--lb-bg)' }}
-    >
-      {/* Left rail — step list. Stays put while only the main content
-          scrolls, because the root is locked to viewport height and the
-          aside is a flex column with its own internal scroll on .nav. */}
+    <div className="flex overflow-hidden h-full w-full" style={{ background: 'var(--lb-surface)' }}>
+      {/* ─── Left rail — navy gradient ─────────────────────────────── */}
       <aside
-        className="hidden md:flex md:flex-col shrink-0 border-r h-full"
+        className="hidden md:flex md:flex-col shrink-0 h-full"
         style={{
-          width: 260,
-          background: 'var(--lb-surface)',
-          borderColor: 'var(--lb-line)',
+          width: 248,
+          background: 'linear-gradient(180deg, #0a1530 0%, #1b2a52 100%)',
+          padding: '22px 18px',
         }}
       >
-        <div className="px-5 py-5 border-b" style={{ borderColor: 'var(--lb-line-soft)' }}>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-1">Setup</div>
-          <div className="text-base font-extrabold text-slate-900 tracking-tight">LeadBridge</div>
+        {/* Rail header — sparkles tile + title + step counter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 22 }}>
+          <span
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'var(--lb-accent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Sparkles size={16} color="#fff" />
+          </span>
+          <div style={{ lineHeight: 1.1 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>Setup wizard</div>
+            <div style={{
+              fontSize: 10, fontFamily: 'var(--lb-font-mono)', color: '#aeb9d6',
+              textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2,
+            }}>
+              Step {currentIndex + 1} of {totalSteps}
+            </div>
+          </div>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+
+        {/* Step list */}
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
           {WIZARD_STEP_META.map((meta, i) => {
             const status = checklist[meta.slug];
             const isCurrent = meta.slug === currentStep;
-            const isPast = i < currentIndex;
-            const isDone = status === 'done';
-            const isSkipped = status === 'skipped';
-            // Sidebar row is clickable when the wizard owner provides a
-            // jump callback and the click would actually change the
-            // current step. Saving is gated so a click can't race a
-            // pending PATCH.
+            const isDone = status === 'done' || i < currentIndex;
             const clickable = !!onStepClick && !isCurrent && !saving;
-            const rowClasses = `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors w-full text-left ${
-              isCurrent
-                ? 'bg-blue-50 text-blue-900'
-                : isPast || isDone || isSkipped
-                  ? 'text-slate-500'
-                  : 'text-slate-400'
-            } ${clickable ? 'cursor-pointer hover:bg-slate-100' : 'cursor-default'}`;
+
+            const rowStyle: React.CSSProperties = {
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 10px', borderRadius: 9,
+              cursor: clickable ? 'pointer' : 'default',
+              background: isCurrent ? 'rgba(255,255,255,0.12)' : 'transparent',
+              border: 0,
+              width: '100%',
+              textAlign: 'left',
+              fontFamily: 'inherit',
+            };
+            const dotStyle: React.CSSProperties = {
+              width: 24, height: 24, borderRadius: 999,
+              flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 700, fontFamily: 'var(--lb-font-mono)',
+              background: isDone ? '#34d399' : isCurrent ? '#fff' : 'rgba(255,255,255,0.14)',
+              color: isDone ? '#05291c' : isCurrent ? 'var(--lb-ink-1)' : '#aeb9d6',
+            };
+            const labelStyle: React.CSSProperties = {
+              fontSize: 13,
+              fontWeight: isCurrent ? 700 : 500,
+              color: isCurrent || isDone ? '#fff' : '#aeb9d6',
+            };
 
             const inner = (
               <>
-                <span
-                  className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-[11px] font-bold ${
-                    isCurrent
-                      ? 'bg-blue-600 text-white'
-                      : isDone
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : isSkipped
-                          ? 'bg-slate-100 text-slate-400'
-                          : 'bg-slate-100 text-slate-500'
-                  }`}
-                  aria-label={
-                    isDone ? 'done' : isSkipped ? 'skipped' : isCurrent ? 'current' : 'pending'
-                  }
-                >
-                  {isDone ? <Check className="w-3.5 h-3.5" /> : i + 1}
+                <span style={dotStyle}>
+                  {isDone ? <Check size={12} strokeWidth={3} /> : i + 1}
                 </span>
-                <span className="flex-1 truncate">{meta.label}</span>
-                {isSkipped && (
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    skipped
-                  </span>
-                )}
+                <span style={labelStyle}>{meta.label}</span>
               </>
             );
 
@@ -154,7 +171,7 @@ export default function WizardShell({
                   key={meta.slug}
                   type="button"
                   onClick={() => onStepClick!(meta.slug)}
-                  className={rowClasses}
+                  style={rowStyle}
                   aria-current={isCurrent ? 'step' : undefined}
                 >
                   {inner}
@@ -162,126 +179,200 @@ export default function WizardShell({
               );
             }
             return (
-              <div key={meta.slug} className={rowClasses} aria-current={isCurrent ? 'step' : undefined}>
+              <div key={meta.slug} style={rowStyle} aria-current={isCurrent ? 'step' : undefined}>
                 {inner}
               </div>
             );
           })}
         </nav>
-        <div className="m-3 space-y-1">
-          <button
-            onClick={handleExit}
-            className="block w-full px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
-          >
-            ← Skip for later — go to Dashboard
-          </button>
-          {onRestart && (
-            <button
-              onClick={onRestart}
-              className="block w-full px-3 py-2 text-xs font-semibold text-slate-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors text-left"
-              title="Wipe wizard progress and start over"
-            >
-              ↻ Restart setup
-            </button>
-          )}
+
+        {/* Rail footer — informational text + optional restart link */}
+        <div style={{ flex: 1 }} />
+        <div style={{ fontSize: 11, color: '#8b94ab', lineHeight: 1.5 }}>
+          You can reopen this wizard any time from the{' '}
+          <strong style={{ color: '#cdd6ea' }}>Setup</strong> button in the top bar.
         </div>
+        {onRestart && (
+          <button
+            onClick={onRestart}
+            style={{
+              marginTop: 10,
+              background: 'transparent', border: 0, padding: 0,
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+              color: '#aeb9d6',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+            title="Wipe wizard progress and start over"
+          >
+            ↻ Restart setup
+          </button>
+        )}
       </aside>
 
-      {/* Right pane */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Sticky top header — two rows: progress bar on top, then the
-            action row (Back + step-specific actions + Skip/Continue +
-            Exit). Bottom footer is intentionally gone so users never
-            have to scroll to find Save & Continue. */}
-        <header
-          className="sticky top-0 z-10 px-6 md:px-10 pt-4 pb-3 border-b"
-          style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line)' }}
+      {/* ─── Right content pane ─────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--lb-surface)' }}>
+        {/* Header: title + description + close button */}
+        <div
+          style={{
+            padding: '22px 28px 16px',
+            borderBottom: '1px solid var(--lb-line-soft)',
+            display: 'flex', alignItems: 'flex-start', gap: 16,
+            flexShrink: 0,
+          }}
         >
-          {/* Row 1: progress bar — full width above the buttons. */}
-          <div className="mb-3">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
-              Step {currentIndex + 1} of {totalSteps}
-            </div>
-            <div className="mt-1.5 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-600 transition-all duration-300"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{
+              margin: 0,
+              fontSize: 21, fontWeight: 700, color: 'var(--lb-ink-1)',
+              letterSpacing: '-0.02em',
+            }}>
+              {currentMeta.title}
+            </h2>
+            <p style={{
+              margin: '5px 0 0',
+              fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            }}>
+              {currentMeta.description}
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={handleExit}
+            title="Close"
+            aria-label="Close setup"
+            style={{
+              width: 34, height: 34, borderRadius: 9,
+              border: '1px solid var(--lb-line)',
+              background: 'var(--lb-surface)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--lb-ink-4)',
+              flexShrink: 0,
+              fontFamily: 'inherit',
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
 
-          {/* Row 2: action row. Back left, step / continue buttons
-              center, Exit right. */}
-          <div className="flex items-center gap-3">
-            {/* Back — shown whenever a previous step exists, regardless
-                of whether the step owns its own actions. */}
-            {onBack && (
-              <button
-                onClick={onBack}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-                aria-label="Previous step"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Back</span>
-              </button>
-            )}
-
-            {/* Step-owned action slot. Steps wrap their buttons in
-                <WizardStepActions> which portals them into the
-                headerSlot ref below. The headerActions prop is the
-                legacy/static fallback when a step doesn't use the
-                portal. The default Skip/Continue is suppressed whenever
-                either a portal child or static headerActions exists. */}
-            <div ref={setHeaderSlot} className="flex items-center gap-2 flex-1 min-w-0" />
-            {headerActions ? (
-              <div className="flex items-center gap-2 flex-1 min-w-0">{headerActions}</div>
-            ) : !hideActions ? (
-              <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-                {onSkip && (
-                  <button
-                    onClick={onSkip}
-                    disabled={saving}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-                  >
-                    <SkipForward className="w-4 h-4" />
-                    <span className="hidden sm:inline">Skip this step</span>
-                  </button>
-                )}
-                {onContinue && (
-                  <button
-                    onClick={onContinue}
-                    disabled={continueDisabled || saving}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
-                  >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {saving ? 'Saving…' : continueLabel}
-                    {!saving && <ArrowRight className="w-4 h-4" />}
-                  </button>
-                )}
-              </div>
-            ) : null}
-
-            <button
-              onClick={handleExit}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
-              aria-label="Exit setup"
-              title="Skip for later — your progress is saved"
-            >
-              <X className="w-4 h-4" />
-              <span className="hidden sm:inline">Exit</span>
-            </button>
-          </div>
-        </header>
+        {/* Thin progress bar */}
+        <div style={{ height: 3, background: 'var(--lb-ink-10)', flexShrink: 0 }}>
+          <div
+            style={{
+              height: '100%',
+              width: `${progressPct}%`,
+              background: 'var(--lb-accent)',
+              borderRadius: 99,
+              transition: 'width 200ms ease',
+            }}
+          />
+        </div>
 
         {/* Step body */}
-        <main className="flex-1 px-6 md:px-10 py-8 md:py-12 overflow-y-auto">
-          <div className="max-w-2xl mx-auto">
-            <WizardHeaderSlotContext.Provider value={headerSlot}>
+        <main
+          className="flex-1 overflow-y-auto"
+          style={{
+            minHeight: 0,
+            padding: '24px 28px',
+            background: 'var(--lb-bg)',
+          }}
+        >
+          <div style={{ maxWidth: 640, margin: '0 auto' }}>
+            <WizardHeaderSlotContext.Provider value={footerSlot}>
               {children}
             </WizardHeaderSlotContext.Provider>
           </div>
         </main>
+
+        {/* Footer: Back (left) — spacer — step buttons / Skip / Continue / Finish (right) */}
+        <div
+          style={{
+            padding: '14px 28px',
+            borderTop: '1px solid var(--lb-line-soft)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            flexShrink: 0,
+            background: 'var(--lb-surface)',
+          }}
+        >
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={saving}
+              style={{
+                padding: '10px 16px',
+                borderRadius: 10,
+                border: '1px solid var(--lb-line)',
+                background: 'var(--lb-surface)',
+                color: 'var(--lb-ink-3)',
+                fontSize: 13, fontWeight: 600,
+                cursor: saving ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit',
+                opacity: saving ? 0.5 : 1,
+              }}
+            >
+              Back
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          {/* Portal target — Save & Continue + siblings land here. When
+              a step provides portal children, the shell's default
+              Skip/Continue is suppressed via hideActions. */}
+          <div ref={setFooterSlot} style={{ display: 'flex', alignItems: 'center', gap: 10 }} />
+          {/* Legacy static headerActions (kept name for back-compat). */}
+          {headerActions && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{headerActions}</div>
+          )}
+          {/* Default Skip + Continue when the step doesn't own actions. */}
+          {!hideActions && !headerActions && (
+            <>
+              {onSkip && (
+                <button
+                  type="button"
+                  onClick={onSkip}
+                  disabled={saving}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: 0,
+                    background: 'transparent',
+                    color: 'var(--lb-ink-5)',
+                    fontSize: 13, fontWeight: 600,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    opacity: saving ? 0.5 : 1,
+                  }}
+                >
+                  Skip this step
+                </button>
+              )}
+              {onContinue && (
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  disabled={continueDisabled || saving}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '10px 22px',
+                    borderRadius: 10,
+                    border: 0,
+                    background: 'var(--lb-accent)',
+                    color: 'var(--lb-accent-fg)',
+                    fontSize: 13, fontWeight: 700,
+                    cursor: (continueDisabled || saving) ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    opacity: (continueDisabled || saving) ? 0.5 : 1,
+                  }}
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {saving ? 'Saving…' : continueLabel}
+                  {!saving && <ArrowRight size={14} />}
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

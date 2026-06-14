@@ -3,7 +3,6 @@ import { ArrowRight, ExternalLink, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
 import { thumbtackApi } from '../../../services/api';
-import { getStepMeta } from '../wizardConfig';
 import AccountFaqForm from '../../../components/AccountFaqForm';
 import { WizardStepActions } from '../WizardStepActions';
 
@@ -32,7 +31,7 @@ export default function AIKnowledgeStep({ onSaveContinue, saving, setSaving }: P
   const navigate = useNavigate();
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
-  const meta = getStepMeta('ai');
+  // Title + description live in WizardShell header (2026-06-13 redesign).
 
   const [accountsLoading, setAccountsLoading] = useState(savedAccounts.length === 0);
 
@@ -101,12 +100,7 @@ export default function AIKnowledgeStep({ onSaveContinue, saving, setSaving }: P
         </button>
       </WizardStepActions>
 
-      <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-4 max-w-xl">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       {/* "Pre-filled from your website" hint when verify produced an FAQ
           patch. We can't strictly verify what was filled here without a

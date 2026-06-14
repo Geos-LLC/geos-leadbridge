@@ -9,7 +9,6 @@ import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import type { SavedAccount } from '../../../types';
-import { getStepMeta } from '../wizardConfig';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
 import { WizardStepActions } from '../WizardStepActions';
@@ -59,7 +58,7 @@ interface VerifyOutcome {
 export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, saving, setSaving }: Props) {
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
-  const meta = getStepMeta('business');
+  // Title + description live in WizardShell header (2026-06-13 redesign).
 
   // ── Website state ──────────────────────────────────────────────────
   const [value, setValue] = useState<string>(user?.website ?? '');
@@ -462,12 +461,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         </button>
       </WizardStepActions>
 
-      <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-6 max-w-xl">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
       <section className="mt-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">

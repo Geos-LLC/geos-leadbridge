@@ -4,7 +4,6 @@ import ConnectionModal from '../../../components/ConnectionModal';
 import { useAppStore } from '../../../store/appStore';
 import { thumbtackApi } from '../../../services/api';
 import { PlatformBadge } from '../../../components/ui';
-import { getStepMeta } from '../wizardConfig';
 import type { SavedAccount } from '../../../types';
 
 // Sentinel checked by Dashboard after an OAuth callback to decide
@@ -44,7 +43,7 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(savedAccounts.length === 0);
 
-  const meta = getStepMeta('connect');
+  // Title + description live in WizardShell header (2026-06-13 redesign).
 
   // Pull the latest account list on mount so the step shows a fresh
   // count even if the user reached this page via a deep link.
@@ -94,12 +93,7 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
 
   return (
     <div className="pt-2">
-      <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight mb-2">
-        {meta.title}
-      </h1>
-      <p className="text-base text-slate-500 leading-relaxed mb-8 max-w-xl">
-        {meta.description}
-      </p>
+      {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       {/* Connected accounts — only render the section when we have data */}
       {!loading && savedAccounts.length > 0 && (
