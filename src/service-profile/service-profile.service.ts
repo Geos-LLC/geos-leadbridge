@@ -32,11 +32,28 @@ import {
   ResolvedProfile,
   SavedAccountForResolver,
   ServiceOverrides,
+  extractAiPlaybookV2,
+  isEffectivelyEmpty,
   mergeFaqJson,
   mergePricingJson,
   parseMappings,
   parseServiceOverrides,
 } from './service-profile.types';
+
+/**
+ * Per-field source tracking for telemetry. The top-level `source` field
+ * answers "did a ServiceProfile drive this call?" (true even if some
+ * fields fell back). `fieldSources` answers "which side actually
+ * supplied each field?" — useful for monitoring how often the
+ * per-field fallback fires (and therefore which tenants still have
+ * legacy data the profile didn't migrate).
+ */
+type FieldSource = 'service_profile' | 'legacy_saved_account' | 'none';
+type FieldSources = {
+  pricing: FieldSource;
+  faq: FieldSource;
+  aiInstructions: FieldSource;
+};
 
 @Injectable()
 export class ServiceProfileService {
@@ -166,13 +183,21 @@ export class ServiceProfileService {
   /**
    * Convenience wrapper for the AI prompt assembler: returns the
    * effective pricing + FAQ + AI instructions the assembler should
-   * use, falling through to the legacy SavedAccount columns when no
-   * profile matches.
+   * use, with **per-field fallback** to SavedAccount when the matched
+   * ServiceProfile is missing that specific field.
    *
    * Phase 1 callers: ai.controller.ts preview-for-lead, preview-with-context.
    *
    * Returns the same shape regardless of source, so the assembler
-   * doesn't need branching.
+   * doesn't need branching. `fieldSources` is included for telemetry
+   * — callers can ignore it.
+   *
+   * The per-field fallback is what stops the Spotless-shaped incident
+   * from PR #244: a default profile backfilled from an account whose
+   * faqJson was null would have wiped the tenant's FAQ for every
+   * lead. With per-field fallback, an empty profile field falls
+   * through to the SavedAccount equivalent rather than overriding it
+   * with null.
    */
   async resolveEffectivePromptInputs(
     lead: LeadForResolver,
@@ -184,6 +209,7 @@ export class ServiceProfileService {
     aiPaused: boolean;
     profileId: string | null;
     source: 'service_profile' | 'legacy_saved_account';
+    fieldSources: FieldSources;
   }> {
     const resolved = await this.resolveForLead(lead, savedAccount);
 
@@ -195,28 +221,63 @@ export class ServiceProfileService {
         aiPaused: true,
         profileId: resolved.profileId,
         source: 'service_profile',
+        fieldSources: { pricing: 'none', faq: 'none', aiInstructions: 'none' },
       };
     }
 
+    // Legacy SavedAccount values we may need to fall through to.
+    const legacyPricing = savedAccount?.servicePricingJson ?? null;
+    const legacyFaq = savedAccount?.faqJson ?? null;
+    const legacyAi = extractAiPlaybookV2(savedAccount?.followUpSettingsJson ?? null);
+
     if (resolved.status === 'resolved') {
+      const profilePricing = resolved.effectivePricingJson;
+      const profileFaq = resolved.effectiveFaqJson;
+      const profileAi = resolved.effectiveAiInstructionsJson;
+
+      // Per-field fallback: profile wins when it has content, else SA.
+      // `isEffectivelyEmpty` treats null, '', '[]', '{}', and unparseable
+      // strings as empty — anything past that is preserved verbatim.
+      const pricingUseLegacy = isEffectivelyEmpty(profilePricing);
+      const faqUseLegacy = isEffectivelyEmpty(profileFaq);
+      const aiUseLegacy = isEffectivelyEmpty(profileAi);
+
+      const pricingJson = pricingUseLegacy ? legacyPricing : profilePricing;
+      const faqJson = faqUseLegacy ? legacyFaq : profileFaq;
+      const aiInstructionsJson = aiUseLegacy ? legacyAi : profileAi;
+
+      const fieldSources: FieldSources = {
+        pricing: pricingJson == null ? 'none' : pricingUseLegacy ? 'legacy_saved_account' : 'service_profile',
+        faq: faqJson == null ? 'none' : faqUseLegacy ? 'legacy_saved_account' : 'service_profile',
+        aiInstructions: aiInstructionsJson == null ? 'none' : aiUseLegacy ? 'legacy_saved_account' : 'service_profile',
+      };
+
       return {
-        pricingJson: resolved.effectivePricingJson,
-        faqJson: resolved.effectiveFaqJson,
-        aiInstructionsJson: resolved.effectiveAiInstructionsJson,
+        pricingJson,
+        faqJson,
+        aiInstructionsJson,
         aiPaused: false,
         profileId: resolved.profileId,
         source: 'service_profile',
+        fieldSources,
       };
     }
 
-    // legacy_fallback — read directly from SavedAccount columns.
+    // legacy_fallback — read directly from SavedAccount columns. The AI
+    // instructions extractor now runs here too so consumers that adopt
+    // aiInstructionsJson get the legacy data even when no profile exists.
     return {
-      pricingJson: savedAccount?.servicePricingJson ?? null,
-      faqJson: savedAccount?.faqJson ?? null,
-      aiInstructionsJson: null,
+      pricingJson: legacyPricing,
+      faqJson: legacyFaq,
+      aiInstructionsJson: legacyAi,
       aiPaused: false,
       profileId: null,
       source: 'legacy_saved_account',
+      fieldSources: {
+        pricing: legacyPricing == null ? 'none' : 'legacy_saved_account',
+        faq: legacyFaq == null ? 'none' : 'legacy_saved_account',
+        aiInstructions: legacyAi == null ? 'none' : 'legacy_saved_account',
+      },
     };
   }
 }

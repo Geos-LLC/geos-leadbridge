@@ -39,6 +39,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/utils/prisma.service';
+import { pickPrimarySavedAccount } from '../src/service-profile/service-profile.types';
 
 const DRY_RUN = (process.env.DRY_RUN ?? 'true').toLowerCase() !== 'false';
 const USER_ID = process.env.USER_ID || undefined;
@@ -108,15 +109,27 @@ async function main() {
         continue;
       }
 
-      // Most recently used account — best proxy for "primary." Pricing
-      // and FAQ are typically set up on the account the tenant actually
-      // uses day-to-day, so copying from this one minimizes divergence
-      // from legacy behavior post-dual-read.
-      const primary = await prisma.savedAccount.findFirst({
+      // Tiered preference: pick the SavedAccount carrying BOTH pricing
+      // and FAQ first, then pricing-only, then FAQ-only, then anything.
+      // Within tier, ties break on most-recently-used.
+      //
+      // Replaces the original naive "lastUsedAt DESC" picker that bit
+      // Spotless during the Phase 1 backfill — Wesley Chapel was last
+      // touched but had null faqJson, so the default profile inherited
+      // null FAQ over 6 sibling accounts that all had populated FAQs.
+      //
+      // See pickPrimarySavedAccount in service-profile.types.ts.
+      const candidates = await prisma.savedAccount.findMany({
         where: { userId: u.id },
-        orderBy: { lastUsedAt: 'desc' },
-        select: { id: true, businessName: true, servicePricingJson: true, faqJson: true },
+        select: {
+          id: true,
+          businessName: true,
+          servicePricingJson: true,
+          faqJson: true,
+          lastUsedAt: true,
+        },
       });
+      const primary = pickPrimarySavedAccount(candidates);
 
       if (!primary) {
         c.noSavedAccount += 1;
