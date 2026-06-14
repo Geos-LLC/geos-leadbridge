@@ -27,7 +27,7 @@ import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
-import { buildQuoteFromContext } from '../pricing/pricing-engine';
+import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import OpenAI from 'openai';
@@ -241,6 +241,11 @@ export class FollowUpGeneratorService {
     // by AI Conversation / Review Mode / Instant Text. Filled below in the
     // `if (lead?.businessId)` branch.
     let quoteContext = '';
+    // Runtime price-intent enforcement — when the latest customer
+    // message asks for price AND the engine produced a usable quote,
+    // this block overrides PRIMARY INSTRUCTION + PLAYBOOK for THIS
+    // reply. See src/pricing/price-intent.ts.
+    let priceIntentContext = '';
     // Qualification REFERENCE block. Only emitted when the resolved strategy
     // is 'price' or 'qualify' AND the tenant has saved a non-empty
     // `qualificationV2.requiredFields` array. Existing accounts without
@@ -324,17 +329,22 @@ export class FollowUpGeneratorService {
           // authoritative; the LLM will quote these numbers verbatim
           // instead of inferring from the table.
           try {
-            const built = buildQuoteFromContext({
+            const built = computeQuoteAndIntent({
               pricing: p,
               leadDetails: leadFactsRecord,
               customerMessage: lead?.message ?? null,
               conversationHistory: context?.recentMessages ?? null,
               additionalInfo,
             });
-            if (built) {
+            if (built.quoteBlock) {
               quoteContext =
                 '=== REFERENCE: CALCULATED QUOTE (deterministic — these numbers are authoritative; see BASE HARD RULES) ===\n' +
-                built;
+                built.quoteBlock;
+            }
+            if (built.priceIntentBlock) {
+              priceIntentContext =
+                '=== PRICE INTENT ENFORCEMENT (runtime guard — overrides PRIMARY INSTRUCTION and PLAYBOOK for THIS reply) ===\n' +
+                built.priceIntentBlock;
             }
           } catch (err: any) {
             this.logger.warn(`[FollowUpGenerator] quote engine threw for ${conversationId}: ${err?.message}`);
@@ -459,6 +469,10 @@ export class FollowUpGeneratorService {
 
     if (quoteContext) {
       systemParts.push('', quoteContext);
+    }
+
+    if (priceIntentContext) {
+      systemParts.push('', priceIntentContext);
     }
 
     if (faqContext) {

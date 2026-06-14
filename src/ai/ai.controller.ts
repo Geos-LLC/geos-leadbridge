@@ -9,7 +9,7 @@ import { buildBusinessContextBlock } from './business-context';
 import { buildFaqBlock, parseAccountFaq } from './faq-context';
 import { buildPricingGuardRules } from './pricing-guards';
 import { hydratePricing, parseAndHydratePricing } from '../users/pricing-hydrate';
-import { buildQuoteFromContext } from '../pricing/pricing-engine';
+import { computeQuoteAndIntent, QuoteAndIntent } from '../pricing/pricing-engine';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 
 @Controller('v1/ai')
@@ -85,11 +85,11 @@ export class AiController {
       timezone: account?.followUpTimezone ?? null,
     });
 
-    // Deterministic quote — compute base + add-ons in code so the LLM
-    // doesn't infer prices. The BASE HARD RULES make this block
-    // authoritative: the model quotes these numbers verbatim. See
-    // src/pricing/pricing-engine.ts.
-    const quoteBlock = this.computeQuoteBlock({
+    // Deterministic quote + price-intent guard — compute base + add-ons
+    // in code so the LLM doesn't infer prices, and add a top-priority
+    // override when the customer explicitly asked for price. See
+    // src/pricing/pricing-engine.ts + src/pricing/price-intent.ts.
+    const { quoteBlock, priceIntentBlock } = this.computeQuote({
       pricingJson: profileInputs.pricingJson,
       leadDetails: details,
       customerMessage: customerMessage || lead.message || '',
@@ -112,6 +112,7 @@ export class AiController {
         businessBlock,
         pricingBlock: pricingBlock ?? undefined,
         quoteBlock: quoteBlock ?? undefined,
+        priceIntentBlock: priceIntentBlock ?? undefined,
         faqBlock: faqBlock ?? undefined,
         conversationHistory: conversationHistory ?? [],
         leadDetails: details,
@@ -204,10 +205,11 @@ export class AiController {
     const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
-    // Deterministic quote — same engine the AI conversation, follow-ups,
-    // and Instant Text all use. Uses the loaded conversation history so
-    // the engine picks up add-ons the customer mentioned mid-thread.
-    const quoteBlock = this.computeQuoteBlock({
+    // Deterministic quote + price-intent guard — same engine the AI
+    // conversation, follow-ups, and Instant Text use. Conversation
+    // history flows in so add-on mentions and price asks earlier in
+    // the thread are still picked up.
+    const { quoteBlock, priceIntentBlock } = this.computeQuote({
       pricingJson: profileInputs.pricingJson,
       leadDetails: details,
       customerMessage: customerMessage || lead.message || '',
@@ -231,6 +233,7 @@ export class AiController {
         businessBlock,
         pricingBlock: pricingBlock ?? undefined,
         quoteBlock: quoteBlock ?? undefined,
+        priceIntentBlock: priceIntentBlock ?? undefined,
         faqBlock: faqBlock ?? undefined,
         urgencyBlock: urgencyBlock ?? undefined,
         conversationHistory,
@@ -397,22 +400,23 @@ export class AiController {
 
   /**
    * Thin wrapper around the deterministic pricing engine. Hydrates the
-   * pricing JSON, then asks pricing-engine.buildQuoteFromContext to
-   * extract add-ons + facts and produce the authoritative quote block.
-   * Returns null when there's nothing meaningful to inject (no pricing
-   * configured, no facts, no add-on mentions).
+   * pricing JSON, then asks pricing-engine.computeQuoteAndIntent to
+   * extract add-ons + facts and produce BOTH the authoritative quote
+   * block AND the runtime price-intent enforcement block (when the
+   * latest customer message asks for a price). Returns nulls when
+   * there's nothing meaningful to inject.
    */
-  private computeQuoteBlock(opts: {
+  private computeQuote(opts: {
     pricingJson: string | null | undefined;
     leadDetails: Record<string, string>;
     customerMessage: string;
     conversationHistory: ConversationMessage[] | null;
     additionalInfo: string | null;
-  }): string | null {
+  }): QuoteAndIntent {
     const pricing = parseAndHydratePricing(opts.pricingJson ?? null);
-    if (!pricing) return null;
+    if (!pricing) return { quoteBlock: null, priceIntentBlock: null };
     try {
-      return buildQuoteFromContext({
+      return computeQuoteAndIntent({
         pricing,
         leadDetails: opts.leadDetails,
         customerMessage: opts.customerMessage,
@@ -421,10 +425,10 @@ export class AiController {
       });
     } catch (err: any) {
       // Engine is pure — failures here are programming bugs, not data
-      // bugs. Log and degrade gracefully (no quote block) so the AI
-      // reply still goes out using only the PRICING TABLE reference.
-      this.logger.warn(`[AI computeQuoteBlock] engine threw: ${err?.message}`);
-      return null;
+      // bugs. Log and degrade gracefully so the AI reply still goes out
+      // using only the PRICING TABLE reference.
+      this.logger.warn(`[AI computeQuote] engine threw: ${err?.message}`);
+      return { quoteBlock: null, priceIntentBlock: null };
     }
   }
 

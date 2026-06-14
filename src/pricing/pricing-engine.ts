@@ -22,6 +22,7 @@
 
 import { ServicePricing, PricingRow } from '../users/pricing-hydrate';
 import { extractAddons } from './addon-extractor';
+import { buildPriceIntentBlock } from './price-intent';
 
 export interface MatchedExtra {
   /** Pricing key on `ServicePricing.extras[].key`. */
@@ -342,6 +343,25 @@ export interface BuildQuoteFromContextInput {
 }
 
 export function buildQuoteFromContext(input: BuildQuoteFromContextInput): string | null {
+  return computeQuoteAndIntent(input).quoteBlock;
+}
+
+/**
+ * Two-output facade used by every AI surface: returns both the
+ * authoritative CALCULATED QUOTE reference block AND the runtime
+ * PRICE INTENT ENFORCEMENT instruction (when fire conditions are met).
+ *
+ * The price-intent block is null when the latest customer message has
+ * no price-seeking token. When it IS set, callers should inject it at
+ * a layer that overrides PRIMARY INSTRUCTION (see ai.service.ts
+ * priceIntentBlock field).
+ */
+export interface QuoteAndIntent {
+  quoteBlock: string | null;
+  priceIntentBlock: string | null;
+}
+
+export function computeQuoteAndIntent(input: BuildQuoteFromContextInput): QuoteAndIntent {
   const facts = inferQuoteFacts(input.leadDetails ?? undefined, input.pricing);
   const addons = extractAddons({
     pricing: input.pricing,
@@ -358,7 +378,12 @@ export function buildQuoteFromContext(input: BuildQuoteFromContextInput): string
     extras: addons.matched,
     pricing: input.pricing,
   });
-  return buildQuoteBlock(result, { ambiguousAddons: addons.ambiguous });
+  const quoteBlock = buildQuoteBlock(result, { ambiguousAddons: addons.ambiguous });
+  const priceIntentBlock = buildPriceIntentBlock({
+    customerMessage: input.customerMessage ?? null,
+    calculation: result,
+  });
+  return { quoteBlock, priceIntentBlock };
 }
 
 function matchCleaningTypeKey(
