@@ -2155,3 +2155,44 @@ model SettingsChangeAuditLog {
   @@index([savedAccountId])
   @@map("settings_change_audit_logs")
 }
+
+// ==========================================
+// Service Schema Accumulator
+// ==========================================
+// Provider-side per-category question catalogs accumulated from inbound
+// lead payloads. Thumbtack delivers `request.category.name` + an array
+// of `request.details[].question / .answer` on every NegotiationCreatedV4
+// webhook — over time this is enough to reconstruct most of TT's
+// per-category questionnaire without calling a TT catalog endpoint
+// (none of which our OAuth client is scoped for as of 2026-06-13).
+//
+// `questionsJson` shape (array, append-only, dedup by normalized key):
+//   [{
+//     key: "what_type_of_issue",      // normalize(label): lowercased, non-word -> _
+//     label: "What type of issue?",   // original first-seen label
+//     type: "observed_select",        // step 1: every TT question treated as observed
+//     options: ["Power outage", ...], // de-duplicated set of observed answers
+//     observationsCount: 12,          // # leads that showed this question
+//     lastSeenAt: "2026-06-13T...Z"   // ISO string
+//   }]
+//
+// `observationsCount` (top-level) is # leads merged into this schema row.
+// `sourceConfidence` is "partial" while we're still observing; flips to
+// "complete" only if/when a future PR fetches an official catalog.
+model ServiceSchema {
+  id                   String   @id @default(uuid())
+  provider             String   // 'thumbtack' | 'yelp' | 'manual'
+  providerCategoryName String
+  providerServiceId    String?
+  source               String   // 'webhook_accumulator' | 'official_api' | 'manual_curated'
+  sourceConfidence     String   @default("partial") // 'partial' | 'complete'
+  questionsJson        Json     @default("[]")
+  observationsCount    Int      @default(0)
+  lastSeenAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([provider, providerCategoryName, source])
+  @@index([provider, lastSeenAt])
+  @@map("service_schemas")
+}

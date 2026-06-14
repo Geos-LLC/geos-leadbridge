@@ -41,6 +41,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { TrialModule } from './trial/trial.module';
 import { PartnerNetworkModule } from './modules/partner-network/partner-network.module';
+import { ServiceSchemaModule } from './service-schema/service-schema.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
@@ -93,6 +94,7 @@ import { AuditModule } from './common/audit/audit.module';
     MonitoringModule,
     OnboardingModule,
     PartnerNetworkModule,
+    ServiceSchemaModule,
   ],
   providers: [
     {

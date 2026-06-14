@@ -21,6 +21,7 @@ import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { TrialService } from '../trial/trial.service';
 import { LeadsService } from '../leads/leads.service';
+import { ServiceSchemaService } from '../service-schema/service-schema.service';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
@@ -54,6 +55,7 @@ export class WebhooksService {
     private trialService: TrialService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
+    private serviceSchemaService: ServiceSchemaService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -364,6 +366,16 @@ export class WebhooksService {
     ]);
 
     this.logger.log(`[timing] lead upsert + savedAccount: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
+
+    // Service-schema accumulator — fire-and-forget. Mines `request.category.name`
+    // + `request.details[].question/.answer` from every TT lead into the
+    // global `service_schemas` table so a future PR can use the catalog
+    // to drive qualification/pricing/preset logic. Wrapped in -Safe so
+    // any failure (DB blip, race) only warns and never blocks webhook ack.
+    this.serviceSchemaService.mergeFromThumbtackPayloadSafe({
+      rawPayload: data,
+      observedAt: originalCreatedAt,
+    }).catch(() => {});
 
     // Trial meter — count this delivery toward the user's trial quota.
     // Idempotent CAS on Lead.trialCounted; webhook retries and concurrent
