@@ -14,6 +14,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
 import { LeadsModule } from '../leads/leads.module';
+import { ServiceSchemaModule } from '../service-schema/service-schema.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { LeadsModule } from '../leads/leads.module';
     AnalyticsModule,
     ConversationContextModule,
     FollowUpEngineModule,
+    ServiceSchemaModule,
     forwardRef(() => AutomationModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => CallConnectModule),
