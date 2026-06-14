@@ -814,7 +814,7 @@ export function Layout() {
               <div
                 role="dialog"
                 aria-label="Setup wizard"
-                className="lb-wizard-modal fixed flex flex-col overflow-hidden"
+                className="lb-wizard-modal fixed overflow-hidden"
                 style={{
                   top: '50%',
                   left: '50%',

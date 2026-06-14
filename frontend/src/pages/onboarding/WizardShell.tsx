@@ -183,11 +183,15 @@ export default function WizardShell({
             Bottom footer is intentionally gone so users never have to
             scroll to find a Save & Continue button. */}
         <header
-          className="sticky top-0 z-10 px-6 md:px-10 py-4 border-b flex items-center gap-3 flex-wrap"
+          className="sticky top-0 z-10 px-6 md:px-10 py-4 border-b flex items-center gap-3"
           style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line)' }}
         >
+          {/* Progress block — flex-1 + min-w-0 so it compresses before
+              the action buttons wrap. flex-wrap was dropped from the
+              header so the action row stays on top in the narrower
+              in-app Setup modal (940px frame ~ 680px right pane). */}
           <div className="flex-1 min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 truncate">
               Step {currentIndex + 1} of {totalSteps}
             </div>
             <div className="mt-1.5 h-1.5 w-full max-w-xs bg-slate-100 rounded-full overflow-hidden">
