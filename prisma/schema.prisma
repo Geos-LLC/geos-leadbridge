@@ -314,7 +314,14 @@ model Lead {
   postcode                String?
   city                    String?
   state                   String?
-  category                String? // Service category
+  category                String? // Service category (display name)
+  // Platform-side category ID. Thumbtack: numeric string from
+  // `request.category.categoryID` on every NegotiationCreatedV4 / GET
+  // negotiation payload. Stable join key against `service_schemas.providerCategoryId`
+  // — categories can be renamed, but the ID is the durable handle.
+  // Null for Yelp (no equivalent ID surfaced) and for historical TT
+  // leads until the backfill script runs.
+  categoryId              String?
   // Canonical LB pipeline status. See src/leads/canonical-status.ts.
   // Pipeline: new -> contacted -> engaged -> quoted -> booked -> scheduled -> in_progress -> completed
   // Terminals: lost, cancelled, no_show, archived
@@ -2183,6 +2190,16 @@ model ServiceSchema {
   id                   String   @id @default(uuid())
   provider             String   // 'thumbtack' | 'yelp' | 'manual'
   providerCategoryName String
+  // Platform-side stable ID for the category. Thumbtack: numeric string
+  // mined from inbound lead payloads (`request.category.categoryID`).
+  // Backwards-compatible add: rows created before this column existed
+  // remain valid with NULL. Populated opportunistically by the accumulator
+  // whenever it sees a payload carrying the ID — never overwrites a
+  // previously-set non-null value, to keep audit-trail stable if TT ever
+  // reassigns names across IDs.
+  providerCategoryId   String?
+  // Reserved for a future sub-service ID if TT exposes one. Today only
+  // category-level IDs are visible in any payload we receive.
   providerServiceId    String?
   source               String   // 'webhook_accumulator' | 'official_api' | 'manual_curated'
   sourceConfidence     String   @default("partial") // 'partial' | 'complete'

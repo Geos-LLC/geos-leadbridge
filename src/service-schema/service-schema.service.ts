@@ -97,6 +97,18 @@ export class ServiceSchemaService {
       return { status: 'skipped', reason: 'no_category' };
     }
 
+    // Stable platform-side ID, when present. TT payloads carry
+    // `request.category.categoryID` (numeric string). Yelp doesn't expose
+    // an equivalent. Stored alongside the row so future PRs can join
+    // service_schemas to lead rawJson by ID rather than by display name.
+    const categoryIdRaw = request?.category?.categoryID;
+    const providerCategoryId: string | null =
+      typeof categoryIdRaw === 'string' && categoryIdRaw.trim().length > 0
+        ? categoryIdRaw.trim()
+        : typeof categoryIdRaw === 'number'
+        ? String(categoryIdRaw)
+        : null;
+
     const details: any[] = Array.isArray(request?.details) ? request.details : [];
 
     // Even when `details` is empty we still upsert the row — that bumps
@@ -162,6 +174,13 @@ export class ServiceSchemaService {
             questionsJson: questions as unknown as Prisma.InputJsonValue,
             observationsCount: existing.observationsCount + 1,
             lastSeenAt: observedAt,
+            // Backfill providerCategoryId on first observation that carries
+            // one. Never overwrite a previously-set non-null value — if TT
+            // ever reassigns names across IDs, we keep the original mapping
+            // stable so audit trails / lead-row joins don't shift under us.
+            ...(providerCategoryId && !existing.providerCategoryId
+              ? { providerCategoryId }
+              : {}),
           },
         });
         return {
@@ -177,6 +196,7 @@ export class ServiceSchemaService {
         data: {
           provider: 'thumbtack',
           providerCategoryName: categoryName,
+          providerCategoryId,
           source: 'webhook_accumulator',
           sourceConfidence: 'partial',
           questionsJson: questions as unknown as Prisma.InputJsonValue,
@@ -203,6 +223,7 @@ export class ServiceSchemaService {
     id: string;
     provider: string;
     providerCategoryName: string;
+    providerCategoryId: string | null;
     source: string;
     sourceConfidence: string;
     observationsCount: number;
@@ -222,6 +243,7 @@ export class ServiceSchemaService {
         id: row.id,
         provider: row.provider,
         providerCategoryName: row.providerCategoryName,
+        providerCategoryId: row.providerCategoryId ?? null,
         source: row.source,
         sourceConfidence: row.sourceConfidence,
         observationsCount: row.observationsCount,
