@@ -26,6 +26,7 @@ type Row = {
   id: string;
   provider: string;
   providerCategoryName: string;
+  providerCategoryId: string | null;
   source: string;
   sourceConfidence: string;
   questionsJson: unknown;
@@ -61,6 +62,7 @@ function buildPrismaMock(seed: Row[] = []) {
     const row: Row = {
       id: `svcschema-${state.idCounter}`,
       providerServiceId: data.providerServiceId ?? null,
+      providerCategoryId: data.providerCategoryId ?? null,
       provider: data.provider,
       providerCategoryName: data.providerCategoryName,
       source: data.source,
@@ -87,9 +89,18 @@ function buildPrismaMock(seed: Row[] = []) {
   return mock;
 }
 
-function payload(category: string | null, details: Array<{ question?: string; answer?: any }>): any {
+function payload(
+  category: string | null,
+  details: Array<{ question?: string; answer?: any }>,
+  opts: { categoryID?: string | number | null } = {},
+): any {
   const request: any = { details };
-  if (category != null) request.category = { name: category };
+  if (category != null) {
+    request.category = { name: category };
+    if (opts.categoryID !== undefined && opts.categoryID !== null) {
+      request.category.categoryID = opts.categoryID;
+    }
+  }
   return { request };
 }
 
@@ -295,6 +306,70 @@ describe('ServiceSchemaService — Thumbtack accumulator', () => {
     const bedrooms = questions.find((q) => q.key === 'bedrooms');
     expect(bedrooms?.options).toEqual(['3', '4']); // dedup held
     expect(bedrooms?.observationsCount).toBe(3);
+  });
+
+  it('case 11: providerCategoryId is captured on create when payload carries categoryID', async () => {
+    const prisma = buildPrismaMock();
+    const svc = new ServiceSchemaService(prisma);
+
+    await svc.mergeFromThumbtackPayload({
+      rawPayload: payload(
+        'House Cleaning',
+        [{ question: 'Bedrooms?', answer: '3' }],
+        { categoryID: '219264413294461288' }, // live Spotless JAX value
+      ),
+    });
+
+    expect(prisma._state.rows).toHaveLength(1);
+    expect(prisma._state.rows[0].providerCategoryId).toBe('219264413294461288');
+  });
+
+  it('case 12: providerCategoryId backfills on existing row when first seen', async () => {
+    const prisma = buildPrismaMock();
+    const svc = new ServiceSchemaService(prisma);
+
+    // First observation has no categoryID — row created with null
+    await svc.mergeFromThumbtackPayload({
+      rawPayload: payload('House Cleaning', [{ question: 'Bedrooms?', answer: '3' }]),
+    });
+    expect(prisma._state.rows[0].providerCategoryId).toBeNull();
+
+    // Later observation includes categoryID — should hydrate the column
+    await svc.mergeFromThumbtackPayload({
+      rawPayload: payload(
+        'House Cleaning',
+        [{ question: 'Bedrooms?', answer: '3' }],
+        { categoryID: '219264413294461288' },
+      ),
+    });
+    expect(prisma._state.rows).toHaveLength(1);
+    expect(prisma._state.rows[0].providerCategoryId).toBe('219264413294461288');
+  });
+
+  it('case 13: providerCategoryId is NEVER overwritten once set', async () => {
+    // Defends the audit-trail invariant from the schema comment: even if
+    // TT ever surfaces a new categoryID for the same name (re-ID), we
+    // keep the original mapping stable. The catalog-fetcher PR can do
+    // an explicit re-mapping later if needed.
+    const prisma = buildPrismaMock();
+    const svc = new ServiceSchemaService(prisma);
+
+    await svc.mergeFromThumbtackPayload({
+      rawPayload: payload(
+        'House Cleaning',
+        [{ question: 'Bedrooms?', answer: '3' }],
+        { categoryID: 'ORIGINAL-ID' },
+      ),
+    });
+    await svc.mergeFromThumbtackPayload({
+      rawPayload: payload(
+        'House Cleaning',
+        [{ question: 'Bedrooms?', answer: '3' }],
+        { categoryID: 'DIFFERENT-ID' },
+      ),
+    });
+
+    expect(prisma._state.rows[0].providerCategoryId).toBe('ORIGINAL-ID');
   });
 
   it('listByProvider returns a compact projection ordered by lastSeenAt desc', async () => {

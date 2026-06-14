@@ -348,6 +348,10 @@ export class WebhooksService {
           city: location.city,
           state: location.state,
           category: request.category?.name,
+          // Stable platform-side category ID. Independent of the display
+          // name — TT can rename a category without changing the ID, so
+          // this is the durable join key against service_schemas.
+          categoryId: request.category?.categoryID ?? null,
           rawJson: JSON.stringify(data),
           createdAt: originalCreatedAt,
         },
@@ -355,6 +359,15 @@ export class WebhooksService {
           customerName,
           customerPhone: customer.phone,
           message: request.description || '',
+          // Re-deliveries of the same negotiation now also refresh
+          // category + categoryId. Previously the update branch left
+          // both untouched — observed on a live Spotless JAX lead whose
+          // Lead.category was null despite rawJson.request.category.name
+          // being present. Always-write here is safe because TT does
+          // not change a lead's category mid-flight; the webhook always
+          // carries the canonical value.
+          category: request.category?.name ?? undefined,
+          categoryId: request.category?.categoryID ?? undefined,
           rawJson: JSON.stringify(data),
           createdAt: originalCreatedAt,
         },
