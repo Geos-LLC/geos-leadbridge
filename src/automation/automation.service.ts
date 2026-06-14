@@ -1584,6 +1584,42 @@ export class AutomationService implements OnModuleInit {
 
     // Prefer high-confidence LLM classification; fall back to phrase lists.
     const llmKind = classification ? this.intentToTransitionKind(classification) : null;
+
+    // Guard: classifier intents `completed` and `hired_elsewhere` both map
+    // to `hired_someone` → writes Lead.status='lost'. That's the right
+    // call when the customer was still negotiating, but it's wrong when
+    // they already booked — a "Thanks again!" or "Sounds good!" from a
+    // booked customer is a positive wrap-up, not a competitor-hire signal.
+    //
+    // Feryal Berjawi 2026-06-14 incident: classified `completed` @ 0.90
+    // ("Customer acknowledges and concludes the conversation"), gate wrote
+    // `lost` over `booked` → owner saw "Lost" while SF correctly held
+    // "Scheduled". Suppressing here keeps the booked terminal intact;
+    // owners can manually flip a lead to lost if the customer actually
+    // backed out.
+    //
+    // The pipeline_downgrade guard inside LeadStatusService doesn't catch
+    // this because `lost` is a valid terminal from any prior state — that
+    // guard only blocks `engaged` over later states. So the gate has to
+    // live here, on the source of the transition kind.
+    if (
+      llmKind === 'hired_someone' &&
+      classification &&
+      (classification.intent === 'completed' || classification.intent === 'hired_elsewhere')
+    ) {
+      const cur = await this.prisma.lead.findUnique({
+        where: { id: context.leadId },
+        select: { status: true },
+      });
+      if (cur?.status === 'booked' || cur?.status === 'completed') {
+        this.logger.log(
+          `[classifier] suppressed ${classification.intent}→hired_someone on ${cur.status} lead ${context.leadId} ` +
+          `— positive wrap-up after booking, not a competitor hire`,
+        );
+        return;
+      }
+    }
+
     const transition: CustomerReplyTransition = llmKind
       ? ({ kind: llmKind } as CustomerReplyTransition)
       : detectCustomerReplyTransition(context.customerMessage);
