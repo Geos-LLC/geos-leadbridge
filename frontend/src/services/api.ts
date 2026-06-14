@@ -1666,6 +1666,40 @@ export const usersApi = {
     );
     return data;
   },
+  /**
+   * Unified Business profile URL apply — wizard + Settings General both
+   * call this. Backend detects platform from hostname (thumbtack.com /
+   * yelp.com / other) and:
+   *   - thumbtack/yelp → fans out to every connected account of that
+   *     platform, persists URL, runs the existing seed pipeline.
+   *   - website → saves on User.website, runs verifyWebsite + Playbook
+   *     + FAQ apply.
+   * One field, three behaviors — no platform picker needed.
+   */
+  applyBusinessProfileUrl: async (
+    url: string,
+  ): Promise<{
+    success: boolean;
+    platform: 'thumbtack' | 'yelp' | 'website';
+    savedUrl: string | null;
+    accountsAffected: number;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    websiteMetadata?: WebsiteMetadataPayload;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/business-url/apply', { url });
+    return data;
+  },
+  /** Resolve whichever profile URL is currently saved — TT, Yelp, or
+   *  website — for hydrating the unified input on mount. */
+  getBusinessProfileUrl: async (): Promise<{
+    url: string | null;
+    platform: 'thumbtack' | 'yelp' | 'website' | null;
+  }> => {
+    const { data } = await api.get('/v1/users/me/business-url');
+    return data;
+  },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {
     const { data } = await api.delete('/v1/users/me');
     return data;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building, Globe, Info, Loader2, Phone, Sparkles } from 'lucide-react';
+import { Building, Globe, Info, Loader2, Phone } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
 } from '../../components/automation/ui';
@@ -16,56 +16,17 @@ export function SettingsGeneral() {
   const setAuth = useAuthStore(s => s.setAuth);
   const savedAccounts = useAppStore(s => s.savedAccounts);
 
-  // First TT / Yelp account ids for the "Pull from..." buttons. Buttons
-  // are hidden when the user has no account of that platform connected.
-  const ttAccountId = savedAccounts.find(a => a.platform === 'thumbtack')?.id;
-  const yelpAccountId = savedAccounts.find(a => a.platform === 'yelp')?.id;
-  const [pullingFrom, setPullingFrom] = useState<'thumbtack' | 'yelp' | null>(null);
+  // The "Pull from Thumbtack / Yelp" buttons are removed in the unified
+  // URL flow — the Apply button on the URL field does both jobs (save
+  // URL + run the seed pipeline) in one click. We keep `pullingFrom`
+  // wired only as the busy state for the unified apply.
+  const [pullingFrom, setPullingFrom] = useState<'apply' | null>(null);
+  void pullingFrom; // referenced via setter in handleApplyBusinessUrl
 
-  // Public Thumbtack profile URL — pasted by the user so the pull flow
-  // can scrape the rich public profile page instead of the API (which
-  // returns only businessID + name + phone + image). Persisted at
-  // SavedAccount.followUpSettingsJson.publicProfileUrl via a dedicated
-  // PATCH endpoint. Saves on blur when the value changes.
-  const [ttProfileUrl, setTtProfileUrl] = useState<string>('');
-  const ttProfileUrlInitialRef = useRef<string>('');
-  // Hydrate from backend on mount + whenever the TT account id changes.
-  // The URL lives in SavedAccount.followUpSettingsJson.publicProfileUrl
-  // so it isn't on the cached savedAccounts list — fetch it explicitly.
-  useEffect(() => {
-    if (!ttAccountId) {
-      setTtProfileUrl('');
-      ttProfileUrlInitialRef.current = '';
-      return;
-    }
-    let alive = true;
-    usersApi.getThumbtackProfileUrl(ttAccountId)
-      .then(res => {
-        if (!alive) return;
-        const next = res.url ?? '';
-        setTtProfileUrl(next);
-        ttProfileUrlInitialRef.current = next;
-      })
-      .catch(() => { /* non-fatal — leave field empty */ });
-    return () => { alive = false; };
-  }, [ttAccountId]);
-
-  const saveTtProfileUrl = async () => {
-    if (!ttAccountId) return;
-    const next = ttProfileUrl.trim();
-    if (next === ttProfileUrlInitialRef.current.trim()) return;
-    try {
-      const res = await usersApi.saveThumbtackProfileUrl(ttAccountId, next || null);
-      if (!res.success) {
-        notify.warning('Could not save URL', res.warning || 'Try again.');
-        return;
-      }
-      ttProfileUrlInitialRef.current = next;
-      notify.success('Thumbtack profile URL saved', 'Pull from Thumbtack will now use it.', 3000);
-    } catch (e: any) {
-      notify.error('Save failed', e?.response?.data?.message || e?.message || 'Could not save URL.');
-    }
-  };
+  // Detected platform from the LAST successful apply — drives the small
+  // badge next to the URL field's "Verified" pill. Hydrated on mount
+  // from the unified GET endpoint.
+  const [detectedPlatform, setDetectedPlatform] = useState<'thumbtack' | 'yelp' | 'website' | null>(null);
 
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
@@ -127,6 +88,24 @@ export function SettingsGeneral() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  // Hydrate the unified URL field from whichever source has a saved
+  // value (TT publicProfileUrl > Yelp publicProfileUrl > User.website).
+  // Runs on mount + whenever the cached savedAccounts list changes, so
+  // a freshly-connected TT account's saved URL fills the field without
+  // a hard reload.
+  useEffect(() => {
+    let alive = true;
+    usersApi.getBusinessProfileUrl()
+      .then(res => {
+        if (!alive) return;
+        if (res.url && !website.trim()) setWebsite(res.url);
+        if (res.platform) setDetectedPlatform(res.platform);
+      })
+      .catch(() => { /* non-fatal */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedAccounts.length]);
+
   // Force-refresh the cached user once on mount. The Apply-to-Playbook button
   // gates on `websiteMetadata.playbookSeed`, which only landed in the verify
   // flow recently; users who verified earlier have a stale auth-store entry
@@ -141,25 +120,49 @@ export function SettingsGeneral() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pullFromAccount = async (platform: 'thumbtack' | 'yelp', accountId: string) => {
-    setPullingFrom(platform);
+  // Unified Apply handler — backend detects platform from hostname and
+  // routes to TT fan-out / Yelp fan-out / generic website. Replaces both
+  // the prior `verifyAndSaveWebsite` and the per-platform pull buttons.
+  const applyBusinessUrl = async () => {
+    const trimmed = website.trim();
+    if (trimmed.length === 0) {
+      // Empty value — clear User.website (keeps the per-account TT/Yelp
+      // URLs intact; clearing those is out of scope for v1 of this flow).
+      setVerifying(true);
+      setVerifyError(null);
+      try {
+        await usersApi.updateProfile({ website: null, websiteMetadata: null });
+        setWebsiteMetadata(null);
+        setDetectedPlatform(null);
+        if (token) {
+          try {
+            const fresh: any = await authApi.getProfile();
+            const u = fresh?.user ?? fresh;
+            if (u?.id) setAuth(u, token);
+          } catch { /* silent */ }
+        }
+        setSavedAt(Date.now());
+      } finally {
+        setVerifying(false);
+      }
+      return;
+    }
+
+    setVerifying(true);
+    setVerifyError(null);
+    setPullingFrom('apply');
     try {
-      const res = await usersApi.pullBusinessInfoFromAccount(platform, accountId);
-      if (!res.success) {
-        notify.warning(`No ${platform === 'thumbtack' ? 'Thumbtack' : 'Yelp'} data`, res.warning || 'Nothing new to pull.');
+      const res = await usersApi.applyBusinessProfileUrl(trimmed);
+      if (!res.success || !res.savedUrl) {
+        setVerifyError(res.warning || "We couldn't load that link.");
         return;
       }
-      const label = platform === 'thumbtack' ? 'Thumbtack' : 'Yelp';
-      const parts: string[] = [];
-      if (res.fieldsApplied > 0) parts.push(`${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'} added`);
-      if (res.conflictsRaised > 0) parts.push(`${res.conflictsRaised} conflict${res.conflictsRaised === 1 ? '' : 's'} queued for review`);
-      notify.success(
-        `Pulled from ${label}`,
-        parts.length > 0 ? parts.join(', ') + '.' : 'Already up to date.',
-        4500,
-      );
-      // Refresh auth user so the preview card re-renders with the new
-      // businessInformation values.
+      setDetectedPlatform(res.platform);
+      setWebsite(res.savedUrl);
+      if (res.platform === 'website') {
+        // Generic site path also updated User.website + metadata.
+        setWebsiteMetadata((res.websiteMetadata as any) ?? null);
+      }
       if (token) {
         try {
           const fresh: any = await authApi.getProfile();
@@ -170,54 +173,29 @@ export function SettingsGeneral() {
           }
         } catch { /* silent */ }
       }
-    } catch (e: any) {
-      notify.error('Pull failed', e?.response?.data?.message || e?.message || 'Try again later.');
-    } finally {
-      setPullingFrom(null);
-    }
-  };
-
-  const verifyAndSaveWebsite = async () => {
-    setVerifying(true);
-    setVerifyError(null);
-    try {
-      const trimmed = website.trim();
-      if (trimmed.length === 0) {
-        await usersApi.updateProfile({ website: null, websiteMetadata: null });
-        setWebsiteMetadata(null);
-        if (token) {
-          try {
-            const fresh: any = await authApi.getProfile();
-            const u = fresh?.user ?? fresh;
-            if (u?.id) setAuth(u, token);
-          } catch { /* silent */ }
-        }
-        setSavedAt(Date.now());
-        return;
-      }
-      const outcome = await usersApi.verifyWebsite(trimmed);
-      if (!outcome.reachable) {
-        setVerifyError(outcome.errorMessage || 'We couldn\'t load that site.');
-        return;
-      }
-      await usersApi.updateProfile({
-        website: outcome.normalizedUrl,
-        websiteMetadata: outcome.metadata ?? null,
-      });
-      setWebsite(outcome.normalizedUrl);
-      setWebsiteMetadata(outcome.metadata ?? null);
-      if (token) {
-        try {
-          const fresh: any = await authApi.getProfile();
-          const u = fresh?.user ?? fresh;
-          if (u?.id) setAuth(u, token);
-        } catch { /* silent */ }
+      const platformWord =
+        res.platform === 'thumbtack' ? 'Thumbtack' :
+        res.platform === 'yelp' ? 'Yelp' :
+        'your website';
+      if (res.fieldsApplied > 0) {
+        notify.success(
+          `Pulled from ${platformWord}`,
+          `Filled ${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'}. Review in Settings → AI Playbook.`,
+          4500,
+        );
+      } else {
+        notify.success(
+          `${platformWord} link saved`,
+          'No new fields to add — everything looked up-to-date.',
+          3500,
+        );
       }
       setSavedAt(Date.now());
     } catch (e: any) {
-      setVerifyError(e?.response?.data?.message || e?.message || 'Failed to verify');
+      setVerifyError(e?.response?.data?.message || e?.message || 'Failed to apply');
     } finally {
       setVerifying(false);
+      setPullingFrom(null);
     }
   };
 
@@ -345,22 +323,33 @@ export function SettingsGeneral() {
       <SettingCard
         icon={Globe}
         iconTone="violet"
-        title="Business website"
-        subtitle="We pull a preview + AI summary so we can seed your FAQ and AI playbook."
+        title="Business profile or website"
+        subtitle="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source and pull info into your AI Playbook + FAQ."
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="Website URL">
+        <FieldRow label="URL">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 200 }}>
               <SettingsInput
                 value={website}
                 onChange={setWebsite}
-                placeholder="myco.com or https://myco.com"
+                placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
               />
             </div>
+            {detectedPlatform && (
+              <span style={{
+                fontSize: 11, fontWeight: 700,
+                padding: '4px 10px', borderRadius: 999,
+                background: 'var(--lb-accent-tint, #dbeafe)',
+                color: 'var(--lb-accent, #2563eb)',
+                textTransform: 'uppercase', letterSpacing: 0.02,
+              }}>
+                {detectedPlatform === 'thumbtack' ? 'Thumbtack' : detectedPlatform === 'yelp' ? 'Yelp' : 'Website'}
+              </span>
+            )}
             <button
               type="button"
-              onClick={() => void verifyAndSaveWebsite()}
+              onClick={() => void applyBusinessUrl()}
               disabled={verifying}
               style={{
                 padding: '9px 16px',
@@ -375,11 +364,11 @@ export function SettingsGeneral() {
               }}
             >
               {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
-              {verifying ? 'Checking…' : 'Verify & save'}
+              {verifying ? 'Fetching…' : 'Fetch & save'}
             </button>
-            {/* Apply-to-Playbook sits on the same row as Verify & save so
-                the two-button flow the user expects is one glance. Disabled
-                until the verification produces a playbookSeed. */}
+            {/* Apply-to-Playbook stays for the website path — only shows
+                a usable seed when a generic website was the source. The
+                TT/Yelp paths apply automatically during Fetch & save. */}
             <ApplyToPlaybookButton
               hasSeed={!!websiteMetadata?.playbookSeed}
               tone="settings"
@@ -393,53 +382,7 @@ export function SettingsGeneral() {
             fontSize: 12, fontWeight: 600,
           }}>{verifyError}</div>
         )}
-        {ttAccountId && (
-          <div style={{ padding: '0 24px 10px' }}>
-            <div style={{
-              fontSize: 12, fontWeight: 600, color: 'var(--lb-ink-3)',
-              marginBottom: 4, letterSpacing: 0.02,
-            }}>
-              Thumbtack profile URL <span style={{ color: 'var(--lb-ink-5)', fontWeight: 400 }}>(optional)</span>
-            </div>
-            <input
-              type="url"
-              value={ttProfileUrl}
-              onChange={e => setTtProfileUrl(e.target.value)}
-              onBlur={() => void saveTtProfileUrl()}
-              placeholder="https://www.thumbtack.com/fl/jacksonville/house-cleaning/your-business/service/..."
-              style={{
-                width: '100%', boxSizing: 'border-box',
-                padding: '8px 12px',
-                border: '1px solid var(--lb-line)',
-                borderRadius: 8,
-                fontSize: 13, fontFamily: 'inherit',
-                color: 'var(--lb-ink-1)', background: 'white',
-              }}
-            />
-            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.4 }}>
-              Paste your public Thumbtack profile URL so <em>Pull from Thumbtack</em> can extract services, address, insurance, and pricing. Thumbtack's API alone returns only name + phone.
-            </div>
-          </div>
-        )}
-        {(ttAccountId || yelpAccountId) && (
-          <div style={{ padding: '0 24px 12px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {ttAccountId && (
-              <PullButton
-                label="Pull from Thumbtack"
-                busy={pullingFrom === 'thumbtack'}
-                onClick={() => void pullFromAccount('thumbtack', ttAccountId)}
-              />
-            )}
-            {yelpAccountId && (
-              <PullButton
-                label="Pull from Yelp"
-                busy={pullingFrom === 'yelp'}
-                onClick={() => void pullFromAccount('yelp', yelpAccountId)}
-              />
-            )}
-          </div>
-        )}
-        {(user?.website || websiteMetadata) && (
+        {detectedPlatform === 'website' && (user?.website || websiteMetadata) && (
           <div style={{ padding: '0 24px 12px' }}>
             <WebsitePreviewCard
               url={user?.website || website || null}
@@ -510,30 +453,6 @@ export function SettingsGeneral() {
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />
     </div>
-  );
-}
-
-function PullButton({ label, busy, onClick }: { label: string; busy: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      style={{
-        padding: '9px 14px',
-        fontSize: 13, fontWeight: 600,
-        color: 'var(--lb-ink-2)',
-        background: 'white',
-        border: '1px solid var(--lb-line)', borderRadius: 8,
-        cursor: busy ? 'not-allowed' : 'pointer',
-        opacity: busy ? 0.6 : 1,
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-      {busy ? 'Pulling…' : label}
-    </button>
   );
 }
 
