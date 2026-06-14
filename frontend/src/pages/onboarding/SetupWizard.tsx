@@ -27,8 +27,16 @@ import { FIRST_ACTIONABLE_STEP, WIZARD_STEP_META, getStepIndex } from './wizardC
 // ai_rules is intentionally a placeholder in PR 1 — the wizard is
 // navigable end-to-end so we can validate the shell + the resume
 // behavior before the real step bodies land.
-export default function SetupWizard() {
+interface SetupWizardProps {
+  // When mounted inside the in-app Setup modal (Layout.tsx), the parent
+  // owns dismiss. onExit closes the modal in place; the default route
+  // behavior navigates back to /overview.
+  onExit?: () => void;
+}
+
+export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
   const navigate = useNavigate();
+  const handleExit = onExit ?? (() => navigate('/overview'));
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
 
@@ -200,7 +208,7 @@ export default function SetupWizard() {
 
   function handleFinish() {
     void advance({ finishedStep: 'done', status: 'done', nextStep: null, complete: true })
-      .then(() => navigate('/overview'));
+      .then(handleExit);
   }
 
   // Wipe wizard progress and snap back to the first actionable step.
@@ -332,6 +340,7 @@ export default function SetupWizard() {
       onContinue={stepOwnsActions ? undefined : handleContinue}
       onStepClick={goToStep}
       onRestart={handleRestart}
+      onExit={onExit}
       saving={saving}
       hideActions={stepOwnsActions}
     >

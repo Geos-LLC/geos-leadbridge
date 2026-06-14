@@ -34,6 +34,11 @@ interface WizardShellProps {
   // "Restart setup" link under the "Skip for later" link so users
   // can wipe their wizard progress without finding it in Settings.
   onRestart?: () => void;
+  // Override the default Exit / Skip-for-later behavior. By default
+  // both call navigate('/overview') — when mounted inside the in-app
+  // Setup modal (Layout.tsx), the parent supplies onExit so the modal
+  // can close in place instead of routing away.
+  onExit?: () => void;
 }
 
 // Shared chrome for the 8-step setup wizard. Renders the left rail with
@@ -54,8 +59,10 @@ export default function WizardShell({
   headerActions,
   onStepClick,
   onRestart,
+  onExit,
 }: WizardShellProps) {
   const navigate = useNavigate();
+  const handleExit = onExit ?? (() => navigate('/overview'));
   const currentIndex = getStepIndex(currentStep);
   const totalSteps = WIZARD_STEP_META.length;
   // % shown in the header — counts welcome + done so the bar moves on the
@@ -152,7 +159,7 @@ export default function WizardShell({
         </nav>
         <div className="m-3 space-y-1">
           <button
-            onClick={() => navigate('/overview')}
+            onClick={handleExit}
             className="block w-full px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-left"
           >
             ← Skip for later — go to Dashboard
@@ -238,7 +245,7 @@ export default function WizardShell({
           ) : null}
 
           <button
-            onClick={() => navigate('/overview')}
+            onClick={handleExit}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             aria-label="Exit setup"
             title="Skip for later — your progress is saved"

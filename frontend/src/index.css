@@ -151,4 +151,14 @@ h1, h2, h3, h4 {
   .lb-required-info-grid {
     grid-template-columns: repeat(2, 1fr) !important;
   }
+
+  /* Setup wizard modal goes full-screen on mobile per spec. */
+  .lb-wizard-modal {
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+  }
 }

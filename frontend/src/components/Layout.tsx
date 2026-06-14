@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Settings, LogOut, Shield, FlaskConical, Menu,
@@ -13,6 +13,7 @@ import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
+import SetupWizard from '../pages/onboarding/SetupWizard';
 // OnboardingStep1Modal and OnboardingStep2Modal (the legacy 2-step
 // segmentation quiz) are intentionally NOT rendered anymore. The 8-step
 // guided setup wizard at /onboarding/setup replaces them. The modal
@@ -84,6 +85,26 @@ export function Layout() {
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(false);
+  // In-app Setup wizard modal. The /onboarding/setup route still works
+  // for first-run / direct deep-links; this flag overlays the wizard on
+  // top of any current route via the top-nav Setup button.
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // Auto-close on route change so step deep-links (e.g. Pricing setup
+  // jumping into AI Playbook) dismiss the modal cleanly. Snapshot the
+  // path at open time and compare on later renders.
+  const wizardOpenedAt = useRef<string | null>(null);
+  useEffect(() => {
+    if (wizardOpen) {
+      wizardOpenedAt.current = location.pathname;
+    } else {
+      wizardOpenedAt.current = null;
+    }
+  }, [wizardOpen]);
+  useEffect(() => {
+    if (wizardOpen && wizardOpenedAt.current && wizardOpenedAt.current !== location.pathname) {
+      setWizardOpen(false);
+    }
+  }, [location.pathname, wizardOpen]);
   const [aiChatInput, setAiChatInput] = useState('');
   const [aiChatFiles, setAiChatFiles] = useState<File[]>([]);
 
@@ -676,7 +697,7 @@ export function Layout() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => navigate('/onboarding/setup')}
+                    onClick={() => setWizardOpen(true)}
                     className="lb-setup-btn flex items-center gap-2 hover:opacity-90 transition-opacity"
                     style={{
                       height: 38,
@@ -773,6 +794,43 @@ export function Layout() {
           <CancelledSubscriptionBanner />
 
           <Outlet />
+
+          {/* In-app Setup wizard modal. Mounts the full SetupWizard inside
+              a centered 940x640 dialog over a dark blur scrim; goes
+              full-screen on mobile per spec. The wizard's onExit closes
+              the modal in place instead of routing to /overview. */}
+          {wizardOpen && (
+            <>
+              <div
+                onClick={() => setWizardOpen(false)}
+                className="fixed inset-0"
+                style={{
+                  background: 'rgba(10,21,48,0.45)',
+                  backdropFilter: 'blur(2px)',
+                  zIndex: 70,
+                }}
+                aria-hidden
+              />
+              <div
+                role="dialog"
+                aria-label="Setup wizard"
+                className="lb-wizard-modal fixed flex flex-col overflow-hidden"
+                style={{
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: 'min(940px, calc(100vw - 32px))',
+                  height: 'min(640px, calc(100dvh - 32px))',
+                  background: 'var(--lb-surface)',
+                  borderRadius: 18,
+                  boxShadow: '0 24px 60px rgba(10,21,48,0.35)',
+                  zIndex: 80,
+                }}
+              >
+                <SetupWizard onExit={() => setWizardOpen(false)} />
+              </div>
+            </>
+          )}
 
           {/* Floating AI assistant trigger — raised so it never overlaps the
               Lead Activity composer send button. */}
