@@ -6,6 +6,7 @@ import { useAppStore } from '../../../store/appStore';
 import { followUpApi, usersApi } from '../../../services/api';
 import { notify } from '../../../store/notificationStore';
 import { WizardStepActions } from '../WizardStepActions';
+import { SettingCard, FieldRow, ToggleRow } from '../../../components/automation/ui';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -65,6 +66,11 @@ const TRIAL_BUNDLE: Record<string, unknown> = {
  *   - Resume follow-ups after a conversation
  *   - Check in after customer deferral
  *   - Re-engage after customer hired competitor
+ *
+ * The card vocabulary (SettingCard / FieldRow / ToggleRow / IconTile) is
+ * imported from `components/automation/ui` so the wizard renders with the
+ * SAME design system as the main Automation pages — no hand-rolled
+ * Tailwind cards, no hardcoded slate-* colors, no toggle size drift.
  *
  * Save fans out across every connected SavedAccount: the TRIAL_BUNDLE
  * master switches + granular settings go through
@@ -192,22 +198,33 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   }
 
   return (
-    <div className="pt-2">
+    <div style={{ paddingTop: 8 }}>
       {/* Sticky top action row — Save & Continue stays in view through
-          the long bundle picker + fine-tune section. */}
+          the long fine-tune section. Save button uses the same accent
+          background as AutoPageHeader's primary action so the wizard
+          shares the main Automation page's affordance vocabulary. */}
       <WizardStepActions>
         <button
           type="button"
           onClick={() => void apply()}
           disabled={saving}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '10px 20px', fontSize: 13.5, fontWeight: 700,
+            background: 'var(--lb-accent)', color: 'white',
+            border: 0, borderRadius: 10,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            opacity: saving ? 0.6 : 1,
+            fontFamily: 'inherit',
+            transition: 'background 120ms',
+          }}
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? <Loader2 size={14} className="animate-spin" /> : null}
           {saving ? 'Saving…' : 'Save & Continue'}
-          {!saving && <ArrowRight className="w-4 h-4" />}
+          {!saving && <ArrowRight size={14} />}
         </button>
         {cascadeNote && (
-          <span className="text-[11px] text-slate-500">
+          <span style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>
             Applies to all connected accounts.
           </span>
         )}
@@ -215,113 +232,138 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
-      {/* Trial users get the full product turned on. The Basic /
-          Recommended / Advanced plan picker that used to sit here is
-          gone — there's nothing to choose between, and the granular
-          cards below stay editable for users who want to dial things
-          back. */}
-
       {/* ─── Fine-tune section ──────────────────────────────────────────── */}
       <div>
-        <div className="mb-4">
-          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Timing &amp; follow-ups</h2>
-          <p className="text-sm text-slate-500 mt-1">All of these are editable later on Automation. Defaults are tuned for the trial.</p>
+        <div style={{ marginBottom: 18 }}>
+          <h2 style={{
+            margin: 0, fontSize: 18, fontWeight: 700,
+            color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
+          }}>
+            Timing &amp; follow-ups
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
+            All of these are editable later on Automation. Defaults are tuned for the trial.
+          </p>
         </div>
 
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">
-            <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+          <div style={{
+            padding: '48px 0', textAlign: 'center',
+            color: 'var(--lb-ink-6, #94a3b8)',
+          }}>
+            <Loader2 size={20} className="animate-spin" style={{ display: 'inline-block' }} />
           </div>
         ) : (
-          <div className="space-y-3">
-            {/* Timing — instant text + call gates */}
-            <FinetuneCard icon={Clock} title="Timing" subtitle={`Business hours: ${businessHoursLabel}`}>
-              <ToggleRow
-                label="Only send instant text during business hours"
-                checked={opts.firstMsgDuringBusinessHours}
-                onChange={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
-              />
-              <ToggleRow
-                label="Only call during business hours"
-                checked={opts.callDuringBusinessHours}
-                onChange={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
-              />
-            </FinetuneCard>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Timing — instant text + call gates. No master toggle: both
+                rows are independent gates that share the same business-
+                hours window. */}
+            <SettingCard
+              icon={Clock}
+              iconTone="blue"
+              title="Timing"
+              subtitle={`Business hours: ${businessHoursLabel}`}
+              contentPad="8px 24px 16px"
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <ToggleRow
+                  icon={Clock}
+                  iconTone="gray"
+                  label="Only send instant text during business hours"
+                  on={opts.firstMsgDuringBusinessHours}
+                  onChange={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
+                />
+                <ToggleRow
+                  icon={PhoneCall}
+                  iconTone="gray"
+                  label="Only call during business hours"
+                  on={opts.callDuringBusinessHours}
+                  onChange={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
+                />
+              </div>
+            </SettingCard>
 
-            {/* Quiet hours — follow-up overnight gate */}
-            <FinetuneCard icon={Moon} title="Quiet hours" subtitle="Don't send follow-ups overnight.">
-              <ToggleRow
-                label="Apply quiet hours to follow-ups"
-                checked={opts.followUpsApplyQuietHours}
-                onChange={v => setOpts(o => ({ ...o, followUpsApplyQuietHours: v }))}
-              />
-            </FinetuneCard>
+            {/* Quiet hours — single master toggle gates the overnight rule. */}
+            <SettingCard
+              icon={Moon}
+              iconTone="violet"
+              title="Quiet hours"
+              subtitle="Don't send follow-ups overnight."
+              enabled={opts.followUpsApplyQuietHours}
+              onToggle={v => setOpts(o => ({ ...o, followUpsApplyQuietHours: v }))}
+            />
 
-            {/* Resume after silence */}
-            <FinetuneCard
+            {/* Resume after silence — master toggle + delay picker. */}
+            <SettingCard
               icon={RotateCcw}
+              iconTone="teal"
               title="Resume follow-ups after a conversation"
               subtitle="When a customer replies and then goes silent again, start a new follow-up sequence."
+              enabled={opts.fuReEnrollOnSilence}
+              onToggle={v => setOpts(o => ({ ...o, fuReEnrollOnSilence: v }))}
+              contentPad="0 24px 16px"
             >
-              <ToggleRow
-                label="Resume after silence"
-                checked={opts.fuReEnrollOnSilence}
-                onChange={v => setOpts(o => ({ ...o, fuReEnrollOnSilence: v }))}
-              />
-              {opts.fuReEnrollOnSilence && (
-                <DelayPicker
-                  label="Wait before resuming"
+              <FieldRow
+                label="Wait before resuming"
+                sublabel="How long after your last message before follow-ups start again."
+                align="top"
+                noBorder
+              >
+                <PillRow
                   value={opts.fuReEnrollDelay}
                   options={RESUME_DELAY_OPTIONS}
                   onChange={v => setOpts(o => ({ ...o, fuReEnrollDelay: v }))}
-                  hint="How long to wait after your last message before starting follow-ups again."
                 />
-              )}
-            </FinetuneCard>
+              </FieldRow>
+            </SettingCard>
 
-            {/* Check in after customer deferral */}
-            <FinetuneCard
+            {/* Check in after customer deferral — master toggle + delay picker. */}
+            <SettingCard
               icon={MessageSquare}
+              iconTone="purple"
               title="Check in after customer deferral"
               subtitle={"When customer says \"I'll get back to you\" / \"let me think\", schedule one nudge later. Cancels if they reply first."}
+              enabled={opts.aiDeferralCheckIn}
+              onToggle={v => setOpts(o => ({ ...o, aiDeferralCheckIn: v }))}
+              contentPad="0 24px 16px"
             >
-              <ToggleRow
-                label="Send a check-in"
-                checked={opts.aiDeferralCheckIn}
-                onChange={v => setOpts(o => ({ ...o, aiDeferralCheckIn: v }))}
-              />
-              {opts.aiDeferralCheckIn && (
-                <DelayPicker
-                  label="Send check-in after"
+              <FieldRow
+                label="Send check-in after"
+                sublabel="AI generates this check-in from the conversation using your Conversation Goal."
+                align="top"
+                noBorder
+              >
+                <PillRow
                   value={opts.aiDeferralDelay}
                   options={DEFERRAL_DELAY_OPTIONS}
                   onChange={v => setOpts(o => ({ ...o, aiDeferralDelay: v }))}
-                  hint="AI generates this check-in from the conversation using your Conversation Goal."
                 />
-              )}
-            </FinetuneCard>
+              </FieldRow>
+            </SettingCard>
 
-            {/* Re-engage hired competitor */}
-            <FinetuneCard
+            {/* Re-engage hired competitor — master toggle + delay picker. */}
+            <SettingCard
               icon={PhoneCall}
+              iconTone="orange"
               title="Re-engage after customer hired competitor"
               subtitle="When customer says they hired someone else, send one polite check-in later. Captures the dissatisfied ones."
+              enabled={opts.aiHiredCompetitorReengage}
+              onToggle={v => setOpts(o => ({ ...o, aiHiredCompetitorReengage: v }))}
+              contentPad="0 24px 16px"
             >
-              <ToggleRow
-                label="Send a re-engage"
-                checked={opts.aiHiredCompetitorReengage}
-                onChange={v => setOpts(o => ({ ...o, aiHiredCompetitorReengage: v }))}
-              />
-              {opts.aiHiredCompetitorReengage && (
-                <DelayPicker
-                  label="Send re-engage after"
+              <FieldRow
+                label="Send re-engage after"
+                sublabel="AI generates this re-engage from the conversation using your Conversation Goal."
+                align="top"
+                noBorder
+              >
+                <PillRow
                   value={opts.aiHiredCompetitorDelay}
                   options={HIRED_DELAY_OPTIONS}
                   onChange={v => setOpts(o => ({ ...o, aiHiredCompetitorDelay: v }))}
-                  hint="AI generates this re-engage from the conversation using your Conversation Goal."
                 />
-              )}
-            </FinetuneCard>
+              </FieldRow>
+            </SettingCard>
 
             {/* Auto Reply Availability moved to AI Rules step — it's a
                 conversation-level rule about WHEN AI can reply, not a
@@ -333,14 +375,14 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         )}
       </div>
 
-      <div className="mt-8 space-y-2">
+      <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {cascadeNote && (
-          <p className="text-xs text-slate-400 max-w-md">
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--lb-ink-5)', maxWidth: 440 }}>
             Applies to all connected accounts. You can customize each account later on the Automation page.
           </p>
         )}
-        <p className="text-xs text-slate-400 max-w-md">
-          <Workflow className="inline w-3.5 h-3.5 mr-1 align-text-bottom" />
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--lb-ink-5)', maxWidth: 440 }}>
+          <Workflow size={13} style={{ display: 'inline-block', marginRight: 6, verticalAlign: 'text-bottom' }} />
           Templates, business-hours windows, and per-card message text stay editable on Templates and Automation.
         </p>
       </div>
@@ -350,80 +392,45 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
 
 // ─── Subcomponents ──────────────────────────────────────────────────────
 
-function FinetuneCard({
-  icon: Icon, title, subtitle, children,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
+/**
+ * Horizontal pill row — used for the delay pickers (6-hour, 12-hour, …).
+ * Styled to match the Automation page's segmented affordances: selected
+ * pill uses --lb-accent, idle pills use --lb-line border on white. Kept
+ * inline because the main pages don't have a 6-option pill picker — the
+ * closest equivalent is PlanSwitcher's segmented control, which has its
+ * own larger sizing.
+ */
+function PillRow({
+  value, options, onChange,
+}: { value: string; options: string[]; onChange: (v: string) => void }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="flex items-start gap-3 mb-3">
-        <span className="w-9 h-9 rounded-lg inline-flex items-center justify-center bg-slate-100 text-slate-600 shrink-0">
-          <Icon className="w-4 h-4" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-extrabold text-slate-900">{title}</div>
-          {subtitle && <p className="text-xs text-slate-500 leading-relaxed mt-0.5">{subtitle}</p>}
-        </div>
-      </div>
-      <div className="space-y-2">{children}</div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {options.map(opt => {
+        const active = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            style={{
+              padding: '7px 14px',
+              fontSize: 12.5, fontWeight: 600,
+              background: active ? 'var(--lb-accent)' : 'white',
+              color: active ? 'white' : 'var(--lb-ink-3)',
+              border: '1px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'background 120ms, border-color 120ms, color 120ms',
+            }}
+          >
+            {opt}
+          </button>
+        );
+      })}
     </div>
   );
 }
-
-function ToggleRow({
-  label, checked, onChange,
-}: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-slate-100 bg-slate-50 cursor-pointer">
-      <span className="text-sm text-slate-800">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-          checked ? 'bg-blue-600' : 'bg-slate-300'
-        }`}
-      >
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-1'}`} />
-      </button>
-    </label>
-  );
-}
-
-function DelayPicker({
-  label, value, options, onChange, hint,
-}: { label: string; value: string; options: string[]; onChange: (v: string) => void; hint?: string }) {
-  return (
-    <div className="pl-2 pt-1">
-      <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-1">{label}</div>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map(opt => {
-          const active = value === opt;
-          return (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => onChange(opt)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
-                active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              {opt}
-            </button>
-          );
-        })}
-      </div>
-      {hint && <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">{hint}</p>}
-    </div>
-  );
-}
-
-// RadioRow moved to AIRulesStep with the Auto Reply Availability card.
 
 // Convert a 24h "HH:MM" string into a friendlier "9:00 AM" label. Used
 // only for the read-only business-hours line; the full hours picker
