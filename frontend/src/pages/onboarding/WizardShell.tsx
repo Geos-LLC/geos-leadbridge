@@ -189,23 +189,20 @@ export default function WizardShell({
 
       {/* Right pane */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Sticky top header — owns ALL wizard navigation. Progress on
-            the left; Back + step-specific actions + Exit on the right.
-            Bottom footer is intentionally gone so users never have to
-            scroll to find a Save & Continue button. */}
+        {/* Sticky top header — two rows: progress bar on top, then the
+            action row (Back + step-specific actions + Skip/Continue +
+            Exit). Bottom footer is intentionally gone so users never
+            have to scroll to find Save & Continue. */}
         <header
-          className="sticky top-0 z-10 px-6 md:px-10 py-4 border-b flex items-center gap-3"
+          className="sticky top-0 z-10 px-6 md:px-10 pt-4 pb-3 border-b"
           style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line)' }}
         >
-          {/* Progress block — flex-1 + min-w-0 so it compresses before
-              the action buttons wrap. flex-wrap was dropped from the
-              header so the action row stays on top in the narrower
-              in-app Setup modal (940px frame ~ 680px right pane). */}
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 truncate">
+          {/* Row 1: progress bar — full width above the buttons. */}
+          <div className="mb-3">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
               Step {currentIndex + 1} of {totalSteps}
             </div>
-            <div className="mt-1.5 h-1.5 w-full max-w-xs bg-slate-100 rounded-full overflow-hidden">
+            <div className="mt-1.5 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
               <div
                 className="h-full bg-blue-600 transition-all duration-300"
                 style={{ width: `${progressPct}%` }}
@@ -213,64 +210,68 @@ export default function WizardShell({
             </div>
           </div>
 
-          {/* Back — shown whenever a previous step exists, regardless
-              of whether the step owns its own actions. */}
-          {onBack && (
+          {/* Row 2: action row. Back left, step / continue buttons
+              center, Exit right. */}
+          <div className="flex items-center gap-3">
+            {/* Back — shown whenever a previous step exists, regardless
+                of whether the step owns its own actions. */}
+            {onBack && (
+              <button
+                onClick={onBack}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
+                aria-label="Previous step"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+            )}
+
+            {/* Step-owned action slot. Steps wrap their buttons in
+                <WizardStepActions> which portals them into the
+                headerSlot ref below. The headerActions prop is the
+                legacy/static fallback when a step doesn't use the
+                portal. The default Skip/Continue is suppressed whenever
+                either a portal child or static headerActions exists. */}
+            <div ref={setHeaderSlot} className="flex items-center gap-2 flex-1 min-w-0" />
+            {headerActions ? (
+              <div className="flex items-center gap-2 flex-1 min-w-0">{headerActions}</div>
+            ) : !hideActions ? (
+              <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+                {onSkip && (
+                  <button
+                    onClick={onSkip}
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <SkipForward className="w-4 h-4" />
+                    <span className="hidden sm:inline">Skip this step</span>
+                  </button>
+                )}
+                {onContinue && (
+                  <button
+                    onClick={onContinue}
+                    disabled={continueDisabled || saving}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {saving ? 'Saving…' : continueLabel}
+                    {!saving && <ArrowRight className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
+            ) : null}
+
             <button
-              onClick={onBack}
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-              aria-label="Previous step"
+              onClick={handleExit}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
+              aria-label="Exit setup"
+              title="Skip for later — your progress is saved"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Back</span>
+              <X className="w-4 h-4" />
+              <span className="hidden sm:inline">Exit</span>
             </button>
-          )}
-
-          {/* Step-owned action slot. Steps wrap their buttons in
-              <WizardStepActions> which portals them into the
-              headerSlot ref below. The headerActions prop is the
-              legacy/static fallback when a step doesn't use the
-              portal. The default Skip/Continue is suppressed whenever
-              either a portal child or static headerActions exists. */}
-          <div ref={setHeaderSlot} className="flex items-center gap-2" />
-          {headerActions ? (
-            <div className="flex items-center gap-2">{headerActions}</div>
-          ) : !hideActions ? (
-            <>
-              {onSkip && (
-                <button
-                  onClick={onSkip}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg hover:bg-slate-100 transition-colors"
-                >
-                  <SkipForward className="w-4 h-4" />
-                  <span className="hidden sm:inline">Skip this step</span>
-                </button>
-              )}
-              {onContinue && (
-                <button
-                  onClick={onContinue}
-                  disabled={continueDisabled || saving}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {saving ? 'Saving…' : continueLabel}
-                  {!saving && <ArrowRight className="w-4 h-4" />}
-                </button>
-              )}
-            </>
-          ) : null}
-
-          <button
-            onClick={handleExit}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            aria-label="Exit setup"
-            title="Skip for later — your progress is saved"
-          >
-            <X className="w-4 h-4" />
-            <span className="hidden sm:inline">Exit</span>
-          </button>
+          </div>
         </header>
 
         {/* Step body */}
