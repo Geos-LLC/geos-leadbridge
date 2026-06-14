@@ -283,10 +283,14 @@ describe('getCustomInstructions', () => {
 // ─── Token budget regression guard ───────────────────────────────────────
 
 describe('token budget', () => {
-  it('full empty-playbook block stays under 6000 characters', () => {
+  it('full empty-playbook block stays under 7000 characters', () => {
     const block = renderPlaybookBlock(makeAccount());
-    // ~4 chars per token rule-of-thumb → ~1500 tokens. Easily fits.
-    expect(block.length).toBeLessThan(6000);
+    // ~4 chars per token rule-of-thumb → ~1750 tokens. Easily fits.
+    // Threshold bumped from 6000 → 7000 when the deterministic-quote
+    // PRICING rule joined BASE HARD RULES (deterministic pricing engine,
+    // 2026-06-13). The added text is the only path that prevents the
+    // LLM from inventing add-on totals — worth ~500 chars.
+    expect(block.length).toBeLessThan(7000);
   });
 
   it('section keys covered list matches PLAYBOOK_SECTION_ORDER', () => {

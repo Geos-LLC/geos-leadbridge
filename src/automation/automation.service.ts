@@ -27,6 +27,7 @@ import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
+import { buildQuoteFromContext } from '../pricing/pricing-engine';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -2129,6 +2130,29 @@ export class AutomationService implements OnModuleInit {
           } catch { /* invalid JSON */ }
         }
 
+        // Deterministic quote block — pricing engine. BASE HARD RULES
+        // make this authoritative: when present, the LLM quotes these
+        // numbers verbatim instead of inferring from the PRICING TABLE.
+        // Built from the same hydrated pricing used for pricingBlock so
+        // the two never disagree. Skipped under qualify (no quoting).
+        let quoteBlock: string | undefined;
+        if (pricingJson && !suppressPricingForQualify) {
+          try {
+            const p = hydratePricing(JSON.parse(pricingJson));
+            const additionalInfo = leadDetails['Additional details'] ?? null;
+            const built = buildQuoteFromContext({
+              pricing: p,
+              leadDetails,
+              customerMessage,
+              conversationHistory,
+              additionalInfo,
+            });
+            if (built) quoteBlock = built;
+          } catch (err: any) {
+            this.logger.warn(`[AI quote] engine threw for ${pendingId}: ${err?.message}`);
+          }
+        }
+
         // REFERENCE: account FAQ — verified per-tenant answers to the most
         // common customer questions. Empty fields fall through to the GLOBAL
         // defer-when-empty rule.
@@ -2185,6 +2209,7 @@ export class AutomationService implements OnModuleInit {
           threadContextBlock: threadContextPrompt,
           businessBlock,
           pricingBlock,
+          quoteBlock,
           faqBlock,
           playbookBlock: playbookBlock || undefined,
           qualificationBlock: qualificationBlock || undefined,

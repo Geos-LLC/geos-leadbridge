@@ -1467,6 +1467,11 @@ export class NotificationsService {
             customerMessage: lead.message || '',
             category: lead.category ?? undefined,
             accountName: context.accountName,
+            // Feed the raw platform payload so the deterministic pricing
+            // engine can extract bed/bath/sqft/service type. Without this
+            // the engine still matches add-on mentions in the message body
+            // but cannot compute a base price.
+            leadRawJson: lead.rawJson ?? undefined,
           });
           this.logger.log(
             `[INSTANT_TEXT_AI] generated ${aiGeneratedBody.length} chars for lead ${leadId} account ${savedAccountId}`,

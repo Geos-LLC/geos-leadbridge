@@ -8,7 +8,8 @@ import { buildPriceRangeInstruction } from './price-range';
 import { buildBusinessContextBlock } from './business-context';
 import { buildFaqBlock, parseAccountFaq } from './faq-context';
 import { buildPricingGuardRules } from './pricing-guards';
-import { hydratePricing } from '../users/pricing-hydrate';
+import { hydratePricing, parseAndHydratePricing } from '../users/pricing-hydrate';
+import { buildQuoteFromContext } from '../pricing/pricing-engine';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -65,6 +66,18 @@ export class AiController {
       timezone: account?.followUpTimezone ?? null,
     });
 
+    // Deterministic quote — compute base + add-ons in code so the LLM
+    // doesn't infer prices. The BASE HARD RULES make this block
+    // authoritative: the model quotes these numbers verbatim. See
+    // src/pricing/pricing-engine.ts.
+    const quoteBlock = this.computeQuoteBlock({
+      pricingJson: account?.servicePricingJson ?? null,
+      leadDetails: details,
+      customerMessage: customerMessage || lead.message || '',
+      conversationHistory: conversationHistory ?? null,
+      additionalInfo: details?.['Additional details'] ?? null,
+    });
+
     let reply: string;
     try {
       reply = await this.aiService.generateReply({
@@ -79,6 +92,7 @@ export class AiController {
         strategyPrompt,
         businessBlock,
         pricingBlock: pricingBlock ?? undefined,
+        quoteBlock: quoteBlock ?? undefined,
         faqBlock: faqBlock ?? undefined,
         conversationHistory: conversationHistory ?? [],
         leadDetails: details,
@@ -156,6 +170,17 @@ export class AiController {
     const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
+    // Deterministic quote — same engine the AI conversation, follow-ups,
+    // and Instant Text all use. Uses the loaded conversation history so
+    // the engine picks up add-ons the customer mentioned mid-thread.
+    const quoteBlock = this.computeQuoteBlock({
+      pricingJson: account?.servicePricingJson ?? null,
+      leadDetails: details,
+      customerMessage: customerMessage || lead.message || '',
+      conversationHistory,
+      additionalInfo: details?.['Additional details'] ?? null,
+    });
+
     let reply: string;
     try {
       reply = await this.aiService.generateReply({
@@ -171,6 +196,7 @@ export class AiController {
         threadContextBlock: threadContextPrompt,
         businessBlock,
         pricingBlock: pricingBlock ?? undefined,
+        quoteBlock: quoteBlock ?? undefined,
         faqBlock: faqBlock ?? undefined,
         urgencyBlock: urgencyBlock ?? undefined,
         conversationHistory,
@@ -331,6 +357,39 @@ export class AiController {
 
       return parts.join('\n');
     } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Thin wrapper around the deterministic pricing engine. Hydrates the
+   * pricing JSON, then asks pricing-engine.buildQuoteFromContext to
+   * extract add-ons + facts and produce the authoritative quote block.
+   * Returns null when there's nothing meaningful to inject (no pricing
+   * configured, no facts, no add-on mentions).
+   */
+  private computeQuoteBlock(opts: {
+    pricingJson: string | null | undefined;
+    leadDetails: Record<string, string>;
+    customerMessage: string;
+    conversationHistory: ConversationMessage[] | null;
+    additionalInfo: string | null;
+  }): string | null {
+    const pricing = parseAndHydratePricing(opts.pricingJson ?? null);
+    if (!pricing) return null;
+    try {
+      return buildQuoteFromContext({
+        pricing,
+        leadDetails: opts.leadDetails,
+        customerMessage: opts.customerMessage,
+        conversationHistory: opts.conversationHistory,
+        additionalInfo: opts.additionalInfo,
+      });
+    } catch (err: any) {
+      // Engine is pure — failures here are programming bugs, not data
+      // bugs. Log and degrade gracefully (no quote block) so the AI
+      // reply still goes out using only the PRICING TABLE reference.
+      this.logger.warn(`[AI computeQuoteBlock] engine threw: ${err?.message}`);
       return null;
     }
   }

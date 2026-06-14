@@ -154,6 +154,80 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     expect(generateReply.mock.calls[0][0].conversationHistory).toEqual([]);
   });
 
+  it('passes a deterministic CALCULATED QUOTE block when pricing + rawJson + add-on mention all align', async () => {
+    // Deterministic pricing engine wired into Instant Text (2026-06-13).
+    // The block content is fully tested in src/pricing/*.spec.ts — here we
+    // only pin the wiring: when SavedAccount has pricing JSON, the lead
+    // rawJson has bed/bath, and the customer mentions a configured add-on,
+    // the engine produces a "Calculated total" line and the service hands
+    // it through as `quoteBlock` to AiService.generateReply.
+    const pricingJson = JSON.stringify({
+      cleaningTypes: [
+        { key: 'regular', label: 'Regular', enabled: true },
+        { key: 'deep', label: 'Deep', enabled: true },
+      ],
+      priceTable: [
+        { bed: 3, bath: 2, sqftMin: 1300, sqftMax: 1600, regular: 159, deep: 219 },
+      ],
+      extras: [
+        { key: 'fridge', label: 'Inside Fridge', price: 40 },
+        { key: 'oven', label: 'Inside Oven', price: 40 },
+      ],
+    });
+    const { svc, generateReply } = buildSvc({
+      account: {
+        businessName: 'Test',
+        servicePricingJson: pricingJson,
+        faqJson: null,
+        followUpSettingsJson: null,
+        followUpTimezone: null,
+        userId: 'user-1',
+      },
+    });
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'How much for a deep clean with inside the fridge and oven?',
+      leadRawJson: JSON.stringify({ bedrooms: 3, bathrooms: 2, serviceType: 'Deep Clean' }),
+    });
+    const quoteBlock = generateReply.mock.calls[0][0].quoteBlock;
+    expect(typeof quoteBlock).toBe('string');
+    expect(quoteBlock).toContain('Calculated total: $299');
+    expect(quoteBlock).toContain('Inside Fridge');
+    expect(quoteBlock).toContain('Inside Oven');
+    expect(quoteBlock).toMatch(/use these numbers verbatim/i);
+  });
+
+  it('emits clarification quoteBlock when leadRawJson is missing (no bed/bath)', async () => {
+    // Spec: "If no history exists, pricing falls back to platform data only."
+    // When platform data is also absent, the engine emits the
+    // requiresClarification block so the LLM asks instead of guessing.
+    const pricingJson = JSON.stringify({
+      cleaningTypes: [{ key: 'regular', label: 'Regular', enabled: true }],
+      priceTable: [{ bed: 3, bath: 2, regular: 159 }],
+      extras: [],
+    });
+    const { svc, generateReply } = buildSvc({
+      account: {
+        businessName: 'Test',
+        servicePricingJson: pricingJson,
+        faqJson: null,
+        followUpSettingsJson: null,
+        followUpTimezone: null,
+        userId: 'user-1',
+      },
+    });
+    await svc.generateInstantTextBody({
+      savedAccountId: 'sa-1',
+      customerName: 'Sam',
+      customerMessage: 'How much?',
+    });
+    const quoteBlock = generateReply.mock.calls[0][0].quoteBlock;
+    expect(typeof quoteBlock).toBe('string');
+    expect(quoteBlock).toMatch(/NOT been calculated/i);
+    expect(quoteBlock).toContain('bedrooms');
+  });
+
   it('passes the saved account globalAiPrompt when set', async () => {
     const { svc, generateReply } = buildSvc({
       user: { globalAiPrompt: 'Always sign off with "—Nadja"', name: 'Nadja' },

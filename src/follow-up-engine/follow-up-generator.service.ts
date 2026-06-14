@@ -27,6 +27,7 @@ import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
+import { buildQuoteFromContext } from '../pricing/pricing-engine';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import OpenAI from 'openai';
@@ -172,15 +173,58 @@ export class FollowUpGeneratorService {
 
     // Extract request details (bedrooms, bathrooms, service type) from lead
     let requestDetails = '';
+    // Same record shape the pricing engine consumes (see
+    // inferQuoteFacts in src/pricing/pricing-engine.ts) — keys are
+    // user-visible labels because they originated as TT/Yelp survey
+    // questions. We build both the flat string (existing prompt UX)
+    // and the record (new deterministic-quote engine input).
+    const leadFactsRecord: Record<string, string> = {};
+    let additionalInfo: string | null = null;
     if (lead?.rawJson) {
       try {
         const raw = JSON.parse(lead.rawJson);
         const details: string[] = [];
-        if (raw.bedrooms) details.push(`${raw.bedrooms} bedrooms`);
-        if (raw.bathrooms) details.push(`${raw.bathrooms} bathrooms`);
-        if (raw.squareFeet || raw.square_feet) details.push(`${raw.squareFeet || raw.square_feet} sq ft`);
-        if (raw.frequency) details.push(`frequency: ${raw.frequency}`);
-        if (raw.serviceType || raw.service_type) details.push(`service: ${raw.serviceType || raw.service_type}`);
+        if (raw.bedrooms !== undefined && raw.bedrooms !== null) {
+          details.push(`${raw.bedrooms} bedrooms`);
+          leadFactsRecord['Bedrooms'] = String(raw.bedrooms);
+        }
+        if (raw.bathrooms !== undefined && raw.bathrooms !== null) {
+          details.push(`${raw.bathrooms} bathrooms`);
+          leadFactsRecord['Bathrooms'] = String(raw.bathrooms);
+        }
+        const sqftVal = raw.squareFeet ?? raw.square_feet;
+        if (sqftVal !== undefined && sqftVal !== null) {
+          details.push(`${sqftVal} sq ft`);
+          leadFactsRecord['Square footage'] = String(sqftVal);
+        }
+        if (raw.frequency) {
+          details.push(`frequency: ${raw.frequency}`);
+          leadFactsRecord['Frequency'] = String(raw.frequency);
+        }
+        const svcVal = raw.serviceType ?? raw.service_type;
+        if (svcVal) {
+          details.push(`service: ${svcVal}`);
+          leadFactsRecord['Cleaning type'] = String(svcVal);
+        }
+        // Also pull TT request.details[] / Yelp project.survey_answers[]
+        // so the pricing engine sees the same Q&A the other surfaces see.
+        const ttDetails: any[] = raw.request?.details || raw.details || [];
+        for (const item of ttDetails) {
+          if (item?.question && item?.answer) {
+            leadFactsRecord[String(item.question)] = String(item.answer);
+          }
+        }
+        const yelpSurvey: any[] = raw.project?.survey_answers || [];
+        for (const q of yelpSurvey) {
+          if (q?.question_text && q?.answer_text) {
+            const a = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
+            leadFactsRecord[String(q.question_text)] = a;
+          }
+        }
+        if (raw.project?.additional_info) {
+          additionalInfo = String(raw.project.additional_info);
+          leadFactsRecord['Additional details'] = additionalInfo;
+        }
         if (details.length > 0) requestDetails = `Customer request details: ${details.join(', ')}`;
       } catch {}
     }
@@ -193,6 +237,10 @@ export class FollowUpGeneratorService {
     let businessContext = '';
     let urgencyContext = '';
     let playbookBlock = '';
+    // Deterministic quote block from the pricing engine. Same engine used
+    // by AI Conversation / Review Mode / Instant Text. Filled below in the
+    // `if (lead?.businessId)` branch.
+    let quoteContext = '';
     // Qualification REFERENCE block. Only emitted when the resolved strategy
     // is 'price' or 'qualify' AND the tenant has saved a non-empty
     // `qualificationV2.requiredFields` array. Existing accounts without
@@ -270,6 +318,26 @@ export class FollowUpGeneratorService {
             // or when the requested service type has zero prices across all rows.
             priceParts.push(buildPricingGuardRules(p));
             pricingContext = priceParts.join('\n');
+          }
+          // Deterministic quote — same engine used by AI Conversation /
+          // Review Mode / Instant Text. BASE HARD RULES make this
+          // authoritative; the LLM will quote these numbers verbatim
+          // instead of inferring from the table.
+          try {
+            const built = buildQuoteFromContext({
+              pricing: p,
+              leadDetails: leadFactsRecord,
+              customerMessage: lead?.message ?? null,
+              conversationHistory: context?.recentMessages ?? null,
+              additionalInfo,
+            });
+            if (built) {
+              quoteContext =
+                '=== REFERENCE: CALCULATED QUOTE (deterministic — these numbers are authoritative; see BASE HARD RULES) ===\n' +
+                built;
+            }
+          } catch (err: any) {
+            this.logger.warn(`[FollowUpGenerator] quote engine threw for ${conversationId}: ${err?.message}`);
           }
         } catch { /* invalid JSON */ }
       }
@@ -387,6 +455,10 @@ export class FollowUpGeneratorService {
 
     if (pricingContext) {
       systemParts.push('', pricingContext);
+    }
+
+    if (quoteContext) {
+      systemParts.push('', quoteContext);
     }
 
     if (faqContext) {

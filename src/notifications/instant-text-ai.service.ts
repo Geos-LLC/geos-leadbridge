@@ -37,6 +37,7 @@ import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
+import { buildQuoteFromContext } from '../pricing/pricing-engine';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -89,6 +90,14 @@ export interface GenerateInstantTextBodyInput {
   category?: string;
   /** Optional account display name override. Defaults to SavedAccount.businessName. */
   accountName?: string;
+  /**
+   * Raw lead JSON (TT request payload / Yelp project payload). Optional but
+   * strongly recommended — it's the only source of bedrooms/bathrooms/sqft
+   * for the deterministic pricing engine on first-touch SMS. Without this,
+   * the engine can still match add-ons in the customer message but cannot
+   * compute a base price.
+   */
+  leadRawJson?: string;
 }
 
 @Injectable()
@@ -212,6 +221,18 @@ export class InstantTextAiService {
       followUpSettingsJson: account.followUpSettingsJson ?? null,
     });
 
+    // Deterministic quote — same pricing engine that runs in AI
+    // Conversation / Review Mode / Follow-ups. On first-touch SMS there
+    // is no conversation history (the customer's message IS the only
+    // turn), so the engine sees customerMessage + platform-derived facts.
+    // If `leadRawJson` was not passed in, base-price calculation falls
+    // back to "missing inputs" and the LLM asks rather than guessing.
+    const quoteBlock = this.buildQuoteBlock({
+      pricingJson: account.servicePricingJson,
+      leadRawJson: opts.leadRawJson,
+      customerMessage: opts.customerMessage,
+    });
+
     const accountName = opts.accountName ?? account.businessName ?? undefined;
 
     const reply = await this.ai.generateReply({
@@ -223,6 +244,7 @@ export class InstantTextAiService {
       strategyPrompt: SMS_FIRST_TOUCH_PROMPT,
       businessBlock,
       pricingBlock: pricingBlock || undefined,
+      quoteBlock: quoteBlock || undefined,
       faqBlock: faqBlock || undefined,
       playbookBlock: playbookBlock || undefined,
       conversationHistory: [],
@@ -234,5 +256,83 @@ export class InstantTextAiService {
     // We DO leave the body otherwise alone — Twilio handles long SMS via
     // segmentation, and the prompt's 240-char cap already keeps it short.
     return reply.replace(/[\r\n]+/g, ' ').trim();
+  }
+
+  /**
+   * Run the deterministic pricing engine for the first-touch SMS context.
+   * Pure helper — parses pricing + lead JSON, calls buildQuoteFromContext,
+   * returns the reference block or empty string when nothing to inject.
+   */
+  private buildQuoteBlock(opts: {
+    pricingJson: string | null;
+    leadRawJson: string | null | undefined;
+    customerMessage: string;
+  }): string {
+    if (!opts.pricingJson) return '';
+    let pricing;
+    try {
+      pricing = hydratePricing(JSON.parse(opts.pricingJson));
+    } catch {
+      return '';
+    }
+    const leadDetails = this.extractLeadDetails(opts.leadRawJson);
+    let additionalInfo: string | null = null;
+    if (opts.leadRawJson) {
+      try {
+        const raw = JSON.parse(opts.leadRawJson);
+        if (raw?.project?.additional_info) additionalInfo = String(raw.project.additional_info);
+      } catch {}
+    }
+    try {
+      const built = buildQuoteFromContext({
+        pricing,
+        leadDetails,
+        customerMessage: opts.customerMessage,
+        conversationHistory: null,
+        additionalInfo,
+      });
+      return built ?? '';
+    } catch (err: any) {
+      this.logger.warn(`[InstantTextAi] quote engine threw: ${err?.message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Same shape as ai.controller's extractLeadDetails — used to feed the
+   * deterministic pricing engine. Tolerates both Thumbtack and Yelp
+   * payload shapes; never throws.
+   */
+  private extractLeadDetails(rawJson: string | null | undefined): Record<string, string> {
+    if (!rawJson) return {};
+    try {
+      const raw = JSON.parse(rawJson);
+      const result: Record<string, string> = {};
+      const ttDetails: any[] = raw.request?.details || raw.details || [];
+      for (const item of ttDetails) {
+        if (item?.question && item?.answer) {
+          result[String(item.question)] = String(item.answer);
+        }
+      }
+      const yelpSurvey: any[] = raw.project?.survey_answers || [];
+      for (const q of yelpSurvey) {
+        if (q?.question_text && q?.answer_text) {
+          const a = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
+          result[String(q.question_text)] = a;
+        }
+      }
+      // Flat fields some payloads carry at top level (older TT shape +
+      // some test fixtures).
+      if (raw.bedrooms !== undefined && raw.bedrooms !== null) result['Bedrooms'] = String(raw.bedrooms);
+      if (raw.bathrooms !== undefined && raw.bathrooms !== null) result['Bathrooms'] = String(raw.bathrooms);
+      const sqft = raw.squareFeet ?? raw.square_feet;
+      if (sqft !== undefined && sqft !== null) result['Square footage'] = String(sqft);
+      const svc = raw.serviceType ?? raw.service_type;
+      if (svc) result['Cleaning type'] = String(svc);
+      if (raw.project?.additional_info) result['Additional details'] = String(raw.project.additional_info);
+      return result;
+    } catch {
+      return {};
+    }
   }
 }

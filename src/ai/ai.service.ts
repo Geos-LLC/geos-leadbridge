@@ -48,6 +48,15 @@ export interface AiReplyContext {
   businessBlock?: string;
   /** REFERENCE — pricing table + range instruction. Optional. */
   pricingBlock?: string;
+  /**
+   * REFERENCE — deterministic calculated quote produced by the pricing
+   * engine (src/pricing/pricing-engine.ts:buildQuoteBlock). When present,
+   * the BASE HARD RULES require the LLM to use the numbers in this block
+   * verbatim — no recompute, no rounding, no estimation. When the block
+   * says "Pricing has NOT been calculated", the LLM must ask one
+   * clarifying question instead of quoting. Optional.
+   */
+  quoteBlock?: string;
   /** REFERENCE — per-account FAQ (insurance, supplies, pets, payment, scope, etc.). Optional. */
   faqBlock?: string;
   /** REFERENCE — urgency context (customer urgency × business capability). Optional. */
@@ -118,6 +127,13 @@ export class AiService {
     }
     if (ctx.pricingBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===\n${ctx.pricingBlock.trim()}`);
+    }
+    // CALCULATED QUOTE — deterministic, authoritative. Renders after the
+    // raw PRICING TABLE so the LLM sees "here is the table; here is the
+    // already-computed quote for THIS lead — use the quote." BASE HARD
+    // RULES forbid recomputing this block.
+    if (ctx.quoteBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: CALCULATED QUOTE (deterministic — these numbers are authoritative; see BASE HARD RULES) ===\n${ctx.quoteBlock.trim()}`);
     }
     if (ctx.faqBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: ACCOUNT FAQ (verified answers — use verbatim when relevant) ===\n${ctx.faqBlock.trim()}`);
