@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
 import { aiSettingsAssistantApi, type SignedProposal, type InterpretResponse, type ConflictResolutionOption, type ConflictResolution } from '../services/api';
 import TrialBanner from './TrialBanner';
+import TrialSidebarCard from './TrialSidebarCard';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
@@ -578,6 +579,12 @@ export function Layout() {
 
           {/* Secondary nav + user card */}
           <div className="mt-auto">
+            {/* Trial / Upgrade card — sits above Settings per the
+                LeadBridgeDesignUpdated sidebar reference. Hidden for
+                paid tenants and for trial-ended state (the latter
+                still shows at the top via TrialBanner so it can't be
+                missed). */}
+            <TrialSidebarCard />
             {renderNavItem({ icon: <Settings size={15} />, label: 'Settings', path: '/settings' })}
 
             <div

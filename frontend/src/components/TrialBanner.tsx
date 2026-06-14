@@ -42,6 +42,11 @@ export default function TrialBanner() {
   // No trial yet (user hasn't connected a platform) — nothing to show
   if (!trial.type) return null;
 
+  // Active trials moved to the sidebar (<TrialSidebarCard>) per the
+  // LeadBridgeDesignUpdated layout. Only the trial-ended hard block
+  // still shows here at the top so it can't be missed.
+  if (!trial.isEnded) return null;
+
   // Trial ended — hard block banner
   if (trial.isEnded) {
     const reason =
