@@ -269,6 +269,52 @@ export function extractAiPlaybookV2(followUpSettingsJson: string | null | undefi
 }
 
 /**
+ * Bridge the resolver's `aiInstructionsJson` into the shape
+ * `renderPlaybookBlock` already consumes (legacy `followUpSettingsJson`
+ * with nested `aiPlaybookV2`).
+ *
+ * Phase 1b note: today the resolver's per-field fallback re-extracts
+ * the SAME `aiPlaybookV2` sub-tree the legacy renderer would have read,
+ * so this helper is a near-no-op. Its purpose is forward compatibility
+ * for Phase 2, when tenants will start authoring profile-level
+ * `aiInstructionsJson` separately from the per-account V2 storage —
+ * synthesizing the legacy shape from the profile-side value lets every
+ * downstream consumer keep calling `renderPlaybookBlock` unchanged.
+ *
+ * - profile value present → splice it as the `aiPlaybookV2` key on top
+ *   of whatever else lives in the legacy settings blob (`priceQuoteMode`,
+ *   `qualificationV2`, `followUpStrategy`, etc.).
+ * - profile value absent → return the legacy blob untouched.
+ *
+ * Always returns a JSON string (or null) — the same shape callers
+ * already pass to `renderPlaybookBlock({ followUpSettingsJson })`.
+ */
+export function buildPlaybookSettingsForRenderer(
+  profileAiInstructionsJson: string | null,
+  legacyFollowUpSettingsJson: string | null,
+): string | null {
+  if (!profileAiInstructionsJson) return legacyFollowUpSettingsJson;
+  let v2: unknown;
+  try {
+    v2 = JSON.parse(profileAiInstructionsJson);
+  } catch {
+    return legacyFollowUpSettingsJson;
+  }
+  let legacyParsed: Record<string, unknown> = {};
+  if (legacyFollowUpSettingsJson) {
+    try {
+      const parsed = JSON.parse(legacyFollowUpSettingsJson);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        legacyParsed = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Keep legacyParsed = {} so we still emit a valid blob below.
+    }
+  }
+  return JSON.stringify({ ...legacyParsed, aiPlaybookV2: v2 });
+}
+
+/**
  * Inputs the picker needs from a SavedAccount row. Subset of the full
  * SavedAccount Prisma row — kept narrow so the script's findMany select
  * stays small and tests can build fixtures cheaply.

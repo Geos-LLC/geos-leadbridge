@@ -14,6 +14,7 @@ import { ConversationContextModule } from '../conversation-context/conversation-
 import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AiModule } from '../ai/ai.module';
+import { ServiceProfileModule } from '../service-profile/service-profile.module';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpStateService } from './follow-up-state.service';
 import { FollowUpSchedulerService } from './follow-up-scheduler.service';
@@ -29,6 +30,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
     ConversationContextModule,
     PlatformsModule,
     AiModule,
+    ServiceProfileModule,
     forwardRef(() => LeadsModule),
   ],
   providers: [
