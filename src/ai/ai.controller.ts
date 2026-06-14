@@ -10,6 +10,7 @@ import { buildFaqBlock, parseAccountFaq } from './faq-context';
 import { buildPricingGuardRules } from './pricing-guards';
 import { hydratePricing, parseAndHydratePricing } from '../users/pricing-hydrate';
 import { buildQuoteFromContext } from '../pricing/pricing-engine';
+import { ServiceProfileService } from '../service-profile/service-profile.service';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -20,6 +21,7 @@ export class AiController {
     private aiService: AiService,
     private prisma: PrismaService,
     private contextService: ConversationContextService,
+    private serviceProfile: ServiceProfileService,
   ) {}
 
   /**
@@ -48,13 +50,30 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
+    // Dual-read seam — resolve a ServiceProfile for this lead and
+    // return its effective pricing/FAQ. If no profile matches (legacy
+    // tenant, Yelp lead with no default, etc), falls through to the
+    // SavedAccount columns. Source field is logged but the assembler
+    // below treats both sources identically.
+    const profileInputs = await this.serviceProfile.resolveEffectivePromptInputs(
+      { id: lead.id, userId: lead.userId, category: lead.category, categoryId: (lead as any).categoryId ?? null },
+      account
+        ? {
+            id: account.id,
+            servicePricingJson: account.servicePricingJson,
+            faqJson: account.faqJson,
+            serviceOverridesJson: account.serviceOverridesJson,
+          }
+        : null,
+    );
+
     const details = this.extractLeadDetails(lead.rawJson);
-    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson, account?.followUpSettingsJson);
-    const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
+    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson, account?.followUpSettingsJson);
+    const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
       ownerName: userRecord?.name ?? null,
@@ -71,7 +90,7 @@ export class AiController {
     // authoritative: the model quotes these numbers verbatim. See
     // src/pricing/pricing-engine.ts.
     const quoteBlock = this.computeQuoteBlock({
-      pricingJson: account?.servicePricingJson ?? null,
+      pricingJson: profileInputs.pricingJson,
       leadDetails: details,
       customerMessage: customerMessage || lead.message || '',
       conversationHistory: conversationHistory ?? null,
@@ -133,9 +152,24 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
+
+    // Dual-read seam — same call as preview-for-lead. Returns the
+    // effective pricing/FAQ for the matched ServiceProfile, or falls
+    // through to legacy SavedAccount columns when no profile applies.
+    const profileInputs = await this.serviceProfile.resolveEffectivePromptInputs(
+      { id: lead.id, userId: lead.userId, category: lead.category, categoryId: (lead as any).categoryId ?? null },
+      account
+        ? {
+            id: account.id,
+            servicePricingJson: account.servicePricingJson,
+            faqJson: account.faqJson,
+            serviceOverridesJson: account.serviceOverridesJson,
+          }
+        : null,
+    );
 
     const details = this.extractLeadDetails(lead.rawJson);
     const mode = contextMode || 'full';
@@ -166,15 +200,15 @@ export class AiController {
       activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
       timezone: account?.followUpTimezone ?? null,
     });
-    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson, account?.followUpSettingsJson);
-    const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
+    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson, account?.followUpSettingsJson);
+    const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
     // Deterministic quote — same engine the AI conversation, follow-ups,
     // and Instant Text all use. Uses the loaded conversation history so
     // the engine picks up add-ons the customer mentioned mid-thread.
     const quoteBlock = this.computeQuoteBlock({
-      pricingJson: account?.servicePricingJson ?? null,
+      pricingJson: profileInputs.pricingJson,
       leadDetails: details,
       customerMessage: customerMessage || lead.message || '',
       conversationHistory,
