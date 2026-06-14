@@ -193,6 +193,17 @@ model User {
   passwordResetToken   String?
   passwordResetExpires DateTime?
 
+  // Service Profile foundation (Phase 1). Tenants can have multiple
+  // ServiceProfiles (one per distinct service offering). One is marked
+  // as the default — used when service detection can't pin a specific
+  // profile (Yelp leads with no categoryId, manual leads, AI runtime
+  // before category mapping). Backfilled to every existing user via
+  // scripts/backfill-service-profiles.ts: one row carrying their
+  // current SavedAccount pricing/FAQ. Nullable + onDelete:SetNull so
+  // an admin deleting the row leaves the User intact.
+  defaultServiceProfileId String?
+  defaultServiceProfile   ServiceProfile? @relation("UserDefaultServiceProfile", fields: [defaultServiceProfileId], references: [id], onDelete: SetNull)
+
   // Relationships
   platforms                   Platform[]
   leads                       Lead[]
@@ -216,6 +227,7 @@ model User {
   accountHealthStatuses       AccountHealthStatus[]
   onboardingProfile           OnboardingProfile?
   settingsChangeAuditLogs     SettingsChangeAuditLog[]
+  serviceProfiles             ServiceProfile[] @relation("UserOwnsServiceProfile")
 
   @@map("users")
 }
@@ -623,6 +635,14 @@ model SavedAccount {
   servicePricingJson          String?  @db.Text
   // FAQ — per-account answers to common customer questions, injected as REFERENCE in AI prompts
   faqJson                     String?  @db.Text
+  // Per-location/account deltas over the ServiceProfile base config.
+  // Shape: { [serviceProfileId]: { pricingDeltasJson?, faqAdditionsJson?, ... } }
+  // Backfill leaves this null — current readers fall through to the
+  // legacy servicePricingJson / faqJson columns above. Populated
+  // explicitly when a tenant wants Tampa rates to differ from JAX
+  // rates etc. ServiceProfileService merges base + override at read
+  // time; see src/service-profile/service-profile.service.ts.
+  serviceOverridesJson        String?  @db.Text
   // Team — when set, org members can access this account
   organizationId              String?
   lastUsedAt                  DateTime @default(now())
@@ -2154,4 +2174,93 @@ model SettingsChangeAuditLog {
   @@index([userId, createdAt])
   @@index([savedAccountId])
   @@map("settings_change_audit_logs")
+}
+
+// ==========================================
+// Service Profiles — per-tenant service configuration
+// ==========================================
+// Phase 1 foundation. One tenant can have multiple ServiceProfiles
+// (one per distinct service offering — House Cleaning, Upholstery,
+// Carpet, etc.). Each profile carries the service-specific runtime
+// config that today lives spread across SavedAccount columns and
+// nested followUpSettingsJson sections.
+//
+// The reader path (ServiceProfileService.resolveForLead) selects a
+// profile based on:
+//   1. Lead.category fuzzy match against ServiceProfile.providerCategoryMappingsJson
+//   2. Operator pin (future)
+//   3. User.defaultServiceProfileId fallback
+// Drafts and archived profiles are excluded from selection. If no
+// profile matches, the AI prompt assembler falls back to the legacy
+// SavedAccount.servicePricingJson / faqJson columns — guaranteeing
+// no behavior change for tenants without ServiceProfile rows.
+//
+// Phase 1 does NOT migrate writes — the legacy columns stay live, and
+// backfill produces identical-content copies on the ServiceProfile
+// side. Tenants observe no difference until a future PR splits writes.
+model ServiceProfile {
+  id     String @id @default(uuid())
+  userId String
+
+  // Display name (e.g. "House Cleaning", "Upholstery Cleaning").
+  // Free-text — operator-controlled.
+  name String
+
+  // URL-safe identifier, unique per tenant. Default profile uses
+  // 'default-service' so admin scripts can find it deterministically.
+  slug String
+
+  // 'draft' — auto-created from a category we don't yet know how to
+  //           handle. AI auto-reply is paused for leads routed here
+  //           until an operator promotes to 'active'.
+  // 'active' — fully configured, AI uses this profile freely.
+  // 'archived' — soft-deleted. Excluded from runtime resolution.
+  //              Lead history that references it remains intact.
+  status String @default("active")
+
+  // True for the tenant's fallback profile. Exactly one row per tenant
+  // should have isDefault=true (enforced by the partial unique index
+  // below) — backfill creates that row and every other ServiceProfile
+  // is created with isDefault=false. Loosely coupled to
+  // User.defaultServiceProfileId (which points by ID); keeping the bool
+  // here lets resolver fast-path without a join back to User.
+  isDefault Boolean @default(false)
+
+  // Per-provider category attachments. Shape:
+  //   [{ provider: 'thumbtack', providerCategoryId?: string, categoryName?: string }]
+  // The resolver scans this on every lead — categoryId match wins;
+  // case-insensitive name match is the fallback.
+  providerCategoryMappingsJson Json @default("[]")
+
+  // Pricing config. Same shape as today's SavedAccount.servicePricingJson
+  // (the deterministic pricing engine in src/pricing/ consumes both).
+  // Backfill copies the primary SavedAccount's value here verbatim.
+  pricingJson String? @db.Text
+
+  // FAQ config. Same shape as today's SavedAccount.faqJson.
+  faqJson String? @db.Text
+
+  // Qualification schema — populated in Phase 2 from ServiceSchema /
+  // the TT request-form API. Phase 1 leaves null.
+  qualificationSchemaJson String? @db.Text
+
+  // Service-scoped AI playbook overrides. Layered ON TOP of
+  // User.globalAiPrompt at prompt-build time. Phase 1 leaves null;
+  // backfill does NOT copy followUpSettingsJson.aiPlaybookV2 here
+  // (that lives at SavedAccount level and the legacy reader still
+  // picks it up — splitting it across profiles is a Phase 1b concern).
+  aiInstructionsJson String? @db.Text
+
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user             User  @relation("UserOwnsServiceProfile", fields: [userId], references: [id], onDelete: Cascade)
+  defaultForUsers  User[] @relation("UserDefaultServiceProfile")
+
+  @@unique([userId, slug])
+  // Exactly one default per tenant. Partial unique allows multiple
+  // rows with isDefault=false but only one with isDefault=true per user.
+  @@index([userId, status])
+  @@map("service_profiles")
 }
