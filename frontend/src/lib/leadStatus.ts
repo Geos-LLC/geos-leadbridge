@@ -61,7 +61,11 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
  */
 export const FILTER_PSEUDO_GROUPS: readonly { id: StatusGroupId; label: string }[] = [
   { id: 'refunded', label: 'Refunded' },
-  { id: 'refundable', label: 'Refundable' },
+  // UI label uses the descriptive "Eligible for refund" — the dropdown
+  // benefits from explicit phrasing, while the compact lead-card badge
+  // keeps the shorter "Refundable" tag. Same underlying predicate
+  // (matchesRefundableFilter — Lead.refundableFlag active + not refunded).
+  { id: 'refundable', label: 'Eligible for refund' },
 ];
 
 /**
