@@ -30,6 +30,11 @@ lerna-debug.log*
 .DS_Store
 *.pem
 
+# Network captures and design dropzips — they routinely contain JWTs / tokens / PII
+*.har
+LeadBridgeDesign*.zip
+.design-extract/
+
 # Debug
 .vscode/
 .idea/
