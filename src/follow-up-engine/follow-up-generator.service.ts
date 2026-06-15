@@ -14,7 +14,7 @@
  *   - Platform-agnostic (Yelp, Thumbtack, future platforms)
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
@@ -30,6 +30,8 @@ import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
+import { ServiceProfileService } from '../service-profile/service-profile.service';
+import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -57,6 +59,14 @@ export class FollowUpGeneratorService {
     // Optional so unit tests that direct-instantiate the service don't need to
     // wire monitoring. Production DI always populates it via the global module.
     @Optional() private readonly monitoring: MonitoringService | null = null,
+    // ServiceProfile resolver (Phase 1b adoption). @Inject + @Optional
+    // is the right Nest spelling — bare @Optional sometimes resolves to
+    // null even when the provider IS wired (the optional flag suppresses
+    // the diagnostic Nest would otherwise log). Explicit token closes
+    // that.
+    @Optional()
+    @Inject(ServiceProfileService)
+    private readonly serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   private get openai(): OpenAI | null {
@@ -259,9 +269,11 @@ export class FollowUpGeneratorService {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
         select: {
+          id: true,
           businessName: true,
           servicePricingJson: true,
           faqJson: true,
+          serviceOverridesJson: true,
           followUpTimezone: true,
           followUpSettingsJson: true,
           followUpActiveHoursStart: true,
@@ -269,6 +281,68 @@ export class FollowUpGeneratorService {
           aiConversationMode: true,
         },
       });
+
+      // ServiceProfile resolver (Phase 1b). Same priority chain the
+      // AI Conversation and Instant Text paths use — per-field fallback
+      // protects against null profile columns wiping legacy data, and
+      // an `ai_paused` profile short-circuits the AI generation path so
+      // we don't produce a follow-up message for a draft service.
+      //
+      // Optional dep guard: if the service wasn't wired (e.g. unit tests
+      // direct-instantiate this generator without DI), fall through to
+      // legacy reads — preserves backwards compat.
+      const profileInputs = this.serviceProfile && lead && account
+        ? await this.serviceProfile.resolveEffectivePromptInputs(
+            {
+              // `id` is purely a log handle in the resolver. The lead
+              // SELECT here doesn't include `id` or `threadId`, so we
+              // reuse `conversationId` (== threadId for the active
+              // enrollment) as the stable identifier.
+              id: conversationId,
+              userId: lead.userId,
+              category: lead.category ?? null,
+              categoryId: (lead as any).categoryId ?? null,
+            },
+            {
+              id: account.id,
+              servicePricingJson: account.servicePricingJson,
+              faqJson: account.faqJson,
+              serviceOverridesJson: account.serviceOverridesJson,
+              followUpSettingsJson: account.followUpSettingsJson,
+            },
+          )
+        : null;
+
+      if (profileInputs?.aiPaused) {
+        // Surface via the scheduler's generation-error catch path
+        // (follow-up-scheduler.service.ts line ~1096), which marks the
+        // step failed and schedules a 15-min retry. The retry loop is
+        // intentionally loud here — operators see the structured
+        // failure reason in logs until they activate the draft profile.
+        // Empty-message return would be silently sent by the scheduler's
+        // auto-send branch, which is the worse failure mode.
+        this.logger.log(
+          `[service-profile] AI paused — skipping follow-up generation ` +
+          `path=follow_up_generator conversationId=${conversationId} ` +
+          `userId=${lead.userId} profileId=${profileInputs.profileId} ` +
+          `reason=service_profile_ai_paused`,
+        );
+        const err = new Error(
+          `service_profile_ai_paused: profileId=${profileInputs.profileId} userId=${lead.userId}`,
+        );
+        (err as any).code = 'SERVICE_PROFILE_AI_PAUSED';
+        throw err;
+      }
+
+      // Effective values from the resolver (profile-first with per-field
+      // SavedAccount fallback). Equivalent to direct account reads when
+      // no profile exists.
+      const effectivePricingJson = profileInputs?.pricingJson ?? account?.servicePricingJson ?? null;
+      const effectiveFaqJson = profileInputs?.faqJson ?? account?.faqJson ?? null;
+      const effectivePlaybookSettingsJson = buildPlaybookSettingsForRenderer(
+        profileInputs?.aiInstructionsJson ?? null,
+        account?.followUpSettingsJson ?? null,
+      );
       const owner = await this.prisma.user.findUnique({
         where: { id: lead.userId },
         select: { name: true },
@@ -278,12 +352,16 @@ export class FollowUpGeneratorService {
       // isn't tempted to volunteer a number after the customer answers a
       // qualifying question.
       const suppressPricingForQualify = strategyKey === 'qualify';
-      if (account?.servicePricingJson && !suppressPricingForQualify) {
+      // Resolver-supplied pricing (profile-first, account fallback).
+      // The Spotless null-FAQ class of bugs can't recur here even when
+      // the profile pricingJson is empty — resolver returns the
+      // account's pricing via per-field fallback in that case.
+      if (effectivePricingJson && !suppressPricingForQualify) {
         try {
           // Hydrate: legacy accounts missing cleaningTypes still get Deep
           // Cleaning in the prompt; explicit 0 prices stay 0 (and flip the
           // pricing-guards "do not quote, defer" clause on for that type).
-          const p = hydratePricing(JSON.parse(account.servicePricingJson));
+          const p = hydratePricing(JSON.parse(effectivePricingJson));
           const allTypes = p.cleaningTypes;
           if (p.priceTable.length > 0 && allTypes.length > 0) {
             // Same range/exact toggle as automation.service / ai.controller.
@@ -352,7 +430,8 @@ export class FollowUpGeneratorService {
         } catch { /* invalid JSON */ }
       }
 
-      const faq = buildFaqBlock(parseAccountFaq(account?.faqJson));
+      // Resolver-supplied FAQ — profile-first with account fallback.
+      const faq = buildFaqBlock(parseAccountFaq(effectiveFaqJson));
       if (faq) {
         faqContext = `=== REFERENCE: ACCOUNT FAQ (verified answers — use verbatim when relevant) ===\n${faq}`;
       }
@@ -390,8 +469,10 @@ export class FollowUpGeneratorService {
 
       // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
       // No automation-derived behavior bullets in V2; Playbook is HOW only.
+      // Resolver-supplied: profile aiInstructionsJson spliced over legacy
+      // followUpSettingsJson (or pure legacy when profile field empty).
       playbookBlock = renderPlaybookBlock({
-        followUpSettingsJson: account?.followUpSettingsJson ?? null,
+        followUpSettingsJson: effectivePlaybookSettingsJson,
       });
     }
 

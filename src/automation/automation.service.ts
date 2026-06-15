@@ -3,7 +3,7 @@
  * Manages automation rules and pending automated messages
  */
 
-import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { parseDuration } from '../common/utils/parse-duration';
@@ -31,6 +31,8 @@ import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ServiceProfileService } from '../service-profile/service-profile.service';
+import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
 import { isAutomationOwner, logSkippedAutomation } from '../common/automation-owner';
 
 /**
@@ -229,6 +231,14 @@ export class AutomationService implements OnModuleInit {
     // every tenant not in BOOKING_ORCHESTRATION_ENABLED_USER_IDS.
     @Inject(forwardRef(() => BookingOrchestratorService))
     private bookingOrchestrator: BookingOrchestratorService,
+    // ServiceProfile resolver (Phase 1b adoption). @Inject + @Optional
+    // ensures Nest finds the provider when wired AND falls back to null
+    // when not (legacy unit tests direct-instantiating without DI). Bare
+    // @Optional alone was observed to resolve to null in prod despite
+    // the import being correct — explicit token closes that.
+    @Optional()
+    @Inject(ServiceProfileService)
+    private serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   /**
@@ -2028,13 +2038,18 @@ export class AutomationService implements OnModuleInit {
 
         // Load account first so we can read the central followUpStrategy
         // when resolving the PRIMARY INSTRUCTION below.
+        // ServiceProfile adoption (Phase 1b): added `id` and
+        // `serviceOverridesJson` to the SELECT so the resolver can apply
+        // per-location overrides on top of the profile base.
         const account = context.businessId
           ? await this.prisma.savedAccount.findFirst({
               where: { userId: context.userId, businessId: context.businessId },
               select: {
+                id: true,
                 businessName: true,
                 servicePricingJson: true,
                 faqJson: true,
+                serviceOverridesJson: true,
                 followUpSettingsJson: true,
                 followUpActiveHoursStart: true,
                 followUpActiveHoursEnd: true,
@@ -2043,6 +2058,60 @@ export class AutomationService implements OnModuleInit {
               },
             })
           : null;
+
+        // ─── ServiceProfile resolver ────────────────────────────────────
+        // Phase 1b adoption: route pricing/FAQ/aiInstructions through the
+        // resolver so per-field fallback applies and aiPaused (draft
+        // profile) short-circuits the reply path entirely.
+        //
+        // The Spotless null-FAQ class of bugs is prevented at runtime here:
+        // even when the profile carries a null faqJson, the resolver
+        // returns the SavedAccount's faqJson via per-field fallback rather
+        // than wiping the prompt context.
+        //
+        // Optional dep — legacy unit tests direct-instantiate this service
+        // without DI. When the resolver isn't wired we fall through to
+        // direct account reads below (same behavior as pre-Phase-1b).
+        const profileInputs = this.serviceProfile
+          ? await this.serviceProfile.resolveEffectivePromptInputs(
+              { id: lead.id, userId: lead.userId, category: lead.category ?? null, categoryId: (lead as any).categoryId ?? null },
+              account
+                ? {
+                    id: account.id,
+                    servicePricingJson: account.servicePricingJson,
+                    faqJson: account.faqJson,
+                    serviceOverridesJson: account.serviceOverridesJson,
+                    followUpSettingsJson: account.followUpSettingsJson,
+                  }
+                : null,
+            )
+          : null;
+
+        // Draft profile short-circuit: do NOT generate an AI reply.
+        // The lead/message remain tracked elsewhere — this only skips
+        // the AI generate+send. Structured log line so monitoring can
+        // alert when this fires in volume (signal: an operator hasn't
+        // promoted a draft profile to active yet).
+        //
+        // Cancellation pattern matches the trial-paywall / stopOnReply
+        // branches above (status='cancelled', specific failureReason),
+        // so the row exits 'pending' and won't be re-attempted on the
+        // next cron cycle. Synthetic rows have no DB representation —
+        // structured log only.
+        if (profileInputs?.aiPaused) {
+          this.logger.log(
+            `[service-profile] AI paused — skipping reply path=automation pendingId=${pendingId} ` +
+            `userId=${context.userId} leadId=${lead.id} profileId=${profileInputs.profileId} ` +
+            `reason=service_profile_ai_paused`,
+          );
+          if (!pendingId.startsWith('synthetic-')) {
+            await this.prisma.pendingAutomatedMessage.update({
+              where: { id: pendingId },
+              data: { status: 'cancelled', failureReason: 'service_profile_ai_paused' },
+            }).catch(() => undefined);
+          }
+          return;
+        }
 
         // Parse central AI Strategy from followUpSettingsJson. Same setting
         // is used by Follow-ups (follow-up-generator.service.ts:124) and by
@@ -2106,7 +2175,12 @@ export class AutomationService implements OnModuleInit {
           timezone: account?.followUpTimezone ?? null,
         });
 
-        let pricingJson: string | null = account?.servicePricingJson ?? null;
+        // Pricing: prefer the resolver's effective value. Resolver already
+        // handles per-field fallback to account.servicePricingJson, so the
+        // cross-tenant sibling fallback below only fires when BOTH the
+        // profile AND the current account have no pricing — defense in
+        // depth for tenants with a barely-configured primary account.
+        let pricingJson: string | null = profileInputs?.pricingJson ?? account?.servicePricingJson ?? null;
         if (!pricingJson) {
           const sibling = await this.prisma.savedAccount.findFirst({
             where: { userId: context.userId, servicePricingJson: { not: null } },
@@ -2194,18 +2268,33 @@ export class AutomationService implements OnModuleInit {
         // REFERENCE: account FAQ — verified per-tenant answers to the most
         // common customer questions. Empty fields fall through to the GLOBAL
         // defer-when-empty rule.
+        // Resolver-supplied: profile faqJson when populated, else
+        // account.faqJson via per-field fallback. The Spotless null-FAQ
+        // class of incidents can't recur here even if the profile column
+        // was backfilled empty.
         const { buildFaqBlock, parseAccountFaq } = require('../ai/faq-context');
-        const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson)) || undefined;
+        const effectiveFaqJson = profileInputs?.faqJson ?? account?.faqJson ?? null;
+        const faqBlock = buildFaqBlock(parseAccountFaq(effectiveFaqJson)) || undefined;
 
         // PLAYBOOK — behavior summary (generated from settings) + user
         // instructions (followUpSettingsJson.aiPlaybookInstructions). Pure
         // PLAYBOOK V2 — BASE HARD RULES + 8 HOW sections (default + custom).
         // No automation-derived "current behavior" bullets in V2; Playbook is
         // HOW only. See src/ai/playbook-renderer.ts.
+        //
+        // The playbook helper still reads from a `followUpSettingsJson`
+        // blob shape. buildPlaybookSettingsForRenderer splices the
+        // resolver-supplied aiInstructionsJson (when present) as the
+        // `aiPlaybookV2` key on top of the legacy blob — keeping all
+        // sibling keys (priceQuoteMode, qualificationV2, …) intact.
         const { renderPlaybookBlock } = require('../ai/playbook-renderer');
+        const playbookSettingsForRenderer = buildPlaybookSettingsForRenderer(
+          profileInputs?.aiInstructionsJson ?? null,
+          account?.followUpSettingsJson ?? null,
+        );
         const playbookBlock: string = account
           ? renderPlaybookBlock({
-              followUpSettingsJson: account.followUpSettingsJson ?? null,
+              followUpSettingsJson: playbookSettingsForRenderer,
             })
           : '';
 

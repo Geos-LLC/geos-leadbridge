@@ -67,6 +67,11 @@ export class AiController {
             servicePricingJson: account.servicePricingJson,
             faqJson: account.faqJson,
             serviceOverridesJson: account.serviceOverridesJson,
+            // Resolver needs this for the aiInstructionsJson per-field
+            // fallback — extracts aiPlaybookV2 when the profile column
+            // is empty. Already selected for buildPricingPrompt /
+            // businessBlock below, no extra Prisma round trip.
+            followUpSettingsJson: account.followUpSettingsJson,
           }
         : null,
     );
@@ -168,6 +173,11 @@ export class AiController {
             servicePricingJson: account.servicePricingJson,
             faqJson: account.faqJson,
             serviceOverridesJson: account.serviceOverridesJson,
+            // Resolver needs this for the aiInstructionsJson per-field
+            // fallback — extracts aiPlaybookV2 when the profile column
+            // is empty. Already selected for buildPricingPrompt /
+            // businessBlock below, no extra Prisma round trip.
+            followUpSettingsJson: account.followUpSettingsJson,
           }
         : null,
     );

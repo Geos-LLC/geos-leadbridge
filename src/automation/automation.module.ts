@@ -14,6 +14,7 @@ import { ConversationContextModule } from '../conversation-context/conversation-
 import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { BookingOrchestratorModule } from '../booking-orchestrator/booking-orchestrator.module';
+import { ServiceProfileModule } from '../service-profile/service-profile.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { BookingOrchestratorModule } from '../booking-orchestrator/booking-orche
     forwardRef(() => FollowUpEngineModule),
     NotificationsModule,
     forwardRef(() => BookingOrchestratorModule),
+    ServiceProfileModule,
   ],
   controllers: [AutomationController],
   providers: [AutomationService],

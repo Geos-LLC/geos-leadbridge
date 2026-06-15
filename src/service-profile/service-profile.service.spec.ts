@@ -18,7 +18,13 @@
  */
 
 import { ServiceProfileService } from './service-profile.service';
-import { mergePricingJson, mergeFaqJson } from './service-profile.types';
+import {
+  extractAiPlaybookV2,
+  isEffectivelyEmpty,
+  mergeFaqJson,
+  mergePricingJson,
+  pickPrimarySavedAccount,
+} from './service-profile.types';
 
 type ProfileRow = {
   id: string;
@@ -571,5 +577,378 @@ describe('ServiceProfileService — merge helpers', () => {
   it('mergeFaqJson: arrays concatenate', () => {
     const merged = mergeFaqJson('[{"q":"a"}]', '[{"q":"b"}]')!;
     expect(JSON.parse(merged)).toEqual([{ q: 'a' }, { q: 'b' }]);
+  });
+});
+
+describe('isEffectivelyEmpty', () => {
+  it.each([
+    [null, true],
+    [undefined, true],
+    ['', true],
+    ['   ', true],
+    ['[]', true],
+    ['{}', true],
+    ['null', true],
+    ['not-json', true], // defensive — treat unparseable as empty
+    ['[{"q":"a"}]', false],
+    ['{"a":1}', false],
+    ['"some string"', false],
+    ['42', false],
+  ])('isEffectivelyEmpty(%j) → %p', (input, expected) => {
+    expect(isEffectivelyEmpty(input as any)).toBe(expected);
+  });
+});
+
+describe('extractAiPlaybookV2', () => {
+  it('returns null when followUpSettingsJson is null/empty/unparseable', () => {
+    expect(extractAiPlaybookV2(null)).toBeNull();
+    expect(extractAiPlaybookV2('')).toBeNull();
+    expect(extractAiPlaybookV2('not-json')).toBeNull();
+    expect(extractAiPlaybookV2('{}')).toBeNull();
+    expect(extractAiPlaybookV2('{"other":"thing"}')).toBeNull();
+  });
+
+  it('returns null when aiPlaybookV2 has no section with non-empty customInstructions', () => {
+    const blob = JSON.stringify({
+      aiPlaybookV2: {
+        brand_voice: { customInstructions: '' },
+        faq: { customInstructions: '   ' },
+        pricing_guidance: {},
+      },
+    });
+    expect(extractAiPlaybookV2(blob)).toBeNull();
+  });
+
+  it('returns the v2 sub-tree re-stringified when at least one section has content', () => {
+    const v2 = {
+      brand_voice: { customInstructions: 'Always be friendly.' },
+      faq: { customInstructions: '' },
+    };
+    const blob = JSON.stringify({ aiPlaybookV2: v2, somethingElse: 'ignored' });
+    const out = extractAiPlaybookV2(blob);
+    expect(out).not.toBeNull();
+    expect(JSON.parse(out!)).toEqual(v2);
+  });
+});
+
+describe('pickPrimarySavedAccount — tiered preference', () => {
+  it('picks the only account when there is one (any tier)', () => {
+    const picked = pickPrimarySavedAccount([
+      { id: 'a', servicePricingJson: null, faqJson: null, lastUsedAt: new Date('2026-06-01') },
+    ]);
+    expect(picked?.id).toBe('a');
+  });
+
+  it('returns null on empty input', () => {
+    expect(pickPrimarySavedAccount([])).toBeNull();
+  });
+
+  it('prefers complete account (Tier 1) over a more-recently-used incomplete one', () => {
+    // This is the Spotless-like fixture: Wesley Chapel was last touched
+    // but had null faqJson, so the original picker chose it. The new
+    // picker prefers any sibling that carries both fields.
+    const picked = pickPrimarySavedAccount([
+      {
+        id: 'wesley-chapel',
+        servicePricingJson: '{"base":219}',
+        faqJson: null, // missing FAQ
+        lastUsedAt: new Date('2026-06-14T20:00:32Z'), // most recent
+      },
+      {
+        id: 'jacksonville',
+        servicePricingJson: '{"base":249}',
+        faqJson: '[{"q":"supplies?"}]',
+        lastUsedAt: new Date('2026-06-14T20:00:25Z'),
+      },
+      {
+        id: 'tampa',
+        servicePricingJson: '{"base":199}',
+        faqJson: '[{"q":"supplies?"}]',
+        lastUsedAt: new Date('2026-06-14T20:00:10Z'),
+      },
+    ]);
+    expect(picked?.id).toBe('jacksonville'); // newest Tier 1, not Wesley Chapel
+  });
+
+  it('Tier 1 ties break on most-recently-used', () => {
+    const picked = pickPrimarySavedAccount([
+      {
+        id: 'older-complete',
+        servicePricingJson: '{"x":1}',
+        faqJson: '[]', // empty array passes the picker's "non-null" check
+        lastUsedAt: new Date('2026-06-10'),
+      },
+      {
+        id: 'newer-complete',
+        servicePricingJson: '{"x":1}',
+        faqJson: '[]',
+        lastUsedAt: new Date('2026-06-14'),
+      },
+    ]);
+    expect(picked?.id).toBe('newer-complete');
+  });
+
+  it('falls through tiers: Tier 1 missing → Tier 2 (pricing only) wins over Tier 3', () => {
+    const picked = pickPrimarySavedAccount([
+      {
+        id: 'tier3-faq-only',
+        servicePricingJson: null,
+        faqJson: '[{"q":"a"}]',
+        lastUsedAt: new Date('2026-06-14'), // most recent overall
+      },
+      {
+        id: 'tier2-pricing-only',
+        servicePricingJson: '{"x":1}',
+        faqJson: null,
+        lastUsedAt: new Date('2026-06-10'),
+      },
+    ]);
+    expect(picked?.id).toBe('tier2-pricing-only'); // Tier 2 beats Tier 3
+  });
+
+  it('null lastUsedAt sorts after a real Date within the same tier', () => {
+    const picked = pickPrimarySavedAccount([
+      {
+        id: 'null-time',
+        servicePricingJson: '{"x":1}',
+        faqJson: '[{"q":"a"}]',
+        lastUsedAt: null,
+      },
+      {
+        id: 'real-time',
+        servicePricingJson: '{"x":1}',
+        faqJson: '[{"q":"a"}]',
+        lastUsedAt: new Date('2025-01-01'),
+      },
+    ]);
+    expect(picked?.id).toBe('real-time');
+  });
+});
+
+describe('ServiceProfileService — per-field fallback (Phase 1b)', () => {
+  // Re-declare the local helpers from the file's first describe block —
+  // jest sets up describe contexts independently, so we need our own
+  // copies here to keep the new tests isolated.
+  type LocalProfile = {
+    id: string;
+    userId: string;
+    name: string;
+    slug: string;
+    status: string;
+    isDefault: boolean;
+    providerCategoryMappingsJson: unknown;
+    pricingJson: string | null;
+    faqJson: string | null;
+    aiInstructionsJson: string | null;
+    qualificationSchemaJson: string | null;
+    archivedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+
+  function makeProfile(overrides: Partial<LocalProfile> = {}): LocalProfile {
+    return {
+      id: 'prof-default',
+      userId: 'user-1',
+      name: 'Default',
+      slug: 'default-service',
+      status: 'active',
+      isDefault: true,
+      providerCategoryMappingsJson: [],
+      pricingJson: null,
+      faqJson: null,
+      aiInstructionsJson: null,
+      qualificationSchemaJson: null,
+      archivedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  function makeMock(profile: LocalProfile, defaultProfileId: string | null) {
+    return {
+      serviceProfile: {
+        findMany: jest.fn().mockResolvedValue([profile]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      },
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ defaultServiceProfileId: defaultProfileId }),
+        update: jest.fn(),
+      },
+      savedAccount: { findFirst: jest.fn() },
+    } as any;
+  }
+
+  it('profile has pricing but null FAQ → returns profile pricing + SavedAccount FAQ', async () => {
+    // This is exactly the Spotless incident in micro: profile field
+    // missing, SavedAccount has the canonical content.
+    const prisma = makeMock(
+      makeProfile({ pricingJson: '{"base":219}', faqJson: null }),
+      'prof-default',
+    );
+    const svc = new ServiceProfileService(prisma);
+
+    const out = await svc.resolveEffectivePromptInputs(
+      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: '{"legacy":true}',
+        faqJson: '[{"q":"supplies?","a":"yes"}]',
+        serviceOverridesJson: null,
+        followUpSettingsJson: null,
+      },
+    );
+
+    expect(out.pricingJson).toBe('{"base":219}'); // profile wins
+    expect(out.faqJson).toBe('[{"q":"supplies?","a":"yes"}]'); // SA wins (fallback)
+    expect(out.fieldSources.pricing).toBe('service_profile');
+    expect(out.fieldSources.faq).toBe('legacy_saved_account');
+    expect(out.source).toBe('service_profile');
+    expect(out.profileId).toBe('prof-default');
+  });
+
+  it('profile has FAQ + empty-array pricing → returns profile FAQ + SavedAccount pricing', async () => {
+    // Mixed mode: opposite direction. Empty array `[]` and empty object
+    // `{}` both register as "effectively empty" so the fallback fires.
+    const prisma = makeMock(
+      makeProfile({ pricingJson: '{}', faqJson: '[{"q":"FAQ from profile"}]' }),
+      'prof-default',
+    );
+    const svc = new ServiceProfileService(prisma);
+
+    const out = await svc.resolveEffectivePromptInputs(
+      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: '{"legacy_pricing":true}',
+        faqJson: '[{"q":"FAQ from SA"}]',
+        serviceOverridesJson: null,
+        followUpSettingsJson: null,
+      },
+    );
+
+    expect(out.pricingJson).toBe('{"legacy_pricing":true}'); // SA wins (profile empty)
+    expect(out.faqJson).toBe('[{"q":"FAQ from profile"}]'); // profile wins
+    expect(out.fieldSources.pricing).toBe('legacy_saved_account');
+    expect(out.fieldSources.faq).toBe('service_profile');
+  });
+
+  it('profile has all-null fields → every field falls back to SavedAccount', async () => {
+    // Tests "profile fields all null → legacy fallback" per the spec.
+    // Note: this is per-field fallback while the profile IS still matched.
+    // (Status remains 'resolved' / source='service_profile', not 'legacy_fallback'.)
+    const prisma = makeMock(
+      makeProfile({ pricingJson: null, faqJson: '[]', aiInstructionsJson: '' }),
+      'prof-default',
+    );
+    const svc = new ServiceProfileService(prisma);
+
+    const out = await svc.resolveEffectivePromptInputs(
+      { id: 'lead-1', userId: 'user-1', category: null, categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: '{"sa":1}',
+        faqJson: '[{"q":"sa"}]',
+        serviceOverridesJson: null,
+        followUpSettingsJson: JSON.stringify({
+          aiPlaybookV2: { brand_voice: { customInstructions: 'Friendly tone.' } },
+        }),
+      },
+    );
+
+    expect(out.pricingJson).toBe('{"sa":1}');
+    expect(out.faqJson).toBe('[{"q":"sa"}]');
+    expect(out.aiInstructionsJson).not.toBeNull();
+    expect(JSON.parse(out.aiInstructionsJson!)).toEqual({
+      brand_voice: { customInstructions: 'Friendly tone.' },
+    });
+    expect(out.fieldSources).toEqual({
+      pricing: 'legacy_saved_account',
+      faq: 'legacy_saved_account',
+      aiInstructions: 'legacy_saved_account',
+    });
+    expect(out.profileId).toBe('prof-default'); // still resolved against profile
+  });
+
+  it('legacy_fallback path also extracts aiPlaybookV2 from followUpSettingsJson', async () => {
+    // When no ServiceProfile exists at all (no profiles + no default
+    // pointer), the legacy_fallback branch should still hydrate
+    // aiInstructionsJson from the SavedAccount.
+    const prisma: any = {
+      serviceProfile: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+      },
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ defaultServiceProfileId: null }),
+        update: jest.fn(),
+      },
+      savedAccount: { findFirst: jest.fn() },
+    };
+    const svc = new ServiceProfileService(prisma);
+
+    const out = await svc.resolveEffectivePromptInputs(
+      { id: 'lead-1', userId: 'user-1', category: null, categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: '{"x":1}',
+        faqJson: '[{"q":"a"}]',
+        serviceOverridesJson: null,
+        followUpSettingsJson: JSON.stringify({
+          aiPlaybookV2: { faq: { customInstructions: 'Refer to product docs.' } },
+        }),
+      },
+    );
+
+    expect(out.source).toBe('legacy_saved_account');
+    expect(out.profileId).toBeNull();
+    expect(out.pricingJson).toBe('{"x":1}');
+    expect(out.faqJson).toBe('[{"q":"a"}]');
+    expect(JSON.parse(out.aiInstructionsJson!)).toEqual({
+      faq: { customInstructions: 'Refer to product docs.' },
+    });
+  });
+
+  it('Spotless-like fixture: Wesley Chapel null FAQ does not wipe tenant FAQ at runtime', async () => {
+    // Acceptance scenario for the bug we hit on staging:
+    //   - Backfill chose Wesley Chapel (null FAQ) as primary
+    //   - Default profile inherited null faqJson
+    //   - A lead landing on Tampa's SavedAccount would previously have
+    //     been served null FAQ (regression)
+    //   - With per-field fallback, Tampa's lead reads Tampa's SA FAQ
+    //     because the profile's FAQ slot is empty
+    const prisma = makeMock(
+      makeProfile({
+        pricingJson: '{"base":219}', // shared pricing — fine
+        faqJson: null, // <-- the bug, profile has null FAQ
+      }),
+      'prof-default',
+    );
+    const svc = new ServiceProfileService(prisma);
+
+    // A lead landing on Tampa SavedAccount which has a populated FAQ.
+    const out = await svc.resolveEffectivePromptInputs(
+      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
+      {
+        id: 'spotless-tampa',
+        servicePricingJson: '{"base":219}',
+        faqJson: JSON.stringify([
+          { q: 'Do you bring supplies?', a: 'Yes' },
+          { q: 'Pet policy?', a: 'Extra charge if sheds 20$' },
+        ]),
+        serviceOverridesJson: null,
+        followUpSettingsJson: null,
+      },
+    );
+
+    expect(out.faqJson).not.toBeNull();
+    const faqArray = JSON.parse(out.faqJson!);
+    expect(faqArray).toHaveLength(2);
+    expect(faqArray[0].q).toBe('Do you bring supplies?');
+    expect(out.fieldSources.faq).toBe('legacy_saved_account');
+    expect(out.fieldSources.pricing).toBe('service_profile');
   });
 });
