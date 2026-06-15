@@ -15,6 +15,32 @@ import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
 import SetupWizard from '../pages/onboarding/SetupWizard';
+
+/**
+ * Notify any open Custom Instructions sub-section (Settings → AI
+ * Playbook) that a chat-driven write just landed so it can re-fetch
+ * its list. The detail carries the area + savedAccountId straight from
+ * the signed proposal so a listener filters on its own scope.
+ *
+ * Window event name is intentionally specific — no risk of collision
+ * with other app events.
+ */
+export const AI_SETTINGS_ASSISTANT_APPLIED_EVENT = 'ai-settings-assistant-applied';
+export interface AiSettingsAssistantAppliedDetail {
+  area: string;
+  savedAccountId: string | null;
+}
+function dispatchAssistantApplied(proposal: SignedProposal) {
+  try {
+    const detail: AiSettingsAssistantAppliedDetail = {
+      area: proposal.payload.target.area,
+      savedAccountId: proposal.payload.savedAccountId,
+    };
+    window.dispatchEvent(new CustomEvent(AI_SETTINGS_ASSISTANT_APPLIED_EVENT, { detail }));
+  } catch {
+    // CustomEvent is supported in every browser we target; defensive only.
+  }
+}
 // OnboardingStep1Modal and OnboardingStep2Modal (the legacy 2-step
 // segmentation quiz) are intentionally NOT rendered anymore. The 8-step
 // guided setup wizard at /onboarding/setup replaces them. The modal
@@ -195,6 +221,8 @@ export function Layout() {
       setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant' && t.payload.kind === 'apply_ready'
         ? { ...t, payload: { ...t.payload, state: 'applied' } } as Turn
         : t));
+      // Notify any open Custom Instructions sub-section to re-fetch.
+      dispatchAssistantApplied(turn.payload.proposal);
     } catch (err: any) {
       const reason = err?.response?.data?.message || err?.message || 'Apply failed.';
       setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant'
@@ -245,6 +273,8 @@ export function Layout() {
             },
           } as Turn
         : t));
+      // Notify any open Custom Instructions sub-section to re-fetch.
+      dispatchAssistantApplied(option.proposal);
     } catch (err: any) {
       const reason = err?.response?.data?.message || err?.message || 'Apply failed.';
       setAiChatTurns(prev => prev.map(t => t.id === turnId && t.role === 'assistant'

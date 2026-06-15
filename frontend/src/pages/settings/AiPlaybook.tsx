@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
+import { AI_SETTINGS_ASSISTANT_APPLIED_EVENT, type AiSettingsAssistantAppliedDetail } from '../../components/Layout';
 import { followUpApi, usersApi, aiSettingsAssistantApi, type ChatInstructionEntry } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
@@ -899,6 +900,28 @@ function ChatInstructionsSubsection({
       .catch((e: any) => { if (alive) setError(e?.message ?? 'Failed to load custom instructions'); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
+  }, [area, savedAccountId]);
+
+  // Re-fetch when the chat assistant applies a write that targets THIS
+  // sub-section's scope. The Layout dispatches this event from both the
+  // apply-ready and conflict-resolution apply paths. We compare on both
+  // area and savedAccountId so an unrelated playbook section's write
+  // doesn't trigger an unnecessary re-fetch.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<AiSettingsAssistantAppliedDetail>).detail;
+      if (!detail || detail.area !== area) return;
+      // For global the detail.savedAccountId is null and our savedAccountId
+      // prop is undefined — both match the "no scope" case. For per-section
+      // playbook areas both must equal.
+      const sameScope = (detail.savedAccountId ?? undefined) === savedAccountId;
+      if (!sameScope) return;
+      aiSettingsAssistantApi.listChatInstructions(area, savedAccountId)
+        .then(res => setEntries(res.entries ?? []))
+        .catch(() => { /* leave existing list intact on transient error */ });
+    };
+    window.addEventListener(AI_SETTINGS_ASSISTANT_APPLIED_EVENT, handler);
+    return () => window.removeEventListener(AI_SETTINGS_ASSISTANT_APPLIED_EVENT, handler);
   }, [area, savedAccountId]);
 
   const handleDelete = async (id: string) => {
