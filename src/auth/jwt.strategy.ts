@@ -66,7 +66,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ExtractJwt.fromUrlQueryParameter('token'),
       ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('jwt.secret') || 'default-secret',
+      algorithms: ['HS256'],
+      secretOrKey: configService.getOrThrow<string>('jwt.secret'),
     });
   }
 

@@ -3,6 +3,19 @@
  * Loads and validates environment variables
  */
 
+function requiredEnv(name: string, minLength = 1): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  if (value.length < minLength) {
+    throw new Error(
+      `Environment variable ${name} is too short (got ${value.length} chars, need >=${minLength})`,
+    );
+  }
+  return value;
+}
+
 export default () => ({
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -13,12 +26,12 @@ export default () => ({
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+    secret: requiredEnv('JWT_SECRET', 32),
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
 
   encryption: {
-    key: process.env.ENCRYPTION_KEY || 'your-32-character-encryption-key',
+    key: requiredEnv('ENCRYPTION_KEY', 32),
   },
 
   thumbtack: {

@@ -20,8 +20,9 @@ import { AdminModule } from '../admin/admin.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('jwt.secret') || 'default-secret',
+        secret: configService.getOrThrow<string>('jwt.secret'),
         signOptions: {
+          algorithm: 'HS256',
           expiresIn: configService.get<string>('jwt.expiresIn') || '7d',
         } as any,
       }),
