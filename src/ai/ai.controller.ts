@@ -11,6 +11,7 @@ import { buildPricingGuardRules } from './pricing-guards';
 import { hydratePricing, parseAndHydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent, QuoteAndIntent } from '../pricing/pricing-engine';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
+import { extractLeadDetails } from '../leads/extract-lead-details';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -76,7 +77,7 @@ export class AiController {
         : null,
     );
 
-    const details = this.extractLeadDetails(lead.rawJson);
+    const details = extractLeadDetails(lead.rawJson);
     const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson, account?.followUpSettingsJson);
     const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const businessBlock = buildBusinessContextBlock({
@@ -182,7 +183,7 @@ export class AiController {
         : null,
     );
 
-    const details = this.extractLeadDetails(lead.rawJson);
+    const details = extractLeadDetails(lead.rawJson);
     const mode = contextMode || 'full';
 
     let conversationHistory: ConversationMessage[] = [];
@@ -442,39 +443,4 @@ export class AiController {
     }
   }
 
-  private extractLeadDetails(rawJson: string): Record<string, string> {
-    try {
-      const raw = JSON.parse(rawJson);
-      const result: Record<string, string> = {};
-
-      // Thumbtack format: request.details[].question / .answer
-      const details: any[] = raw.request?.details || raw.details || [];
-      for (const item of details) {
-        if (item.question && item.answer) {
-          result[String(item.question)] = String(item.answer);
-        }
-      }
-
-      // Yelp format: project.survey_answers[].question_text / .answer_text
-      const surveyAnswers: any[] = raw.project?.survey_answers || [];
-      for (const q of surveyAnswers) {
-        if (q.question_text && q.answer_text) {
-          const answer = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
-          result[String(q.question_text)] = answer;
-        }
-      }
-
-      // Yelp: availability and additional info
-      if (raw.project?.availability?.status) result['Availability'] = raw.project.availability.status;
-      if (raw.project?.additional_info) result['Additional details'] = raw.project.additional_info;
-
-      // Also pull top-level fields if present
-      if (raw.request?.description) result['Description'] = raw.request.description;
-      if (raw.description) result['Description'] = raw.description;
-
-      return result;
-    } catch {
-      return {};
-    }
-  }
 }

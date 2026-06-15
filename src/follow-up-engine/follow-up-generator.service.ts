@@ -28,6 +28,7 @@ import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
+import { extractLeadDetails } from '../leads/extract-lead-details';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
@@ -181,62 +182,22 @@ export class FollowUpGeneratorService {
       select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true, message: true, rawJson: true },
     });
 
-    // Extract request details (bedrooms, bathrooms, service type) from lead
-    let requestDetails = '';
-    // Same record shape the pricing engine consumes (see
+    // Extract request details (bedrooms, bathrooms, service type) from lead.
+    // leadFactsRecord is the record shape the pricing engine consumes (see
     // inferQuoteFacts in src/pricing/pricing-engine.ts) — keys are
     // user-visible labels because they originated as TT/Yelp survey
-    // questions. We build both the flat string (existing prompt UX)
-    // and the record (new deterministic-quote engine input).
-    const leadFactsRecord: Record<string, string> = {};
-    let additionalInfo: string | null = null;
+    // questions. requestDetails is a flat string surfaced in the prompt UX.
+    const leadFactsRecord: Record<string, string> = extractLeadDetails(lead?.rawJson ?? null);
+    let additionalInfo: string | null = leadFactsRecord['Additional details'] ?? null;
+    let requestDetails = '';
     if (lead?.rawJson) {
-      try {
-        const raw = JSON.parse(lead.rawJson);
-        const details: string[] = [];
-        if (raw.bedrooms !== undefined && raw.bedrooms !== null) {
-          details.push(`${raw.bedrooms} bedrooms`);
-          leadFactsRecord['Bedrooms'] = String(raw.bedrooms);
-        }
-        if (raw.bathrooms !== undefined && raw.bathrooms !== null) {
-          details.push(`${raw.bathrooms} bathrooms`);
-          leadFactsRecord['Bathrooms'] = String(raw.bathrooms);
-        }
-        const sqftVal = raw.squareFeet ?? raw.square_feet;
-        if (sqftVal !== undefined && sqftVal !== null) {
-          details.push(`${sqftVal} sq ft`);
-          leadFactsRecord['Square footage'] = String(sqftVal);
-        }
-        if (raw.frequency) {
-          details.push(`frequency: ${raw.frequency}`);
-          leadFactsRecord['Frequency'] = String(raw.frequency);
-        }
-        const svcVal = raw.serviceType ?? raw.service_type;
-        if (svcVal) {
-          details.push(`service: ${svcVal}`);
-          leadFactsRecord['Cleaning type'] = String(svcVal);
-        }
-        // Also pull TT request.details[] / Yelp project.survey_answers[]
-        // so the pricing engine sees the same Q&A the other surfaces see.
-        const ttDetails: any[] = raw.request?.details || raw.details || [];
-        for (const item of ttDetails) {
-          if (item?.question && item?.answer) {
-            leadFactsRecord[String(item.question)] = String(item.answer);
-          }
-        }
-        const yelpSurvey: any[] = raw.project?.survey_answers || [];
-        for (const q of yelpSurvey) {
-          if (q?.question_text && q?.answer_text) {
-            const a = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
-            leadFactsRecord[String(q.question_text)] = a;
-          }
-        }
-        if (raw.project?.additional_info) {
-          additionalInfo = String(raw.project.additional_info);
-          leadFactsRecord['Additional details'] = additionalInfo;
-        }
-        if (details.length > 0) requestDetails = `Customer request details: ${details.join(', ')}`;
-      } catch {}
+      const flatParts: string[] = [];
+      if (leadFactsRecord['Bedrooms']) flatParts.push(`${leadFactsRecord['Bedrooms']} bedrooms`);
+      if (leadFactsRecord['Bathrooms']) flatParts.push(`${leadFactsRecord['Bathrooms']} bathrooms`);
+      if (leadFactsRecord['Square footage']) flatParts.push(`${leadFactsRecord['Square footage']} sq ft`);
+      if (leadFactsRecord['Frequency']) flatParts.push(`frequency: ${leadFactsRecord['Frequency']}`);
+      if (leadFactsRecord['Cleaning type']) flatParts.push(`service: ${leadFactsRecord['Cleaning type']}`);
+      if (flatParts.length > 0) requestDetails = `Customer request details: ${flatParts.join(', ')}`;
     }
     if (!requestDetails && lead?.message) {
       requestDetails = `Customer request: ${lead.message.substring(0, 200)}`;
