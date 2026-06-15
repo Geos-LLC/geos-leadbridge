@@ -42,9 +42,29 @@ import {
   type PlaybookSectionKey,
 } from './section-default-prompts';
 
+/**
+ * One chat-added instruction. The AI Settings Assistant pushes a new
+ * entry into `chatInstructions[]` instead of mutating the freeform
+ * `customInstructions` blob so the UI can list / delete each one
+ * individually. Runtime concatenates these onto `customInstructions`
+ * at prompt-build time.
+ */
+export interface ChatInstruction {
+  /** Stable opaque id used by the UI for delete + React keys. */
+  id: string;
+  /** The actual rule text that lands in the AI prompt. */
+  text: string;
+  /** Original user chat message (for display only). Optional. */
+  userMessage?: string;
+  /** ISO timestamp the entry was added. */
+  createdAt: string;
+}
+
 export type PlaybookV2Storage = {
   [K in PlaybookSectionKey]?: {
     customInstructions: string;
+    /** Chat-added rules. See ChatInstruction. Empty/missing = none. */
+    chatInstructions?: ChatInstruction[];
   };
 };
 
@@ -82,6 +102,37 @@ export function getCustomInstructions(
   return entry.customInstructions.trim();
 }
 
+/**
+ * Read the chat-added instructions for a section, defensively. Drops
+ * malformed entries so corrupt JSON never crashes the renderer.
+ */
+export function getChatInstructions(
+  storage: PlaybookV2Storage,
+  section: PlaybookSectionKey,
+): ChatInstruction[] {
+  const entry = storage[section];
+  const list = entry?.chatInstructions;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (e): e is ChatInstruction =>
+      !!e && typeof e === 'object' &&
+      typeof e.id === 'string' &&
+      typeof e.text === 'string' &&
+      e.text.trim().length > 0,
+  );
+}
+
+/**
+ * Combined section text — the typed `customInstructions` blob followed
+ * by every chat-added entry on its own paragraph. This is what the
+ * runtime prompt actually sees per section.
+ */
+function combinedSectionText(storage: PlaybookV2Storage, section: PlaybookSectionKey): string {
+  const typed = getCustomInstructions(storage, section);
+  const chat = getChatInstructions(storage, section).map(e => e.text.trim()).filter(Boolean);
+  return [typed, ...chat].filter(s => s.length > 0).join('\n\n');
+}
+
 // ─── Public renderer ──────────────────────────────────────────────────────
 
 /**
@@ -99,7 +150,7 @@ export function renderPlaybookBlock(savedAccount: RawSavedAccount): string {
   for (const section of PLAYBOOK_SECTION_ORDER) {
     const label = PLAYBOOK_SECTION_LABELS[section];
     const defaultPrompt = SECTION_DEFAULT_PROMPTS[section];
-    const custom = getCustomInstructions(storage, section);
+    const custom = combinedSectionText(storage, section);
 
     const parts: string[] = [`[${label}]`];
     parts.push(`Default approach:\n${defaultPrompt}`);
@@ -133,7 +184,7 @@ export function previewPlaybookSections(savedAccount: RawSavedAccount): SectionP
     section,
     promptLabel: PLAYBOOK_SECTION_LABELS[section],
     defaultPrompt: SECTION_DEFAULT_PROMPTS[section],
-    customInstructions: getCustomInstructions(storage, section),
+    customInstructions: combinedSectionText(storage, section),
   }));
 }
 

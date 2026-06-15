@@ -11,6 +11,7 @@ import { buildPricingGuardRules } from './pricing-guards';
 import { hydratePricing, parseAndHydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent, QuoteAndIntent } from '../pricing/pricing-engine';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
+import { resolveGlobalPrompt } from './global-prompt-resolver';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -48,7 +49,7 @@ export class AiController {
     }
 
     const [userRecord, account] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
+      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true } }),
       lead.businessId
         ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
         : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
@@ -112,7 +113,7 @@ export class AiController {
         state: lead.state ?? undefined,
         budget: lead.budget ? Number(lead.budget) : undefined,
         accountName: account?.businessName ?? undefined,
-        globalPrompt: userRecord?.globalAiPrompt ?? undefined,
+        globalPrompt: resolveGlobalPrompt(userRecord),
         strategyPrompt,
         businessBlock,
         pricingBlock: pricingBlock ?? undefined,
@@ -156,7 +157,7 @@ export class AiController {
     }
 
     const [userRecord, account] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
+      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true } }),
       lead.businessId
         ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
         : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
@@ -237,7 +238,7 @@ export class AiController {
         state: lead.state ?? undefined,
         budget: lead.budget ? Number(lead.budget) : undefined,
         accountName: account?.businessName ?? undefined,
-        globalPrompt: userRecord?.globalAiPrompt ?? undefined,
+        globalPrompt: resolveGlobalPrompt(userRecord),
         strategyPrompt,
         threadContextBlock: threadContextPrompt,
         businessBlock,

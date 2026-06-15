@@ -142,6 +142,14 @@ model User {
   // AI settings
   globalAiPrompt String? @map("global_ai_prompt") @db.Text // Global AI system prompt — applied to all AI replies
 
+  // Chat-added global instructions. Each entry is `{ id, text, userMessage?, createdAt }`.
+  // The AI Settings Assistant pushes a new entry here instead of mutating
+  // `globalAiPrompt` so the UI can list and delete entries individually
+  // (without fuzzy-substring tricks). Runtime concatenates these onto
+  // `globalAiPrompt` at prompt-build time. Null/empty array = no chat
+  // additions; the typed `globalAiPrompt` value still applies on its own.
+  globalAiChatInstructionsJson Json? @map("global_ai_chat_instructions_json")
+
   // AI Conversation master switch — user-scope. Single source of truth
   // for "do I want AI Conversation capability at all on my plan". The
   // per-account SavedAccount.aiConversationMode answers the orthogonal

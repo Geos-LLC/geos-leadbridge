@@ -34,6 +34,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
@@ -145,7 +146,7 @@ export class InstantTextAiService {
     }
     const user = await this.prisma.user.findUnique({
       where: { id: account.userId },
-      select: { globalAiPrompt: true, name: true },
+      select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true },
     });
 
     // ServiceProfile resolver (Phase 1b adoption). Instant Text has no
@@ -313,7 +314,7 @@ export class InstantTextAiService {
       customerMessage: opts.customerMessage,
       category: opts.category,
       accountName,
-      globalPrompt: user?.globalAiPrompt ?? undefined,
+      globalPrompt: resolveGlobalPrompt(user),
       strategyPrompt: SMS_FIRST_TOUCH_PROMPT,
       businessBlock,
       pricingBlock: pricingBlock || undefined,

@@ -6,15 +6,37 @@
  * dictated by `proposal.payload.target.area`. There is no generic "patch"
  * path; adding a new MVP area is a deliberate code change here.
  *
- * SavedAccount.followUpSettingsJson is a single TEXT blob in the DB. We
- * read-modify-write under a per-account narrow scope and only touch the
- * `aiPlaybookV2[sectionKey].customInstructions` field. Other keys in the
- * blob are preserved verbatim. This matches the merge semantics used in
- * follow-up-engine.controller.ts's saveSettings handler.
+ * Storage model per playbook / global area, by operation:
+ *
+ *   - operation='append':
+ *       Push a structured `ChatInstruction` entry into the section's
+ *       `chatInstructions[]` array (per playbook section) or into
+ *       `User.globalAiChatInstructionsJson[]` (global). The typed
+ *       `customInstructions` / `globalAiPrompt` blob is NEVER mutated.
+ *       The Custom Instructions UI lists each entry and lets the user
+ *       delete one at a time without fuzzy substring matching.
+ *
+ *   - operation='replace' / 'set':
+ *       Used by conflict-resolution ("Replace conflicting rule"). The
+ *       proposal carries a precomputed newValue that's the merged text
+ *       minus the excerpt. We REPLACE the typed `customInstructions` /
+ *       `globalAiPrompt` blob with that value, leaving the chat list
+ *       untouched. This preserves the long-standing conflict-resolution
+ *       UX where the merged result lives in the typed blob.
+ *
+ *   - faq:
+ *       Append a Q&A pair into `SavedAccount.faqJson.entries[]`. Already
+ *       structured — unchanged.
+ *
+ * `beforeValue` / `afterValue` recorded in the audit log are the
+ * *combined* effective text for the area (typed + every chat entry
+ * joined by paragraph breaks) — what the runtime prompt actually sees.
  */
 
 import { PrismaService } from '../common/utils/prisma.service';
 import { SignedProposal, AssistantArea } from './assistant.types';
+import { randomUUID } from 'crypto';
+import type { ChatInstruction } from '../ai/playbook-renderer';
 
 export interface WriteResult {
   beforeValue: string | null;
@@ -31,13 +53,38 @@ const PLAYBOOK_AREA_TO_SECTION: Record<Exclude<AssistantArea, 'faq' | 'global_cu
   brand_voice: 'personality_brand_voice', // UI calls it Brand Voice; storage key is the longer name
 };
 
-function appendInstruction(current: string | null, addition: string): string {
-  const cur = (current ?? '').trim();
-  const add = addition.trim();
-  if (!cur) return add;
-  // Separate paragraph so each AI-Assistant write is visually distinguishable
-  // when the user opens the section card in Settings.
-  return `${cur}\n\n${add}`;
+/** Drop malformed entries the same way the renderer does. */
+function safeChatList(raw: unknown): ChatInstruction[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (e): e is ChatInstruction =>
+      !!e && typeof e === 'object' &&
+      typeof (e as ChatInstruction).id === 'string' &&
+      typeof (e as ChatInstruction).text === 'string' &&
+      (e as ChatInstruction).text.trim().length > 0,
+  );
+}
+
+/**
+ * Effective text the runtime + conflict detector see: typed blob
+ * followed by each chat entry, joined by blank lines.
+ */
+function combineSection(
+  customInstructions: string | null | undefined,
+  chatList: ChatInstruction[],
+): string {
+  const typed = (customInstructions ?? '').trim();
+  const chat = chatList.map(e => e.text.trim()).filter(Boolean);
+  return [typed, ...chat].filter(s => s.length > 0).join('\n\n');
+}
+
+function newEntry(text: string, userMessage: string | undefined): ChatInstruction {
+  return {
+    id: randomUUID(),
+    text: text.trim(),
+    userMessage,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export async function applyProposal(
@@ -45,24 +92,35 @@ export async function applyProposal(
   userId: string,
   proposal: SignedProposal,
 ): Promise<WriteResult> {
-  const { target, proposedChange, savedAccountId } = proposal.payload;
+  const { target, proposedChange, savedAccountId, userMessage } = proposal.payload;
+  const isReplace = proposedChange.operation === 'replace' || proposedChange.operation === 'set';
 
-  // global_custom_instructions — User.globalAiPrompt
+  // global_custom_instructions
   if (target.area === 'global_custom_instructions') {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { globalAiPrompt: true },
+      select: { globalAiPrompt: true, globalAiChatInstructionsJson: true },
     });
-    const before = user?.globalAiPrompt ?? null;
-    const next =
-      proposedChange.operation === 'set'
-        ? proposedChange.newValue
-        : appendInstruction(before, proposedChange.newValue);
+    const existingChat = safeChatList(user?.globalAiChatInstructionsJson as unknown);
+    const before = combineSection(user?.globalAiPrompt, existingChat) || null;
+
+    if (isReplace) {
+      const nextTyped = proposedChange.newValue;
+      await prisma.user.update({
+        where: { id: userId },
+        data: { globalAiPrompt: nextTyped || null },
+      });
+      const after = combineSection(nextTyped, existingChat);
+      return { beforeValue: before, afterValue: after, storageKey: 'globalAiPrompt' };
+    }
+
+    const nextChat = [...existingChat, newEntry(proposedChange.newValue, userMessage)];
     await prisma.user.update({
       where: { id: userId },
-      data: { globalAiPrompt: next || null },
+      data: { globalAiChatInstructionsJson: nextChat as any },
     });
-    return { beforeValue: before, afterValue: next, storageKey: 'globalAiPrompt' };
+    const after = combineSection(user?.globalAiPrompt, nextChat);
+    return { beforeValue: before, afterValue: after, storageKey: 'globalAiChatInstructionsJson' };
   }
 
   // For everything else we need a savedAccountId
@@ -75,7 +133,7 @@ export async function applyProposal(
   });
   if (!account) throw new Error('account_not_found');
 
-  // faq — append to SavedAccount.faqJson
+  // faq — unchanged
   if (target.area === 'faq') {
     let faq: { entries?: FaqEntry[] } & Record<string, any> = {};
     if (account.faqJson) {
@@ -97,7 +155,7 @@ export async function applyProposal(
     return { beforeValue: beforeStr, afterValue: afterStr, storageKey: 'faqJson' };
   }
 
-  // The three playbook V2 surfaces — read-modify-write on followUpSettingsJson
+  // Playbook V2 sections — read-modify-write on followUpSettingsJson.
   const sectionKey = PLAYBOOK_AREA_TO_SECTION[target.area];
   let settings: Record<string, any> = {};
   if (account.followUpSettingsJson) {
@@ -107,13 +165,24 @@ export async function applyProposal(
     ? { ...settings.aiPlaybookV2 }
     : {};
   const section = v2[sectionKey] && typeof v2[sectionKey] === 'object' ? { ...v2[sectionKey] } : {};
-  const before: string | null = typeof section.customInstructions === 'string'
-    ? section.customInstructions
-    : null;
-  const next = proposedChange.operation === 'replace' || proposedChange.operation === 'set'
-    ? proposedChange.newValue
-    : appendInstruction(before, proposedChange.newValue);
-  section.customInstructions = next;
+  const existingChat = safeChatList(section.chatInstructions);
+  const typed: string = typeof section.customInstructions === 'string' ? section.customInstructions : '';
+
+  const before = combineSection(typed, existingChat) || null;
+
+  let storageKey: string;
+  let nextTyped = typed;
+  let nextChat = existingChat;
+  if (isReplace) {
+    nextTyped = proposedChange.newValue;
+    storageKey = `aiPlaybookV2.${sectionKey}.customInstructions`;
+  } else {
+    nextChat = [...existingChat, newEntry(proposedChange.newValue, userMessage)];
+    storageKey = `aiPlaybookV2.${sectionKey}.chatInstructions`;
+  }
+
+  section.customInstructions = nextTyped;
+  section.chatInstructions = nextChat;
   v2[sectionKey] = section;
   settings.aiPlaybookV2 = v2;
 
@@ -121,9 +190,7 @@ export async function applyProposal(
     where: { id: account.id },
     data: { followUpSettingsJson: JSON.stringify(settings) },
   });
-  return {
-    beforeValue: before,
-    afterValue: next,
-    storageKey: `aiPlaybookV2.${sectionKey}.customInstructions`,
-  };
+
+  const after = combineSection(nextTyped, nextChat);
+  return { beforeValue: before, afterValue: after, storageKey };
 }

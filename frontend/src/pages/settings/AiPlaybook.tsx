@@ -24,11 +24,11 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
-  ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle,
+  ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, MessageSquare, Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
-import { followUpApi, usersApi } from '../../services/api';
+import { followUpApi, usersApi, aiSettingsAssistantApi, type ChatInstructionEntry } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
 import AccountFaqForm from '../../components/AccountFaqForm';
@@ -52,6 +52,19 @@ const SECTION_ICONS: Record<PlaybookSectionKey, LucideIcon> = {
   human_handoff_guidance: PhoneCall,
   followup_tone:          Send,
   personality_brand_voice: UserIcon,
+};
+
+/**
+ * Map a Playbook section key to its `assistant area` — the value the AI
+ * Settings Assistant chat uses to push entries into. Only the three
+ * sections currently surfaced by the chat classifier appear here. Other
+ * sections never get chat-added entries today, so the Custom
+ * Instructions sub-section stays hidden under them.
+ */
+const SECTION_TO_ASSISTANT_AREA: Partial<Record<PlaybookSectionKey, string>> = {
+  business_information: 'business_information',
+  pricing_guidance: 'pricing_guidance',
+  personality_brand_voice: 'brand_voice',
 };
 
 export function SettingsAiPlaybook() {
@@ -184,6 +197,7 @@ export function SettingsAiPlaybook() {
           value={v2.business_information?.customInstructions ?? ''}
           onChange={v => onSectionChange('business_information', v)}
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
+          savedAccountId={accounts[0].id}
         />
 
         {/* 2. FAQ */}
@@ -258,6 +272,7 @@ export function SettingsAiPlaybook() {
               onChange={v => onSectionChange('personality_brand_voice', v)}
               legacyAdvanced
               isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
+              savedAccountId={accounts[0].id}
             />
           </>
         )}
@@ -320,7 +335,7 @@ function HelpBlock() {
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
+  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced, savedAccountId,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -338,8 +353,13 @@ function HowSectionCard({
    *  mode (qualification_guidance, booking_guidance, etc.). The textarea
    *  is fully editable; behavior is unchanged. */
   legacyAdvanced?: boolean;
+  /** Account scope for the Custom Instructions sub-section. When present
+   *  AND the section maps to a chat assistant area, the sub-section is
+   *  rendered below the textarea. */
+  savedAccountId?: string;
 }) {
   const Icon = SECTION_ICONS[section];
+  const chatArea = SECTION_TO_ASSISTANT_AREA[section];
   return (
     <PlaybookSectionShell
       icon={Icon}
@@ -356,6 +376,9 @@ function HowSectionCard({
         onChange={onChange}
         onRevertToDefault={() => onChange('')}
       />
+      {chatArea && savedAccountId && (
+        <ChatInstructionsSubsection area={chatArea} savedAccountId={savedAccountId} />
+      )}
     </PlaybookSectionShell>
   );
 }
@@ -453,6 +476,7 @@ function PricingGuidanceCard({
         onChange={onChange}
         onRevertToDefault={() => onChange('')}
       />
+      <ChatInstructionsSubsection area="pricing_guidance" savedAccountId={accountId} />
       <div style={{
         marginTop: 18, padding: '14px 16px',
         background: '#f8fafc',
@@ -586,8 +610,10 @@ function GlobalCustomInstructionsCard() {
         </span>
       </div>
 
+      <ChatInstructionsSubsection area="global_custom_instructions" />
+
       {expanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
           <textarea
             value={prompt}
             onChange={e => { setPrompt(e.target.value); setDirty(true); setSaved(false); }}
@@ -835,6 +861,215 @@ function btnGhostDanger(disabled: boolean): React.CSSProperties {
     border: 0, cursor: disabled ? 'not-allowed' : 'pointer',
     fontFamily: 'inherit', opacity: disabled ? 0.7 : 1,
   };
+}
+
+// ─── Custom Instructions sub-section ─────────────────────────────────────
+// Lists chat-added rules for a given assistant area. Each entry carries
+// its own delete button; a "Clear all" link wipes the section's list.
+// The typed `customInstructions` textarea above is independent — this
+// sub-section never touches it.
+//
+// `savedAccountId` is required for per-section playbook areas and
+// omitted for the global card. The list is fetched lazily on mount and
+// re-fetched after each mutation. We don't share state with the parent
+// `v2` object because chat entries are written through a dedicated
+// endpoint, not the wizard-settings save fan-out.
+
+function ChatInstructionsSubsection({
+  area, savedAccountId, title,
+}: {
+  area: string;
+  savedAccountId?: string;
+  /** Heading shown above the list. Defaults to "Custom instructions (from chat)". */
+  title?: string;
+}) {
+  const [entries, setEntries] = useState<ChatInstructionEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Initial fetch + re-fetch when scope changes.
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    aiSettingsAssistantApi.listChatInstructions(area, savedAccountId)
+      .then(res => { if (alive) setEntries(res.entries ?? []); })
+      .catch((e: any) => { if (alive) setError(e?.message ?? 'Failed to load custom instructions'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [area, savedAccountId]);
+
+  const handleDelete = async (id: string) => {
+    setBusyId(id); setError(null);
+    try {
+      const res = await aiSettingsAssistantApi.deleteChatInstruction(area, id, savedAccountId);
+      setEntries(res.entries ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to delete entry');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (entries.length === 0) return;
+    if (!window.confirm(`Delete all ${entries.length} chat-added instruction${entries.length === 1 ? '' : 's'} for this section?`)) return;
+    setClearing(true); setError(null);
+    try {
+      // Delete one by one — keeps the audit log honest and avoids a new
+      // bulk-delete endpoint. The list is short by design (chat-added).
+      let remaining = entries;
+      for (const e of entries) {
+        const res = await aiSettingsAssistantApi.deleteChatInstruction(area, e.id, savedAccountId);
+        remaining = res.entries ?? [];
+      }
+      setEntries(remaining);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to clear entries');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div style={{
+      marginTop: 18,
+      padding: '14px 16px',
+      background: '#f8fafc',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+        marginBottom: 10,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
+          letterSpacing: 0.06, textTransform: 'uppercase',
+          fontFamily: 'var(--lb-font-mono)',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <MessageSquare size={11} />
+          {title ?? 'Custom instructions (from chat)'}
+          {entries.length > 0 && (
+            <span style={{
+              fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
+              background: '#eef2ff', color: '#4338ca',
+            }}>
+              {entries.length}
+            </span>
+          )}
+        </div>
+        {entries.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearAll}
+            disabled={clearing || busyId !== null}
+            style={{
+              background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+              color: '#b91c1c', opacity: clearing ? 0.6 : 1,
+            }}
+          >
+            {clearing ? 'Clearing…' : 'Clear all ↺'}
+          </button>
+        )}
+      </div>
+
+      {loading && (
+        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Loader2 size={12} className="animate-spin" /> Loading…
+        </div>
+      )}
+
+      {!loading && entries.length === 0 && (
+        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
+          No chat-added instructions yet. Use the AI Settings Assistant to
+          add rules in natural language — each one will appear here with
+          its own delete button.
+        </div>
+      )}
+
+      {!loading && entries.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {entries.map(e => (
+            <li
+              key={e.id}
+              style={{
+                padding: '10px 12px',
+                background: 'white',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 8,
+                display: 'flex', gap: 10, alignItems: 'flex-start',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  {e.text}
+                </div>
+                {(e.userMessage || e.createdAt) && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: 'var(--lb-ink-6)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {e.userMessage && <span title="What you typed">"{truncateText(e.userMessage, 80)}"</span>}
+                    {e.createdAt && <span>· {formatRelative(e.createdAt)}</span>}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handleDelete(e.id)}
+                disabled={busyId === e.id || clearing}
+                title="Delete this instruction"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 28, height: 28, borderRadius: 6,
+                  background: 'transparent', border: 0, cursor: 'pointer',
+                  color: '#b91c1c', opacity: busyId === e.id ? 0.6 : 1,
+                  flexShrink: 0,
+                }}
+              >
+                {busyId === e.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && (
+        <div style={{
+          marginTop: 8,
+          padding: '6px 10px',
+          background: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: 6,
+          fontSize: 12, color: '#991b1b',
+        }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function truncateText(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1).trimEnd() + '…';
+}
+
+function formatRelative(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const diffMs = Date.now() - t;
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(t).toLocaleDateString();
 }
 
 // Suppress the unused Sparkles import warning since iconography may evolve.

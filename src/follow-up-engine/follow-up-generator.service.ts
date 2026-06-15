@@ -29,6 +29,7 @@ import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
@@ -483,11 +484,15 @@ export class FollowUpGeneratorService {
       if (template?.content) customPrompt = template.content;
     }
 
-    // Step 5: Load global AI prompt
+    // Step 5: Load global AI prompt (typed blob + chat-added entries)
     let globalPrompt = '';
     if (lead?.userId) {
-      const user = await this.prisma.user.findUnique({ where: { id: lead.userId }, select: { globalAiPrompt: true } });
-      if (user?.globalAiPrompt) globalPrompt = user.globalAiPrompt;
+      const user = await this.prisma.user.findUnique({
+        where: { id: lead.userId },
+        select: { globalAiPrompt: true, globalAiChatInstructionsJson: true },
+      });
+      const combined = resolveGlobalPrompt(user);
+      if (combined) globalPrompt = combined;
     }
     if (!globalPrompt) {
       const { TemplatesService } = require('../templates/templates.service');

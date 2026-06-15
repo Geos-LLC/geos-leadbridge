@@ -258,6 +258,64 @@ describe('previewPlaybookSections — UI surface', () => {
   });
 });
 
+// ─── Chat-added instructions ─────────────────────────────────────────────
+
+describe('chat-added instructions concatenate into the section', () => {
+  it('renders each chat entry alongside typed custom instructions', () => {
+    const v2: PlaybookV2Storage = {
+      pricing_guidance: {
+        customInstructions: 'Typed floor: $120.',
+        chatInstructions: [
+          { id: 'a', text: 'No discounts on first visit.', createdAt: '2026-06-15T00:00:00Z' },
+          { id: 'b', text: 'Always offer trainee tier first.', createdAt: '2026-06-15T00:00:01Z' },
+        ],
+      },
+    };
+    const block = renderPlaybookBlock(makeAccount({ v2 }));
+    expect(block).toContain('Business preference');
+    expect(block).toContain('Typed floor: $120.');
+    expect(block).toContain('No discounts on first visit.');
+    expect(block).toContain('Always offer trainee tier first.');
+  });
+
+  it('emits Business preference when only chatInstructions are set (no typed text)', () => {
+    const v2: PlaybookV2Storage = {
+      pricing_guidance: {
+        customInstructions: '',
+        chatInstructions: [{ id: 'a', text: 'Quote only ranges.', createdAt: '2026-06-15T00:00:00Z' }],
+      },
+    };
+    const block = renderPlaybookBlock(makeAccount({ v2 }));
+    expect(block).toContain('Business preference');
+    expect(block).toContain('Quote only ranges.');
+  });
+
+  it('omits Business preference when both typed and chat lists are empty', () => {
+    const v2: PlaybookV2Storage = {
+      pricing_guidance: { customInstructions: '', chatInstructions: [] },
+    };
+    const block = renderPlaybookBlock(makeAccount({ v2 }));
+    expect(block).not.toContain('Business preference');
+  });
+
+  it('drops malformed chat entries defensively', () => {
+    const v2 = {
+      pricing_guidance: {
+        customInstructions: '',
+        chatInstructions: [
+          { id: 'ok', text: 'Valid entry.', createdAt: '2026-06-15T00:00:00Z' },
+          { id: 'bad', text: '   ' } as any,
+          null as any,
+          { text: 'no id' } as any,
+        ],
+      },
+    } as unknown as PlaybookV2Storage;
+    const block = renderPlaybookBlock(makeAccount({ v2 }));
+    expect(block).toContain('Valid entry.');
+    expect(block).not.toContain('no id');
+  });
+});
+
 // ─── getCustomInstructions helper ────────────────────────────────────────
 
 describe('getCustomInstructions', () => {

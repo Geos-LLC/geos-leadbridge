@@ -786,6 +786,18 @@ export interface InterpretResponse {
   newRule?: string;
 }
 
+/**
+ * One chat-added Custom Instruction entry — mirror of the backend
+ * ChatInstruction shape. Each entry has its own id so the AI Playbook
+ * UI can delete one at a time.
+ */
+export interface ChatInstructionEntry {
+  id: string;
+  text: string;
+  userMessage?: string;
+  createdAt: string;
+}
+
 export const aiSettingsAssistantApi = {
   interpret: async (
     message: string,
@@ -798,6 +810,33 @@ export const aiSettingsAssistantApi = {
     proposal: SignedProposal,
   ): Promise<{ success: boolean; appliedAt: string; auditLogId: string }> => {
     const { data } = await api.post('/v1/ai-settings-assistant/apply', { proposal });
+    return data;
+  },
+  /**
+   * List chat-added entries for an area. `savedAccountId` is required
+   * for per-section playbook areas and omitted for global.
+   */
+  listChatInstructions: async (
+    area: string,
+    savedAccountId?: string,
+  ): Promise<{ entries: ChatInstructionEntry[] }> => {
+    const params: Record<string, string> = { area };
+    if (savedAccountId) params.savedAccountId = savedAccountId;
+    const { data } = await api.get('/v1/ai-settings-assistant/chat-instructions', { params });
+    return data;
+  },
+  /**
+   * Delete one chat-added entry by id. Returns the remaining list so
+   * the caller can render without a second fetch.
+   */
+  deleteChatInstruction: async (
+    area: string,
+    entryId: string,
+    savedAccountId?: string,
+  ): Promise<{ entries: ChatInstructionEntry[] }> => {
+    const { data } = await api.post('/v1/ai-settings-assistant/chat-instructions/delete', {
+      area, entryId, savedAccountId,
+    });
     return data;
   },
 };

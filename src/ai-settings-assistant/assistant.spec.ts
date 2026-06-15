@@ -155,7 +155,7 @@ describe('safety — STOP / opt-out / compliance refusals', () => {
 describe('proposal signer — sign + verify', () => {
   const userId = 'user_abc';
   const payload: SignedProposal['payload'] = {
-    target: { area: 'business_information', storageKey: 'aiPlaybookV2.business_information.customInstructions' },
+    target: { area: 'business_information', storageKey: 'aiPlaybookV2.business_information.chatInstructions' },
     proposedChange: {
       operation: 'append',
       currentValue: null,
@@ -239,11 +239,13 @@ describe('proposal signer — sign + verify', () => {
  * captured into `state` so assertions can read them back.
  */
 function makeStubPrisma(initial: {
-  user?: { id: string; globalAiPrompt: string | null };
+  user?: { id: string; globalAiPrompt: string | null; globalAiChatInstructionsJson?: any };
   savedAccount?: { id: string; userId: string; faqJson: string | null; followUpSettingsJson: string | null };
 }) {
   const state = {
-    user: initial.user ? { ...initial.user } : null,
+    user: initial.user
+      ? { globalAiChatInstructionsJson: null as any, ...initial.user }
+      : null,
     savedAccount: initial.savedAccount ? { ...initial.savedAccount } : null,
     auditLogs: [] as any[],
   };
@@ -254,11 +256,17 @@ function makeStubPrisma(initial: {
       user: {
         findUnique: async ({ where, select: _select }: any) => {
           if (!state.user || state.user.id !== where.id) return null;
-          return { globalAiPrompt: state.user.globalAiPrompt };
+          return {
+            globalAiPrompt: state.user.globalAiPrompt,
+            globalAiChatInstructionsJson: state.user.globalAiChatInstructionsJson,
+          };
         },
         update: async ({ where, data }: any) => {
           if (!state.user || state.user.id !== where.id) throw new Error('not found');
           if (data.globalAiPrompt !== undefined) state.user.globalAiPrompt = data.globalAiPrompt;
+          if (data.globalAiChatInstructionsJson !== undefined) {
+            state.user.globalAiChatInstructionsJson = data.globalAiChatInstructionsJson;
+          }
           return state.user;
         },
       },
@@ -322,11 +330,22 @@ describe('writer + service.apply — audit log + scoped writes', () => {
     expect(row.userId).toBe(userId);
     expect(row.savedAccountId).toBe('acct_8');
     expect(row.area).toBe('business_information');
-    expect(row.target).toBe('aiPlaybookV2.business_information.customInstructions');
+    expect(row.target).toBe('aiPlaybookV2.business_information.chatInstructions');
     expect(row.userMessage).toMatch(/cleaning supplies/i);
+    // beforeValue is the typed blob (chat list was empty); afterValue is the
+    // combined typed + new chat entry.
     expect(row.beforeValue).toBe('We serve Tampa and surrounding cities.');
     expect(row.afterValue).toContain('We serve Tampa and surrounding cities.');
     expect(row.afterValue).toMatch(/cleaning supplies/i);
+
+    // Storage: typed blob preserved, chat list now has the new entry.
+    const after = JSON.parse(stub.state.savedAccount!.followUpSettingsJson!);
+    expect(after.aiPlaybookV2.business_information.customInstructions).toBe(
+      'We serve Tampa and surrounding cities.',
+    );
+    expect(after.aiPlaybookV2.business_information.chatInstructions).toHaveLength(1);
+    expect(after.aiPlaybookV2.business_information.chatInstructions[0].text).toMatch(/cleaning supplies/i);
+    expect(after.aiPlaybookV2.business_information.chatInstructions[0].id).toBeTruthy();
   });
 
   it('(9) updates only the intended section — leaves sibling sections + other settings untouched', async () => {
@@ -365,12 +384,16 @@ describe('writer + service.apply — audit log + scoped writes', () => {
     await svc.apply(userId, { proposal: interp.proposal! });
 
     const after = JSON.parse(stub.state.savedAccount!.followUpSettingsJson!);
-    // brand_voice (storage key personality_brand_voice) got the append.
-    expect(after.aiPlaybookV2.personality_brand_voice.customInstructions).toContain('Existing voice.');
-    expect(after.aiPlaybookV2.personality_brand_voice.customInstructions).not.toBe('Existing voice.');
+    // brand_voice (storage key personality_brand_voice) got a new chat entry;
+    // the typed `customInstructions` blob is preserved verbatim.
+    expect(after.aiPlaybookV2.personality_brand_voice.customInstructions).toBe('Existing voice.');
+    expect(after.aiPlaybookV2.personality_brand_voice.chatInstructions).toHaveLength(1);
+    expect(after.aiPlaybookV2.personality_brand_voice.chatInstructions[0].text.length).toBeGreaterThan(0);
     // Siblings untouched.
     expect(after.aiPlaybookV2.business_information.customInstructions).toBe('Existing biz info.');
+    expect(after.aiPlaybookV2.business_information.chatInstructions).toBeUndefined();
     expect(after.aiPlaybookV2.pricing_guidance.customInstructions).toBe('Existing pricing.');
+    expect(after.aiPlaybookV2.pricing_guidance.chatInstructions).toBeUndefined();
     // Unrelated top-level keys untouched.
     expect(after.followUpStrategy).toBe('auto');
     expect(after.priceQuoteMode).toBe('range');
@@ -435,7 +458,7 @@ describe('service.interpret — STOP refusal end-to-end', () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('writer — direct invocation respects target.area scope', () => {
-  it('global_custom_instructions writes globalAiPrompt and nothing else', async () => {
+  it('global_custom_instructions pushes to globalAiChatInstructionsJson and never touches globalAiPrompt', async () => {
     const userId = 'user_w';
     const stub = makeStubPrisma({
       user: { id: userId, globalAiPrompt: 'Old global.' },
@@ -448,17 +471,29 @@ describe('writer — direct invocation respects target.area scope', () => {
     });
 
     const proposal = signProposal(userId, {
-      target: { area: 'global_custom_instructions', storageKey: 'globalAiPrompt' },
-      proposedChange: { operation: 'set', currentValue: 'Old global.', newValue: 'New global.' },
-      userMessage: 'replace global',
-      summary: 'Replace Global Custom Instructions',
+      target: { area: 'global_custom_instructions', storageKey: 'globalAiChatInstructionsJson' },
+      proposedChange: { operation: 'append', currentValue: 'Old global.', newValue: 'Always sign off as Sara.' },
+      userMessage: 'sign off as Sara',
+      summary: 'Add to Global Custom Instructions',
       savedAccountId: null,
     });
 
     const res = await applyProposal(stub.prisma as any, userId, proposal);
+    // before = typed "Old global." with no chat entries yet
     expect(res.beforeValue).toBe('Old global.');
-    expect(res.afterValue).toBe('New global.');
-    expect(stub.state.user!.globalAiPrompt).toBe('New global.');
+    // after = typed blob + new chat entry text concatenated
+    expect(res.afterValue).toContain('Old global.');
+    expect(res.afterValue).toContain('Always sign off as Sara.');
+
+    // Typed blob untouched.
+    expect(stub.state.user!.globalAiPrompt).toBe('Old global.');
+    // Chat list now has the new entry.
+    const list = stub.state.user!.globalAiChatInstructionsJson as any[];
+    expect(Array.isArray(list)).toBe(true);
+    expect(list).toHaveLength(1);
+    expect(list[0].text).toBe('Always sign off as Sara.');
+    expect(list[0].id).toBeTruthy();
+
     // Saved account untouched.
     expect(stub.state.savedAccount!.faqJson).toBe('untouched');
     expect(stub.state.savedAccount!.followUpSettingsJson).toBe(JSON.stringify({ followUpStrategy: 'auto' }));

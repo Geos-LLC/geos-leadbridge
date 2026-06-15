@@ -690,6 +690,26 @@ export class FollowUpEngineController {
     // hardcoded-priority behavior — no migration required.
     if (body.qualificationV2 !== undefined) extendedSettings.qualificationV2 = body.qualificationV2;
 
+    // AI Playbook V2 — per-section custom instructions edited from
+    // Settings → AI Playbook. The UI sends `aiPlaybookV2` as a partial
+    // sub-tree (only the sections the user touched); we merge it onto
+    // the existing aiPlaybookV2 so we never clobber `chatInstructions[]`
+    // entries that the AI Settings Assistant has pushed alongside.
+    // Each section's `chatInstructions` is preserved verbatim when the
+    // UI omits it; the UI can also send a shrunk array (after a delete)
+    // and that value wins.
+    if (body.aiPlaybookV2 && typeof body.aiPlaybookV2 === 'object') {
+      const existingV2: Record<string, any> =
+        extendedSettings.aiPlaybookV2 && typeof extendedSettings.aiPlaybookV2 === 'object'
+          ? { ...extendedSettings.aiPlaybookV2 }
+          : {};
+      for (const [sectionKey, raw] of Object.entries(body.aiPlaybookV2 as Record<string, any>)) {
+        const incoming = raw && typeof raw === 'object' ? raw : {};
+        existingV2[sectionKey] = { ...(existingV2[sectionKey] ?? {}), ...incoming };
+      }
+      extendedSettings.aiPlaybookV2 = existingV2;
+    }
+
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset
     // unrelated columns to defaults.

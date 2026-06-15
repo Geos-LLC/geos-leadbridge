@@ -26,6 +26,7 @@ import {
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
+import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
 import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
@@ -2033,7 +2034,7 @@ export class AutomationService implements OnModuleInit {
         // Fetch user's global AI prompt + name (used for business context)
         const userRecord = await this.prisma.user.findUnique({
           where: { id: context.userId },
-          select: { globalAiPrompt: true, name: true },
+          select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true },
         });
 
         // Load account first so we can read the central followUpStrategy
@@ -2331,7 +2332,7 @@ export class AutomationService implements OnModuleInit {
           state: context.state,
           budget: context.budget,
           accountName: context.accountName,
-          globalPrompt: userRecord?.globalAiPrompt || undefined,
+          globalPrompt: resolveGlobalPrompt(userRecord),
           strategyPrompt,
           threadContextBlock: threadContextPrompt,
           businessBlock,
