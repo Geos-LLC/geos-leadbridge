@@ -526,6 +526,9 @@ export function Analytics() {
       {/* ── Trends Over Time ── */}
       {view === 'overview' && (
       <>
+      {/* Refundable summary — 2-stat strip. Compact + read-only; the
+          per-lead view lives on the Messages page Refundable badge. */}
+      <RefundableSummaryStrip />
       <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
@@ -1321,6 +1324,72 @@ export function Analytics() {
       )}
       </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Refundable summary strip — 2 small stats above the Trends section on
+ * the Overview tab. activeCount = leads with a currently-active
+ * RefundableLeadFlag and refundedAt IS NULL. estimatedValue = SUM of
+ * those leads' rawJson.leadPrice. The per-lead view + evidence proof
+ * lives on the Messages page badge popover; this widget is the headline
+ * only — no drill-down here.
+ *
+ * Hidden when the count is zero so the strip doesn't take real estate
+ * for tenants who haven't had any detected refund candidates yet.
+ */
+function RefundableSummaryStrip() {
+  const [data, setData] = useState<{ activeCount: number; estimatedValue: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    analyticsApi
+      .getRefundableSummary()
+      .then((resp) => {
+        if (!cancelled) setData(resp.data);
+      })
+      .catch(() => { /* silent — widget is optional */ });
+    return () => { cancelled = true; };
+  }, []);
+  if (!data || data.activeCount === 0) return null;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div
+        className="p-4 md:p-5"
+        style={{
+          background: 'var(--lb-surface)',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 'var(--lb-radius-lg)',
+        }}
+      >
+        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+          Refundable leads (active)
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+          {data.activeCount}
+        </div>
+        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--lb-ink-5)' }}>
+          Leads that appear refundable (45-day window)
+        </div>
+      </div>
+      <div
+        className="p-4 md:p-5"
+        style={{
+          background: 'var(--lb-surface)',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 'var(--lb-radius-lg)',
+        }}
+      >
+        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontFamily: 'var(--lb-font-mono)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+          Estimated recoverable
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+          ${data.estimatedValue.toFixed(2)}
+        </div>
+        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--lb-ink-5)' }}>
+          Total cost across active refundable leads
+        </div>
+      </div>
     </div>
   );
 }

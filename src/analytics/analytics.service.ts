@@ -549,6 +549,50 @@ export class AnalyticsService {
   }
 
   /**
+   * Refundable-lead summary for the Overview tab widget.
+   *
+   * Counts leads with a currently-active RefundableLeadFlag (validUntil >
+   * now) where Lead.refundedAt IS NULL — matches the same predicate the
+   * Messages page uses to render the amber Refundable badge.
+   *
+   * estimatedValue parses rawJson.leadPrice (TT's pro-side cost) for each
+   * such lead and sums them. Same parser used elsewhere ($ stripped,
+   * float-coerced). Returns 0 when no leads match or no leadPrice is
+   * extractable.
+   */
+  async getRefundableSummary(
+    userId: string,
+  ): Promise<{ activeCount: number; estimatedValue: number }> {
+    const now = new Date();
+    const rows = await this.prisma.lead.findMany({
+      where: {
+        userId,
+        refundedAt: null,
+        refundableFlags: {
+          some: { validUntil: { gt: now } },
+        },
+      },
+      select: { rawJson: true },
+      take: 500,
+    });
+    let estimatedValue = 0;
+    for (const r of rows) {
+      try {
+        const parsed = r.rawJson ? JSON.parse(r.rawJson) : null;
+        const raw = parsed?.leadPrice;
+        if (typeof raw === 'string') {
+          const n = parseFloat(raw.replace(/[^0-9.]/g, ''));
+          if (Number.isFinite(n)) estimatedValue += n;
+        }
+      } catch { /* skip */ }
+    }
+    return {
+      activeCount: rows.length,
+      estimatedValue: Number(estimatedValue.toFixed(2)),
+    };
+  }
+
+  /**
    * Tenant-facing list of leads where the follow-up engine couldn't
    * deliver. Surfaces what the operator currently sees only via the
    * historical-reactivation batch report CLI.

@@ -210,6 +210,7 @@ model User {
   conversations               Conversation[]
   messages                    Message[]
   savedAccounts               SavedAccount[]
+  refundableLeadFlags         RefundableLeadFlag[]
   messageTemplates            MessageTemplate[]
   automationRules             AutomationRule[]
   subscriptionHistory         SubscriptionHistory[]
@@ -440,6 +441,7 @@ model Lead {
   followUpEnrollments     FollowUpEnrollment[] // Follow-up sequences for this lead
   statusAuditLogs         LeadStatusAuditLog[]
   sfInboundEvents         SfInboundEvent[]
+  refundableFlags         RefundableLeadFlag[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -455,7 +457,51 @@ model Lead {
   @@index([userId, syncStatus])
   // Account-aware reverse lookup (PR B / PR D).
   @@index([accountId])
+  // Refundable-lead duplicate-detection scans — narrow these queries down
+  // to the same-tenant, same-account, recent window without a full table
+  // walk. See RefundableLeadDetectorService.runDuplicateDetection.
+  @@index([userId, customerPhone, businessId, createdAt])
+  @@index([userId, category, postcode, createdAt])
   @@map("leads")
+}
+
+/// Per-lead "possibly refundable" flag — surfaces leads that match a
+/// detection rule (e.g. duplicate within 45 days). The flag is purely a
+/// hint with evidence; refunds themselves are tracked by Lead.refundedAt
+/// (set by the polling sweep + send-time 404 handler). A flag is active
+/// when validUntil > now AND the lead's refundedAt is null; UI derives
+/// the "Refundable" badge from those two conditions without a status
+/// column. Once Lead.refundedAt is set or validUntil passes, the badge
+/// disappears with no manual transition.
+model RefundableLeadFlag {
+  id              String   @id @default(cuid())
+  leadId          String
+  userId          String
+  // MVP rule: 'duplicate_within_45_days'. Future rules add new values.
+  ruleId          String
+  // Internal — used for ordering / tuning. UI shows a single label
+  // "Possibly refundable" regardless of confidence per operator spec.
+  confidence      String // 'high' | 'medium' | 'low'
+  // Human-readable one-paragraph summary rendered in the popover.
+  evidenceSummary String   @db.Text
+  // Structured evidence — duplicateLeadId, matchedField, jaccard, etc.
+  evidenceJson    String?  @db.Text
+  detectedAt      DateTime @default(now())
+  // Set to lead.createdAt + 45 days so the flag expires exactly when
+  // TT's refund window closes. After validUntil, flag is dormant; rows
+  // are retained 90 more days for audit, then pruned.
+  validUntil      DateTime
+  createdAt       DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One flag per (lead, rule) — detector upserts so re-runs are no-ops.
+  @@unique([leadId, ruleId])
+  // Primary list query: tenant's currently-active flags.
+  @@index([userId, validUntil])
+  @@index([leadId])
+  @@map("refundable_lead_flags")
 }
 
 // ==========================================

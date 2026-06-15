@@ -34,7 +34,7 @@ import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { PlatformBadge, StatusPill } from '../components/ui';
-import { displayLabel, displayPillKind, STATUS_FILTER_OPTIONS, matchesGroupFilter, matchesRefundedFilter, type StatusGroupId } from '../lib/leadStatus';
+import { displayLabel, displayPillKind, STATUS_FILTER_OPTIONS, matchesGroupFilter, matchesRefundedFilter, matchesRefundableFilter, type StatusGroupId } from '../lib/leadStatus';
 import { LeadActivityTimeline } from '../components/LeadActivityTimeline';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
@@ -326,6 +326,8 @@ export function Messages() {
   const [, setMessages] = useState<LocalMessage[]>([]);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
   const [searchQuery, setSearchQuery] = useState('');
+  // Lead selected for the "Possibly refundable" proof modal. Null = closed.
+  const [refundableProofLead, setRefundableProofLead] = useState<Lead | null>(null);
   // Get account filter from URL params, default to 'all'
   const accountFilter = searchParams.get('account') || localStorage.getItem('lb_last_account_filter') || 'all';
   // Get date filter from URL params, default to 'all' (no filter)
@@ -1549,15 +1551,18 @@ export function Messages() {
       const leadMonth = leadDate.getMonth();
       matchesDate = leadYear === parsedDateFilter.year && leadMonth === parsedDateFilter.month;
     }
-    // Status group filter. 'refunded' is a pseudo-group that matches
-    // Lead.refundedAt / chargeStateRaw instead of Lead.status — refunded
-    // leads keep their real status pill (Lost, Active, etc.).
+    // Status group filter. 'refunded' + 'refundable' are pseudo-groups
+    // — they match Lead.refundedAt / Lead.refundableFlag instead of
+    // Lead.status. Refunded/refundable leads keep their real status
+    // pill (Lost, Active, etc.) and add a secondary badge.
     const matchesStatus =
       statusFilter === 'all'
         ? true
         : statusFilter === 'refunded'
           ? matchesRefundedFilter(lead)
-          : matchesGroupFilter(lead.status, statusFilter);
+          : statusFilter === 'refundable'
+            ? matchesRefundableFilter(lead)
+            : matchesGroupFilter(lead.status, statusFilter);
     // Activity sub-bucket filter — only applies when the primary status
     // group is 'active'. activityBucket is null on terminal leads so this
     // naturally excludes them.
@@ -2084,6 +2089,37 @@ export function Messages() {
                         >
                           Refunded
                         </span>
+                      )}
+                      {/* Refundable badge — surfaces leads matched by the
+                          duplicate detector. Refunded wins precedence so we
+                          never render both. Click → opens a popover-style
+                          modal with the evidence + an "Open in Thumbtack"
+                          deep link. Read-only proof; no submit/ignore
+                          buttons per operator spec. */}
+                      {!matchesRefundedFilter(lead) && lead.refundableFlag && (
+                        <button
+                          type="button"
+                          title="Possibly refundable — click to view evidence"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRefundableProofLead(lead);
+                          }}
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: 0.04,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: '#fffbeb',
+                            color: '#92400e',
+                            border: '1px solid #fcd34d',
+                            lineHeight: 1.4,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          Refundable
+                        </button>
                       )}
                       {/* SF identity tag — keeps the inbox scannable. Priority
                           is structural (`if/else if`) so we never render both:
@@ -3754,6 +3790,89 @@ export function Messages() {
           </div>
         </div>
       )}
+
+      {/* Refundable proof modal — read-only evidence + "Open in Thumbtack"
+          deep link. No submit/ignore buttons per operator spec; the pro
+          decides on TT's side, the existing chargeState sweep confirms
+          back. Closes on backdrop click or ESC. */}
+      {refundableProofLead && (() => {
+        const flag = refundableProofLead.refundableFlag;
+        if (!flag) return null;
+        let parsed: any = null;
+        try { parsed = flag.evidenceJson ? JSON.parse(flag.evidenceJson) : null; } catch { /* keep null */ }
+        const ttUrl = refundableProofLead.externalRequestId
+          ? `https://www.thumbtack.com/pro/jobs/${refundableProofLead.externalRequestId}`
+          : null;
+        return (
+          <div
+            onClick={() => setRefundableProofLead(null)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1000,
+              background: 'rgba(15, 23, 42, 0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: '#fff', borderRadius: 12, maxWidth: 480, width: '100%',
+                padding: 24, boxShadow: '0 24px 48px -12px rgba(0,0,0,0.25)',
+                border: '1px solid var(--lb-line)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <span style={{
+                  display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+                  background: '#f59e0b',
+                }} />
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                  Possibly refundable
+                </h3>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginBottom: 16, lineHeight: 1.5 }}>
+                {flag.evidenceSummary}
+              </div>
+              {parsed && (parsed.leadCost != null || parsed.candidateLeadCost != null) && (
+                <div style={{
+                  background: '#f8fafc', border: '1px solid var(--lb-line)', borderRadius: 6,
+                  padding: '10px 12px', fontSize: 12, marginBottom: 16, color: 'var(--lb-ink-2)',
+                }}>
+                  {parsed.leadCost != null && <div>This lead cost: <strong>${parsed.leadCost}</strong></div>}
+                  {parsed.candidateLeadCost != null && <div>Earlier lead cost: <strong>${parsed.candidateLeadCost}</strong></div>}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setRefundableProofLead(null)}
+                  style={{
+                    padding: '8px 16px', borderRadius: 6, border: '1px solid var(--lb-line)',
+                    background: 'var(--lb-surface)', color: 'var(--lb-ink-2)',
+                    fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Close
+                </button>
+                {ttUrl && (
+                  <a
+                    href={ttUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '8px 16px', borderRadius: 6, border: '1px solid #1d4ed8',
+                      background: '#1d4ed8', color: '#fff',
+                      fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                      display: 'inline-flex', alignItems: 'center',
+                    }}
+                  >
+                    Open in Thumbtack
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
