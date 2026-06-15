@@ -6,8 +6,10 @@
  * Phase 3: approve/skip/pause suggestions.
  */
 
-import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRef, Logger, NotFoundException } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AdminGuard } from '../admin/guards/admin.guard';
+import { RequiresSupportGrant } from '../admin/support-grants/decorators/requires-support-grant.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
 import { parseDuration } from '../common/utils/parse-duration';
@@ -455,8 +457,18 @@ export class FollowUpEngineController {
    */
   @Post('enroll')
   async enroll(
+    @CurrentUser() user: any,
     @Body() body: { conversationId: string; templateId: string; platform: string; leadId?: string },
   ) {
+    await this.tenancyService.requireConversationAccess(body.conversationId, user.id);
+    const template = await this.prisma.followUpSequenceTemplate.findFirst({
+      where: { id: body.templateId, userId: user.id },
+      select: { id: true },
+    });
+    if (!template) throw new NotFoundException('Template not found');
+    if (body.leadId) {
+      await this.tenancyService.requireTenantAccess('lead', body.leadId, user.id);
+    }
     const enrollmentId = await this.engineService.enrollInSequence(
       body.conversationId,
       body.templateId,
@@ -998,8 +1010,12 @@ export class FollowUpEngineController {
 
   /**
    * Run migration from existing AutomationRule follow-ups.
+   * Admin-only with active support grant — the migration runs globally across
+   * all tenants, so an authenticated end-user must not be able to invoke it.
    */
   @Post('migrate')
+  @UseGuards(AdminGuard)
+  @RequiresSupportGrant('follow-up:migrate')
   async migrate() {
     const { FollowUpMigrationService } = await import('./follow-up-migration.service');
     const migrationService = new FollowUpMigrationService(this.prisma);
