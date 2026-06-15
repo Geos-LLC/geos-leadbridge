@@ -55,6 +55,7 @@ export class AiSettingsAssistantController {
     @Query('area') area: string,
     @Query('savedAccountId') savedAccountId?: string,
   ) {
+    this.logger.log(`[list] user=${user?.id} area=${area} acct=${savedAccountId ?? '-'}`);
     if (!area) throw new BadRequestException('area is required');
     return this.service.listChatInstructions(user.id, area, savedAccountId);
   }
@@ -69,6 +70,9 @@ export class AiSettingsAssistantController {
     @CurrentUser() user: any,
     @Body() body: { area?: string; entryId?: string; savedAccountId?: string },
   ) {
+    this.logger.log(
+      `[delete] user=${user?.id} area=${body?.area ?? '-'} entryId=${body?.entryId ?? '-'} acct=${body?.savedAccountId ?? '-'}`,
+    );
     if (!body?.area || !body?.entryId) {
       throw new BadRequestException('area and entryId are required');
     }
