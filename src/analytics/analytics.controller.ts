@@ -77,4 +77,19 @@ export class AnalyticsController {
     const data = await this.analyticsService.getSkippedLeads(user.id, query);
     return { success: true, data };
   }
+
+  /**
+   * Refundable-lead summary — small 2-stat widget on the Overview tab:
+   *   - activeCount: leads with a currently-active RefundableLeadFlag
+   *     and refundedAt IS NULL (matches the UI Refundable badge predicate)
+   *   - estimatedValue: SUM(rawJson.leadPrice) for those leads
+   *
+   * No full table — the per-lead view is the Messages page badge +
+   * popover. This endpoint is purely the headline number.
+   */
+  @Get('refundable-summary')
+  async getRefundableSummary(@CurrentUser() user: any) {
+    const data = await this.analyticsService.getRefundableSummary(user.id);
+    return { success: true, data };
+  }
 }

@@ -25,6 +25,7 @@ export type StatusGroupId =
   | 'completed'     // id stays 'completed' (canonical); label is "Done"
   | 'lost'
   | 'refunded'      // NOT a Lead.status — Lead.refundedAt-driven. See FILTER_PSEUDO_GROUPS.
+  | 'refundable'    // NOT a Lead.status — Lead.refundableFlag-driven. See FILTER_PSEUDO_GROUPS.
   | 'unknown';
 
 export interface StatusGroup {
@@ -60,6 +61,7 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
  */
 export const FILTER_PSEUDO_GROUPS: readonly { id: StatusGroupId; label: string }[] = [
   { id: 'refunded', label: 'Refunded' },
+  { id: 'refundable', label: 'Refundable' },
 ];
 
 /**
@@ -129,11 +131,11 @@ export type StatusPillKind =
 
 export function displayPillKind(status: string | null | undefined): StatusPillKind {
   const id = displayGroup(status);
-  // 'refunded' is a filter pseudo-group, not a status-derived bucket — it
-  // can't actually be returned by displayGroup() since STATUS_TO_GROUP_ID is
-  // built from STATUS_GROUPS only. The explicit narrowing satisfies TS and
-  // future-proofs against any drift.
-  if (id === 'unknown' || id === 'refunded') return 'neutral';
+  // Filter pseudo-groups ('refunded', 'refundable') are never returned by
+  // displayGroup() in practice — STATUS_TO_GROUP_ID is built from
+  // STATUS_GROUPS only — but the explicit narrowing satisfies TS and
+  // future-proofs against any drift in the type.
+  if (id === 'unknown' || id === 'refunded' || id === 'refundable') return 'neutral';
   return id;
 }
 
@@ -170,4 +172,21 @@ export function matchesRefundedFilter(lead: {
   if (lead.refundedAt) return true;
   if ((lead.chargeStateRaw ?? '').toLowerCase() === 'refunded') return true;
   return false;
+}
+
+/**
+ * Predicate for the 'refundable' pseudo-filter. True when the lead has a
+ * non-null `refundableFlag` AND is NOT already confirmed-refunded
+ * (Refunded takes priority — same precedence rule used in the UI badge).
+ *
+ * The backend only surfaces flags with validUntil > now, so we don't
+ * re-check expiry here.
+ */
+export function matchesRefundableFilter(lead: {
+  refundedAt?: string | null;
+  chargeStateRaw?: string | null;
+  refundableFlag?: { validUntil: string } | null;
+}): boolean {
+  if (matchesRefundedFilter(lead)) return false;
+  return !!lead.refundableFlag;
 }

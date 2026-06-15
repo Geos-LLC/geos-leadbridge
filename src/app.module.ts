@@ -27,6 +27,7 @@ import { ConversationSyncModule } from './conversation-sync/conversation-sync.mo
 import { ConversationContextModule } from './conversation-context/conversation-context.module';
 import { ConversationRuntimeObservabilityModule } from './conversation-runtime/conversation-runtime.module';
 import { FollowUpEngineModule } from './follow-up-engine/follow-up-engine.module';
+import { RefundModule } from './refund/refund.module';
 import { AiSettingsAssistantModule } from './ai-settings-assistant/assistant.module';
 import { TeamsModule } from './teams/teams.module';
 import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
@@ -81,6 +82,7 @@ import { AuditModule } from './common/audit/audit.module';
     ConversationContextModule,
     ConversationRuntimeObservabilityModule,
     FollowUpEngineModule,
+    RefundModule,
     AiSettingsAssistantModule,
     TeamsModule,
     CrmWebhookModule,

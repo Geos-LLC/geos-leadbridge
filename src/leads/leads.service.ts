@@ -219,10 +219,20 @@ export class LeadsService {
       CacheKeys.leadDetail(userId, leadId),
       LEAD_DETAIL_TTL_SECONDS,
       async () => {
+        // Includes only currently-active refundable flags — same filter as
+        // the list endpoint so single-lead detail and list views show the
+        // same badge state.
         const lead = await this.prisma.lead.findFirst({
           where: {
             id: leadId,
             userId,
+          },
+          include: {
+            refundableFlags: {
+              where: { validUntil: { gt: new Date() } },
+              orderBy: [{ confidence: 'desc' }, { detectedAt: 'desc' }],
+              take: 1,
+            },
           },
         });
 
@@ -281,6 +291,7 @@ export class LeadsService {
     const isCacheable = this.isCacheableLeadFilter(filters);
 
     const loader = async () => {
+      const nowForFlagFilter = new Date();
       const queryOptions: any = {
         where: {
           userId,
@@ -302,6 +313,15 @@ export class LeadsService {
                 select: { content: true, sender: true, sentAt: true },
               },
             },
+          },
+          // Currently-active refundable flags only — the badge derivation
+          // in convertToNormalizedLead picks the most-confident one. Past-
+          // expiry flags are retained for audit (see RefundableLeadDetector
+          // pruneExpiredFlags) but never surface in the API.
+          refundableFlags: {
+            where: { validUntil: { gt: nowForFlagFilter } },
+            orderBy: [{ confidence: 'desc' }, { detectedAt: 'desc' }],
+            take: 1,
           },
         },
         orderBy: { createdAt: 'desc' },
@@ -2167,6 +2187,23 @@ export class LeadsService {
       refundedAt: lead.refundedAt ?? null,
       chargeStateRaw: lead.chargeStateRaw ?? null,
       budgetVoidedAt: lead.budgetVoidedAt ?? null,
+      // Possibly-refundable hint — picks the most-confident currently-
+      // active flag from `lead.refundableFlags` (caller is responsible
+      // for including with a `validUntil: { gt: now }` filter so we
+      // never surface expired flags). The list endpoint includes them;
+      // single-lead getLead does NOT, so we defensively check both.
+      refundableFlag: (() => {
+        const active = Array.isArray((lead as any).refundableFlags) && (lead as any).refundableFlags[0];
+        if (!active) return null;
+        return {
+          ruleId: active.ruleId,
+          confidence: active.confidence,
+          evidenceSummary: active.evidenceSummary,
+          evidenceJson: active.evidenceJson ?? null,
+          validUntil: active.validUntil,
+          detectedAt: active.detectedAt,
+        };
+      })(),
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }

@@ -156,6 +156,18 @@ export interface Lead {
   refundedAt?: string | null;
   chargeStateRaw?: string | null;
   budgetVoidedAt?: string | null;
+  // Possibly-refundable hint — populated when a RefundableLeadFlag is
+  // currently active (validUntil > now). Drives the amber "Refundable"
+  // badge + popover on the Messages page. Null when no active flag.
+  // Refunded (`refundedAt`) takes precedence in the UI.
+  refundableFlag?: {
+    ruleId: string;
+    confidence: string;
+    evidenceSummary: string;
+    evidenceJson?: string | null;
+    validUntil: string;
+    detectedAt: string;
+  } | null;
   raw?: any;
 }
 

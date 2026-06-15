@@ -161,6 +161,24 @@ export class NormalizedLead {
   chargeStateRaw?: string | null;
   budgetVoidedAt?: Date | null;
 
+  // "Possibly refundable" hint produced by RefundableLeadDetectorService.
+  // Drives the amber Refundable badge + popover on the Messages page.
+  // Distinct from `refundedAt` (which is the confirmed-refund signal): a
+  // lead can be Refundable today and either become Refunded tomorrow
+  // (via the polling sweep) or expire silently after 45 days. The UI
+  // shows Refunded > Refundable > none, in that priority.
+  //
+  // Only the most-confident currently-active flag is surfaced. Null when
+  // no active flag exists.
+  refundableFlag?: {
+    ruleId: string;
+    confidence: string;
+    evidenceSummary: string;
+    evidenceJson?: string | null;
+    validUntil: Date;
+    detectedAt: Date;
+  } | null;
+
   raw?: any; // Original platform payload for debugging
 }
 

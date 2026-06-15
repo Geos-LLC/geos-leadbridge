@@ -1492,6 +1492,17 @@ export const analyticsApi = {
     const { data } = await api.get(`/v1/analytics/skipped?${queryParams.toString()}`);
     return data;
   },
+
+  // Refundable summary — backs the small 2-stat widget on the Analytics
+  // Overview tab. activeCount + estimatedValue scoped to the tenant. No
+  // params; tenant scope comes from the JWT.
+  getRefundableSummary: async (): Promise<{
+    success: boolean;
+    data: { activeCount: number; estimatedValue: number };
+  }> => {
+    const { data } = await api.get('/v1/analytics/refundable-summary');
+    return data;
+  },
 };
 
 export interface SkippedLeadRow {
