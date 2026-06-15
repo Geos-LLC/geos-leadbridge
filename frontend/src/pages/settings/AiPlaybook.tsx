@@ -23,8 +23,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
-  Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
+  Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe,
   ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, MessageSquare, Trash2,
+  Archive,
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
@@ -39,8 +40,9 @@ import {
 } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
-import AccountFaqForm from '../../components/AccountFaqForm';
-import ServicePricingForm from '../../components/ServicePricingForm';
+// AccountFaqForm + ServicePricingForm imports removed in PR-B.1 — both
+// surfaces moved to Settings → Services. ServiceScopedInfoCard replaces
+// them on the Global tab with a pointer to the new location.
 import {
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
@@ -175,18 +177,32 @@ function ScopeTabStrip({
   error: string | null;
 }) {
   const loading = profiles === null && !error;
-  // Sort profiles for the strip: active default first, then active by name,
-  // then drafts, then archived at the tail. Mirrors the Services list page
-  // ordering so users don't have to re-learn it.
-  const ordered = useMemo(() => {
-    if (!profiles) return [];
+  // Default: hide archived from the strip. Operators can reveal them with
+  // the "Show archived" toggle below. If the active scope IS an archived
+  // profile (e.g. via shared URL), we expand automatically so the user
+  // can see what they're editing.
+  const archivedScopeActive =
+    scope.kind === 'service' && activeProfile?.status === 'archived';
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedExpanded = showArchived || archivedScopeActive;
+
+  const { primary, archived } = useMemo(() => {
+    if (!profiles) return { primary: [] as ServiceProfile[], archived: [] as ServiceProfile[] };
     const rank = (p: ServiceProfile) =>
-      p.status === 'active' ? (p.isDefault ? 0 : 1) : p.status === 'draft' ? 2 : 3;
-    return [...profiles].sort((a, b) => {
-      const d = rank(a) - rank(b);
-      if (d !== 0) return d;
-      return a.name.localeCompare(b.name);
-    });
+      p.status === 'active' ? (p.isDefault ? 0 : 1) : 2; // draft = 2
+    const primarySorted = profiles
+      .filter((p) => p.status !== 'archived')
+      .slice()
+      .sort((a, b) => {
+        const d = rank(a) - rank(b);
+        if (d !== 0) return d;
+        return getServiceDisplayName(a).localeCompare(getServiceDisplayName(b));
+      });
+    const archivedSorted = profiles
+      .filter((p) => p.status === 'archived')
+      .slice()
+      .sort((a, b) => getServiceDisplayName(a).localeCompare(getServiceDisplayName(b)));
+    return { primary: primarySorted, archived: archivedSorted };
   }, [profiles]);
 
   return (
@@ -199,15 +215,41 @@ function ScopeTabStrip({
             badge="global"
             onClick={() => onSelect({ kind: 'global' })}
           />
-          {ordered.map((p) => (
+          {primary.map((p) => (
             <ScopeTabButton
               key={p.id}
-              label={p.name}
+              label={getServiceDisplayName(p)}
               active={scope.kind === 'service' && scope.profileId === p.id}
-              badge={p.status === 'active' ? 'service' : p.status === 'draft' ? 'draft' : 'archived'}
+              badge={p.status === 'active' ? 'service' : 'draft'}
               onClick={() => onSelect({ kind: 'service', profileId: p.id })}
             />
           ))}
+          {archivedExpanded && archived.map((p) => (
+            <ScopeTabButton
+              key={p.id}
+              label={getServiceDisplayName(p)}
+              active={scope.kind === 'service' && scope.profileId === p.id}
+              badge="archived"
+              onClick={() => onSelect({ kind: 'service', profileId: p.id })}
+            />
+          ))}
+          {archived.length > 0 && !archivedScopeActive && (
+            <button
+              type="button"
+              onClick={() => setShowArchived((v) => !v)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', borderRadius: 8,
+                border: '1px dashed var(--lb-line)',
+                background: 'transparent',
+                color: 'var(--lb-ink-5)',
+                fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <Archive size={12} />
+              {showArchived ? 'Hide archived' : `Show ${archived.length} archived`}
+            </button>
+          )}
           {loading && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--lb-ink-5)' }}>
               <Loader2 size={12} className="animate-spin" /> Loading services…
@@ -219,7 +261,7 @@ function ScopeTabStrip({
         )}
         {scope.kind === 'global' && (
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
-            Global instructions apply across every connected account and every service.
+            Applies to all services. Use Global for tenant-wide tone and instructions; service tabs override per category.
           </div>
         )}
         {error && (
@@ -307,11 +349,12 @@ function ScopeStatusLine({ profile }: { profile: ServiceProfile }) {
   const status = profile.status;
   const isArchived = status === 'archived';
   const isDraft = status === 'draft';
+  const displayName = getServiceDisplayName(profile);
   return (
     <div style={{ fontSize: 12.5, color: isArchived ? '#6b7280' : isDraft ? '#b45309' : 'var(--lb-ink-5)' }}>
-      {isArchived && <>This service is archived — edits stay saved but the resolver will not match new leads against it.</>}
-      {isDraft && <>This service is in draft — AI replies stay paused for matched leads until you activate.</>}
-      {!isArchived && !isDraft && <>Instructions here apply only to leads matched to this service.</>}
+      {isArchived && <>Not used for AI replies.</>}
+      {isDraft && <>AI paused until activated.</>}
+      {!isArchived && !isDraft && <>Applies only to {displayName}.</>}
     </div>
   );
 }
@@ -370,6 +413,309 @@ function serializeWrapper(wrapper: AiInstructionsWrapper): string {
   };
   return JSON.stringify(out);
 }
+
+// ─── Display name resolution ─────────────────────────────────────────────
+//
+// Many tenants land on the seed "Default Service" name even when their
+// real service is House Cleaning (bed/bath pricing model is the giveaway).
+// We render a friendlier display name in the tab + header, but do NOT
+// mutate the DB unless the operator explicitly clicks Rename. Heuristic:
+//   - Only kicks in for isDefault profiles whose name is literally
+//     "Default Service" (the wizard seed).
+//   - bed_bath_grid pricing model → House Cleaning
+//   - OR FAQ/pricing text mentions bedroom/bathroom/sqft → House Cleaning
+//   - Otherwise the seed name stays.
+
+const DEFAULT_PROFILE_SEED_NAME = 'Default Service';
+const HOUSE_CLEANING_INDICATOR = /\b(bedroom|bathroom|sq ?ft|square ?feet|cleaning)\b/i;
+
+function detectHouseCleaning(profile: ServiceProfile): boolean {
+  try {
+    if (profile.pricingJson) {
+      const pricing = JSON.parse(profile.pricingJson);
+      if (pricing && pricing.pricingModel === 'bed_bath_grid') return true;
+    }
+  } catch {
+    // unparseable pricingJson — fall through to text check
+  }
+  const blob = `${profile.pricingJson ?? ''} ${profile.faqJson ?? ''}`;
+  return HOUSE_CLEANING_INDICATOR.test(blob);
+}
+
+function isDefaultRenamable(profile: ServiceProfile): boolean {
+  return profile.isDefault && profile.name === DEFAULT_PROFILE_SEED_NAME && detectHouseCleaning(profile);
+}
+
+function getServiceDisplayName(profile: ServiceProfile): string {
+  return isDefaultRenamable(profile) ? 'House Cleaning' : profile.name;
+}
+
+// ─── Service rules viewer (read-only, frontend-only) ─────────────────────
+//
+// Mirrors the extractServiceRules logic that lives on the backend (PR-A).
+// We don't import the backend helper because this is a Vite bundle —
+// instead we duplicate the small parser.
+
+type ParsedServiceRules = {
+  requiredDetails: string[];
+  unsupportedServices: string[];
+  workflowSteps: string[];
+};
+
+function extractServiceRulesFromWrapper(
+  wrapper: AiInstructionsWrapper,
+): ParsedServiceRules | null {
+  const raw = wrapper.passthrough?.serviceRules;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const required = arr(r.requiredDetails);
+  const unsupported = arr(r.unsupportedServices);
+  const workflow = arr(r.workflowSteps);
+  if (required.length === 0 && unsupported.length === 0 && workflow.length === 0) return null;
+  return { requiredDetails: required, unsupportedServices: unsupported, workflowSteps: workflow };
+}
+
+function ServiceRulesViewer({ rules }: { rules: ParsedServiceRules }) {
+  return (
+    <SectionCard padding="18px 22px">
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
+          Service rules
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
+          Read-only. Edit in <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → Services</a>.
+        </div>
+      </div>
+      {rules.requiredDetails.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--lb-ink-3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.04 }}>
+            Required details
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {rules.requiredDetails.map((d) => (
+              <li key={d} style={{ fontSize: 13, color: 'var(--lb-ink-2)', lineHeight: 1.4 }}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {rules.unsupportedServices.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#b45309', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.04 }}>
+            Not supported
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {rules.unsupportedServices.map((d) => (
+              <li key={d} style={{ fontSize: 13, color: '#b45309', lineHeight: 1.4 }}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {rules.workflowSteps.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--lb-ink-3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.04 }}>
+            Workflow steps
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {rules.workflowSteps.map((s, i) => (
+              <li key={`${i}-${s}`} style={{ fontSize: 13, color: 'var(--lb-ink-2)', lineHeight: 1.4 }}>{s}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ─── Service summary card (FAQ/Pricing/Questions → Settings → Services) ─
+
+function ServiceSummaryCard({ profile }: { profile: ServiceProfile }) {
+  return (
+    <SectionCard padding="16px 20px">
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ flexShrink: 0, paddingTop: 2 }}>
+          <Info size={16} style={{ color: 'var(--lb-accent)' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 8 }}>
+            Service data lives in Settings → Services
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div><strong>Pricing:</strong> managed in Settings → Services</div>
+            <div><strong>FAQ:</strong> managed in Settings → Services</div>
+            <div><strong>Qualification questions:</strong> managed in Settings → Services</div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <a
+              href={`/settings/services?profile=${encodeURIComponent(profile.id)}`}
+              style={{ fontSize: 13, color: 'var(--lb-accent)', fontWeight: 600 }}
+            >
+              Open {getServiceDisplayName(profile)} in Settings → Services →
+            </a>
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── Service tab header (badge + description + rename CTA) ───────────────
+
+function ServiceHeader({
+  profile,
+  onRenamed,
+}: {
+  profile: ServiceProfile;
+  onRenamed: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const displayName = getServiceDisplayName(profile);
+  const showRenameCta = isDefaultRenamable(profile);
+  const handleRename = async () => {
+    setRenaming(true);
+    try {
+      await serviceProfilesApi.update(profile.id, { name: 'House Cleaning' });
+      notify.success('Service renamed', 'Default Service is now House Cleaning.');
+      onRenamed();
+    } catch (err: any) {
+      notify.error('Could not rename', err?.response?.data?.message ?? err?.message ?? 'Rename failed');
+    } finally {
+      setRenaming(false);
+    }
+  };
+  return (
+    <SectionCard padding="18px 22px">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
+              {displayName}
+            </div>
+            {profile.isDefault && <ScopeBadgePill badge="global" />}
+            <ScopeBadgePill
+              badge={profile.status === 'active' ? 'service' : profile.status === 'draft' ? 'draft' : 'archived'}
+            />
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-4)', lineHeight: 1.55 }}>
+            Instructions on this tab apply only to leads matched to <strong>{displayName}</strong>.
+          </div>
+          {showRenameCta && (
+            <div style={{
+              marginTop: 12,
+              padding: 10,
+              borderRadius: 8,
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              fontSize: 12.5,
+              color: '#92400e',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}>
+              <Info size={13} style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 200 }}>
+                This is your fallback service. Rename it to your main service so the tab is easier to recognize.
+              </span>
+              <button
+                type="button"
+                onClick={handleRename}
+                disabled={renaming}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #fcd34d',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: renaming ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {renaming ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+                Rename to House Cleaning
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── Global tab: service-scoped info card (PR-B.1) ───────────────────────
+// Replaces the FaqCard + PricingGuidanceCard that used to live on Global
+// and were inherently service-specific.
+
+function ServiceScopedInfoCard() {
+  return (
+    <SectionCard padding="16px 20px">
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ flexShrink: 0, paddingTop: 2 }}>
+          <Info size={16} style={{ color: 'var(--lb-accent)' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+            Pricing, FAQ, and qualification questions are service-specific
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
+            Select a service tab above to edit its instructions, or open{' '}
+            <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
+              Settings → Services
+            </a>{' '}
+            to manage pricing tables, FAQs, and qualification questions.
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── Status banners ──────────────────────────────────────────────────────
+
+function ArchivedWarningBanner() {
+  return (
+    <div style={{
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: '#f3f4f6',
+      border: '1px solid #e5e7eb',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-start',
+    }}>
+      <Archive size={16} style={{ color: '#6b7280', flexShrink: 0, marginTop: 2 }} />
+      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
+        <strong>This service is archived</strong> and is not used for AI replies. Edits stay saved, but the resolver will not match new leads to it. Reactivate from Settings → Services to bring it back into the AI flow.
+      </div>
+    </div>
+  );
+}
+
+function DraftWarningBanner() {
+  return (
+    <div style={{
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: '#fffbeb',
+      border: '1px solid #fde68a',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-start',
+    }}>
+      <Info size={16} style={{ color: '#b45309', flexShrink: 0, marginTop: 2 }} />
+      <div style={{ fontSize: 13, color: '#92400e', lineHeight: 1.5 }}>
+        <strong>AI replies are paused</strong> until this service is activated. You can still edit instructions now — they take effect the moment you activate the service in Settings → Services.
+      </div>
+    </div>
+  );
+}
+
 
 function ServicePlaybookEditor({
   profile,
@@ -436,6 +782,12 @@ function ServicePlaybookEditor({
   };
 
   const hasDirty = dirtyRef.current.size > 0;
+  const serviceRules = useMemo(
+    () => extractServiceRulesFromWrapper(initialWrapper),
+    [initialWrapper],
+  );
+  const isArchived = profile.status === 'archived';
+  const isDraft = profile.status === 'draft';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -443,7 +795,11 @@ function ServicePlaybookEditor({
       {!error && saving && <StatusPill status="saving" />}
       {!error && !saving && savedAt && <StatusPill status="saved" />}
 
-      <ServiceScopeHelpBlock profileName={profile.name} />
+      <ServiceHeader profile={profile} onRenamed={onSaved} />
+      {isArchived && <ArchivedWarningBanner />}
+      {isDraft && <DraftWarningBanner />}
+      <ServiceSummaryCard profile={profile} />
+      {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
 
       <HowSectionCard
         section="business_information"
@@ -455,6 +811,12 @@ function ServicePlaybookEditor({
         section="pricing_guidance"
         value={v2.pricing_guidance?.customInstructions ?? ''}
         onChange={(v) => onSectionChange('pricing_guidance', v)}
+      />
+
+      <HowSectionCard
+        section="personality_brand_voice"
+        value={v2.personality_brand_voice?.customInstructions ?? ''}
+        onChange={(v) => onSectionChange('personality_brand_voice', v)}
       />
 
       {advancedMode && (
@@ -490,18 +852,12 @@ function ServicePlaybookEditor({
             onChange={(v) => onSectionChange('followup_tone', v)}
             legacyAdvanced
           />
-          <HowSectionCard
-            section="personality_brand_voice"
-            value={v2.personality_brand_voice?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('personality_brand_voice', v)}
-            legacyAdvanced
-          />
         </>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
         <span style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginRight: 'auto' }}>
-          Editing the {profile.name} service playbook.
+          Editing the {getServiceDisplayName(profile)} service playbook.
         </span>
         <button
           type="button"
@@ -520,29 +876,6 @@ function ServicePlaybookEditor({
         </button>
       </div>
     </div>
-  );
-}
-
-function ServiceScopeHelpBlock({ profileName }: { profileName: string }) {
-  return (
-    <SectionCard padding="18px 22px">
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <BookOpen size={18} style={{ color: 'var(--lb-accent)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            How AI should communicate for {profileName}
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            FAQ, pricing tables, and qualification questions for this service are managed in{' '}
-            <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
-              Settings → Services
-            </a>.
-          </div>
-        </div>
-      </div>
-    </SectionCard>
   );
 }
 
@@ -673,7 +1006,7 @@ function GlobalPlaybookEditor() {
         {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
         <CustomInstructionsAllCard savedAccountId={accounts[0].id} />
 
-        {/* 1. Business Information */}
+        {/* 1. Business Information (company-wide) */}
         <HowSectionCard
           section="business_information"
           value={v2.business_information?.customInstructions ?? ''}
@@ -681,22 +1014,21 @@ function GlobalPlaybookEditor() {
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
         />
 
-        {/* 2. FAQ */}
-        <FaqCard
-          accountId={accounts[0].id}
-          accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
-          accountIds={accounts.map(a => a.id)}
+        {/* 2. Communication Style & Brand Voice (promoted from advanced in
+              PR-B.1 — tenant-wide tone belongs on the Global tab so users
+              don't have to flip ?advanced=1 to set their default voice.) */}
+        <HowSectionCard
+          section="personality_brand_voice"
+          value={v2.personality_brand_voice?.customInstructions ?? ''}
+          onChange={v => onSectionChange('personality_brand_voice', v)}
+          isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
         />
 
-        {/* 3. Pricing Guidance (with embedded Pricing Table) */}
-        <PricingGuidanceCard
-          value={v2.pricing_guidance?.customInstructions ?? ''}
-          onChange={v => onSectionChange('pricing_guidance', v)}
-          accountId={accounts[0].id}
-          accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
-          accountIds={accounts.map(a => a.id)}
-          isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
-        />
+        {/* Service-scoped info card — FaqCard + PricingGuidanceCard were
+              removed in PR-B.1 because their content is inherently service-
+              specific (FAQ, pricing table). Operators select a service tab
+              above or visit Settings → Services for those surfaces. */}
+        <ServiceScopedInfoCard />
 
         {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
               These 5 backend section keys still emit their default prompts
@@ -742,17 +1074,6 @@ function GlobalPlaybookEditor() {
               value={v2.followup_tone?.customInstructions ?? ''}
               onChange={v => onSectionChange('followup_tone', v)}
               legacyAdvanced
-            />
-            {/* Communication Style & Brand Voice — moved to advanced in V2.5.
-                Backend key still personality_brand_voice; the runtime
-                renderer still consults customInstructions if set, so a
-                legacy account that saved tone notes keeps them active. */}
-            <HowSectionCard
-              section="personality_brand_voice"
-              value={v2.personality_brand_voice?.customInstructions ?? ''}
-              onChange={v => onSectionChange('personality_brand_voice', v)}
-              legacyAdvanced
-              isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
             />
           </>
         )}
@@ -922,81 +1243,10 @@ function ManagedByGoalsBadge() {
   );
 }
 
-// ─── Pricing Guidance — HOW textarea + ServicePricingForm embed ──────────
-
-function PricingGuidanceCard({
-  value, onChange, accountId, accountName, accountIds, isSuggested,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  accountId: string;
-  accountName: string;
-  accountIds: string[];
-  isSuggested?: boolean;
-}) {
-  return (
-    <PlaybookSectionShell
-      icon={CircleDollarSign}
-      title={PLAYBOOK_SECTION_UI_LABELS.pricing_guidance}
-      subtitle={PLAYBOOK_SECTION_SUBTITLES.pricing_guidance}
-    >
-      {isSuggested && <SuggestedFromWebsiteBadge />}
-      <DefaultPromptExpander text={SECTION_DEFAULT_PROMPTS.pricing_guidance} />
-      <CustomInstructionsEditor
-        value={value}
-        defaultText={SECTION_DEFAULT_PROMPTS.pricing_guidance}
-        onChange={onChange}
-        onRevertToDefault={() => onChange('')}
-      />
-      <div style={{
-        marginTop: 18, padding: '14px 16px',
-        background: '#f8fafc',
-        border: '1px solid var(--lb-line-soft)',
-        borderRadius: 10,
-      }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
-          letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10,
-          fontFamily: 'var(--lb-font-mono)',
-        }}>
-          Pricing table — the source AI uses for actual numbers
-        </div>
-        <ServicePricingForm
-          accountId={accountId}
-          accountName={accountName}
-          saveToAll={accountIds}
-        />
-      </div>
-    </PlaybookSectionShell>
-  );
-}
-
-// ─── FAQ — embed AccountFaqForm ──────────────────────────────────────────
-
-function FaqCard({
-  accountId, accountName, accountIds,
-}: {
-  accountId: string;
-  accountName: string;
-  accountIds: string[];
-}) {
-  return (
-    <PlaybookSectionShell
-      icon={BookOpen}
-      title="FAQ"
-      subtitle="Verified answers AI uses verbatim for common customer questions."
-    >
-      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginBottom: 14, lineHeight: 1.5 }}>
-        AI uses these answers when the customer asks a covered question. If a question isn't covered, AI defers to the team rather than guess.
-      </div>
-      <AccountFaqForm
-        accountId={accountId}
-        accountName={accountName}
-        saveToAll={accountIds}
-      />
-    </PlaybookSectionShell>
-  );
-}
+// PricingGuidanceCard + FaqCard removed in PR-B.1 — content was inherently
+// service-specific and now lives in Settings → Services. The Global tab
+// renders ServiceScopedInfoCard in their place to make the migration
+// obvious to operators.
 
 // ─── Global Custom Instructions — surfaces User.globalAiPrompt ───────────
 
