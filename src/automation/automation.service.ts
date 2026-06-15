@@ -12,6 +12,7 @@ import { resolveTimezone } from '../common/utils/account-timezone';
 import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
+import { extractLeadDetails } from '../leads/extract-lead-details';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
 import { IntentClassifierService, IntentClassification, HandoffReason } from '../ai/intent-classifier.service';
@@ -2028,8 +2029,8 @@ export class AutomationService implements OnModuleInit {
           this.logger.log(`[AI] Using raw transcript for ${pendingId} (no thread context, ${conversationHistory.length} msgs)`);
         }
 
-        // Extract structured lead details from rawJson
-        const leadDetails = this.extractLeadDetails(lead.rawJson);
+        // Extract structured lead details from rawJson (TT survey + Yelp survey_answers).
+        const leadDetails = extractLeadDetails(lead.rawJson);
 
         // Fetch user's global AI prompt + name (used for business context)
         const userRecord = await this.prisma.user.findUnique({
@@ -2684,24 +2685,6 @@ export class AutomationService implements OnModuleInit {
   /**
    * Format rule for API response
    */
-  private extractLeadDetails(rawJson: string): Record<string, string> {
-    try {
-      const raw = JSON.parse(rawJson);
-      const details: any[] = raw.request?.details || raw.details || [];
-      const result: Record<string, string> = {};
-      for (const item of details) {
-        if (item.question && item.answer) {
-          result[String(item.question)] = String(item.answer);
-        }
-      }
-      if (raw.request?.description) result['Description'] = raw.request.description;
-      if (raw.description) result['Description'] = raw.description;
-      return result;
-    } catch {
-      return {};
-    }
-  }
-
   private formatRule(rule: any): any {
     return {
       id: rule.id,

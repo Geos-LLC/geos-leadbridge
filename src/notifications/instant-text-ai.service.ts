@@ -41,6 +41,7 @@ import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
+import { extractLeadDetails } from '../leads/extract-lead-details';
 
 /**
  * SMS-optimized strategy prompt. Sent as the PRIMARY INSTRUCTION layer
@@ -353,7 +354,7 @@ export class InstantTextAiService {
     } catch {
       return empty;
     }
-    const leadDetails = this.extractLeadDetails(opts.leadRawJson);
+    const leadDetails = extractLeadDetails(opts.leadRawJson);
     let additionalInfo: string | null = null;
     if (opts.leadRawJson) {
       try {
@@ -379,41 +380,4 @@ export class InstantTextAiService {
     }
   }
 
-  /**
-   * Same shape as ai.controller's extractLeadDetails — used to feed the
-   * deterministic pricing engine. Tolerates both Thumbtack and Yelp
-   * payload shapes; never throws.
-   */
-  private extractLeadDetails(rawJson: string | null | undefined): Record<string, string> {
-    if (!rawJson) return {};
-    try {
-      const raw = JSON.parse(rawJson);
-      const result: Record<string, string> = {};
-      const ttDetails: any[] = raw.request?.details || raw.details || [];
-      for (const item of ttDetails) {
-        if (item?.question && item?.answer) {
-          result[String(item.question)] = String(item.answer);
-        }
-      }
-      const yelpSurvey: any[] = raw.project?.survey_answers || [];
-      for (const q of yelpSurvey) {
-        if (q?.question_text && q?.answer_text) {
-          const a = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
-          result[String(q.question_text)] = a;
-        }
-      }
-      // Flat fields some payloads carry at top level (older TT shape +
-      // some test fixtures).
-      if (raw.bedrooms !== undefined && raw.bedrooms !== null) result['Bedrooms'] = String(raw.bedrooms);
-      if (raw.bathrooms !== undefined && raw.bathrooms !== null) result['Bathrooms'] = String(raw.bathrooms);
-      const sqft = raw.squareFeet ?? raw.square_feet;
-      if (sqft !== undefined && sqft !== null) result['Square footage'] = String(sqft);
-      const svc = raw.serviceType ?? raw.service_type;
-      if (svc) result['Cleaning type'] = String(svc);
-      if (raw.project?.additional_info) result['Additional details'] = String(raw.project.additional_info);
-      return result;
-    } catch {
-      return {};
-    }
-  }
 }
