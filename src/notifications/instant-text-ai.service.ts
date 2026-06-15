@@ -30,7 +30,7 @@
  *     existing template instead. We never silently return a template.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
@@ -109,10 +109,16 @@ export class InstantTextAiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
-    // ServiceProfile resolver (Phase 1b adoption). Optional so unit tests
-    // that direct-instantiate the service don't have to wire the new dep
-    // — falls through to legacy reads when absent.
-    @Optional() private readonly serviceProfile: ServiceProfileService | null = null,
+    // ServiceProfile resolver (Phase 1b adoption). @Inject + @Optional
+    // is the right Nest spelling for "use this provider when available,
+    // fall back to null otherwise" — bare @Optional with a class-typed
+    // param sometimes resolves to null even when the provider IS wired
+    // (Nest reads constructor metadata for the lookup token, but the
+    // optional flag suppresses any reflect-metadata diagnostic that
+    // would normally surface the mis-wire). Explicit token closes that.
+    @Optional()
+    @Inject(ServiceProfileService)
+    private readonly serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   /**

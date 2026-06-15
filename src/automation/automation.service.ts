@@ -231,13 +231,14 @@ export class AutomationService implements OnModuleInit {
     // every tenant not in BOOKING_ORCHESTRATION_ENABLED_USER_IDS.
     @Inject(forwardRef(() => BookingOrchestratorService))
     private bookingOrchestrator: BookingOrchestratorService,
-    // ServiceProfile resolver (Phase 1b adoption). Pricing/FAQ now flow
-    // through resolveEffectivePromptInputs so per-field fallback applies
-    // — fixes the Spotless null-FAQ class of bugs at runtime. Optional
-    // so legacy unit tests that direct-instantiate this service continue
-    // to compile without wiring the new dep; resolver-using branches
-    // no-op (use legacy reads) when absent.
-    @Optional() private serviceProfile: ServiceProfileService | null = null,
+    // ServiceProfile resolver (Phase 1b adoption). @Inject + @Optional
+    // ensures Nest finds the provider when wired AND falls back to null
+    // when not (legacy unit tests direct-instantiating without DI). Bare
+    // @Optional alone was observed to resolve to null in prod despite
+    // the import being correct — explicit token closes that.
+    @Optional()
+    @Inject(ServiceProfileService)
+    private serviceProfile: ServiceProfileService | null = null,
   ) {}
 
   /**
