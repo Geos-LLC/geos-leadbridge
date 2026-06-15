@@ -26,8 +26,9 @@ import {
   MessageCircle,
   Sparkles,
   AlertTriangle,
+  Layers,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, serviceProfilesApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion, type ServiceProfile } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -334,6 +335,36 @@ export function Messages() {
   const dateFilter = searchParams.get('date') || 'all';
   // Status group filter — keys match StatusGroupId in lib/leadStatus.ts.
   const statusFilter = (searchParams.get('status') || 'all') as 'all' | StatusGroupId;
+  // Service filter — matches Lead.category against
+  // ServiceProfile.providerCategoryMappingsJson[].categoryName.
+  // 'all' means no filter; otherwise the value is the profile id.
+  const serviceFilter = searchParams.get('service') || 'all';
+  const [serviceProfiles, setServiceProfiles] = useState<ServiceProfile[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    serviceProfilesApi
+      .list()
+      .then((r) => { if (!cancelled) setServiceProfiles(r.profiles); })
+      .catch(() => { /* silent — filter just doesn't appear if it can't load */ });
+    return () => { cancelled = true; };
+  }, []);
+  const setServiceFilter = (value: string) => {
+    const sp = new URLSearchParams(searchParams);
+    if (value === 'all') sp.delete('service'); else sp.set('service', value);
+    setSearchParams(sp, { replace: true });
+  };
+  // Build the set of categoryNames that match the selected service.
+  // Case-insensitive comparison against Lead.category.
+  const serviceCategoryNamesLower = (() => {
+    if (serviceFilter === 'all') return null;
+    const profile = serviceProfiles.find((p) => p.id === serviceFilter);
+    if (!profile) return null;
+    return new Set(
+      (profile.providerCategoryMappingsJson ?? [])
+        .map((m) => m.categoryName?.trim().toLowerCase())
+        .filter((s): s is string => !!s),
+    );
+  })();
   // Activity sub-bucket filter — only meaningful when statusFilter='active'.
   // Mirrors Lead.activityBucket (derived from ThreadContext.conversationState).
   type ActivityFilter = 'all' | 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff';
@@ -1579,7 +1610,14 @@ export function Messages() {
     // sets isAutoHandled when an AI message exists but no human send and no
     // customer reply do — see leads.service.ts::computeAutoHandledFlags.
     const matchesAutoHandled = !hideAutoHandled || !lead.isAutoHandled;
-    return matchesAccount && matchesDate && matchesStatus && matchesActivity && matchesSearch && matchesAutoHandled;
+    // Service profile filter — leads whose Lead.category matches one of
+    // the selected profile's mapped categoryNames (case-insensitive).
+    // When set to 'all' or the profile can't be found, this is a no-op.
+    const matchesService =
+      !serviceCategoryNamesLower ||
+      (lead.category != null &&
+        serviceCategoryNamesLower.has(lead.category.trim().toLowerCase()));
+    return matchesAccount && matchesDate && matchesStatus && matchesActivity && matchesSearch && matchesAutoHandled && matchesService;
   });
   const autoHandledHiddenCount = hideAutoHandled
     ? leadsFromSavedAccounts.filter((l) => l.isAutoHandled).length
@@ -1817,6 +1855,33 @@ export function Messages() {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
           </div>
         </div>
+
+        {/* Service Filter — shown only when the user has at least one
+            non-archived ServiceProfile. Matches Lead.category against
+            the selected profile's providerCategoryMappingsJson. */}
+        {serviceProfiles.filter((p) => p.status !== 'archived').length > 0 && (
+          <div className="px-4 py-2 border-b border-slate-100">
+            <div className="relative">
+              <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <select
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Services</option>
+                {serviceProfiles
+                  .filter((p) => p.status !== 'archived')
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.status === 'draft' ? ' (draft)' : ''}
+                    </option>
+                  ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
+          </div>
+        )}
 
         {/* Activity sub-bucket filter — shown only when the primary status
             is 'active'. Mirrors Lead.activityBucket which the backend derives
