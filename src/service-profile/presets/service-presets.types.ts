@@ -66,6 +66,12 @@ export type PresetItemPrice = {
   label: string;
   price: number;
   source: PricingSource;
+  /** UI hint — e.g. "per sofa", "per piece". Optional; not part of pricing math. */
+  unit?: string;
+  /** Free-text caveat shown next to the price row. Optional. */
+  notes?: string;
+  /** Default true. Inactive items stay in the data but the UI hides them from quotes. */
+  active?: boolean;
 };
 
 export type PresetAddOnPrice = {
@@ -104,6 +110,30 @@ export type PresetFaq = {
   customQA: Array<{ question: string; answer: string }>;
 };
 
+/**
+ * Service rules — operator-authored guardrails the AI must follow for
+ * this service category. v1 is read-only / display-only on the
+ * frontend; the runtime injector lands in a follow-up PR (PR-B/PR-C).
+ *
+ *  - requiredDetails: information the AI must collect before quoting
+ *    (e.g. "Number of seats", "Fabric type"). Display-list, no schema.
+ *  - unsupportedServices: things this provider does NOT do (e.g.
+ *    "Leather cleaning"). The AI should defer to the owner rather
+ *    than promise the work.
+ *  - workflowSteps: the ordered playbook the AI should walk through
+ *    on each lead. Free text; no machine semantics in v1.
+ *
+ * Stored verbatim into the new ServiceProfile.aiInstructionsJson
+ * wrapper (see buildServiceProfileFromPreset). Today it does NOT
+ * change the AI prompt — the wrapper key is ignored by the existing
+ * playbook renderer until PR-B adds explicit injection.
+ */
+export type PresetServiceRules = {
+  requiredDetails: string[];
+  unsupportedServices: string[];
+  workflowSteps: string[];
+};
+
 export type ServicePreset = {
   /** Stable registry key — used by tenants / UI / lookupByKey. */
   key: string;
@@ -129,4 +159,6 @@ export type ServicePreset = {
   qualificationSchemaJson: PresetQualificationSchema;
   pricingJson: PresetPricing;
   faqJson: PresetFaq;
+  /** Optional v1 — service-specific operator guardrails. See PresetServiceRules. */
+  serviceRules?: PresetServiceRules;
 };

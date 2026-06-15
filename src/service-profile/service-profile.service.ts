@@ -323,6 +323,7 @@ export class ServiceProfileService {
         pricingJson: payload.pricingJson,
         faqJson: payload.faqJson,
         qualificationSchemaJson: payload.qualificationSchemaJson,
+        aiInstructionsJson: payload.aiInstructionsJson,
       },
       select: {
         id: true,

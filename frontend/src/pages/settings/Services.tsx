@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Layers, Plus, Loader2, X, Check, ArrowLeft, Edit3, Archive,
   CheckCircle2, Copy, Sparkles, MapPin, Trash2, Save,
+  Code2, Table2, ShieldAlert, ListChecks, AlertTriangle,
 } from 'lucide-react';
 import { SettingCard } from '../../components/automation/ui';
 import { notify } from '../../store/notificationStore';
@@ -384,12 +385,10 @@ function ProfileDetail({
             Each entry: <code>{`{ "provider": "thumbtack", "categoryName": "..." }`}</code>. The resolver matches inbound leads against these.
           </div>
         </FieldRow>
-        <FieldRow label="Pricing (JSON)">
-          <textarea
+        <FieldRow label="Pricing">
+          <PricingEditor
             value={draft.pricingJson}
-            onChange={(e) => setDraft({ ...draft, pricingJson: e.target.value })}
-            rows={10}
-            style={codeArea}
+            onChange={(next) => setDraft({ ...draft, pricingJson: next })}
           />
         </FieldRow>
         <FieldRow label="FAQ (JSON)">
@@ -414,6 +413,8 @@ function ProfileDetail({
           </button>
         </div>
       </SettingCard>
+
+      <ServiceRulesViewer aiInstructionsJson={profile.aiInstructionsJson} />
 
       <div style={{ marginTop: 16 }}>
         <OverridesSection
@@ -631,10 +632,15 @@ function PresetPickerModal({ onClose, onCreated }: { onClose: () => void; onCrea
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
                   <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
-                  <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)' }}>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
                     <span>{p.pricingJson.items?.length ?? 0} items</span>
                     <span>{p.qualificationSchemaJson.questions.length} questions</span>
                     <span>{p.faqJson.customQA.length} FAQs</span>
+                    {p.serviceRules && (
+                      <span style={{ color: '#b45309', fontWeight: 600 }}>
+                        + service rules
+                      </span>
+                    )}
                     <span>via {p.provider}</span>
                   </div>
                 </div>
@@ -652,6 +658,332 @@ function PresetPickerModal({ onClose, onCreated }: { onClose: () => void; onCrea
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Pricing editor (item_quantity table + JSON fallback) ─────────
+
+type PricingItem = {
+  key: string;
+  label: string;
+  price: number;
+  source?: string;
+  unit?: string;
+  notes?: string;
+  active?: boolean;
+};
+
+type PricingShape = {
+  pricingModel?: 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
+  included?: string[];
+  items?: PricingItem[];
+  addOns?: unknown[];
+  [key: string]: unknown;
+};
+
+type PricingMode = 'item_quantity' | 'json';
+
+function decidePricingMode(value: string): { mode: PricingMode; parsed: PricingShape | null } {
+  if (!value || value.trim().length === 0) {
+    return { mode: 'item_quantity', parsed: { pricingModel: 'item_quantity', items: [] } };
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const p = parsed as PricingShape;
+      if (p.pricingModel === 'item_quantity') return { mode: 'item_quantity', parsed: p };
+      return { mode: 'json', parsed: p };
+    }
+    return { mode: 'json', parsed: null };
+  } catch {
+    return { mode: 'json', parsed: null };
+  }
+}
+
+function slugifyKey(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+}
+
+function PricingEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const initial = useMemo(() => decidePricingMode(value), [value]);
+  const [mode, setMode] = useState<PricingMode>(initial.mode);
+
+  const items: PricingItem[] = useMemo(() => {
+    if (mode !== 'item_quantity') return [];
+    const parsed = decidePricingMode(value).parsed;
+    return parsed?.items ?? [];
+  }, [value, mode]);
+
+  const writeItems = (next: PricingItem[]) => {
+    const base: PricingShape = decidePricingMode(value).parsed ?? { pricingModel: 'item_quantity' };
+    const out: PricingShape = { ...base, pricingModel: 'item_quantity', items: next };
+    onChange(JSON.stringify(out, null, 2));
+  };
+
+  const updateItem = (idx: number, patch: Partial<PricingItem>) => {
+    const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+    writeItems(next);
+  };
+
+  const addItem = () => {
+    const idx = items.length + 1;
+    writeItems([
+      ...items,
+      { key: `item_${idx}`, label: 'New item', price: 0, unit: '', notes: '', active: true, source: 'manual' },
+    ]);
+  };
+
+  const removeItem = (idx: number) => {
+    writeItems(items.filter((_, i) => i !== idx));
+  };
+
+  // Auto-fill key from label when key field is left at its default placeholder.
+  const onLabelBlur = (idx: number, item: PricingItem) => {
+    if (!item.key || item.key === `item_${idx + 1}`) {
+      const slug = slugifyKey(item.label);
+      if (slug.length > 0) updateItem(idx, { key: slug });
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={() => setMode('item_quantity')}
+          style={mode === 'item_quantity' ? toggleBtnActive : toggleBtn}
+        >
+          <Table2 size={13} /> Item table
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('json')}
+          style={mode === 'json' ? toggleBtnActive : toggleBtn}
+        >
+          <Code2 size={13} /> JSON
+        </button>
+      </div>
+
+      {mode === 'item_quantity' && (
+        <div>
+          <div style={hint}>
+            One row per priced item. Inactive items stay saved but are hidden from quotes.
+          </div>
+          {items.length === 0 && (
+            <div style={{ ...emptyState, padding: 18, marginTop: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>
+                No items yet. Add your first priced item below.
+              </div>
+              <button type="button" onClick={addItem} style={primaryBtn}>
+                <Plus size={14} /> Add item
+              </button>
+            </div>
+          )}
+          {items.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {items.map((it, idx) => (
+                <div
+                  key={`${idx}-${it.key}`}
+                  style={{
+                    border: '1px solid var(--lb-border, #e5e7eb)',
+                    borderRadius: 10,
+                    padding: 12,
+                    background: it.active === false ? 'var(--lb-surface, #fafafa)' : 'white',
+                    opacity: it.active === false ? 0.7 : 1,
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 8 }}>
+                    <div>
+                      <div style={miniLabel}>Item name</div>
+                      <input
+                        type="text"
+                        value={it.label}
+                        onChange={(e) => updateItem(idx, { label: e.target.value })}
+                        onBlur={() => onLabelBlur(idx, it)}
+                        style={textInput}
+                      />
+                    </div>
+                    <div>
+                      <div style={miniLabel}>Unit</div>
+                      <input
+                        type="text"
+                        value={it.unit ?? ''}
+                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
+                        placeholder="e.g. per sofa"
+                        style={textInput}
+                      />
+                    </div>
+                    <div>
+                      <div style={miniLabel}>Price ($)</div>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={Number.isFinite(it.price) ? it.price : 0}
+                        onChange={(e) => updateItem(idx, { price: Number(e.target.value) || 0 })}
+                        style={textInput}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={miniLabel}>Notes (optional)</div>
+                    <input
+                      type="text"
+                      value={it.notes ?? ''}
+                      onChange={(e) => updateItem(idx, { notes: e.target.value })}
+                      placeholder="e.g. excludes pet stains"
+                      style={textInput}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginTop: 10,
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 13,
+                        color: 'var(--lb-text)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={it.active !== false}
+                        onChange={(e) => updateItem(idx, { active: e.target.checked })}
+                      />
+                      Active
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(idx)}
+                      style={{ ...secondaryBtn, padding: '6px 10px' }}
+                      title="Remove item"
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <div>
+                <button type="button" onClick={addItem} style={{ ...secondaryBtn, marginTop: 4 }}>
+                  <Plus size={14} /> Add item
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'json' && (
+        <div>
+          <div style={hint}>
+            Raw JSON editor — used for non-item_quantity pricing models (e.g. bed/bath grid).
+          </div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={12}
+            style={{ ...codeArea, marginTop: 6 }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Service rules viewer (read-only v1) ──────────────────────────
+
+type ParsedServiceRules = {
+  requiredDetails: string[];
+  unsupportedServices: string[];
+  workflowSteps: string[];
+};
+
+function extractServiceRulesFromInstructions(json: string | null | undefined): ParsedServiceRules | null {
+  if (!json) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const rules = (parsed as Record<string, unknown>).serviceRules;
+  if (!rules || typeof rules !== 'object' || Array.isArray(rules)) return null;
+  const r = rules as Record<string, unknown>;
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const required = arr(r.requiredDetails);
+  const unsupported = arr(r.unsupportedServices);
+  const workflow = arr(r.workflowSteps);
+  if (required.length === 0 && unsupported.length === 0 && workflow.length === 0) return null;
+  return {
+    requiredDetails: required,
+    unsupportedServices: unsupported,
+    workflowSteps: workflow,
+  };
+}
+
+function ServiceRulesViewer({ aiInstructionsJson }: { aiInstructionsJson: string | null }) {
+  const rules = useMemo(() => extractServiceRulesFromInstructions(aiInstructionsJson), [aiInstructionsJson]);
+  if (!rules) return null;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <SettingCard
+        icon={ShieldAlert}
+        iconTone="amber"
+        title="Service rules"
+        subtitle="Operator guardrails sourced from the preset. Editing these inline lands in a follow-up release."
+      >
+        {rules.requiredDetails.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+              <ListChecks size={14} /> Required details
+            </div>
+            <ul style={ruleList}>
+              {rules.requiredDetails.map((d) => (
+                <li key={d} style={ruleItem}>{d}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {rules.unsupportedServices.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#b45309' }}>
+              <AlertTriangle size={14} /> Not supported
+            </div>
+            <ul style={ruleList}>
+              {rules.unsupportedServices.map((d) => (
+                <li key={d} style={{ ...ruleItem, color: '#b45309' }}>{d}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {rules.workflowSteps.length > 0 && (
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+              <ListChecks size={14} /> Workflow steps
+            </div>
+            <ol style={{ ...ruleList, paddingLeft: 22 }}>
+              {rules.workflowSteps.map((s, i) => (
+                <li key={`${i}-${s}`} style={ruleItem}>{s}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </SettingCard>
     </div>
   );
 }
@@ -733,6 +1065,40 @@ const codeArea: React.CSSProperties = {
 
 const hint: React.CSSProperties = {
   fontSize: 11, color: 'var(--lb-text-muted)', marginTop: 4,
+};
+
+const miniLabel: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, marginBottom: 4,
+  color: 'var(--lb-text-muted)', textTransform: 'uppercase', letterSpacing: 0.04,
+};
+
+const toggleBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '6px 10px', borderRadius: 8,
+  border: '1px solid var(--lb-border, #e5e7eb)',
+  background: 'white', color: 'var(--lb-text-muted)',
+  fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
+
+const toggleBtnActive: React.CSSProperties = {
+  ...toggleBtn,
+  background: 'var(--lb-blue-50, #eff6ff)',
+  color: 'var(--lb-blue-700, #1d4ed8)',
+  borderColor: 'var(--lb-blue-200, #bfdbfe)',
+};
+
+const ruleList: React.CSSProperties = {
+  margin: 0,
+  paddingLeft: 20,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
+
+const ruleItem: React.CSSProperties = {
+  fontSize: 13,
+  color: 'var(--lb-text)',
+  lineHeight: 1.4,
 };
 
 const errorBanner: React.CSSProperties = {

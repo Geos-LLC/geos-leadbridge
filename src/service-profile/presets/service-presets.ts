@@ -93,13 +93,13 @@ export const UPHOLSTERY_FURNITURE_CLEANING_PRESET: ServicePreset = {
     pricingModel: 'item_quantity',
     included: ['Cleaning supplies'],
     items: [
-      { key: 'sofa',      label: 'Sofa',      price: 96,  source: 'thumbtack_average' },
-      { key: 'loveseat',  label: 'Loveseat',  price: 76,  source: 'thumbtack_average' },
-      { key: 'chair',     label: 'Chair',     price: 44,  source: 'thumbtack_average' },
-      { key: 'sectional', label: 'Sectional', price: 149, source: 'thumbtack_average' },
-      { key: 'mattress',  label: 'Mattress',  price: 92,  source: 'thumbtack_average' },
-      { key: 'ottoman',   label: 'Ottoman',   price: 35,  source: 'thumbtack_average' },
-      { key: 'curtains',  label: 'Curtains',  price: 60,  source: 'interpolated' },
+      { key: 'sofa',      label: 'Sofa',      price: 96,  source: 'thumbtack_average', unit: 'per sofa',      active: true },
+      { key: 'loveseat',  label: 'Loveseat',  price: 76,  source: 'thumbtack_average', unit: 'per loveseat',  active: true },
+      { key: 'chair',     label: 'Chair',     price: 44,  source: 'thumbtack_average', unit: 'per chair',     active: true },
+      { key: 'sectional', label: 'Sectional', price: 149, source: 'thumbtack_average', unit: 'per sectional', active: true },
+      { key: 'mattress',  label: 'Mattress',  price: 92,  source: 'thumbtack_average', unit: 'per mattress',  active: true },
+      { key: 'ottoman',   label: 'Ottoman',   price: 35,  source: 'thumbtack_average', unit: 'per ottoman',   active: true },
+      { key: 'curtains',  label: 'Curtains',  price: 60,  source: 'interpolated',      unit: 'per panel',     active: true },
     ],
     addOns: [
       {
@@ -109,6 +109,30 @@ export const UPHOLSTERY_FURNITURE_CLEANING_PRESET: ServicePreset = {
         source: 'missing_from_thumbtack',
         quoteManually: true,
       },
+    ],
+  },
+  serviceRules: {
+    requiredDetails: [
+      'Number of seats',
+      'Area rug size',
+      'Mattress size',
+      'Fabric type',
+      'Full name',
+      'Address',
+      'Phone number',
+    ],
+    unsupportedServices: [
+      'Leather cleaning',
+      'Wool rug cleaning',
+    ],
+    workflowSteps: [
+      'Greet the customer and confirm the service category',
+      'Ask which furniture pieces need cleaning and how many of each',
+      'Ask for fabric type — if leather, mark as unsupported and defer to owner',
+      'Ask about stain locations and types if any are mentioned',
+      'Collect full name, service address, and phone number',
+      'Share per-item starting prices verbatim — do NOT compute a total',
+      'Confirm a preferred date / time window and hand off to the owner',
     ],
   },
   faqJson: {
@@ -215,6 +239,7 @@ export function buildServiceProfileFromPreset(
   pricingJson: string;
   faqJson: string;
   qualificationSchemaJson: string;
+  aiInstructionsJson: string | null;
 } {
   const slug = opts.slug ?? preset.key.replace(/_/g, '-');
   const mappings = [
@@ -224,6 +249,14 @@ export function buildServiceProfileFromPreset(
     },
     ...(opts.extraCategoryMappings ?? []),
   ];
+  // Wrapper shape for aiInstructionsJson — `version: 1` flags this as a
+  // post-v1 envelope so the playbook renderer can disambiguate it from
+  // the legacy "raw V2 sections at top level" shape. v1 only carries
+  // serviceRules; future fields (e.g. profile-level aiPlaybookV2
+  // sections) slot in here without another shape migration.
+  const aiInstructionsJson = preset.serviceRules
+    ? JSON.stringify({ version: 1, serviceRules: preset.serviceRules })
+    : null;
   return {
     userId: opts.userId,
     name: preset.label,
@@ -234,6 +267,7 @@ export function buildServiceProfileFromPreset(
     pricingJson: JSON.stringify(preset.pricingJson),
     faqJson: JSON.stringify(preset.faqJson),
     qualificationSchemaJson: JSON.stringify(preset.qualificationSchemaJson),
+    aiInstructionsJson,
   };
 }
 
