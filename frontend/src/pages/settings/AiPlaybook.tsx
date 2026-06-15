@@ -29,7 +29,14 @@ import {
 } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
 import { AI_SETTINGS_ASSISTANT_APPLIED_EVENT, type AiSettingsAssistantAppliedDetail } from '../../components/Layout';
-import { followUpApi, usersApi, aiSettingsAssistantApi, type ChatInstructionEntry } from '../../services/api';
+import {
+  followUpApi,
+  usersApi,
+  aiSettingsAssistantApi,
+  serviceProfilesApi,
+  type ChatInstructionEntry,
+  type ServiceProfile,
+} from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
 import AccountFaqForm from '../../components/AccountFaqForm';
@@ -55,8 +62,491 @@ const SECTION_ICONS: Record<PlaybookSectionKey, LucideIcon> = {
   personality_brand_voice: UserIcon,
 };
 
+// ─── Scope router (PR-B) ──────────────────────────────────────────────────
+//
+// AI Playbook is scoped to either:
+//   - Global: the existing per-account behavior. Save fans out to every
+//     connected SavedAccount's followUpSettingsJson + User.globalAiPrompt.
+//   - Service: one specific ServiceProfile. Save targets ONLY that profile's
+//     aiInstructionsJson wrapper (the envelope PR-A introduced —
+//     { version, serviceRules?, aiPlaybookV2 }). serviceRules is preserved
+//     verbatim; only the aiPlaybookV2 sub-tree is edited from this page.
+//
+// FAQ + Pricing + Global Custom Instructions are intentionally hidden from
+// Service scope. FAQ and pricing for a service live in Settings → Services
+// (PR-A); global custom instructions are a tenant-wide field by definition.
+
+type Scope = { kind: 'global' } | { kind: 'service'; profileId: string };
+
+function readScopeFromParams(search: URLSearchParams): Scope {
+  const raw = search.get('scope');
+  if (!raw || raw === 'global') return { kind: 'global' };
+  return { kind: 'service', profileId: raw };
+}
 
 export function SettingsAiPlaybook() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scope = readScopeFromParams(searchParams);
+
+  // ServiceProfile list — used by the tab strip + to resolve the active
+  // profile when scope=service. Cached at this level so switching tabs
+  // doesn't refetch on every click.
+  const [profiles, setProfiles] = useState<ServiceProfile[] | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [refreshTok, setRefreshTok] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfilesError(null);
+    serviceProfilesApi
+      .list()
+      .then((r) => { if (!cancelled) setProfiles(r.profiles); })
+      .catch((err: any) => {
+        if (!cancelled) setProfilesError(err?.response?.data?.message ?? err?.message ?? 'Failed to load services');
+      });
+    return () => { cancelled = true; };
+  }, [refreshTok]);
+
+  const activeProfile =
+    scope.kind === 'service'
+      ? (profiles ?? []).find((p) => p.id === scope.profileId) ?? null
+      : null;
+
+  // Invalid ?scope=<id> after profiles load → silently snap back to Global.
+  // We don't surface an error because users land here via shared URLs and
+  // archived/deleted profiles are valid prior state.
+  useEffect(() => {
+    if (scope.kind !== 'service') return;
+    if (!profiles) return;
+    if (activeProfile) return;
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('scope');
+    setSearchParams(sp, { replace: true });
+  }, [scope.kind, scope.kind === 'service' ? scope.profileId : null, profiles, activeProfile, searchParams, setSearchParams]);
+
+  const selectScope = (next: Scope) => {
+    const sp = new URLSearchParams(searchParams);
+    if (next.kind === 'global') sp.delete('scope');
+    else sp.set('scope', next.profileId);
+    setSearchParams(sp, { replace: false });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <ScopeTabStrip
+        profiles={profiles}
+        scope={scope}
+        activeProfile={activeProfile}
+        onSelect={selectScope}
+        error={profilesError}
+      />
+      {scope.kind === 'global' && <GlobalPlaybookEditor />}
+      {scope.kind === 'service' && activeProfile && (
+        <ServicePlaybookEditor
+          key={activeProfile.id}
+          profile={activeProfile}
+          onSaved={() => setRefreshTok((t) => t + 1)}
+        />
+      )}
+      {scope.kind === 'service' && profiles && !activeProfile && (
+        <SectionCard padding="18px 22px">
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)' }}>
+            Service profile not found — switching to Global.
+          </div>
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab strip ────────────────────────────────────────────────────────────
+
+function ScopeTabStrip({
+  profiles,
+  scope,
+  activeProfile,
+  onSelect,
+  error,
+}: {
+  profiles: ServiceProfile[] | null;
+  scope: Scope;
+  activeProfile: ServiceProfile | null;
+  onSelect: (next: Scope) => void;
+  error: string | null;
+}) {
+  const loading = profiles === null && !error;
+  // Sort profiles for the strip: active default first, then active by name,
+  // then drafts, then archived at the tail. Mirrors the Services list page
+  // ordering so users don't have to re-learn it.
+  const ordered = useMemo(() => {
+    if (!profiles) return [];
+    const rank = (p: ServiceProfile) =>
+      p.status === 'active' ? (p.isDefault ? 0 : 1) : p.status === 'draft' ? 2 : 3;
+    return [...profiles].sort((a, b) => {
+      const d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      return a.name.localeCompare(b.name);
+    });
+  }, [profiles]);
+
+  return (
+    <SectionCard padding="14px 18px">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <ScopeTabButton
+            label="Global"
+            active={scope.kind === 'global'}
+            badge="global"
+            onClick={() => onSelect({ kind: 'global' })}
+          />
+          {ordered.map((p) => (
+            <ScopeTabButton
+              key={p.id}
+              label={p.name}
+              active={scope.kind === 'service' && scope.profileId === p.id}
+              badge={p.status === 'active' ? 'service' : p.status === 'draft' ? 'draft' : 'archived'}
+              onClick={() => onSelect({ kind: 'service', profileId: p.id })}
+            />
+          ))}
+          {loading && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--lb-ink-5)' }}>
+              <Loader2 size={12} className="animate-spin" /> Loading services…
+            </span>
+          )}
+        </div>
+        {scope.kind === 'service' && activeProfile && (
+          <ScopeStatusLine profile={activeProfile} />
+        )}
+        {scope.kind === 'global' && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
+            Global instructions apply across every connected account and every service.
+          </div>
+        )}
+        {error && (
+          <div style={{ fontSize: 12, color: '#b91c1c' }}>
+            Could not load services: {error}
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+type ScopeBadge = 'global' | 'service' | 'draft' | 'archived';
+
+const SCOPE_BADGE_STYLES: Record<ScopeBadge, { bg: string; fg: string; border: string; label: string }> = {
+  global:   { bg: '#eff6ff', fg: '#1d4ed8', border: '#bfdbfe', label: 'GLOBAL' },
+  service:  { bg: '#dcfce7', fg: '#15803d', border: '#bbf7d0', label: 'SERVICE' },
+  draft:    { bg: '#fef3c7', fg: '#b45309', border: '#fde68a', label: 'DRAFT' },
+  archived: { bg: '#f3f4f6', fg: '#6b7280', border: '#e5e7eb', label: 'ARCHIVED' },
+};
+
+function ScopeBadgePill({ badge }: { badge: ScopeBadge }) {
+  const s = SCOPE_BADGE_STYLES[badge];
+  return (
+    <span style={{
+      padding: '2px 8px',
+      borderRadius: 4,
+      background: s.bg,
+      color: s.fg,
+      border: `1px solid ${s.border}`,
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: 0.06,
+    }}>{s.label}</span>
+  );
+}
+
+function ScopeTabButton({
+  label,
+  active,
+  badge,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  badge: ScopeBadge;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 12px',
+        borderRadius: 10,
+        border: `1px solid ${active ? 'var(--lb-accent)' : 'var(--lb-line)'}`,
+        background: active ? 'var(--lb-accent-tint, #eff6ff)' : 'white',
+        color: active ? 'var(--lb-accent)' : 'var(--lb-ink-2)',
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        maxWidth: 280,
+      }}
+      title={label}
+    >
+      <span style={{
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        maxWidth: 200,
+      }}>
+        {label}
+      </span>
+      <ScopeBadgePill badge={badge} />
+    </button>
+  );
+}
+
+function ScopeStatusLine({ profile }: { profile: ServiceProfile }) {
+  const status = profile.status;
+  const isArchived = status === 'archived';
+  const isDraft = status === 'draft';
+  return (
+    <div style={{ fontSize: 12.5, color: isArchived ? '#6b7280' : isDraft ? '#b45309' : 'var(--lb-ink-5)' }}>
+      {isArchived && <>This service is archived — edits stay saved but the resolver will not match new leads against it.</>}
+      {isDraft && <>This service is in draft — AI replies stay paused for matched leads until you activate.</>}
+      {!isArchived && !isDraft && <>Instructions here apply only to leads matched to this service.</>}
+    </div>
+  );
+}
+
+// ─── Service-scope editor ─────────────────────────────────────────────────
+//
+// Reads ServiceProfile.aiInstructionsJson, parses the wrapper, edits the
+// aiPlaybookV2 sub-tree only, and saves the merged wrapper back. The
+// wrapper's other keys (version, serviceRules) are preserved verbatim so
+// PR-A's service rules viewer in Settings → Services keeps working.
+
+type AiInstructionsWrapper = {
+  version: number;
+  aiPlaybookV2: PlaybookV2Storage;
+  // Pass-through bag for forward-compat keys (serviceRules + anything we
+  // didn't think of). Preserved verbatim on save.
+  passthrough: Record<string, unknown>;
+};
+
+function parseAiInstructionsWrapper(json: string | null | undefined): AiInstructionsWrapper {
+  if (!json) return { version: 1, aiPlaybookV2: {}, passthrough: {} };
+  try {
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { version: 1, aiPlaybookV2: {}, passthrough: {} };
+    }
+    const obj = parsed as Record<string, unknown>;
+    const hasWrapperShape =
+      'version' in obj || 'serviceRules' in obj || 'aiPlaybookV2' in obj;
+    if (hasWrapperShape) {
+      const v2 =
+        obj.aiPlaybookV2 && typeof obj.aiPlaybookV2 === 'object' && !Array.isArray(obj.aiPlaybookV2)
+          ? (obj.aiPlaybookV2 as PlaybookV2Storage)
+          : {};
+      const passthrough: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'version' || k === 'aiPlaybookV2') continue;
+        passthrough[k] = v;
+      }
+      const version = typeof obj.version === 'number' ? obj.version : 1;
+      return { version, aiPlaybookV2: v2, passthrough };
+    }
+    // Legacy raw-sections shape — treat the entire blob as the V2 sub-tree
+    // and emit it under the wrapper on next save (no data loss).
+    return { version: 1, aiPlaybookV2: obj as PlaybookV2Storage, passthrough: {} };
+  } catch {
+    return { version: 1, aiPlaybookV2: {}, passthrough: {} };
+  }
+}
+
+function serializeWrapper(wrapper: AiInstructionsWrapper): string {
+  const out: Record<string, unknown> = {
+    version: wrapper.version || 1,
+    ...wrapper.passthrough,
+    aiPlaybookV2: wrapper.aiPlaybookV2,
+  };
+  return JSON.stringify(out);
+}
+
+function ServicePlaybookEditor({
+  profile,
+  onSaved,
+}: {
+  profile: ServiceProfile;
+  onSaved: () => void;
+}) {
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' || searchParams.get('debug') === '1';
+
+  const initialWrapper = useMemo(
+    () => parseAiInstructionsWrapper(profile.aiInstructionsJson),
+    [profile.aiInstructionsJson],
+  );
+  const [v2, setV2] = useState<PlaybookV2Storage>(initialWrapper.aiPlaybookV2);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const dirtyRef = useRef<Set<PlaybookSectionKey>>(new Set());
+
+  // Reset state when profile changes (parent uses key=profile.id, so this
+  // is belt-and-suspenders — the key already forces a remount).
+  useEffect(() => {
+    setV2(initialWrapper.aiPlaybookV2);
+    dirtyRef.current = new Set();
+  }, [initialWrapper]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
+
+  const onSectionChange = (section: PlaybookSectionKey, value: string) => {
+    dirtyRef.current.add(section);
+    setV2((prev) => ({
+      ...prev,
+      [section]: { customInstructions: value, suggestedFromWebsite: false },
+    }));
+  };
+
+  const handleSave = async () => {
+    if (dirtyRef.current.size === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const merged: AiInstructionsWrapper = {
+        version: initialWrapper.version || 1,
+        aiPlaybookV2: v2,
+        passthrough: initialWrapper.passthrough,
+      };
+      const aiInstructionsJson = serializeWrapper(merged);
+      await serviceProfilesApi.update(profile.id, { aiInstructionsJson });
+      dirtyRef.current = new Set();
+      setSavedAt(Date.now());
+      onSaved();
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? e?.message ?? 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasDirty = dirtyRef.current.size > 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {error && <StatusPill status="error" message={error} />}
+      {!error && saving && <StatusPill status="saving" />}
+      {!error && !saving && savedAt && <StatusPill status="saved" />}
+
+      <ServiceScopeHelpBlock profileName={profile.name} />
+
+      <HowSectionCard
+        section="business_information"
+        value={v2.business_information?.customInstructions ?? ''}
+        onChange={(v) => onSectionChange('business_information', v)}
+      />
+
+      <HowSectionCard
+        section="pricing_guidance"
+        value={v2.pricing_guidance?.customInstructions ?? ''}
+        onChange={(v) => onSectionChange('pricing_guidance', v)}
+      />
+
+      {advancedMode && (
+        <>
+          <AdvancedSectionsBanner />
+          <HowSectionCard
+            section="qualification_guidance"
+            value={v2.qualification_guidance?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('qualification_guidance', v)}
+            legacyAdvanced
+          />
+          <HowSectionCard
+            section="booking_guidance"
+            value={v2.booking_guidance?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('booking_guidance', v)}
+            legacyAdvanced
+          />
+          <HowSectionCard
+            section="human_handoff_guidance"
+            value={v2.human_handoff_guidance?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('human_handoff_guidance', v)}
+            legacyAdvanced
+          />
+          <HowSectionCard
+            section="objection_handling"
+            value={v2.objection_handling?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('objection_handling', v)}
+            legacyAdvanced
+          />
+          <HowSectionCard
+            section="followup_tone"
+            value={v2.followup_tone?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('followup_tone', v)}
+            legacyAdvanced
+          />
+          <HowSectionCard
+            section="personality_brand_voice"
+            value={v2.personality_brand_voice?.customInstructions ?? ''}
+            onChange={(v) => onSectionChange('personality_brand_voice', v)}
+            legacyAdvanced
+          />
+        </>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginRight: 'auto' }}>
+          Editing the {profile.name} service playbook.
+        </span>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!hasDirty || saving}
+          style={{
+            padding: '10px 18px', fontSize: 13.5, fontWeight: 600,
+            background: hasDirty ? 'var(--lb-accent)' : '#cbd5e1',
+            color: 'white', border: 0, borderRadius: 10,
+            cursor: hasDirty && !saving ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit',
+            opacity: saving ? 0.7 : 1,
+          }}
+        >
+          {saving ? 'Saving…' : hasDirty ? 'Save service playbook' : 'No changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ServiceScopeHelpBlock({ profileName }: { profileName: string }) {
+  return (
+    <SectionCard padding="18px 22px">
+      <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ flexShrink: 0, paddingTop: 2 }}>
+          <BookOpen size={18} style={{ color: 'var(--lb-accent)' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
+            How AI should communicate for {profileName}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
+            FAQ, pricing tables, and qualification questions for this service are managed in{' '}
+            <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
+              Settings → Services
+            </a>.
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function GlobalPlaybookEditor() {
   const accounts = useAppStore(s => s.savedAccounts);
 
   // Advanced/legacy mode (?advanced=1 or ?debug=1) — exposes the 5 legacy
