@@ -55,18 +55,6 @@ const SECTION_ICONS: Record<PlaybookSectionKey, LucideIcon> = {
   personality_brand_voice: UserIcon,
 };
 
-/**
- * Map a Playbook section key to its `assistant area` — the value the AI
- * Settings Assistant chat uses to push entries into. Only the three
- * sections currently surfaced by the chat classifier appear here. Other
- * sections never get chat-added entries today, so the Custom
- * Instructions sub-section stays hidden under them.
- */
-const SECTION_TO_ASSISTANT_AREA: Partial<Record<PlaybookSectionKey, string>> = {
-  business_information: 'business_information',
-  pricing_guidance: 'pricing_guidance',
-  personality_brand_voice: 'brand_voice',
-};
 
 export function SettingsAiPlaybook() {
   const accounts = useAppStore(s => s.savedAccounts);
@@ -192,13 +180,15 @@ export function SettingsAiPlaybook() {
                 (backend key: personality_brand_voice) */}
 
       {accounts.length > 0 && <>
+        {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
+        <CustomInstructionsAllCard savedAccountId={accounts[0].id} />
+
         {/* 1. Business Information */}
         <HowSectionCard
           section="business_information"
           value={v2.business_information?.customInstructions ?? ''}
           onChange={v => onSectionChange('business_information', v)}
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
-          savedAccountId={accounts[0].id}
         />
 
         {/* 2. FAQ */}
@@ -273,7 +263,6 @@ export function SettingsAiPlaybook() {
               onChange={v => onSectionChange('personality_brand_voice', v)}
               legacyAdvanced
               isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
-              savedAccountId={accounts[0].id}
             />
           </>
         )}
@@ -336,7 +325,7 @@ function HelpBlock() {
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
-  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced, savedAccountId,
+  section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -354,13 +343,8 @@ function HowSectionCard({
    *  mode (qualification_guidance, booking_guidance, etc.). The textarea
    *  is fully editable; behavior is unchanged. */
   legacyAdvanced?: boolean;
-  /** Account scope for the Custom Instructions sub-section. When present
-   *  AND the section maps to a chat assistant area, the sub-section is
-   *  rendered below the textarea. */
-  savedAccountId?: string;
 }) {
   const Icon = SECTION_ICONS[section];
-  const chatArea = SECTION_TO_ASSISTANT_AREA[section];
   return (
     <PlaybookSectionShell
       icon={Icon}
@@ -377,9 +361,6 @@ function HowSectionCard({
         onChange={onChange}
         onRevertToDefault={() => onChange('')}
       />
-      {chatArea && savedAccountId && (
-        <ChatInstructionsSubsection area={chatArea} savedAccountId={savedAccountId} />
-      )}
     </PlaybookSectionShell>
   );
 }
@@ -477,7 +458,6 @@ function PricingGuidanceCard({
         onChange={onChange}
         onRevertToDefault={() => onChange('')}
       />
-      <ChatInstructionsSubsection area="pricing_guidance" savedAccountId={accountId} />
       <div style={{
         marginTop: 18, padding: '14px 16px',
         background: '#f8fafc',
@@ -611,10 +591,8 @@ function GlobalCustomInstructionsCard() {
         </span>
       </div>
 
-      <ChatInstructionsSubsection area="global_custom_instructions" />
-
       {expanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <textarea
             value={prompt}
             onChange={e => { setPrompt(e.target.value); setDirty(true); setSaved(false); }}
@@ -864,71 +842,102 @@ function btnGhostDanger(disabled: boolean): React.CSSProperties {
   };
 }
 
-// ─── Custom Instructions sub-section ─────────────────────────────────────
-// Lists chat-added rules for a given assistant area. Each entry carries
-// its own delete button; a "Clear all" link wipes the section's list.
-// The typed `customInstructions` textarea above is independent — this
-// sub-section never touches it.
+// ─── Consolidated Custom Instructions card ───────────────────────────────
+// One place that lists EVERY chat-added rule across all areas
+// (business_information / pricing_guidance / brand_voice / global),
+// each with its own delete button and an area label so the user can
+// tell at a glance which section the rule belongs to. This is the top
+// card on Settings → AI Playbook so the rules surface immediately
+// without scrolling.
 //
-// `savedAccountId` is required for per-section playbook areas and
-// omitted for the global card. The list is fetched lazily on mount and
-// re-fetched after each mutation. We don't share state with the parent
-// `v2` object because chat entries are written through a dedicated
-// endpoint, not the wizard-settings save fan-out.
+// Replaces the per-section subsections from the first cut — the user
+// asked for one consolidated view rather than rules hidden under each
+// playbook section card.
+//
+// Source of truth is the backend list endpoint (one call per area).
+// Re-fetches on the AI Settings Assistant applied event so chat writes
+// auto-appear without a manual refresh.
 
-function ChatInstructionsSubsection({
-  area, savedAccountId, title,
-}: {
-  area: string;
-  savedAccountId?: string;
-  /** Heading shown above the list. Defaults to "Custom instructions (from chat)". */
-  title?: string;
-}) {
-  const [entries, setEntries] = useState<ChatInstructionEntry[]>([]);
+type AreaSpec = { area: string; label: string; savedAccountId?: string };
+
+function CustomInstructionsAllCard({ savedAccountId }: { savedAccountId: string }) {
+  // Areas surfaced by the chat assistant today. `savedAccountId` is
+  // only required for the per-section playbook areas; global is
+  // user-scoped.
+  const areas: AreaSpec[] = useMemo(() => ([
+    { area: 'business_information', label: 'Business Information', savedAccountId },
+    { area: 'pricing_guidance',     label: 'Pricing Guidance',     savedAccountId },
+    { area: 'brand_voice',          label: 'Brand Voice',          savedAccountId },
+    { area: 'global_custom_instructions', label: 'Global' },
+  ]), [savedAccountId]);
+
+  // entries grouped by area, in fetch order. Flattened on render.
+  const [byArea, setByArea] = useState<Record<string, ChatInstructionEntry[]>>({});
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial fetch + re-fetch when scope changes.
+  const refetchOne = async (a: AreaSpec) => {
+    const res = await aiSettingsAssistantApi.listChatInstructions(a.area, a.savedAccountId);
+    setByArea(prev => ({ ...prev, [a.area]: res.entries ?? [] }));
+  };
+
+  const refetchAll = async () => {
+    setError(null);
+    try {
+      const results = await Promise.all(
+        areas.map(a => aiSettingsAssistantApi.listChatInstructions(a.area, a.savedAccountId)
+          .then(r => [a.area, r.entries ?? []] as const)
+          .catch(() => [a.area, [] as ChatInstructionEntry[]] as const)),
+      );
+      const next: Record<string, ChatInstructionEntry[]> = {};
+      for (const [area, entries] of results) next[area] = entries;
+      setByArea(next);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load custom instructions');
+    }
+  };
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    setError(null);
-    aiSettingsAssistantApi.listChatInstructions(area, savedAccountId)
-      .then(res => { if (alive) setEntries(res.entries ?? []); })
-      .catch((e: any) => { if (alive) setError(e?.message ?? 'Failed to load custom instructions'); })
-      .finally(() => { if (alive) setLoading(false); });
+    refetchAll().finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [area, savedAccountId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedAccountId]);
 
-  // Re-fetch when the chat assistant applies a write that targets THIS
-  // sub-section's scope. The Layout dispatches this event from both the
-  // apply-ready and conflict-resolution apply paths. We compare on both
-  // area and savedAccountId so an unrelated playbook section's write
-  // doesn't trigger an unnecessary re-fetch.
+  // Re-fetch when the chat assistant applies a write anywhere — we
+  // refresh only the area that was touched (cheaper) and fall back to
+  // a full refetch on unknown areas.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<AiSettingsAssistantAppliedDetail>).detail;
-      if (!detail || detail.area !== area) return;
-      // For global the detail.savedAccountId is null and our savedAccountId
-      // prop is undefined — both match the "no scope" case. For per-section
-      // playbook areas both must equal.
-      const sameScope = (detail.savedAccountId ?? undefined) === savedAccountId;
-      if (!sameScope) return;
-      aiSettingsAssistantApi.listChatInstructions(area, savedAccountId)
-        .then(res => setEntries(res.entries ?? []))
-        .catch(() => { /* leave existing list intact on transient error */ });
+      if (!detail) return;
+      const match = areas.find(a => a.area === detail.area);
+      if (!match) { refetchAll(); return; }
+      refetchOne(match).catch(() => { /* leave existing on transient error */ });
     };
     window.addEventListener(AI_SETTINGS_ASSISTANT_APPLIED_EVENT, handler);
     return () => window.removeEventListener(AI_SETTINGS_ASSISTANT_APPLIED_EVENT, handler);
-  }, [area, savedAccountId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areas]);
 
-  const handleDelete = async (id: string) => {
-    setBusyId(id); setError(null);
+  // Flat list, newest first across all areas.
+  const flat = useMemo(() => {
+    const rows: Array<{ entry: ChatInstructionEntry; spec: AreaSpec }> = [];
+    for (const a of areas) {
+      for (const e of byArea[a.area] ?? []) rows.push({ entry: e, spec: a });
+    }
+    rows.sort((x, y) => (Date.parse(y.entry.createdAt) || 0) - (Date.parse(x.entry.createdAt) || 0));
+    return rows;
+  }, [byArea, areas]);
+
+  const handleDelete = async (entryId: string, spec: AreaSpec) => {
+    setBusyId(entryId); setError(null);
     try {
-      const res = await aiSettingsAssistantApi.deleteChatInstruction(area, id, savedAccountId);
-      setEntries(res.entries ?? []);
+      const res = await aiSettingsAssistantApi.deleteChatInstruction(spec.area, entryId, spec.savedAccountId);
+      setByArea(prev => ({ ...prev, [spec.area]: res.entries ?? [] }));
     } catch (e: any) {
       setError(e?.message ?? 'Failed to delete entry');
     } finally {
@@ -937,18 +946,14 @@ function ChatInstructionsSubsection({
   };
 
   const handleClearAll = async () => {
-    if (entries.length === 0) return;
-    if (!window.confirm(`Delete all ${entries.length} chat-added instruction${entries.length === 1 ? '' : 's'} for this section?`)) return;
+    if (flat.length === 0) return;
+    if (!window.confirm(`Delete all ${flat.length} chat-added instruction${flat.length === 1 ? '' : 's'}?`)) return;
     setClearing(true); setError(null);
     try {
-      // Delete one by one — keeps the audit log honest and avoids a new
-      // bulk-delete endpoint. The list is short by design (chat-added).
-      let remaining = entries;
-      for (const e of entries) {
-        const res = await aiSettingsAssistantApi.deleteChatInstruction(area, e.id, savedAccountId);
-        remaining = res.entries ?? [];
+      for (const { entry, spec } of flat) {
+        const res = await aiSettingsAssistantApi.deleteChatInstruction(spec.area, entry.id, spec.savedAccountId);
+        setByArea(prev => ({ ...prev, [spec.area]: res.entries ?? [] }));
       }
-      setEntries(remaining);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to clear entries');
     } finally {
@@ -957,16 +962,14 @@ function ChatInstructionsSubsection({
   };
 
   return (
-    <div style={{
-      marginTop: 18,
-      padding: '14px 16px',
-      background: '#f8fafc',
-      border: '1px solid var(--lb-line-soft)',
-      borderRadius: 10,
-    }}>
+    <PlaybookSectionShell
+      icon={MessageSquare}
+      title="Custom Instructions"
+      subtitle="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
+    >
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-        marginBottom: 10,
+        marginBottom: 12,
       }}>
         <div style={{
           fontSize: 11, fontWeight: 700, color: 'var(--lb-ink-5)',
@@ -974,18 +977,9 @@ function ChatInstructionsSubsection({
           fontFamily: 'var(--lb-font-mono)',
           display: 'inline-flex', alignItems: 'center', gap: 6,
         }}>
-          <MessageSquare size={11} />
-          {title ?? 'Custom instructions (from chat)'}
-          {entries.length > 0 && (
-            <span style={{
-              fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
-              background: '#eef2ff', color: '#4338ca',
-            }}>
-              {entries.length}
-            </span>
-          )}
+          {flat.length} active rule{flat.length === 1 ? '' : 's'}
         </div>
-        {entries.length > 0 && (
+        {flat.length > 0 && (
           <button
             type="button"
             onClick={handleClearAll}
@@ -1007,19 +1001,20 @@ function ChatInstructionsSubsection({
         </div>
       )}
 
-      {!loading && entries.length === 0 && (
+      {!loading && flat.length === 0 && (
         <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
-          No chat-added instructions yet. Use the AI Settings Assistant to
-          add rules in natural language — each one will appear here with
-          its own delete button.
+          No chat-added instructions yet. Open the AI Settings Assistant
+          (the sparkle icon in the top right) and describe a rule in
+          natural language — each one will appear here with its own
+          delete button.
         </div>
       )}
 
-      {!loading && entries.length > 0 && (
+      {!loading && flat.length > 0 && (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {entries.map(e => (
+          {flat.map(({ entry, spec }) => (
             <li
-              key={e.id}
+              key={`${spec.area}:${entry.id}`}
               style={{
                 padding: '10px 12px',
                 background: 'white',
@@ -1029,30 +1024,42 @@ function ChatInstructionsSubsection({
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                  {e.text}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+                    background: '#ede9fe', color: '#6d28d9',
+                    letterSpacing: 0.04, textTransform: 'uppercase',
+                    fontFamily: 'var(--lb-font-mono)',
+                  }}>
+                    {spec.label}
+                  </span>
+                  {entry.createdAt && (
+                    <span style={{ fontSize: 11, color: 'var(--lb-ink-6)' }}>{formatRelative(entry.createdAt)}</span>
+                  )}
                 </div>
-                {(e.userMessage || e.createdAt) && (
-                  <div style={{ marginTop: 4, fontSize: 11, color: 'var(--lb-ink-6)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {e.userMessage && <span title="What you typed">"{truncateText(e.userMessage, 80)}"</span>}
-                    {e.createdAt && <span>· {formatRelative(e.createdAt)}</span>}
+                <div style={{ fontSize: 13, color: 'var(--lb-ink-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  {entry.text}
+                </div>
+                {entry.userMessage && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: 'var(--lb-ink-6)' }} title="What you typed">
+                    "{truncateText(entry.userMessage, 100)}"
                   </div>
                 )}
               </div>
               <button
                 type="button"
-                onClick={() => handleDelete(e.id)}
-                disabled={busyId === e.id || clearing}
+                onClick={() => handleDelete(entry.id, spec)}
+                disabled={busyId === entry.id || clearing}
                 title="Delete this instruction"
                 style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   width: 28, height: 28, borderRadius: 6,
                   background: 'transparent', border: 0, cursor: 'pointer',
-                  color: '#b91c1c', opacity: busyId === e.id ? 0.6 : 1,
+                  color: '#b91c1c', opacity: busyId === entry.id ? 0.6 : 1,
                   flexShrink: 0,
                 }}
               >
-                {busyId === e.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {busyId === entry.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               </button>
             </li>
           ))}
@@ -1071,7 +1078,7 @@ function ChatInstructionsSubsection({
           {error}
         </div>
       )}
-    </div>
+    </PlaybookSectionShell>
   );
 }
 
