@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText, Check,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText, Check, Layers,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -13,17 +13,20 @@ import { SettingsAccounts } from './Accounts';
 import { SettingsBilling } from './Billing';
 import { SettingsPartnerNetwork } from './PartnerNetwork';
 import { SettingsAiPlaybook } from './AiPlaybook';
+import { SettingsServices } from './Services';
 import { MessageSettings } from '../MessageSettings';
 
 type TabKey =
   | 'general' | 'communication' | 'hours' | 'ai-playbook'
-  | 'templates' | 'team' | 'accounts' | 'billing' | 'partner-network';
+  | 'templates' | 'team' | 'accounts' | 'billing' | 'partner-network'
+  | 'services';
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
   { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
   { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'How AI communicates' },
+  { key: 'services',        label: 'Services',          icon: Layers,        sublabel: 'Per-service config' },
   { key: 'templates',       label: 'Templates',         icon: FileText,      sublabel: 'Pre-written messages' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
@@ -38,6 +41,7 @@ const SUBTITLES: Record<TabKey, string> = {
   communication: 'Phone numbers, notifications and alert routing.',
   hours: "When you're open, and how Leadbridge behaves outside hours.",
   'ai-playbook': 'Define how AI communicates with customers. Timing, automation, follow-ups, stop rules, and notifications are configured in Automation settings.',
+  services: 'Per-service configuration — pricing, FAQ, and qualification questions. Create profiles from curated presets.',
   templates: 'Pre-written messages used when you choose Custom Template instead of AI in your automation settings.',
   team: 'People who can use Leadbridge and what they can do.',
   accounts: 'Manage Thumbtack, Yelp, Angi and other connected sources.',
@@ -62,6 +66,7 @@ export default function SettingsPage() {
     case 'communication':   body = <SettingsCommunication />; break;
     case 'hours':           body = <SettingsHours />; break;
     case 'ai-playbook':     body = <SettingsAiPlaybook />; break;
+    case 'services':        body = <SettingsServices />; break;
     case 'templates':       body = <SettingsTemplates />; break;
     case 'team':            body = <SettingsTeam />; break;
     case 'accounts':        body = <SettingsAccounts />; break;

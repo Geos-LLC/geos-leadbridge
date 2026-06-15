@@ -802,6 +802,44 @@ export const aiSettingsAssistantApi = {
   },
 };
 
+export type ServiceProfilePreset = {
+  key: string;
+  provider: 'thumbtack' | 'yelp' | 'manual';
+  providerCategoryName: string;
+  label: string;
+  description: string;
+  aliases: string[];
+  qualificationSchemaJson: {
+    questions: Array<{
+      key: string;
+      label: string;
+      type: 'multi_select' | 'single_select' | 'text' | 'number' | 'date';
+      options?: string[];
+    }>;
+  };
+  pricingJson: {
+    pricingModel: 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
+    included?: string[];
+    items?: Array<{ key: string; label: string; price: number; source: string }>;
+    addOns?: Array<{ key: string; label: string; price: number; source: string; quoteManually?: boolean }>;
+  };
+  faqJson: { customQA: Array<{ question: string; answer: string }> };
+};
+
+export const serviceProfilePresetsApi = {
+  list: async (): Promise<{ presets: ServiceProfilePreset[] }> => {
+    const { data } = await api.get('/v1/service-profile-presets');
+    return data;
+  },
+  createFromPreset: async (
+    presetKey: string,
+    status?: 'draft' | 'active',
+  ): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
+    const { data } = await api.post('/v1/service-profiles/from-preset', { presetKey, status });
+    return data;
+  },
+};
+
 export const conversationContextApi = {
   suggestStrategy: async (conversationId: string): Promise<{
     success: boolean;
