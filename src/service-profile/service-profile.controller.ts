@@ -57,6 +57,7 @@ export class ServiceProfileController {
         qualificationSchemaJson: p.qualificationSchemaJson,
         pricingJson: p.pricingJson,
         faqJson: p.faqJson,
+        serviceRules: p.serviceRules ?? null,
       })),
     };
   }

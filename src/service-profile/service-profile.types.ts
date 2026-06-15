@@ -294,24 +294,80 @@ export function buildPlaybookSettingsForRenderer(
   legacyFollowUpSettingsJson: string | null,
 ): string | null {
   if (!profileAiInstructionsJson) return legacyFollowUpSettingsJson;
-  let v2: unknown;
+  let parsed: unknown;
   try {
-    v2 = JSON.parse(profileAiInstructionsJson);
+    parsed = JSON.parse(profileAiInstructionsJson);
   } catch {
     return legacyFollowUpSettingsJson;
+  }
+  // Shape detection.
+  //   wrapper (v1+): { version: 1, serviceRules?: ..., aiPlaybookV2?: ... }
+  //   legacy:        { personality_brand_voice: {...}, pricing_guidance: {...}, ... }
+  // The wrapper carries an explicit `version` key OR known wrapper-only
+  // keys (serviceRules). Anything else falls back to the legacy "raw V2
+  // sections" interpretation so the existing per-account playbook path
+  // keeps working unchanged.
+  const isObject =
+    parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+  let v2Sections: unknown = parsed;
+  if (isObject) {
+    const obj = parsed as Record<string, unknown>;
+    const isWrapper =
+      'version' in obj || 'serviceRules' in obj || 'aiPlaybookV2' in obj;
+    if (isWrapper) {
+      v2Sections =
+        obj.aiPlaybookV2 && typeof obj.aiPlaybookV2 === 'object'
+          ? obj.aiPlaybookV2
+          : null;
+    }
   }
   let legacyParsed: Record<string, unknown> = {};
   if (legacyFollowUpSettingsJson) {
     try {
-      const parsed = JSON.parse(legacyFollowUpSettingsJson);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        legacyParsed = parsed as Record<string, unknown>;
+      const legacy = JSON.parse(legacyFollowUpSettingsJson);
+      if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+        legacyParsed = legacy as Record<string, unknown>;
       }
     } catch {
       // Keep legacyParsed = {} so we still emit a valid blob below.
     }
   }
-  return JSON.stringify({ ...legacyParsed, aiPlaybookV2: v2 });
+  // Wrapper carries no V2 sections (e.g. serviceRules-only payload) →
+  // emit the legacy blob unchanged so the renderer's existing playbook
+  // path doesn't get a null v2 it would have to special-case.
+  if (v2Sections === null) {
+    return legacyFollowUpSettingsJson;
+  }
+  return JSON.stringify({ ...legacyParsed, aiPlaybookV2: v2Sections });
+}
+
+/**
+ * Extract the optional `serviceRules` block from a profile's
+ * aiInstructionsJson wrapper. Returns null when the shape is missing,
+ * legacy, or has no serviceRules key. Read-only consumer for v1 — the
+ * UI uses this to render a service-rules viewer on the detail page.
+ */
+export function extractServiceRules(
+  profileAiInstructionsJson: string | null | undefined,
+): { requiredDetails: string[]; unsupportedServices: string[]; workflowSteps: string[] } | null {
+  if (!profileAiInstructionsJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(profileAiInstructionsJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const rules = (parsed as Record<string, unknown>).serviceRules;
+  if (!rules || typeof rules !== 'object' || Array.isArray(rules)) return null;
+  const r = rules as Record<string, unknown>;
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  return {
+    requiredDetails: arr(r.requiredDetails),
+    unsupportedServices: arr(r.unsupportedServices),
+    workflowSteps: arr(r.workflowSteps),
+  };
 }
 
 /**

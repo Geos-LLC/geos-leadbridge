@@ -194,4 +194,58 @@ describe('buildServiceProfileFromPreset — factory contract', () => {
       { provider: 'thumbtack', providerCategoryId: '219264413294461288', categoryName: 'Furniture Cleaning' },
     ]);
   });
+
+  it('seeds aiInstructionsJson with a versioned wrapper carrying serviceRules', () => {
+    const out = buildServiceProfileFromPreset(UPHOLSTERY_FURNITURE_CLEANING_PRESET, {
+      userId: 'user-1',
+    });
+    expect(out.aiInstructionsJson).not.toBeNull();
+    const parsed = JSON.parse(out.aiInstructionsJson!);
+    expect(parsed.version).toBe(1);
+    expect(parsed.serviceRules).toBeDefined();
+    expect(parsed.serviceRules.requiredDetails).toContain('Fabric type');
+    expect(parsed.serviceRules.unsupportedServices).toContain('Leather cleaning');
+    expect(parsed.serviceRules.workflowSteps.length).toBeGreaterThan(0);
+  });
+
+  it('omits aiInstructionsJson when the preset has no serviceRules', () => {
+    const presetWithoutRules = {
+      ...UPHOLSTERY_FURNITURE_CLEANING_PRESET,
+      serviceRules: undefined,
+    };
+    const out = buildServiceProfileFromPreset(presetWithoutRules, { userId: 'user-1' });
+    expect(out.aiInstructionsJson).toBeNull();
+  });
+});
+
+describe('UPHOLSTERY preset — service rules + item units', () => {
+  it('carries the seven required-detail items from the v1 spec', () => {
+    const rules = UPHOLSTERY_FURNITURE_CLEANING_PRESET.serviceRules;
+    expect(rules).toBeDefined();
+    expect(rules!.requiredDetails).toEqual(
+      expect.arrayContaining([
+        'Number of seats',
+        'Area rug size',
+        'Mattress size',
+        'Fabric type',
+        'Full name',
+        'Address',
+        'Phone number',
+      ]),
+    );
+  });
+
+  it('flags leather + wool rug cleaning as unsupported', () => {
+    const rules = UPHOLSTERY_FURNITURE_CLEANING_PRESET.serviceRules!;
+    expect(rules.unsupportedServices).toContain('Leather cleaning');
+    expect(rules.unsupportedServices).toContain('Wool rug cleaning');
+  });
+
+  it('all pricing items carry a unit + active=true (default state)', () => {
+    const items = UPHOLSTERY_FURNITURE_CLEANING_PRESET.pricingJson.items ?? [];
+    for (const item of items) {
+      expect(item.unit).toMatch(/^per /);
+      expect(item.active).toBe(true);
+    }
+  });
 });

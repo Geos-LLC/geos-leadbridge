@@ -859,10 +859,23 @@ export type ServiceProfilePreset = {
   pricingJson: {
     pricingModel: 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
     included?: string[];
-    items?: Array<{ key: string; label: string; price: number; source: string }>;
+    items?: Array<{
+      key: string;
+      label: string;
+      price: number;
+      source: string;
+      unit?: string;
+      notes?: string;
+      active?: boolean;
+    }>;
     addOns?: Array<{ key: string; label: string; price: number; source: string; quoteManually?: boolean }>;
   };
   faqJson: { customQA: Array<{ question: string; answer: string }> };
+  serviceRules?: {
+    requiredDetails: string[];
+    unsupportedServices: string[];
+    workflowSteps: string[];
+  } | null;
 };
 
 export const serviceProfilePresetsApi = {
