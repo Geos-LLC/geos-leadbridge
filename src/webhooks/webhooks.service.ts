@@ -1840,14 +1840,20 @@ export class WebhooksService {
       lockKey,
       `YelpEvent ${eventId}`,
       async tx => {
-        // Recently-processed check: the other instance may have finished and
-        // released the lock already — short-circuit instead of redoing work.
+        // Already-processed check: short-circuit when this exact event_id has
+        // been processed before. Window extended from 60s → 7d 2026-06-15
+        // because Yelp can re-deliver the SAME event_id on a multi-minute
+        // backoff for many hours when an earlier ack failed (Spotless
+        // Jacksonville: NEW_EVENT oju4ll_… from 2026-06-14 19:27 was redelivered
+        // ~7× in 2h, firing duplicate customer-reply + handoff owner-SMS each
+        // time because the 60s window always missed). Yelp's documented retry
+        // envelope is ~24h, 7d gives margin without bloating the scan.
         const alreadyDone = await tx.webhookEvent.findFirst({
           where: {
             platform: 'yelp',
             processed: true,
             processingError: null,
-            receivedAt: { gte: new Date(Date.now() - 60_000) },
+            receivedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
             payload: { contains: eventId },
           },
           select: { id: true },
