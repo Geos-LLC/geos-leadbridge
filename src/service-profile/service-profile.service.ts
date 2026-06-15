@@ -332,4 +332,357 @@ export class ServiceProfileService {
       },
     });
   }
+
+  // ─── Phase 1 management endpoints ─────────────────────────────────
+
+  /**
+   * List every non-archived ServiceProfile for this user, plus the
+   * archived ones tail-included so the UI can still surface them in
+   * a "Show archived" toggle. Default sort: drafts first (highest
+   * urgency to configure), then active (alphabetical by name), then
+   * archived at the bottom.
+   */
+  async listByUser(userId: string) {
+    const rows = await this.prisma.serviceProfile.findMany({
+      where: { userId },
+      orderBy: [
+        { status: 'asc' }, // active < archived < draft alphabetically — we re-sort below
+        { isDefault: 'desc' },
+        { name: 'asc' },
+      ],
+    });
+    // Re-sort: drafts first, then active (default first), then archived.
+    const order = (s: string) => (s === 'draft' ? 0 : s === 'active' ? 1 : 2);
+    return rows.sort((a, b) => {
+      const d = order(a.status) - order(b.status);
+      if (d !== 0) return d;
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /**
+   * Get one profile by id, scoped to the calling user. Returns null
+   * when the row exists but belongs to another tenant (the controller
+   * converts that into a 404 — never leaking existence across tenants).
+   */
+  async getOneForUser(userId: string, profileId: string) {
+    const row = await this.prisma.serviceProfile.findUnique({
+      where: { id: profileId },
+    });
+    if (!row || row.userId !== userId) return null;
+    return row;
+  }
+
+  /**
+   * Transition a profile's status under the spec's allowed transitions:
+   *
+   *   draft    → active     (gates that the profile has at least one
+   *                          non-empty config field before activating)
+   *   active   → archived   (rejected when this is the tenant's only
+   *                          default profile and there's no other
+   *                          active default to take its place)
+   *   draft    → archived   (always allowed — never used yet)
+   *   archived → active     (only when caller passes allowReactivate=true;
+   *                          UI defaults to not setting it to avoid
+   *                          accidental resurrection)
+   *
+   * Throws BadRequestException-shaped errors via thrown `Error` with
+   * a `.code` field the controller maps to 400.
+   */
+  async transitionStatus(
+    userId: string,
+    profileId: string,
+    nextStatus: 'draft' | 'active' | 'archived',
+    opts: { allowReactivate?: boolean } = {},
+  ) {
+    const profile = await this.getOneForUser(userId, profileId);
+    if (!profile) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    if (profile.status === nextStatus) {
+      return profile; // idempotent — no-op
+    }
+
+    const cur = profile.status;
+    const valid =
+      (cur === 'draft' && (nextStatus === 'active' || nextStatus === 'archived')) ||
+      (cur === 'active' && nextStatus === 'archived') ||
+      (cur === 'archived' && nextStatus === 'active' && opts.allowReactivate === true);
+    if (!valid) {
+      const err: any = new Error(
+        `Invalid transition: ${cur} → ${nextStatus}${cur === 'archived' && nextStatus === 'active' ? ' (set allowReactivate=true)' : ''}`,
+      );
+      err.code = 'INVALID_TRANSITION';
+      throw err;
+    }
+
+    if (nextStatus === 'active') {
+      // Require at least one config field non-empty before activation.
+      // The activation surface should let an operator catch a still-blank
+      // preset before it starts driving AI replies.
+      const hasConfig =
+        (profile.pricingJson?.trim().length ?? 0) > 0 ||
+        (profile.faqJson?.trim().length ?? 0) > 0 ||
+        (profile.qualificationSchemaJson?.trim().length ?? 0) > 0;
+      if (!hasConfig) {
+        const err: any = new Error(
+          'Cannot activate: profile has no pricing, FAQ, or qualification questions configured',
+        );
+        err.code = 'EMPTY_CONFIG';
+        throw err;
+      }
+    }
+
+    if (nextStatus === 'archived' && profile.isDefault) {
+      // Archiving the default means the resolver loses its safety net
+      // for non-matching leads. Require the operator to point the user
+      // pointer at a different active profile first.
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { defaultServiceProfileId: true },
+      });
+      const stillDefault = user?.defaultServiceProfileId === profileId;
+      const otherActiveDefault = await this.prisma.serviceProfile.findFirst({
+        where: {
+          userId,
+          isDefault: true,
+          status: 'active',
+          NOT: { id: profileId },
+        },
+        select: { id: true },
+      });
+      if (stillDefault && !otherActiveDefault) {
+        const err: any = new Error(
+          'Cannot archive default profile: promote another profile as default first',
+        );
+        err.code = 'DEFAULT_BLOCKED';
+        throw err;
+      }
+    }
+
+    return this.prisma.serviceProfile.update({
+      where: { id: profileId },
+      data: {
+        status: nextStatus,
+        archivedAt: nextStatus === 'archived' ? new Date() : null,
+      },
+    });
+  }
+
+  /**
+   * Edit the basic fields. Each field is optional — only the keys
+   * present in `patch` are written. Mappings are validated to be a
+   * JSON array; pricing/FAQ/qualification are stored as strings (the
+   * AI prompt assembler parses them on read). No size limits enforced
+   * at the service layer — the controller should reject obviously
+   * abusive payloads.
+   */
+  async updateProfile(
+    userId: string,
+    profileId: string,
+    patch: {
+      name?: string;
+      providerCategoryMappingsJson?: unknown;
+      pricingJson?: string | null;
+      faqJson?: string | null;
+      qualificationSchemaJson?: string | null;
+      aiInstructionsJson?: string | null;
+    },
+  ) {
+    const profile = await this.getOneForUser(userId, profileId);
+    if (!profile) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    const data: any = {};
+    if (typeof patch.name === 'string') {
+      const trimmed = patch.name.trim();
+      if (trimmed.length === 0) {
+        const err: any = new Error('Name cannot be empty');
+        err.code = 'EMPTY_NAME';
+        throw err;
+      }
+      data.name = trimmed;
+    }
+    if (patch.providerCategoryMappingsJson !== undefined) {
+      if (!Array.isArray(patch.providerCategoryMappingsJson)) {
+        const err: any = new Error('providerCategoryMappingsJson must be an array');
+        err.code = 'INVALID_MAPPINGS';
+        throw err;
+      }
+      data.providerCategoryMappingsJson = patch.providerCategoryMappingsJson as any;
+    }
+    // Allow explicit null to clear a field; undefined leaves it alone.
+    if (patch.pricingJson !== undefined) data.pricingJson = patch.pricingJson;
+    if (patch.faqJson !== undefined) data.faqJson = patch.faqJson;
+    if (patch.qualificationSchemaJson !== undefined) data.qualificationSchemaJson = patch.qualificationSchemaJson;
+    if (patch.aiInstructionsJson !== undefined) data.aiInstructionsJson = patch.aiInstructionsJson;
+    return this.prisma.serviceProfile.update({
+      where: { id: profileId },
+      data,
+    });
+  }
+
+  /**
+   * Duplicate an existing profile under a new slug. New copy lands as
+   * 'draft' regardless of source status — duplicating an active
+   * profile should not silently double the AI surface.
+   */
+  async duplicateProfile(userId: string, profileId: string) {
+    const src = await this.getOneForUser(userId, profileId);
+    if (!src) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    // Generate a unique slug. Append -copy[-N] until we find a free one.
+    let attempt = `${src.slug}-copy`;
+    let n = 1;
+    while (n < 100) {
+      const collision = await this.prisma.serviceProfile.findUnique({
+        where: { userId_slug: { userId, slug: attempt } },
+      });
+      if (!collision) break;
+      n += 1;
+      attempt = `${src.slug}-copy-${n}`;
+    }
+    return this.prisma.serviceProfile.create({
+      data: {
+        userId,
+        name: `${src.name} (copy)`,
+        slug: attempt,
+        status: 'draft',
+        isDefault: false,
+        providerCategoryMappingsJson: src.providerCategoryMappingsJson as any,
+        pricingJson: src.pricingJson,
+        faqJson: src.faqJson,
+        qualificationSchemaJson: src.qualificationSchemaJson,
+        aiInstructionsJson: src.aiInstructionsJson,
+      },
+    });
+  }
+
+  // ─── Phase 4: location overrides on SavedAccount ──────────────────
+
+  /**
+   * List the override state for one ServiceProfile across every
+   * SavedAccount the user owns. UI uses this for the "Location
+   * overrides" section — shows each account, marks whether it
+   * currently overrides this profile, and surfaces the override
+   * deltas inline.
+   */
+  async listOverridesForProfile(userId: string, profileId: string) {
+    const profile = await this.getOneForUser(userId, profileId);
+    if (!profile) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        businessName: true,
+        platform: true,
+        serviceOverridesJson: true,
+      },
+      orderBy: { businessName: 'asc' },
+    });
+    return accounts.map((a) => {
+      let override: { pricingDeltasJson?: string; faqAdditionsJson?: string } | null = null;
+      if (a.serviceOverridesJson) {
+        try {
+          const all = JSON.parse(a.serviceOverridesJson);
+          if (all && typeof all === 'object' && all[profileId]) {
+            override = all[profileId];
+          }
+        } catch {
+          // unparseable — treated as "no override" so the operator can
+          // write a fresh one
+        }
+      }
+      return {
+        savedAccountId: a.id,
+        businessName: a.businessName,
+        platform: a.platform,
+        hasOverride: override !== null,
+        override,
+      };
+    });
+  }
+
+  /**
+   * Upsert (or clear) the override for one (savedAccountId, profileId)
+   * pair. Passing `pricingDeltasJson: null` + `faqAdditionsJson: null`
+   * clears the override entry for this profile.
+   */
+  async setOverride(
+    userId: string,
+    profileId: string,
+    savedAccountId: string,
+    patch: {
+      pricingDeltasJson?: string | null;
+      faqAdditionsJson?: string | null;
+    },
+  ) {
+    const profile = await this.getOneForUser(userId, profileId);
+    if (!profile) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    const account = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { id: true, userId: true, serviceOverridesJson: true },
+    });
+    if (!account || account.userId !== userId) {
+      const err: any = new Error('Saved account not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    let all: Record<string, { pricingDeltasJson?: string; faqAdditionsJson?: string }> = {};
+    if (account.serviceOverridesJson) {
+      try {
+        const parsed = JSON.parse(account.serviceOverridesJson);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          all = parsed as any;
+        }
+      } catch {
+        // Reset to empty — better than refusing the operation due to a
+        // legacy malformed blob.
+      }
+    }
+
+    const willBeEmpty =
+      (patch.pricingDeltasJson == null || patch.pricingDeltasJson === '') &&
+      (patch.faqAdditionsJson == null || patch.faqAdditionsJson === '');
+    if (willBeEmpty) {
+      delete all[profileId];
+    } else {
+      const entry: any = { ...(all[profileId] ?? {}) };
+      if (patch.pricingDeltasJson !== undefined) {
+        if (patch.pricingDeltasJson === null || patch.pricingDeltasJson === '') delete entry.pricingDeltasJson;
+        else entry.pricingDeltasJson = patch.pricingDeltasJson;
+      }
+      if (patch.faqAdditionsJson !== undefined) {
+        if (patch.faqAdditionsJson === null || patch.faqAdditionsJson === '') delete entry.faqAdditionsJson;
+        else entry.faqAdditionsJson = patch.faqAdditionsJson;
+      }
+      all[profileId] = entry;
+    }
+
+    await this.prisma.savedAccount.update({
+      where: { id: savedAccountId },
+      data: {
+        serviceOverridesJson: Object.keys(all).length === 0 ? null : JSON.stringify(all),
+      },
+    });
+
+    return { savedAccountId, profileId, override: willBeEmpty ? null : all[profileId] };
+  }
 }

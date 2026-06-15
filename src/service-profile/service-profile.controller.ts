@@ -1,13 +1,21 @@
 /**
- * ServiceProfileController — v1 preset consumer endpoints.
+ * ServiceProfileController — preset consumer + management endpoints.
  *
- * Two endpoints:
- *   GET  /v1/service-profile-presets       — list the curated registry
- *   POST /v1/service-profiles/from-preset  — create a draft profile
- *                                            from a preset key
+ * Routes:
+ *   GET    /v1/service-profile-presets              list curated registry
+ *   POST   /v1/service-profiles/from-preset         create from preset
+ *   GET    /v1/service-profiles                     list user's profiles
+ *   GET    /v1/service-profiles/:id                 get one profile
+ *   PATCH  /v1/service-profiles/:id                 edit fields
+ *   PATCH  /v1/service-profiles/:id/status          transition status
+ *   POST   /v1/service-profiles/:id/duplicate       duplicate as draft
+ *   GET    /v1/service-profiles/:id/overrides       list per-account overrides
+ *   PUT    /v1/service-profiles/:id/overrides/:savedAccountId  set override
+ *   DELETE /v1/service-profiles/:id/overrides/:savedAccountId  clear override
  *
- * Both require JWT auth. The POST endpoint is per-user — creates a
- * row under `req.user.id`. No admin/cross-tenant operations in v1.
+ * All endpoints JWT-guarded. Service methods scope by `req.user.id`
+ * so tenants can't read or modify each other's rows even with a known
+ * profile id (returns 404).
  */
 
 import {
@@ -15,8 +23,13 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
+  NotFoundException,
+  Param,
+  Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,12 +42,8 @@ import { SERVICE_PRESETS, lookupPresetByKey } from './presets/service-presets';
 export class ServiceProfileController {
   constructor(private readonly service: ServiceProfileService) {}
 
-  /**
-   * List every curated preset. Returns the full preset object — preset
-   * data is intentionally tenant-facing (operators see the pricing
-   * sources, descriptions, etc. before opting in). No PII, no
-   * tenant-scoped data.
-   */
+  // ─── Preset registry ──────────────────────────────────────────────
+
   @Get('service-profile-presets')
   list() {
     return {
@@ -52,20 +61,6 @@ export class ServiceProfileController {
     };
   }
 
-  /**
-   * Create a draft ServiceProfile from a preset. Body:
-   *   { presetKey: string, status?: 'draft' | 'active' }
-   *
-   * Status defaults to 'draft' — operator must promote to active
-   * before the resolver's aiPaused short-circuit stops gating leads.
-   * No silent activation, even if the caller passes status='active'
-   * explicitly — we honor that, but the typical UX flow shouldn't
-   * send anything but 'draft' in v1.
-   *
-   * 400 — unknown presetKey
-   * 409 — a profile with the preset's default slug already exists
-   *       for this user (preset already used — only one per tenant)
-   */
   @Post('service-profiles/from-preset')
   async createFromPreset(
     @Req() req: any,
@@ -81,11 +76,8 @@ export class ServiceProfileController {
     if (body.status && body.status !== 'draft' && body.status !== 'active') {
       throw new BadRequestException(`Invalid status: ${body.status}`);
     }
-
     const userId: string = req.user?.id;
-    if (!userId) {
-      throw new BadRequestException('Authenticated user required');
-    }
+    if (!userId) throw new BadRequestException('Authenticated user required');
 
     try {
       const profile = await this.service.createFromPreset({
@@ -100,13 +92,162 @@ export class ServiceProfileController {
         name: profile.name,
       };
     } catch (err: any) {
-      // Prisma P2002 — unique constraint violation on (userId, slug).
-      // Convert into a 409 so the UI can show a meaningful message.
       if (err?.code === 'P2002') {
-        throw new ConflictException(
-          `A service profile from this preset already exists for this user`,
-        );
+        throw new ConflictException('A service profile from this preset already exists');
       }
+      throw err;
+    }
+  }
+
+  // ─── Profile listing + details ────────────────────────────────────
+
+  @Get('service-profiles')
+  async listProfiles(@Req() req: any) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    const rows = await this.service.listByUser(userId);
+    return {
+      profiles: rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        status: p.status,
+        isDefault: p.isDefault,
+        providerCategoryMappingsJson: p.providerCategoryMappingsJson,
+        pricingJson: p.pricingJson,
+        faqJson: p.faqJson,
+        qualificationSchemaJson: p.qualificationSchemaJson,
+        aiInstructionsJson: p.aiInstructionsJson,
+        archivedAt: p.archivedAt,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      })),
+    };
+  }
+
+  @Get('service-profiles/:id')
+  async getProfile(@Req() req: any, @Param('id') id: string) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    const row = await this.service.getOneForUser(userId, id);
+    if (!row) throw new NotFoundException('Service profile not found');
+    return row;
+  }
+
+  // ─── Edit + transition + duplicate ────────────────────────────────
+
+  @Patch('service-profiles/:id')
+  async updateProfile(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: {
+      name?: string;
+      providerCategoryMappingsJson?: unknown;
+      pricingJson?: string | null;
+      faqJson?: string | null;
+      qualificationSchemaJson?: string | null;
+      aiInstructionsJson?: string | null;
+    },
+  ) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return await this.service.updateProfile(userId, id, body ?? {});
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      if (err?.code === 'EMPTY_NAME' || err?.code === 'INVALID_MAPPINGS') {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
+  }
+
+  @Patch('service-profiles/:id/status')
+  async transitionStatus(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { status?: 'draft' | 'active' | 'archived'; allowReactivate?: boolean },
+  ) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    if (!body?.status || !['draft', 'active', 'archived'].includes(body.status)) {
+      throw new BadRequestException('status must be draft | active | archived');
+    }
+    try {
+      return await this.service.transitionStatus(userId, id, body.status, {
+        allowReactivate: body.allowReactivate === true,
+      });
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      if (
+        err?.code === 'INVALID_TRANSITION' ||
+        err?.code === 'EMPTY_CONFIG' ||
+        err?.code === 'DEFAULT_BLOCKED'
+      ) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
+  }
+
+  @Post('service-profiles/:id/duplicate')
+  async duplicateProfile(@Req() req: any, @Param('id') id: string) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return await this.service.duplicateProfile(userId, id);
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  // ─── Location overrides ───────────────────────────────────────────
+
+  @Get('service-profiles/:id/overrides')
+  async listOverrides(@Req() req: any, @Param('id') id: string) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return { overrides: await this.service.listOverridesForProfile(userId, id) };
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  @Put('service-profiles/:id/overrides/:savedAccountId')
+  async setOverride(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: { pricingDeltasJson?: string | null; faqAdditionsJson?: string | null },
+  ) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return await this.service.setOverride(userId, id, savedAccountId, body ?? {});
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  @Delete('service-profiles/:id/overrides/:savedAccountId')
+  async clearOverride(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return await this.service.setOverride(userId, id, savedAccountId, {
+        pricingDeltasJson: null,
+        faqAdditionsJson: null,
+      });
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
       throw err;
     }
   }

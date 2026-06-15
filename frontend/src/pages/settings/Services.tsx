@@ -1,97 +1,590 @@
 /**
- * Settings → Services tab (v1).
+ * Settings → Services tab.
  *
- * Single button: "Create service from preset". Opens a modal that
- * lists the curated registry (GET /v1/service-profile-presets) and
- * lets the operator spawn a draft ServiceProfile from one (POST
- * /v1/service-profiles/from-preset).
+ * Two views switched by selected profile id:
+ *   - List view: cards for each ServiceProfile + "Create from preset" button
+ *   - Detail view: edit name/mappings/pricing/FAQ/qualification + location
+ *                  overrides + activate/archive/duplicate actions
  *
- * Intentionally minimal scope — no profile listing / editing yet.
- * The profile created here lands in status='draft' so the Phase 1b
- * resolver gates AI replies for matched leads until the operator
- * promotes it elsewhere. v1 doesn't expose a promote-to-active
- * surface — that's the next consumer PR.
+ * All editor fields except name + mappings are JSON textareas (MVP).
+ * Per the brief: "MVP can expose JSON-backed structured editors or
+ * reuse existing pricing/FAQ forms if available". Specialized forms
+ * are deferred until the underlying schemas are more stable.
  */
 
-import { useEffect, useState } from 'react';
-import { Sparkles, Plus, Loader2, X, Check, Layers } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Layers, Plus, Loader2, X, Check, ArrowLeft, Edit3, Archive,
+  CheckCircle2, Copy, Sparkles, MapPin, Trash2, Save,
+} from 'lucide-react';
 import { SettingCard } from '../../components/automation/ui';
 import { notify } from '../../store/notificationStore';
 import {
   serviceProfilePresetsApi,
+  serviceProfilesApi,
   type ServiceProfilePreset,
+  type ServiceProfile,
+  type ServiceProfileOverrideRow,
 } from '../../services/api';
 
 export function SettingsServices() {
-  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [refreshTok, setRefreshTok] = useState(0);
+  const refresh = () => setRefreshTok((t) => t + 1);
+
+  if (selectedId) {
+    return (
+      <ProfileDetail
+        profileId={selectedId}
+        onBack={() => setSelectedId(null)}
+      />
+    );
+  }
+  return (
+    <ProfileList
+      onSelect={(id) => setSelectedId(id)}
+      refreshTok={refreshTok}
+      onChanged={refresh}
+    />
+  );
+}
+
+// ─── List view ─────────────────────────────────────────────────────
+
+function ProfileList({
+  onSelect,
+  refreshTok,
+  onChanged,
+}: {
+  onSelect: (id: string) => void;
+  refreshTok: number;
+  onChanged: () => void;
+}) {
+  const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [profiles, setProfiles] = useState<ServiceProfile[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfiles(null);
+    setLoadError(null);
+    serviceProfilesApi
+      .list()
+      .then((r) => { if (!cancelled) setProfiles(r.profiles); })
+      .catch((err) => { if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load'); });
+    return () => { cancelled = true; };
+  }, [refreshTok]);
+
   return (
     <div>
       <SettingCard
         icon={Layers}
         iconTone="blue"
         title="Service profiles"
-        subtitle="Create per-service configuration (pricing, FAQ, qualification questions) from curated presets."
+        subtitle="Each service has its own pricing, FAQ, and qualification questions. AI replies use the profile that matches the lead's category."
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '4px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 16px',
-              borderRadius: 10,
-              border: '1px solid var(--lb-blue-200, #bfdbfe)',
-              background: 'var(--lb-blue-600, #2563eb)',
-              color: 'white',
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            onClick={() => setPresetModalOpen(true)}
+            style={primaryBtn}
           >
-            <Plus size={16} />
-            Create service from preset
+            <Plus size={16} /> Create from preset
           </button>
-          <div style={{ fontSize: 13, color: 'var(--lb-text-muted, #6b7280)' }}>
+          <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
             New profiles start as drafts — AI replies stay paused until you activate.
           </div>
         </div>
       </SettingCard>
-      {modalOpen && <PresetPickerModal onClose={() => setModalOpen(false)} />}
+
+      <div style={{ marginTop: 16 }}>
+        {loadError && (
+          <div style={errorBanner}>{loadError}</div>
+        )}
+        {!profiles && !loadError && (
+          <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)' }}>
+            <Loader2 size={14} className="animate-spin" /> Loading profiles…
+          </div>
+        )}
+        {profiles && profiles.length === 0 && (
+          <div style={emptyState}>
+            <Sparkles size={20} color="var(--lb-blue-600, #2563eb)" />
+            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 8 }}>No service profiles yet</div>
+            <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginTop: 4 }}>
+              Click "Create from preset" above to get started with curated pricing + FAQ + qualification.
+            </div>
+          </div>
+        )}
+        {profiles && profiles.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {profiles.map((p) => (
+              <ProfileCard key={p.id} profile={p} onView={() => onSelect(p.id)} onAction={onChanged} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {presetModalOpen && (
+        <PresetPickerModal
+          onClose={() => setPresetModalOpen(false)}
+          onCreated={() => { setPresetModalOpen(false); onChanged(); }}
+        />
+      )}
     </div>
   );
 }
 
-function PresetPickerModal({ onClose }: { onClose: () => void }) {
+function ProfileCard({
+  profile,
+  onView,
+  onAction,
+}: {
+  profile: ServiceProfile;
+  onView: () => void;
+  onAction: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const counts = useMemo(() => {
+    let items = 0, faqs = 0, questions = 0;
+    try {
+      if (profile.pricingJson) {
+        const p = JSON.parse(profile.pricingJson);
+        items = p?.items?.length ?? p?.priceTable?.length ?? 0;
+      }
+    } catch { /* ignore */ }
+    try {
+      if (profile.faqJson) {
+        const f = JSON.parse(profile.faqJson);
+        faqs = f?.customQA?.length ?? 0;
+      }
+    } catch { /* ignore */ }
+    try {
+      if (profile.qualificationSchemaJson) {
+        const q = JSON.parse(profile.qualificationSchemaJson);
+        questions = q?.questions?.length ?? 0;
+      }
+    } catch { /* ignore */ }
+    return { items, faqs, questions };
+  }, [profile.pricingJson, profile.faqJson, profile.qualificationSchemaJson]);
+
+  const mappedNames = useMemo(
+    () => (profile.providerCategoryMappingsJson ?? [])
+      .map((m) => m.categoryName).filter((s): s is string => !!s),
+    [profile.providerCategoryMappingsJson],
+  );
+
+  const handleActivate = async () => {
+    setBusy('activate');
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'active');
+      notify.success('Activated', `${profile.name} is now active. AI replies will use this profile for matched leads.`);
+      onAction();
+    } catch (err: any) {
+      notify.error('Could not activate', err?.response?.data?.message ?? err?.message ?? 'Activation failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!confirm(`Archive "${profile.name}"? Matched leads will fall back to the default profile.`)) return;
+    setBusy('archive');
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'archived');
+      notify.success('Archived', `${profile.name} is archived. No new leads will use this profile.`);
+      onAction();
+    } catch (err: any) {
+      notify.error('Could not archive', err?.response?.data?.message ?? err?.message ?? 'Archive failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDuplicate = async () => {
+    setBusy('duplicate');
+    try {
+      const dup = await serviceProfilesApi.duplicate(profile.id);
+      notify.success('Duplicated', `Created "${dup.name}" as a draft.`);
+      onAction();
+    } catch (err: any) {
+      notify.error('Could not duplicate', err?.response?.data?.message ?? err?.message ?? 'Duplicate failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={card}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{profile.name}</div>
+          <StatusBadge status={profile.status} />
+          {profile.isDefault && <DefaultBadge />}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--lb-text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+          <span><Check size={11} style={{ verticalAlign: 'middle' }} /> {counts.items} items</span>
+          <span><Check size={11} style={{ verticalAlign: 'middle' }} /> {counts.questions} questions</span>
+          <span><Check size={11} style={{ verticalAlign: 'middle' }} /> {counts.faqs} FAQs</span>
+        </div>
+        {mappedNames.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--lb-text-muted)' }}>
+            Maps to: {mappedNames.join(', ')}
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: profile.status === 'draft' ? 'var(--lb-warning, #b45309)' : 'var(--lb-text-muted)', marginTop: 6 }}>
+          {profile.status === 'draft' && 'AI replies are paused for this service until activated.'}
+          {profile.status === 'active' && 'AI can reply for matched leads using this service profile.'}
+          {profile.status === 'archived' && 'Archived — excluded from AI matching.'}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'flex-start' }}>
+        <button type="button" onClick={onView} style={secondaryBtn} title="View/edit">
+          <Edit3 size={14} /> View
+        </button>
+        {profile.status === 'draft' && (
+          <button type="button" onClick={handleActivate} disabled={!!busy} style={primaryBtn} title="Activate">
+            {busy === 'activate' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Activate
+          </button>
+        )}
+        {profile.status === 'active' && (
+          <button type="button" onClick={handleArchive} disabled={!!busy} style={secondaryBtn} title="Archive">
+            {busy === 'archive' ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />} Archive
+          </button>
+        )}
+        <button type="button" onClick={handleDuplicate} disabled={!!busy} style={secondaryBtn} title="Duplicate as draft">
+          {busy === 'duplicate' ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Detail view ────────────────────────────────────────────────────
+
+function ProfileDetail({
+  profileId,
+  onBack,
+}: {
+  profileId: string;
+  onBack: () => void;
+}) {
+  const [profile, setProfile] = useState<ServiceProfile | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    name: string;
+    mappings: string;
+    pricingJson: string;
+    faqJson: string;
+    qualificationSchemaJson: string;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    serviceProfilesApi.get(profileId)
+      .then((p) => {
+        if (cancelled) return;
+        setProfile(p);
+        setDraft({
+          name: p.name,
+          mappings: JSON.stringify(p.providerCategoryMappingsJson ?? [], null, 2),
+          pricingJson: p.pricingJson ?? '',
+          faqJson: p.faqJson ?? '',
+          qualificationSchemaJson: p.qualificationSchemaJson ?? '',
+        });
+      })
+      .catch((err) => { if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load'); });
+    return () => { cancelled = true; };
+  }, [profileId]);
+
+  const handleSave = async () => {
+    if (!draft) return;
+    let mappingsParsed: any;
+    try {
+      mappingsParsed = JSON.parse(draft.mappings);
+      if (!Array.isArray(mappingsParsed)) throw new Error('mappings must be an array');
+    } catch (err: any) {
+      notify.error('Mappings invalid', err?.message ?? 'Mappings must be valid JSON array');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await serviceProfilesApi.update(profileId, {
+        name: draft.name,
+        providerCategoryMappingsJson: mappingsParsed,
+        pricingJson: draft.pricingJson || null,
+        faqJson: draft.faqJson || null,
+        qualificationSchemaJson: draft.qualificationSchemaJson || null,
+      });
+      setProfile(updated);
+      notify.success('Saved', 'Service profile updated.');
+    } catch (err: any) {
+      notify.error('Could not save', err?.response?.data?.message ?? err?.message ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loadError) {
+    return (
+      <div>
+        <button type="button" onClick={onBack} style={{ ...secondaryBtn, marginBottom: 16 }}>
+          <ArrowLeft size={14} /> Back to services
+        </button>
+        <div style={errorBanner}>{loadError}</div>
+      </div>
+    );
+  }
+  if (!profile || !draft) {
+    return (
+      <div>
+        <button type="button" onClick={onBack} style={{ ...secondaryBtn, marginBottom: 16 }}>
+          <ArrowLeft size={14} /> Back to services
+        </button>
+        <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)' }}>
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button type="button" onClick={onBack} style={{ ...secondaryBtn, marginBottom: 16 }}>
+        <ArrowLeft size={14} /> Back to services
+      </button>
+
+      <SettingCard
+        icon={Edit3}
+        iconTone="blue"
+        title={`Edit: ${profile.name}`}
+        subtitle="Status, mappings, pricing, FAQ, and qualification questions for this service."
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <StatusBadge status={profile.status} />
+          {profile.isDefault && <DefaultBadge />}
+        </div>
+        <FieldRow label="Name">
+          <input
+            type="text"
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            style={textInput}
+          />
+        </FieldRow>
+        <FieldRow label="Provider category mappings (JSON array)">
+          <textarea
+            value={draft.mappings}
+            onChange={(e) => setDraft({ ...draft, mappings: e.target.value })}
+            rows={4}
+            style={codeArea}
+          />
+          <div style={hint}>
+            Each entry: <code>{`{ "provider": "thumbtack", "categoryName": "..." }`}</code>. The resolver matches inbound leads against these.
+          </div>
+        </FieldRow>
+        <FieldRow label="Pricing (JSON)">
+          <textarea
+            value={draft.pricingJson}
+            onChange={(e) => setDraft({ ...draft, pricingJson: e.target.value })}
+            rows={10}
+            style={codeArea}
+          />
+        </FieldRow>
+        <FieldRow label="FAQ (JSON)">
+          <textarea
+            value={draft.faqJson}
+            onChange={(e) => setDraft({ ...draft, faqJson: e.target.value })}
+            rows={8}
+            style={codeArea}
+          />
+        </FieldRow>
+        <FieldRow label="Qualification schema (JSON)">
+          <textarea
+            value={draft.qualificationSchemaJson}
+            onChange={(e) => setDraft({ ...draft, qualificationSchemaJson: e.target.value })}
+            rows={8}
+            style={codeArea}
+          />
+        </FieldRow>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={handleSave} disabled={saving} style={primaryBtn}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save changes
+          </button>
+        </div>
+      </SettingCard>
+
+      <div style={{ marginTop: 16 }}>
+        <OverridesSection
+          profileId={profileId}
+          profileName={profile.name}
+        />
+      </div>
+    </div>
+  );
+}
+
+function OverridesSection({ profileId, profileName }: { profileId: string; profileName: string }) {
+  const [rows, setRows] = useState<ServiceProfileOverrideRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editPricing, setEditPricing] = useState('');
+  const [editFaq, setEditFaq] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refreshTok, setRefreshTok] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setLoadError(null);
+    serviceProfilesApi.listOverrides(profileId)
+      .then((r) => { if (!cancelled) setRows(r.overrides); })
+      .catch((err) => { if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load'); });
+    return () => { cancelled = true; };
+  }, [profileId, refreshTok]);
+
+  const startEdit = (row: ServiceProfileOverrideRow) => {
+    setEditing(row.savedAccountId);
+    setEditPricing(row.override?.pricingDeltasJson ?? '');
+    setEditFaq(row.override?.faqAdditionsJson ?? '');
+  };
+
+  const saveOverride = async (savedAccountId: string) => {
+    setBusy(savedAccountId);
+    try {
+      await serviceProfilesApi.setOverride(profileId, savedAccountId, {
+        pricingDeltasJson: editPricing || null,
+        faqAdditionsJson: editFaq || null,
+      });
+      notify.success('Override saved', 'Location override updated.');
+      setEditing(null);
+      setRefreshTok((t) => t + 1);
+    } catch (err: any) {
+      notify.error('Could not save override', err?.response?.data?.message ?? err?.message ?? 'Save failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const clearOverride = async (savedAccountId: string) => {
+    if (!confirm(`Clear override for this location? It will fall back to ${profileName} defaults.`)) return;
+    setBusy(savedAccountId);
+    try {
+      await serviceProfilesApi.clearOverride(profileId, savedAccountId);
+      notify.success('Override cleared', 'Location now uses the profile defaults.');
+      setRefreshTok((t) => t + 1);
+    } catch (err: any) {
+      notify.error('Could not clear override', err?.response?.data?.message ?? err?.message ?? 'Clear failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <SettingCard
+      icon={MapPin}
+      iconTone="violet"
+      title="Location overrides"
+      subtitle="Optional per-account deltas. Leave a location alone to use the profile defaults above."
+    >
+      {loadError && <div style={errorBanner}>{loadError}</div>}
+      {!rows && !loadError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)' }}>
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      )}
+      {rows && rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
+          No connected accounts found for this user.
+        </div>
+      )}
+      {rows && rows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {rows.map((row) => (
+            <div key={row.savedAccountId} style={{ ...card, padding: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{row.businessName}</div>
+                <div style={{ fontSize: 12, color: 'var(--lb-text-muted)', marginTop: 2 }}>
+                  {row.platform} ·{' '}
+                  {row.hasOverride
+                    ? <span style={{ color: 'var(--lb-warning, #b45309)' }}>Has override</span>
+                    : 'Uses profile defaults'}
+                </div>
+                {editing === row.savedAccountId && (
+                  <div style={{ marginTop: 10 }}>
+                    <FieldRow label="Pricing deltas (JSON)">
+                      <textarea
+                        value={editPricing}
+                        onChange={(e) => setEditPricing(e.target.value)}
+                        rows={4}
+                        style={codeArea}
+                        placeholder='e.g. {"sofa": 99}'
+                      />
+                    </FieldRow>
+                    <FieldRow label="FAQ additions (JSON)">
+                      <textarea
+                        value={editFaq}
+                        onChange={(e) => setEditFaq(e.target.value)}
+                        rows={4}
+                        style={codeArea}
+                      />
+                    </FieldRow>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'flex-start' }}>
+                {editing === row.savedAccountId ? (
+                  <>
+                    <button type="button" onClick={() => saveOverride(row.savedAccountId)} disabled={!!busy} style={primaryBtn}>
+                      {busy === row.savedAccountId ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
+                    </button>
+                    <button type="button" onClick={() => setEditing(null)} style={secondaryBtn}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => startEdit(row)} style={secondaryBtn} title="Edit override">
+                      <Edit3 size={14} /> {row.hasOverride ? 'Edit' : 'Add'}
+                    </button>
+                    {row.hasOverride && (
+                      <button type="button" onClick={() => clearOverride(row.savedAccountId)} disabled={!!busy} style={secondaryBtn} title="Clear override">
+                        {busy === row.savedAccountId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Clear
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SettingCard>
+  );
+}
+
+// ─── Preset picker (unchanged from PR #255) ────────────────────────
+
+function PresetPickerModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [presets, setPresets] = useState<ServiceProfilePreset[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creatingKey, setCreatingKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    serviceProfilePresetsApi
-      .list()
-      .then((res) => {
-        if (!cancelled) setPresets(res.presets);
-      })
-      .catch((err) => {
-        if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load presets');
-      });
-    return () => {
-      cancelled = true;
-    };
+    serviceProfilePresetsApi.list()
+      .then((res) => { if (!cancelled) setPresets(res.presets); })
+      .catch((err) => { if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load presets'); });
+    return () => { cancelled = true; };
   }, []);
 
   const handleCreate = async (preset: ServiceProfilePreset) => {
     setCreatingKey(preset.key);
     try {
-      const result = await serviceProfilePresetsApi.createFromPreset(preset.key);
-      notify.success(
-        'Service profile created',
-        `${result.name} is in draft. Activate it when ready to start receiving AI replies for matched leads.`,
-      );
-      onClose();
+      await serviceProfilePresetsApi.createFromPreset(preset.key);
+      notify.success('Service profile created', `${preset.label} is in draft. Click Activate when ready.`);
+      onCreated();
     } catch (err: any) {
       const status = err?.response?.status;
       const msg = err?.response?.data?.message ?? err?.message ?? 'Failed to create service';
@@ -106,71 +599,23 @@ function PresetPickerModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15, 23, 42, 0.45)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'white',
-          borderRadius: 16,
-          width: 'min(680px, 100%)',
-          maxHeight: '85vh',
-          overflow: 'auto',
-          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-          padding: 24,
-        }}
-      >
+    <div onClick={onClose} style={modalBg}>
+      <div onClick={(e) => e.stopPropagation()} style={modalBox}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <Sparkles size={18} color="var(--lb-blue-600, #2563eb)" />
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Pick a preset</h3>
             </div>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-text-muted, #6b7280)' }}>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-text-muted)' }}>
               Each preset bundles pricing, FAQ, and qualification questions sourced from the platform.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              padding: 6,
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--lb-text-muted, #6b7280)',
-              cursor: 'pointer',
-              borderRadius: 6,
-            }}
-          >
+          <button type="button" onClick={onClose} aria-label="Close" style={iconBtn}>
             <X size={18} />
           </button>
         </div>
-        {loadError && (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 8,
-              background: '#fef2f2',
-              color: '#b91c1c',
-              fontSize: 13,
-              marginBottom: 12,
-            }}
-          >
-            {loadError}
-          </div>
-        )}
+        {loadError && <div style={errorBanner}>{loadError}</div>}
         {!presets && !loadError && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)', fontSize: 13 }}>
             <Loader2 size={14} className="animate-spin" /> Loading presets…
@@ -182,13 +627,27 @@ function PresetPickerModal({ onClose }: { onClose: () => void }) {
         {presets && presets.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {presets.map((p) => (
-              <PresetCard
-                key={p.key}
-                preset={p}
-                creating={creatingKey === p.key}
-                disabled={creatingKey !== null && creatingKey !== p.key}
-                onCreate={() => handleCreate(p)}
-              />
+              <div key={p.key} style={card}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
+                  <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)' }}>
+                    <span>{p.pricingJson.items?.length ?? 0} items</span>
+                    <span>{p.qualificationSchemaJson.questions.length} questions</span>
+                    <span>{p.faqJson.customQA.length} FAQs</span>
+                    <span>via {p.provider}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCreate(p)}
+                  disabled={creatingKey !== null && creatingKey !== p.key}
+                  style={primaryBtn}
+                >
+                  {creatingKey === p.key ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Create
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -197,69 +656,104 @@ function PresetPickerModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PresetCard({
-  preset,
-  creating,
-  disabled,
-  onCreate,
-}: {
-  preset: ServiceProfilePreset;
-  creating: boolean;
-  disabled: boolean;
-  onCreate: () => void;
-}) {
-  const itemCount = preset.pricingJson.items?.length ?? 0;
-  const questionCount = preset.qualificationSchemaJson.questions.length;
-  const faqCount = preset.faqJson.customQA.length;
+// ─── small atoms + style tokens ────────────────────────────────────
+
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        border: '1px solid var(--lb-border, #e5e7eb)',
-        borderRadius: 12,
-        padding: 16,
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 16,
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{preset.label}</div>
-        <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{preset.description}</div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)' }}>
-          <span>
-            <Check size={11} style={{ verticalAlign: 'middle' }} /> {itemCount} items
-          </span>
-          <span>
-            <Check size={11} style={{ verticalAlign: 'middle' }} /> {questionCount} questions
-          </span>
-          <span>
-            <Check size={11} style={{ verticalAlign: 'middle' }} /> {faqCount} FAQs
-          </span>
-          <span>via {preset.provider}</span>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onCreate}
-        disabled={disabled}
-        style={{
-          padding: '8px 14px',
-          borderRadius: 8,
-          border: '1px solid var(--lb-blue-200, #bfdbfe)',
-          background: disabled ? 'var(--lb-gray-100, #f3f4f6)' : 'var(--lb-blue-600, #2563eb)',
-          color: disabled ? 'var(--lb-text-muted)' : 'white',
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-        Create
-      </button>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--lb-text-muted)' }}>{label}</div>
+      {children}
     </div>
   );
 }
+
+function StatusBadge({ status }: { status: ServiceProfile['status'] }) {
+  const styles: Record<ServiceProfile['status'], { bg: string; fg: string; label: string }> = {
+    draft: { bg: '#fef3c7', fg: '#b45309', label: 'DRAFT' },
+    active: { bg: '#dcfce7', fg: '#15803d', label: 'ACTIVE' },
+    archived: { bg: '#f3f4f6', fg: '#6b7280', label: 'ARCHIVED' },
+  };
+  const s = styles[status];
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4, background: s.bg, color: s.fg,
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+    }}>{s.label}</span>
+  );
+}
+
+function DefaultBadge() {
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4, background: '#dbeafe', color: '#1e40af',
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+    }}>DEFAULT</span>
+  );
+}
+
+const primaryBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '8px 14px', borderRadius: 8,
+  border: '1px solid var(--lb-blue-200, #bfdbfe)',
+  background: 'var(--lb-blue-600, #2563eb)', color: 'white',
+  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+};
+
+const secondaryBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '8px 12px', borderRadius: 8,
+  border: '1px solid var(--lb-border, #e5e7eb)',
+  background: 'white', color: 'var(--lb-text)',
+  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+};
+
+const iconBtn: React.CSSProperties = {
+  padding: 6, background: 'transparent', border: 'none',
+  color: 'var(--lb-text-muted, #6b7280)', cursor: 'pointer', borderRadius: 6,
+};
+
+const card: React.CSSProperties = {
+  border: '1px solid var(--lb-border, #e5e7eb)',
+  borderRadius: 12, padding: 16,
+  display: 'flex', alignItems: 'flex-start', gap: 16, background: 'white',
+};
+
+const textInput: React.CSSProperties = {
+  width: '100%', padding: '8px 12px',
+  border: '1px solid var(--lb-border, #e5e7eb)',
+  borderRadius: 8, fontSize: 14, fontFamily: 'inherit',
+};
+
+const codeArea: React.CSSProperties = {
+  width: '100%', padding: '8px 12px',
+  border: '1px solid var(--lb-border, #e5e7eb)',
+  borderRadius: 8, fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  resize: 'vertical', minHeight: 60,
+};
+
+const hint: React.CSSProperties = {
+  fontSize: 11, color: 'var(--lb-text-muted)', marginTop: 4,
+};
+
+const errorBanner: React.CSSProperties = {
+  padding: 12, borderRadius: 8, background: '#fef2f2', color: '#b91c1c',
+  fontSize: 13, marginBottom: 12,
+};
+
+const emptyState: React.CSSProperties = {
+  padding: 32, textAlign: 'center',
+  border: '1px dashed var(--lb-border, #e5e7eb)',
+  borderRadius: 12, background: 'var(--lb-surface, #fafafa)',
+};
+
+const modalBg: React.CSSProperties = {
+  position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+  zIndex: 1000, display: 'flex', alignItems: 'center',
+  justifyContent: 'center', padding: 24,
+};
+
+const modalBox: React.CSSProperties = {
+  background: 'white', borderRadius: 16, width: 'min(680px, 100%)',
+  maxHeight: '85vh', overflow: 'auto',
+  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', padding: 24,
+};

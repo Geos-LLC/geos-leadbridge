@@ -879,6 +879,96 @@ export const serviceProfilePresetsApi = {
   },
 };
 
+export type ServiceProfile = {
+  id: string;
+  userId: string;
+  name: string;
+  slug: string;
+  status: 'draft' | 'active' | 'archived';
+  isDefault: boolean;
+  providerCategoryMappingsJson: Array<{
+    provider: 'thumbtack' | 'yelp' | 'manual';
+    providerCategoryId?: string;
+    categoryName?: string;
+  }>;
+  pricingJson: string | null;
+  faqJson: string | null;
+  qualificationSchemaJson: string | null;
+  aiInstructionsJson: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ServiceProfileOverrideRow = {
+  savedAccountId: string;
+  businessName: string;
+  platform: string;
+  hasOverride: boolean;
+  override: { pricingDeltasJson?: string; faqAdditionsJson?: string } | null;
+};
+
+export const serviceProfilesApi = {
+  list: async (): Promise<{ profiles: ServiceProfile[] }> => {
+    const { data } = await api.get('/v1/service-profiles');
+    return data;
+  },
+  get: async (id: string): Promise<ServiceProfile> => {
+    const { data } = await api.get(`/v1/service-profiles/${id}`);
+    return data;
+  },
+  update: async (
+    id: string,
+    patch: Partial<{
+      name: string;
+      providerCategoryMappingsJson: ServiceProfile['providerCategoryMappingsJson'];
+      pricingJson: string | null;
+      faqJson: string | null;
+      qualificationSchemaJson: string | null;
+      aiInstructionsJson: string | null;
+    }>,
+  ): Promise<ServiceProfile> => {
+    const { data } = await api.patch(`/v1/service-profiles/${id}`, patch);
+    return data;
+  },
+  transitionStatus: async (
+    id: string,
+    nextStatus: 'draft' | 'active' | 'archived',
+    allowReactivate = false,
+  ): Promise<ServiceProfile> => {
+    const { data } = await api.patch(`/v1/service-profiles/${id}/status`, {
+      status: nextStatus,
+      allowReactivate,
+    });
+    return data;
+  },
+  duplicate: async (id: string): Promise<ServiceProfile> => {
+    const { data } = await api.post(`/v1/service-profiles/${id}/duplicate`, {});
+    return data;
+  },
+  listOverrides: async (id: string): Promise<{ overrides: ServiceProfileOverrideRow[] }> => {
+    const { data } = await api.get(`/v1/service-profiles/${id}/overrides`);
+    return data;
+  },
+  setOverride: async (
+    profileId: string,
+    savedAccountId: string,
+    body: { pricingDeltasJson?: string | null; faqAdditionsJson?: string | null },
+  ) => {
+    const { data } = await api.put(
+      `/v1/service-profiles/${profileId}/overrides/${savedAccountId}`,
+      body,
+    );
+    return data;
+  },
+  clearOverride: async (profileId: string, savedAccountId: string) => {
+    const { data } = await api.delete(
+      `/v1/service-profiles/${profileId}/overrides/${savedAccountId}`,
+    );
+    return data;
+  },
+};
+
 export const conversationContextApi = {
   suggestStrategy: async (conversationId: string): Promise<{
     success: boolean;
