@@ -1437,9 +1437,13 @@ export class NotificationsService {
     // Prepend platform label so the recipient knows which channel the lead came from
     // (unless the template already mentions the platform). The label is an
     // internal/owner-side cue — never prepend it on customer-facing messages.
+    // Includes the account/business name when available so owners managing multiple
+    // accounts can tell which one fired (matches the test-send format at line ~1791).
+    const platformTag = context.platform === 'yelp' ? '[Yelp]' : context.platform === 'thumbtack' ? '[TT]' : '';
+    const accountTag = context.accountName ? `[${context.accountName}] ` : '';
     const platformLabel = rule?.sendToCustomer
       ? ''
-      : (context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '');
+      : (platformTag ? `${platformTag} ${accountTag}` : '');
 
     // V2 Instant Text AI generation (2026-06-12).
     //
@@ -1499,7 +1503,7 @@ export class NotificationsService {
       const service = lead.category || 'Not specified';
       const location = [lead.city, lead.state, lead.postcode].filter(Boolean).join(', ') || 'Not specified';
       const msg = lead.message ? lead.message.substring(0, 100) : '';
-      messageBody = `[Yelp] New lead: ${name}\n${service}\n${location}${msg ? '\n\n' + msg : ''}`;
+      messageBody = `[Yelp] ${accountTag}New lead: ${name}\n${service}\n${location}${msg ? '\n\n' + msg : ''}`;
     } else {
       messageBody = `${platformLabel}New lead from ${lead.customerName || 'customer'}`;
     }
