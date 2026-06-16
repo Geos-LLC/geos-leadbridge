@@ -333,13 +333,22 @@ export class PlatformService {
    * Handle OAuth callback and store credentials
    */
   async handleCallback(userId: string, platformName: string, code: string, callbackUrl?: string): Promise<void> {
+    this.logger.log(`[oauth-trace] platformService.handleCallback ENTRY platform=${platformName} user=${userId} codeLen=${code?.length ?? 0}`);
     const adapter = this.platformFactory.getAdapter(platformName);
 
     // Exchange code for tokens
-    const credentials = await adapter.handleCallback(code, userId, callbackUrl);
+    let credentials: any;
+    try {
+      credentials = await adapter.handleCallback(code, userId, callbackUrl);
+      this.logger.log(`[oauth-trace] platformService.handleCallback adapter.handleCallback OK platform=${platformName} user=${userId} accessTokenLen=${credentials?.accessToken?.length ?? 0} refreshTokenLen=${credentials?.refreshToken?.length ?? 0} email=${credentials?.email ? 'present' : 'absent'}`);
+    } catch (err: any) {
+      this.logger.error(`[oauth-trace] platformService.handleCallback adapter.handleCallback FAILED platform=${platformName} user=${userId} errName=${err?.constructor?.name ?? 'unknown'} msg=${err?.message ?? 'unknown'}`);
+      throw err;
+    }
 
     // Encrypt and store credentials
     await this.storeCredentials(userId, platformName, credentials);
+    this.logger.log(`[oauth-trace] platformService.handleCallback storeCredentials OK platform=${platformName} user=${userId}`);
   }
 
   /**
