@@ -2052,6 +2052,7 @@ export class AutomationService implements OnModuleInit {
                 servicePricingJson: true,
                 faqJson: true,
                 serviceOverridesJson: true,
+                serviceProfileAssignmentsJson: true,
                 followUpSettingsJson: true,
                 followUpActiveHoursStart: true,
                 followUpActiveHoursEnd: true,

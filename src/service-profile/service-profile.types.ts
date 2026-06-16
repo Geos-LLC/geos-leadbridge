@@ -35,8 +35,12 @@ export type ServiceOverrides = {
  * Output of the resolver's main entry point. Either:
  *  - status='resolved' — a profile applies, the caller should use its
  *    pricing/FAQ/AI overlay
- *  - status='ai_paused' — a profile applies but is in draft; the AI
- *    auto-reply path should be gated off (lead still tracked)
+ *  - status='ai_paused' — a profile applies but the AI auto-reply
+ *    path should be gated off (lead still tracked). Two reasons today:
+ *      - 'draft_profile': matched profile is still draft
+ *      - 'setup_mismatch': matched profile is NOT in the SavedAccount's
+ *        enabledServiceProfileIds list (PR-E account ↔ service
+ *        assignment layer)
  *  - status='legacy_fallback' — no profile applies; caller reads the
  *    legacy SavedAccount columns directly
  */
@@ -54,12 +58,65 @@ export type ResolvedProfile =
       status: 'ai_paused';
       profileId: string;
       profileName: string;
-      reason: 'draft_profile';
+      reason: 'draft_profile' | 'setup_mismatch';
     }
   | {
       status: 'legacy_fallback';
       reason: 'no_default_profile' | 'no_profile_matched_and_no_default';
     };
+
+/**
+ * PR-E — Account ↔ service assignment shape. Stored on
+ * SavedAccount.serviceProfileAssignmentsJson.
+ *
+ * Three states:
+ *   null            → not configured. Resolver preserves the
+ *                     pre-PR-E category-only matching behavior. Used
+ *                     for every existing tenant by default so the
+ *                     migration is a runtime no-op.
+ *   { enabled: [] } → configured but empty. The operator has been to
+ *                     the Manage Availability surface and cleared all
+ *                     entries. Resolver still uses the tenant's
+ *                     default profile but the UI shows a "no services
+ *                     selected" warning.
+ *   { enabled: [..] } → enforcement on. Category-matched profile must
+ *                     be in the list or the resolver returns
+ *                     ai_paused with reason='setup_mismatch'.
+ */
+export type ServiceAssignments = {
+  enabledServiceProfileIds: string[];
+  /** Optional account-level default. Used when enabled is non-empty
+   *  but the lead's category matches no enabled profile. Today this is
+   *  reserved for future use — MVP resolver does not consult it. */
+  defaultServiceProfileId?: string | null;
+};
+
+/**
+ * Defensive parse — returns null when the blob is absent / unparseable
+ * / shape-invalid. null is the "not configured" sentinel that
+ * preserves the legacy resolver behavior.
+ */
+export function parseServiceAssignments(
+  raw: string | null | undefined,
+): ServiceAssignments | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const obj = parsed as Record<string, unknown>;
+    const rawIds = obj.enabledServiceProfileIds;
+    if (!Array.isArray(rawIds)) return null;
+    const enabledServiceProfileIds = rawIds.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    const defaultRaw = obj.defaultServiceProfileId;
+    const defaultServiceProfileId =
+      typeof defaultRaw === 'string' && defaultRaw.length > 0 ? defaultRaw : null;
+    return { enabledServiceProfileIds, defaultServiceProfileId };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Slimmed lead inputs for the resolver. Keeping a narrow type avoids
@@ -80,6 +137,9 @@ export type SavedAccountForResolver = {
   servicePricingJson: string | null;
   faqJson: string | null;
   serviceOverridesJson?: string | null;
+  // PR-E — account ↔ service assignment layer. null = not configured,
+  // resolver preserves legacy category-only behavior.
+  serviceProfileAssignmentsJson?: string | null;
   // Legacy carrier of aiPlaybookV2 — the resolver pulls .aiPlaybookV2
   // out via extractAiPlaybookV2 when the matched ServiceProfile has no
   // aiInstructionsJson of its own. Phase 1 backfill does not migrate

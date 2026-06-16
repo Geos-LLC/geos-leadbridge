@@ -697,6 +697,23 @@ model SavedAccount {
   // rates etc. ServiceProfileService merges base + override at read
   // time; see src/service-profile/service-profile.service.ts.
   serviceOverridesJson        String?  @db.Text
+  // PR-E — account ↔ service assignment layer. Lets operators declare
+  // which ServiceProfiles a given account offers (since Thumbtack /
+  // Yelp don't expose category lists at OAuth time).
+  //
+  // Shape: {
+  //   "enabledServiceProfileIds": ["profileId1", "profileId2"],
+  //   "defaultServiceProfileId": "profileId1" | null
+  // }
+  //
+  // null   → no assignments configured; resolver preserves the
+  //          existing category-only matching behavior (backward compat).
+  // []     → configured but empty; resolver falls back to the tenant's
+  //          default profile.
+  // [...]  → configured with content; resolver enforces that the
+  //          category-matched profile must be in the list, otherwise
+  //          returns ai_paused with reason 'setup_mismatch'.
+  serviceProfileAssignmentsJson String?  @db.Text
   // Team — when set, org members can access this account
   organizationId              String?
   lastUsedAt                  DateTime @default(now())

@@ -236,6 +236,7 @@ export class FollowUpGeneratorService {
           servicePricingJson: true,
           faqJson: true,
           serviceOverridesJson: true,
+          serviceProfileAssignmentsJson: true,
           followUpTimezone: true,
           followUpSettingsJson: true,
           followUpActiveHoursStart: true,

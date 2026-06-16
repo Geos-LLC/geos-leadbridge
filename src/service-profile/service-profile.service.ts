@@ -38,6 +38,7 @@ import {
   mergePricingJson,
   parseMappings,
   parseServiceOverrides,
+  parseServiceAssignments,
 } from './service-profile.types';
 import { buildServiceProfileFromPreset } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
@@ -146,6 +147,34 @@ export class ServiceProfileService {
 
       if (!matched) {
         return { status: 'legacy_fallback', reason: 'no_profile_matched_and_no_default' };
+      }
+
+      // PR-E — account ↔ service assignment enforcement.
+      //
+      // The resolver runs this check before draft gating so a tenant
+      // who hasn't enabled a service for an account never accidentally
+      // pulls in stale draft content either.
+      //
+      //   null  → not configured, preserve legacy behavior (no change).
+      //   []    → configured but empty, treat as "no service selected".
+      //           Today the safest fallthrough is the existing default
+      //           behavior — the matched profile still resolves so we
+      //           don't break existing leads. The UI surfaces a "no
+      //           services selected" warning so operators notice.
+      //   [...] → enforcement on. Matched profile must be in the list
+      //           or the resolver returns ai_paused/setup_mismatch.
+      const assignments = parseServiceAssignments(
+        savedAccount?.serviceProfileAssignmentsJson ?? null,
+      );
+      if (assignments && assignments.enabledServiceProfileIds.length > 0) {
+        if (!assignments.enabledServiceProfileIds.includes(matched.id)) {
+          return {
+            status: 'ai_paused',
+            profileId: matched.id,
+            profileName: matched.name,
+            reason: 'setup_mismatch',
+          };
+        }
       }
 
       // Draft gating — even if matched, AI auto-reply is paused.
@@ -685,5 +714,114 @@ export class ServiceProfileService {
     });
 
     return { savedAccountId, profileId, override: willBeEmpty ? null : all[profileId] };
+  }
+
+  // ─── PR-E: account ↔ service assignments ──────────────────────────
+
+  /**
+   * List every connected SavedAccount for a tenant along with its
+   * current service-assignment state. Powers the Manage Availability
+   * modal in Settings → General → Services Offered.
+   *
+   * Profile validation isn't required here — the resolver tolerates
+   * stale profileIds (they just don't match anything), and the UI
+   * trims unknown ids on display.
+   */
+  async listSavedAccountAssignments(userId: string) {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        businessName: true,
+        platform: true,
+        serviceProfileAssignmentsJson: true,
+      },
+      orderBy: [{ platform: 'asc' }, { businessName: 'asc' }],
+    });
+    return accounts.map((a) => {
+      const assignments = parseServiceAssignments(a.serviceProfileAssignmentsJson);
+      return {
+        savedAccountId: a.id,
+        businessName: a.businessName ?? '',
+        platform: a.platform ?? '',
+        configured: assignments !== null,
+        enabledServiceProfileIds: assignments?.enabledServiceProfileIds ?? [],
+        defaultServiceProfileId: assignments?.defaultServiceProfileId ?? null,
+      };
+    });
+  }
+
+  /**
+   * Set the service assignments for one SavedAccount. Passing
+   * { enabledServiceProfileIds: null } CLEARS the assignment back to
+   * its "not configured" state — the resolver returns to legacy
+   * category-only behavior for that account.
+   *
+   * IDs are not validated against the user's ServiceProfile table —
+   * unknown ids are stored verbatim. The resolver tolerates them
+   * (no profile matches them) and the UI filters on display. Cheaper
+   * than a join + safer if the user is mid-edit while a profile is
+   * being archived elsewhere.
+   */
+  async setSavedAccountAssignments(
+    userId: string,
+    savedAccountId: string,
+    patch: {
+      enabledServiceProfileIds: string[] | null;
+      defaultServiceProfileId?: string | null;
+    },
+  ) {
+    const account = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { id: true, userId: true },
+    });
+    if (!account || account.userId !== userId) {
+      const err: any = new Error('Saved account not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    if (patch.enabledServiceProfileIds === null) {
+      await this.prisma.savedAccount.update({
+        where: { id: savedAccountId },
+        data: { serviceProfileAssignmentsJson: null },
+      });
+      return {
+        savedAccountId,
+        configured: false,
+        enabledServiceProfileIds: [],
+        defaultServiceProfileId: null,
+      };
+    }
+    if (!Array.isArray(patch.enabledServiceProfileIds)) {
+      const err: any = new Error('enabledServiceProfileIds must be an array or null');
+      err.code = 'INVALID_ASSIGNMENT';
+      throw err;
+    }
+    const enabled = patch.enabledServiceProfileIds.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    // Default must be in the enabled list (or null) — otherwise the
+    // resolver would never reach it. We don't auto-correct; we
+    // explicitly null it so the UI surfaces the corrected state.
+    const defaultId =
+      typeof patch.defaultServiceProfileId === 'string' &&
+      patch.defaultServiceProfileId.length > 0 &&
+      enabled.includes(patch.defaultServiceProfileId)
+        ? patch.defaultServiceProfileId
+        : null;
+    const payload = JSON.stringify({
+      enabledServiceProfileIds: enabled,
+      defaultServiceProfileId: defaultId,
+    });
+    await this.prisma.savedAccount.update({
+      where: { id: savedAccountId },
+      data: { serviceProfileAssignmentsJson: payload },
+    });
+    return {
+      savedAccountId,
+      configured: true,
+      enabledServiceProfileIds: enabled,
+      defaultServiceProfileId: defaultId,
+    };
   }
 }
