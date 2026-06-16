@@ -546,12 +546,10 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(true);
     });
 
-    it('SF_STATUS_WINS=true does not produce sf_protected for service_flow (but new SF-link guard 2a holds the lifecycle back instead)', async () => {
-      // Pre-PR contract: service_flow bypassed Guard 4 → applied=true.
-      // Post-PR contract: SF-linked leads are mirror-only — Guard 2a
-      // (sf_lifecycle_managed) intercepts BEFORE Guard 4 runs. The
-      // assertion the original test cared about ("Guard 4 doesn't fire
-      // for service_flow") still holds: skipReason is NOT sf_protected.
+    it('SF_STATUS_WINS=true does not produce sf_protected for service_flow on SF-linked leads', async () => {
+      // SF-connected mode: SF is authoritative for canonical Lead.status.
+      // Guard 4 (SF_STATUS_WINS) only gates lb_automation writes; service_flow
+      // writes flow through and apply.
       const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig({ SF_STATUS_WINS: 'true' }));
 
@@ -562,7 +560,8 @@ describe('LeadStatusService', () => {
       });
 
       expect(res.skipReason).not.toBe('sf_protected');
-      expect(res.skipReason).toBe('sf_lifecycle_managed');
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('in_progress');
     });
   });
 
@@ -660,11 +659,10 @@ describe('LeadStatusService', () => {
       expect(prisma._state.lead.status).toBe('completed');
     });
 
-    it('does NOT produce sf_managed for service_flow (but new SF-link guard 2a holds the lifecycle back as mirror-only)', async () => {
-      // Pre-PR contract: service_flow on SF-linked + connected → applied=true.
-      // Post-PR contract: SF-connected mode → mirror-only. The Guard 4b
-      // (sf_managed) test's invariant — "this guard doesn't fire for
-      // service_flow" — still holds; the new Guard 2a intercepts first.
+    it('does NOT produce sf_managed for service_flow on SF-linked + connected leads (SF is authoritative)', async () => {
+      // SF-connected mode: SF is authoritative for canonical Lead.status.
+      // Guard 4b (sf_managed) only gates manual writes; service_flow writes
+      // flow through and apply.
       const prisma = buildPrismaMock(
         { sfJobId: 'sf_42', status: 'booked' },
         { sfConnection: ACTIVE_CONN },
@@ -679,7 +677,8 @@ describe('LeadStatusService', () => {
       });
 
       expect(res.skipReason).not.toBe('sf_managed');
-      expect(res.skipReason).toBe('sf_lifecycle_managed');
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('completed');
     });
 
     it('does NOT produce sf_managed for lb_automation (but new SF-link guard 2b blocks lost/booked instead)', async () => {
@@ -792,10 +791,10 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(true);
     });
 
-    it('service_flow on scoped SF-linked lead → sf_lifecycle_managed (post-PR mirror-only)', async () => {
-      // Pre-PR: applied=true, status='in_progress'.
-      // Post-PR: Guard 2a holds the canonical write; status stays 'new'
-      // and the mirror columns carry SF's view.
+    it('service_flow on scoped SF-linked lead → applies (SF is authoritative)', async () => {
+      // SF-connected mode: SF owns the lifecycle. service_flow writes flow
+      // through the normal guard chain regardless of SF_STATUS_WINS_USER_IDS
+      // scope (that scope gates lb_automation only).
       const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: USER_ID });
       const svc = new LeadStatusService(
         prisma,
@@ -809,9 +808,9 @@ describe('LeadStatusService', () => {
         newStatus: 'in_progress',
       });
 
-      expect(res.skipReason).toBe('sf_lifecycle_managed');
-      expect(res.status).toBe('new');
-      expect(prisma._state.lead.status).toBe('new');
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('in_progress');
+      expect(prisma._state.lead.status).toBe('in_progress');
     });
 
     it('manual still writes for scoped SF-linked lead but flags sf_push_needed conflict', async () => {

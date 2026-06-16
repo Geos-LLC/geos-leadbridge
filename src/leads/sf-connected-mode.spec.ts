@@ -149,18 +149,18 @@ describe('LeadStatusService — autonomous mode (no SF link) UNCHANGED', () => {
   // catch any regression that widens the SF guards too far.
 
   it('service_flow + non-linked lead → status WRITES as before', async () => {
-    const prisma = buildPrismaMock({ status: 'contacted' });
+    const prisma = buildPrismaMock({ status: 'engaged' });
     const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
     const res = await svc.writeStatus({
       leadId: LEAD_ID,
       source: 'service_flow',
-      newStatus: 'scheduled',
+      newStatus: 'booked',
     });
 
     expect(res.applied).toBe(true);
-    expect(res.status).toBe('scheduled');
-    expect(prisma._state.lead.status).toBe('scheduled');
+    expect(res.status).toBe('booked');
+    expect(prisma._state.lead.status).toBe('booked');
     expect(prisma._state.audits[0]).toBeDefined();
   });
 
@@ -209,13 +209,14 @@ describe('LeadStatusService — autonomous mode (no SF link) UNCHANGED', () => {
   });
 });
 
-describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecycle)', () => {
-  // Per spec: when the lead is SF-linked, service_flow status writes do NOT
-  // mutate Lead.status. SF lifecycle goes to the mirror fields only. The
-  // link metadata in extraLeadUpdates IS still written.
+describe('LeadStatusService — SF-connected mode (service_flow lifecycle: SF authoritative)', () => {
+  // Per spec: when the lead is SF-linked, SF owns the canonical Lead.status.
+  // service_flow webhook events flow through writeStatus into Lead.status,
+  // including reversals (cancelled → booked). The link metadata in
+  // extraLeadUpdates is written alongside.
 
   for (const linkAttr of ['sfJobId', 'sfCustomerId', 'syncStatus'] as const) {
-    for (const sfStatus of ['booked', 'scheduled', 'in_progress', 'completed', 'cancelled', 'no_show'] as const) {
+    for (const sfStatus of ['booked', 'in_progress', 'completed', 'cancelled', 'no_show'] as const) {
       const leadOverride =
         linkAttr === 'sfJobId'
           ? { sfJobId: SF_JOB_ID, status: 'engaged' }
@@ -223,7 +224,7 @@ describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecy
             ? { sfCustomerId: SF_CUSTOMER_ID, status: 'engaged' }
             : { syncStatus: 'linked', status: 'engaged' };
 
-      it(`SF ${sfStatus} on lead linked via ${linkAttr} → Lead.status STAYS engaged (mirror-only)`, async () => {
+      it(`SF ${sfStatus} on lead linked via ${linkAttr} → Lead.status flips to ${sfStatus}`, async () => {
         const prisma = buildPrismaMock(leadOverride);
         const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
@@ -234,19 +235,16 @@ describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecy
           sourceEventId: `evt-${sfStatus}`,
         });
 
-        // Skipped with the new reason. Status unchanged. NO audit row for
-        // the canonical status change (no movement to record).
-        expect(res.applied).toBe(false);
-        expect(res.skipReason).toBe('sf_lifecycle_managed');
-        expect(res.status).toBe('engaged');
-        expect(prisma._state.lead.status).toBe('engaged');
-        expect(prisma._state.audits.length).toBe(0);
+        expect(res.applied).toBe(true);
+        expect(res.status).toBe(sfStatus);
+        expect(prisma._state.lead.status).toBe(sfStatus);
+        expect(prisma._state.audits.length).toBe(1);
       });
     }
   }
 
-  it('SF completed on SF-linked lead → mirror-only AND link metadata is still written', async () => {
-    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'scheduled' });
+  it('SF completed on SF-linked lead → applies AND link metadata is written', async () => {
+    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'booked' });
     const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
     const occurredAt = new Date('2026-06-03T10:00:00Z');
@@ -259,24 +257,15 @@ describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecy
       extraLeadUpdates: { sfLastEventAt: occurredAt },
     });
 
-    expect(res.applied).toBe(false);
-    expect(res.skipReason).toBe('sf_lifecycle_managed');
-    // Lead.status unchanged
-    expect(prisma._state.lead.status).toBe('scheduled');
-    // SF link metadata WRITTEN
+    expect(res.applied).toBe(true);
+    expect(prisma._state.lead.status).toBe('completed');
     expect(prisma._state.lead.sfLastEventAt).toEqual(occurredAt);
-    // The lead.update call carried only extraLeadUpdates (no status/statusSource)
-    expect(prisma._state.updates).toContainEqual({ sfLastEventAt: occurredAt });
-    for (const upd of prisma._state.updates) {
-      expect(upd.status).toBeUndefined();
-      expect(upd.statusSource).toBeUndefined();
-    }
   });
 
-  it('first SF event that establishes the link (pendingUpdates.sfJobId) → mirror-only', async () => {
+  it('first SF event that establishes the link (pendingUpdates.sfJobId) → applies', async () => {
     // Live-webhook path: lead found via externalRequestId fallback,
     // lead.sfJobId is still null but extraLeadUpdates carries the
-    // about-to-be-written sfJobId. The conversion moment is THIS event.
+    // about-to-be-written sfJobId. SF is authoritative from this event on.
     const prisma = buildPrismaMock({
       sfJobId: null,
       sfCustomerId: null,
@@ -293,35 +282,32 @@ describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecy
       extraLeadUpdates: { sfJobId: SF_JOB_ID, sfJobMappedAt: new Date(), sfLastEventAt: new Date() },
     });
 
-    expect(res.applied).toBe(false);
-    expect(res.skipReason).toBe('sf_lifecycle_managed');
-    expect(prisma._state.lead.status).toBe('engaged'); // canonical untouched
-    expect(prisma._state.lead.sfJobId).toBe(SF_JOB_ID); // link established
+    expect(res.applied).toBe(true);
+    expect(prisma._state.lead.status).toBe('completed');
+    expect(prisma._state.lead.sfJobId).toBe(SF_JOB_ID);
   });
 
-  it('SF write with no extraLeadUpdates on SF-linked lead → still skipped, no update at all', async () => {
-    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'contacted' });
+  it('cancel → re-book transition (SF reversal lifecycle)', async () => {
+    // Yelp-archived lead → SF cancels job → SF re-books. Both transitions
+    // flow through to Lead.status.
+    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'cancelled' });
     const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
     const res = await svc.writeStatus({
       leadId: LEAD_ID,
       source: 'service_flow',
-      newStatus: 'scheduled',
-      sourceEventId: 'evt-no-extras',
+      newStatus: 'booked',
+      sourceEventId: 'evt-rebook',
     });
 
-    expect(res.applied).toBe(false);
-    expect(res.skipReason).toBe('sf_lifecycle_managed');
-    expect(prisma._state.lead.status).toBe('contacted');
-    expect(prisma._state.updates.length).toBe(0); // no extraLeadUpdates → no update call
+    expect(res.applied).toBe(true);
+    expect(prisma._state.lead.status).toBe('booked');
   });
 
-  it('SF early-funnel status on SF-linked lead → also blocked (mirror-only contract)', async () => {
-    // SF early-funnel values (`new`, `contacted`, `engaged`, `quoted`) are
-    // unexpected in connected mode but if they ever arrive they MUST NOT
-    // overwrite Lead.status either — SF is not authoritative for funnel
-    // state on a converted customer.
-    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'engaged' });
+  it('SF early-funnel status (quoted) on SF-linked lead → also applies', async () => {
+    // SF early-funnel values are unexpected in connected mode but if they
+    // arrive they MUST flow through — SF is authoritative.
+    const prisma = buildPrismaMock({ sfJobId: SF_JOB_ID, status: 'new' });
     const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
     const res = await svc.writeStatus({
@@ -331,9 +317,8 @@ describe('LeadStatusService — SF-connected mode (guard 2a: service_flow lifecy
       sourceEventId: 'evt-funnel',
     });
 
-    expect(res.applied).toBe(false);
-    expect(res.skipReason).toBe('sf_lifecycle_managed');
-    expect(prisma._state.lead.status).toBe('engaged');
+    expect(res.applied).toBe(true);
+    expect(prisma._state.lead.status).toBe('quoted');
   });
 });
 
@@ -440,10 +425,10 @@ describe('LeadStatusService — SF-connected mode preserves other sources', () =
   // + platform_sync flows are governed by the existing guards (sf_managed,
   // sf_link_protected, etc.) which already existed before this PR.
 
-  it('manual write on SF-linked lead → existing sf_managed guard fires (NOT the new guard)', async () => {
+  it('manual write on SF-linked lead → existing sf_managed guard fires', async () => {
     // sf_managed guard requires an active sf_connection. We provide one;
     // the test asserts the manual write is blocked by sf_managed (existing
-    // behavior), not by the new sf_lifecycle_managed reason.
+    // behavior).
     const prisma = buildPrismaMock(
       { sfJobId: SF_JOB_ID, status: 'engaged' },
       { sfConnection: { isActive: true, status: 'active' } },

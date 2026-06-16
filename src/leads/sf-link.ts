@@ -8,9 +8,16 @@
  *       classifier drives status, follow-up engine chases, AI replies and
  *       can mark lost/booked).
  *     - SF-connected mode: lead is linked to an SF customer or job. SF owns
- *       the customer/job lifecycle. LB stops mirroring SF state into
- *       Lead.status and stops chasing the lead. AI still answers questions
- *       and pages handoffs; bookings still route through SF orchestration.
+ *       the customer/job lifecycle and is authoritative for Lead.status —
+ *       service_flow webhook events flow through writeStatus into the
+ *       canonical Lead.status, including reversals (cancelled → booked,
+ *       completed → cancelled). The sfJobOutcome / sfJobOutcomeAt mirror
+ *       fields are still written by sf-inbound-status.service.ts so SF's
+ *       view is preserved alongside the canonical status. LB stops chasing
+ *       the lead. AI still answers questions and pages handoffs; bookings
+ *       still route through SF orchestration. lb_automation writes that
+ *       would mark the lead lost/booked are suppressed (Guard 2b) because
+ *       SF owns those terminals.
  *
  * The conversion condition is "any one of these is set":
  *   - sfCustomerId  (Lead was matched to an SF customer record)
