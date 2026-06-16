@@ -88,14 +88,6 @@ export type WriteSkipReason =
   // marketplace archive event must not downgrade them. The platformStatus
   // column still flows through; only the canonical Lead.status is held back.
   | 'sf_link_protected'
-  // SF-connected mode (PR finalizing SF↔LB integration): the lead is
-  // SF-linked, so SF owns the customer/job lifecycle. Any service_flow
-  // status write is held back — the canonical Lead.status stays at what
-  // LB had at conversion time. The mirror fields (sfJobOutcome /
-  // sfJobOutcomeAt / sfLastEventAt) still carry SF's view. extraLeadUpdates
-  // (sfJobId / sfLastEventAt / sfJobMappedAt) ARE still written so the
-  // link metadata stays current.
-  | 'sf_lifecycle_managed'
   // SF-connected mode: lb_automation tried to mutate Lead.status to a
   // terminal (lost / booked) on an SF-linked lead. Recorded for audit; the
   // intent is still tracked in conversation runtime + the audit log, but
@@ -266,12 +258,22 @@ export class LeadStatusService {
    * Guard order:
    *   1. same-status no-op
    *   2. canonical validation
-   *   3. hard-terminal (blocks all sources)
+   *   2b. SF-linked lb_automation lost/booked suppression (lb_automation only)
+   *   3. hard-terminal (blocks all sources except service_flow on SF-linked
+   *      leads via SF_REACTIVATION_TARGETS carve-out)
    *   4. SF_STATUS_WINS protection (lb_automation only)
    *   5. automation-terminal (lb_automation only)
    *   6. pipeline-downgrade
    *   7. dedup by (leadId, source, sourceEventId)
    *   8. stale-event (occurredAt < lead.statusUpdatedAt)
+   *
+   * SF-connected mode (lead is SF-linked via sfJobId / sfCustomerId /
+   * syncStatus='linked'): service_flow writes flow through the normal guard
+   * chain — SF is authoritative for the full lifecycle including reversals
+   * (cancelled → booked, completed → cancelled). The mirror fields
+   * (sfJobOutcome / sfJobOutcomeAt) are still written by the Phase 1 mirror
+   * call in sf-inbound-status.service.ts so the SF-side view is preserved
+   * alongside the canonical Lead.status.
    *
    * Manual override rule:
    *   manual writes are allowed against SF-linked leads, but produce a
@@ -331,46 +333,6 @@ export class LeadStatusService {
       throw new BadRequestException(
         `Invalid status "${newStatus}". Must be one of the canonical set; see canonical-status.ts.`,
       );
-    }
-
-    // ── Guard 2a: SF-connected mode — service_flow lifecycle mirror-only ──
-    // When the lead is SF-linked (sfJobId / sfCustomerId / syncStatus='linked',
-    // or about to be via extraLeadUpdates on this very write), SF owns the
-    // customer/job lifecycle. The canonical Lead.status must NOT be mutated
-    // from a service_flow source — SF's lifecycle view goes to the mirror
-    // fields (sfJobOutcome / sfJobOutcomeAt) which are written outside this
-    // method by the Phase 1 mirror call.
-    //
-    // We still apply input.extraLeadUpdates here so the link metadata
-    // (sfJobId / sfLastEventAt / sfJobMappedAt) stays current — those are
-    // SF identifiers, not canonical status.
-    //
-    // Live-webhook callers: the lead may be found via the externalRequestId
-    // fallback when sfJobId is null. extraLeadUpdates carries the
-    // about-to-be-linked sfJobId; isSfLinkedLead's pendingUpdates arg picks
-    // that up so the first event that establishes the link is ALSO treated
-    // as mirror-only.
-    //
-    // Historical-sync callers (manual link, bulk link): write sfJobId
-    // BEFORE this method, so `lead.sfJobId` is already truthy at this point.
-    if (
-      input.source === 'service_flow' &&
-      isSfLinkedLead(lead, input.extraLeadUpdates)
-    ) {
-      if (
-        input.extraLeadUpdates &&
-        Object.keys(input.extraLeadUpdates).length > 0
-      ) {
-        await this.prisma.lead.update({
-          where: { id: lead.id },
-          data: input.extraLeadUpdates,
-        });
-      }
-      this.metrics?.recordSkip('sf_lifecycle_managed');
-      this.logger.log(
-        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=service_flow result=skipped skip_reason=sf_lifecycle_managed status=${oldStatus} attempted=${newStatus} sf_job_id=${lead.sfJobId ?? input.extraLeadUpdates?.sfJobId ?? 'null'} sf_customer_id=${lead.sfCustomerId ?? 'null'} sync_status=${lead.syncStatus ?? 'null'} note=mirror_only`,
-      );
-      return this.skipped(lead, 'sf_lifecycle_managed');
     }
 
     // ── Guard 2b: SF-connected mode — lb_automation lost/booked suppression ──

@@ -1087,30 +1087,27 @@ describe('SfInboundStatusService', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────
-  // SF-connected mode: SF lifecycle does not overwrite Lead.status
+  // SF-connected mode: SF is authoritative for canonical Lead.status
   //
-  // When writeStatus returns skipReason='sf_lifecycle_managed', the live
-  // webhook treats it as a successful mirror-only outcome:
-  //   - result='applied' (NOT 'noop' — from SF's perspective this is the
-  //     happy path in connected mode)
-  //   - sfInboundEvent row carries result=`sf_linked_mirror_only:<canonical>`
-  //   - follow-up enrollments are stopped (eager stop, same as terminal path)
-  //   - skipReason on the response is null (sf_lifecycle_managed is not a
-  //     drift signal for SF's classifier)
+  // SF webhook events flow through writeStatus → Lead.status reflects the
+  // SF canonical status. The sfJobOutcome / sfJobOutcomeAt mirror fields
+  // are still written by the Phase 1 writeSfJobOutcomeMirror call so SF's
+  // view is preserved alongside the canonical status.
   //
-  // Dry-run also predicts the mirror-only outcome rather than the misleading
-  // `would_apply:<canonical>`.
+  // For SF terminal canonicals (booked, completed, lost, cancelled, archived)
+  // the existing terminal path stops follow-up enrollments.
   // ──────────────────────────────────────────────────────────────────
-  describe('process — SF-connected mode (mirror-only Lead.status)', () => {
-    function sfLifecycleManagedSkip() {
+  describe('process — SF-connected mode (SF authoritative)', () => {
+    function appliedWrite(canonical: string, prevStatus = 'engaged') {
       return {
         leadId: LEAD_ID,
-        applied: false,
-        status: 'engaged',
+        applied: true,
+        status: canonical,
         platformStatus: null,
         conflict: null,
-        auditLogId: null,
-        skipReason: 'sf_lifecycle_managed' as const,
+        auditLogId: 'audit-1',
+        skipReason: null,
+        previousStatus: prevStatus,
       };
     }
 
@@ -1126,55 +1123,39 @@ describe('SfInboundStatusService', () => {
       ['cancelled',  'cancelled'],
       ['no_show',    'no_show'],
     ])(
-      'SF %s on SF-linked lead → applied (mirror-only as %s), Lead.status untouched, enrollments stopped',
+      'SF %s on SF-linked lead → applied (Lead.status=%s)',
       async (sfWire, canonical) => {
         prisma.lead.findFirst.mockResolvedValue(
           okLead({ status: 'engaged', sfJobId: JOB_ID, threadId: CONV_ID }),
         );
         prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enr-1' }]);
-        leadStatus.writeStatus.mockResolvedValueOnce(sfLifecycleManagedSkip());
+        leadStatus.writeStatus.mockResolvedValueOnce(appliedWrite(canonical));
 
         const r = await service.process(
           basePayload({ status: { new: sfWire } }),
           { id: SUB_ID, userId: USER_ID },
         );
 
-        // Treated as success (mirror-only is the happy path for SF-connected)
         expect(r.httpStatus).toBe(200);
         expect(r.result).toBe('applied');
-        // sf_lifecycle_managed is NOT a drift signal — surface null skipReason
-        // so SF's lifecycle_drift classifier doesn't treat it as a problem.
-        expect(r.skipReason).toBeNull();
 
         // writeSfJobOutcomeMirror still fires (Phase 1, before writeStatus)
         expect(leadStatus.writeSfJobOutcomeMirror).toHaveBeenCalled();
 
-        // Inbound event row records mirror-only outcome (greppable). The
-        // suffix is the *canonical* status, so SF 'scheduled' becomes
-        // 'sf_linked_mirror_only:booked' post-simplification.
-        expect(prisma.sfInboundEvent.upsert).toHaveBeenCalledWith(
+        // writeStatus called with the canonical status — SF is authoritative.
+        expect(leadStatus.writeStatus).toHaveBeenCalledWith(
           expect.objectContaining({
-            create: expect.objectContaining({
-              status: 'applied',
-              result: `sf_linked_mirror_only:${canonical}`,
-            }),
+            source: 'service_flow',
+            newStatus: canonical,
           }),
-        );
-
-        // Eager enrollment stop fires so existing follow-ups wind down
-        // without waiting for the next scheduler tick.
-        expect(engine.stopEnrollment).toHaveBeenCalledWith(
-          'enr-1',
-          `sf_linked_customer:${canonical}`,
         );
       },
     );
 
-    it('first SF event that establishes the link (no sfJobId yet) → mirror-only', async () => {
+    it('first SF event that establishes the link (no sfJobId yet) → applies via extraLeadUpdates', async () => {
       // Live-webhook fallback path: lead resolved via (channel,
       // externalRequestId), lead.sfJobId is still null but payload.sf_job_id
       // is set. extraLeadUpdates carry the about-to-be-written sfJobId.
-      // writeStatus' new guard treats this as SF-connected via pendingUpdates.
       prisma.lead.findFirst
         .mockResolvedValueOnce(null) // sfJobId lookup miss
         .mockResolvedValueOnce(
@@ -1186,7 +1167,7 @@ describe('SfInboundStatusService', () => {
             threadId: CONV_ID,
           }),
         );
-      leadStatus.writeStatus.mockResolvedValueOnce(sfLifecycleManagedSkip());
+      leadStatus.writeStatus.mockResolvedValueOnce(appliedWrite('completed'));
 
       const r = await service.process(
         basePayload({
@@ -1198,9 +1179,6 @@ describe('SfInboundStatusService', () => {
       );
 
       expect(r.result).toBe('applied');
-      // The writeStatus invocation carries extraLeadUpdates with the
-      // about-to-link sfJobId — the SF-link predicate detects this via
-      // pendingUpdates.
       expect(leadStatus.writeStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           source: 'service_flow',
@@ -1210,7 +1188,7 @@ describe('SfInboundStatusService', () => {
       );
     });
 
-    it('dry-run on SF-linked lead → logs would_mirror_only:<canonical>, not would_apply', async () => {
+    it('dry-run on SF-linked lead → logs would_apply:<canonical>', async () => {
       service = new SfInboundStatusService(
         prisma,
         buildConfig({ SF_INBOUND_WEBHOOK_DRY_RUN: 'true' }),
@@ -1231,7 +1209,7 @@ describe('SfInboundStatusService', () => {
         expect.objectContaining({
           create: expect.objectContaining({
             status: 'dry_run',
-            result: 'would_mirror_only:completed',
+            result: 'would_apply:completed',
           }),
         }),
       );
@@ -1239,23 +1217,7 @@ describe('SfInboundStatusService', () => {
       expect(leadStatus.writeStatus).not.toHaveBeenCalled();
     });
 
-    // Note on the dry-run "autonomous" branch:
-    // Every live SF webhook payload carries an `sf_job_id` (payload
-    // validation requires it). When the live webhook finds a lead via the
-    // (channel, externalRequestId) fallback for an as-yet-unlinked lead,
-    // the dry-run check passes `pendingUpdates.sfJobId = payload.sf_job_id`
-    // to isSfLinkedLead — which always reports linked. So `would_apply:`
-    // is effectively unreachable on this path; only `would_mirror_only:`
-    // can be observed in practice. The branch is retained for callers
-    // that invoke process() directly without an sf_job_id payload (none
-    // today, but the predicate is defensive).
-
     it('autonomous (non-linked) lead → writeStatus IS called (regression guard)', async () => {
-      // Sanity: if the SF-link predicate is widened beyond the documented
-      // condition, this test fails. Autonomous leads (no sfJobId, no
-      // sfCustomerId, syncStatus≠'linked') must still flow through the
-      // canonical write path so the existing Erin/Casey/Spotless tests
-      // and SF-completed-on-non-linked behavior keep working.
       prisma.lead.findFirst.mockResolvedValue(
         okLead({
           status: 'engaged',
@@ -1264,6 +1226,7 @@ describe('SfInboundStatusService', () => {
           syncStatus: null,
         }),
       );
+      leadStatus.writeStatus.mockResolvedValueOnce(appliedWrite('completed'));
 
       await service.process(
         basePayload({ status: { new: 'completed' } }),
@@ -1278,21 +1241,26 @@ describe('SfInboundStatusService', () => {
       );
     });
 
-    it('SF-linked lead with no threadId → mirror-only, no enrollment stop attempted', async () => {
-      // Defensive: if for some reason the lead has no threadId (rare), the
-      // mirror-only outcome still applies but no enrollment stop fires.
+    it('cancel → re-book transition applies (SF reversal lifecycle)', async () => {
+      // The user-facing scenario: SF cancels a job, then re-books it. Both
+      // transitions must flow through to Lead.status.
       prisma.lead.findFirst.mockResolvedValue(
-        okLead({ status: 'engaged', sfJobId: JOB_ID, threadId: null }),
+        okLead({ status: 'cancelled', sfJobId: JOB_ID, threadId: CONV_ID }),
       );
-      leadStatus.writeStatus.mockResolvedValueOnce(sfLifecycleManagedSkip());
+      leadStatus.writeStatus.mockResolvedValueOnce(appliedWrite('booked', 'cancelled'));
 
       const r = await service.process(
-        basePayload({ status: { new: 'completed' } }),
+        basePayload({ status: { new: 'booked' } }),
         { id: SUB_ID, userId: USER_ID },
       );
 
       expect(r.result).toBe('applied');
-      expect(engine.stopEnrollment).not.toHaveBeenCalled();
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'service_flow',
+          newStatus: 'booked',
+        }),
+      );
     });
   });
 });
