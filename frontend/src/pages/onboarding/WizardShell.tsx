@@ -129,7 +129,15 @@ export default function WizardShell({
           {WIZARD_STEP_META.map((meta, i) => {
             const status = checklist[meta.slug];
             const isCurrent = meta.slug === currentStep;
-            const isDone = status === 'done' || i < currentIndex;
+            // PR-F — trust the derived checklist exclusively. Pre-PR-F this
+            // also marked every step earlier than currentStep as done
+            // (`i < currentIndex`), which painted the rail green even
+            // when the backend's config summary said a step wasn't actually
+            // configured (e.g. automation step "clicked through" without
+            // saving any AutomationRules). That contradicted the center
+            // summary on Done, which uses the same data-derived checklist.
+            // Now the rail and the center always agree.
+            const isDone = status === 'done';
             const clickable = !!onStepClick && !isCurrent && !saving;
 
             const rowStyle: React.CSSProperties = {

@@ -39,7 +39,21 @@ type BudgetSnapshot = {
 export function SettingsAccounts() {
   const navigate = useNavigate();
   const accounts = useAppStore(s => s.savedAccounts);
+  const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
   const [modal, setModal] = useState<{ open: boolean; reconnect?: SavedAccount | null }>({ open: false });
+
+  // PR-F — pull a fresh SavedAccount list and push it into the store.
+  // Used by the webhook-recover pill so the "Connected" pill flips back
+  // green immediately after a successful re-register without a full
+  // page reload.
+  const reload = async () => {
+    try {
+      const res = await thumbtackApi.getSavedAccounts();
+      setSavedAccounts(res.accounts ?? []);
+    } catch {
+      // Best-effort refresh; the success toast already told the user it worked
+    }
+  };
 
   // "Configure" jumps to the modern Automation surface (First Reply tab).
   // The last-account id is persisted so the destination page can hydrate
@@ -453,6 +467,11 @@ export function SettingsAccounts() {
                 >
                   <AlertTriangle size={11} /> Reconnect required
                 </button>
+              ) : a.platform === 'thumbtack' && !a.webhookId ? (
+                <WebhookRecoverPill
+                  accountId={a.id}
+                  onRecovered={() => reload()}
+                />
               ) : (
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -1422,5 +1441,68 @@ function PlatformBadge({ platform }: { platform: string }) {
     }}>
       {letter}
     </div>
+  );
+}
+
+// ─── Webhook recovery pill (PR-F) ──────────────────────────────────────
+//
+// Shown when a Thumbtack SavedAccount has live credentials but a NULL
+// webhookId — the half-connected state we hit when OAuth refreshes the
+// token but the follow-up webhook subscription silently fails (TT 5xx,
+// transient network, etc). Without a webhookId the account looks
+// "connected" but new leads never reach LB. One click here calls the
+// existing POST /v1/thumbtack/saved-accounts/:id/reconnect endpoint
+// which deletes any stale webhooks on TT's side and re-registers a
+// fresh one, then writes the new webhookId to saved_accounts.
+
+function WebhookRecoverPill({
+  accountId,
+  onRecovered,
+}: {
+  accountId: string;
+  onRecovered: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const handleClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await thumbtackApi.reconnectAccount(accountId);
+      if (res?.success) {
+        notify.success('Webhook restored', 'Thumbtack leads will resume routing to this account.');
+        onRecovered();
+      } else {
+        notify.error('Re-register failed', 'Thumbtack did not return a webhook id. Try again or fully reconnect.');
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const data = err?.response?.data;
+      const code = data?.errorCode;
+      if (code === 'token_expired' || code === 'token_revoked' || status === 401 || status === 403) {
+        notify.error('Reconnect required', 'Your Thumbtack token is no longer valid — please reconnect the account fully.');
+      } else {
+        notify.error('Re-register failed', data?.message ?? err?.message ?? 'Unknown error');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={busy}
+      title="OAuth succeeded but the webhook subscription is missing — click to re-register"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '4px 10px', borderRadius: 999,
+        background: '#fef3c7', color: '#92400e',
+        fontSize: 11, fontWeight: 600,
+        border: 0, cursor: busy ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+      }}
+    >
+      {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+      {busy ? 'Re-registering…' : 'Re-register webhook'}
+    </button>
   );
 }
