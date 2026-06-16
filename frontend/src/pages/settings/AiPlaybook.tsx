@@ -43,6 +43,10 @@ import { notify } from '../../store/notificationStore';
 // AccountFaqForm + ServicePricingForm imports removed in PR-B.1 — both
 // surfaces moved to Settings → Services. ServiceScopedInfoCard replaces
 // them on the Global tab with a pointer to the new location.
+// PR-D reuses the structured PricingEditor from the Services page on the
+// per-Service AI Playbook tab so users can edit pricing without leaving
+// the playbook surface.
+import { PricingEditor } from './Services';
 import {
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
@@ -528,34 +532,207 @@ function ServiceRulesViewer({ rules }: { rules: ParsedServiceRules }) {
   );
 }
 
-// ─── Service summary card (FAQ/Pricing/Questions → Settings → Services) ─
+// ─── Service-data editor cards (PR-D) ────────────────────────────────────
+//
+// Replaces the old ServiceSummaryCard (PR-B.1) which only linked out to
+// Settings → Services. Each card shows a summary by default with an
+// "Edit" toggle that reveals the inline editor. Save lives on the page
+// footer so a user editing pricing + FAQ + a HOW section commits all
+// drafts in a single PATCH.
 
-function ServiceSummaryCard({ profile }: { profile: ServiceProfile }) {
+function CountSummary({ count, noun }: { count: number; noun: string }) {
+  return (
+    <span style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+      {count === 0 ? `No ${noun} yet.` : `${count} ${noun}${count === 1 ? '' : 's'}.`}
+    </span>
+  );
+}
+
+function CardHeader({
+  title,
+  summary,
+  expanded,
+  onToggle,
+  badge,
+}: {
+  title: string;
+  summary: React.ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
+  badge?: React.ReactNode;
+}) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      flexWrap: 'wrap',
+      marginBottom: expanded ? 14 : 0,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</div>
+          {badge}
+        </div>
+        <div>{summary}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '7px 12px', borderRadius: 8,
+          border: '1px solid var(--lb-line)',
+          background: 'white', color: 'var(--lb-ink-2)',
+          fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        }}
+      >
+        <Pencil size={12} />
+        {expanded ? 'Hide editor' : 'Edit'}
+      </button>
+    </div>
+  );
+}
+
+const inlineJsonTextareaStyle: React.CSSProperties = {
+  width: '100%', padding: '10px 12px',
+  border: '1px solid var(--lb-line)',
+  borderRadius: 8, fontSize: 12,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  resize: 'vertical', minHeight: 120,
+  background: 'white', color: 'var(--lb-ink-1)',
+};
+
+function safeParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function ServicePricingCard({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = useMemo(() => {
+    const parsed = safeParse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return <CountSummary count={0} noun="priced item" />;
+    }
+    const obj = parsed as Record<string, unknown>;
+    const items = Array.isArray(obj.items) ? obj.items.length : 0;
+    const model = typeof obj.pricingModel === 'string' ? obj.pricingModel : 'unknown';
+    return (
+      <span style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+        {items > 0 ? `${items} priced items` : 'No priced items yet'} · model: {model}
+      </span>
+    );
+  }, [value]);
   return (
     <SectionCard padding="16px 20px">
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <Info size={16} style={{ color: 'var(--lb-accent)' }} />
+      <CardHeader
+        title="Pricing"
+        summary={summary}
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+      />
+      {expanded && (
+        <div style={{ marginTop: 8 }}>
+          <PricingEditor value={value} onChange={onChange} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 8 }}>
-            Service data lives in Settings → Services
+      )}
+    </SectionCard>
+  );
+}
+
+function ServiceFaqCard({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = useMemo(() => {
+    const parsed = safeParse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return <CountSummary count={0} noun="Q&A pair" />;
+    }
+    const customQA = (parsed as Record<string, unknown>).customQA;
+    const count = Array.isArray(customQA) ? customQA.length : 0;
+    return <CountSummary count={count} noun="Q&A pair" />;
+  }, [value]);
+  return (
+    <SectionCard padding="16px 20px">
+      <CardHeader
+        title="FAQ"
+        summary={summary}
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+      />
+      {expanded && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginBottom: 8 }}>
+            Stored as JSON in the shape <code>{`{ "customQA": [{ "question": "...", "answer": "..." }] }`}</code>.
           </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div><strong>Pricing:</strong> managed in Settings → Services</div>
-            <div><strong>FAQ:</strong> managed in Settings → Services</div>
-            <div><strong>Qualification questions:</strong> managed in Settings → Services</div>
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <a
-              href={`/settings/services?profile=${encodeURIComponent(profile.id)}`}
-              style={{ fontSize: 13, color: 'var(--lb-accent)', fontWeight: 600 }}
-            >
-              Open {getServiceDisplayName(profile)} in Settings → Services →
-            </a>
-          </div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={10}
+            style={inlineJsonTextareaStyle}
+            placeholder='{ "customQA": [] }'
+          />
         </div>
-      </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function ServiceQualificationCard({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = useMemo(() => {
+    const parsed = safeParse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return <CountSummary count={0} noun="qualification question" />;
+    }
+    const questions = (parsed as Record<string, unknown>).questions;
+    const count = Array.isArray(questions) ? questions.length : 0;
+    return <CountSummary count={count} noun="qualification question" />;
+  }, [value]);
+  return (
+    <SectionCard padding="16px 20px">
+      <CardHeader
+        title="Qualification questions"
+        summary={summary}
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+      />
+      {expanded && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginBottom: 8 }}>
+            Stored as JSON in the shape{' '}
+            <code>{`{ "questions": [{ "key": "...", "label": "...", "type": "single_select" | "multi_select" | "text" | "number" | "date", "options": [...] }] }`}</code>.
+          </div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={10}
+            style={inlineJsonTextareaStyle}
+            placeholder='{ "questions": [] }'
+          />
+        </div>
+      )}
     </SectionCard>
   );
 }
@@ -733,17 +910,33 @@ function ServicePlaybookEditor({
     [profile.aiInstructionsJson],
   );
   const [v2, setV2] = useState<PlaybookV2Storage>(initialWrapper.aiPlaybookV2);
+  // PR-D — pricing/FAQ/qualification drafts now live alongside v2 so the
+  // Service tab is self-contained (no need to bounce out to Settings →
+  // Services for these surfaces). Each draft holds the raw JSON string;
+  // dirtyFields tracks which of the four areas changed so handleSave
+  // sends exactly the fields the user touched.
+  const [pricingDraft, setPricingDraft] = useState<string>(profile.pricingJson ?? '');
+  const [faqDraft, setFaqDraft] = useState<string>(profile.faqJson ?? '');
+  const [qualDraft, setQualDraft] = useState<string>(profile.qualificationSchemaJson ?? '');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef<Set<PlaybookSectionKey>>(new Set());
+  const dirtyFieldsRef = useRef<Set<'pricing' | 'faq' | 'qualification'>>(new Set());
+  // Force a re-render when dirty state changes so the Save button enables/
+  // disables. Ref-only tracking would otherwise keep the button stale.
+  const [, bumpDirty] = useState(0);
 
   // Reset state when profile changes (parent uses key=profile.id, so this
   // is belt-and-suspenders — the key already forces a remount).
   useEffect(() => {
     setV2(initialWrapper.aiPlaybookV2);
+    setPricingDraft(profile.pricingJson ?? '');
+    setFaqDraft(profile.faqJson ?? '');
+    setQualDraft(profile.qualificationSchemaJson ?? '');
     dirtyRef.current = new Set();
-  }, [initialWrapper]);
+    dirtyFieldsRef.current = new Set();
+  }, [initialWrapper, profile.pricingJson, profile.faqJson, profile.qualificationSchemaJson]);
 
   useEffect(() => {
     if (!savedAt) return;
@@ -757,21 +950,49 @@ function ServicePlaybookEditor({
       ...prev,
       [section]: { customInstructions: value, suggestedFromWebsite: false },
     }));
+    bumpDirty((n) => n + 1);
+  };
+
+  const onPricingChange = (next: string) => {
+    dirtyFieldsRef.current.add('pricing');
+    setPricingDraft(next);
+    bumpDirty((n) => n + 1);
+  };
+  const onFaqChange = (next: string) => {
+    dirtyFieldsRef.current.add('faq');
+    setFaqDraft(next);
+    bumpDirty((n) => n + 1);
+  };
+  const onQualChange = (next: string) => {
+    dirtyFieldsRef.current.add('qualification');
+    setQualDraft(next);
+    bumpDirty((n) => n + 1);
   };
 
   const handleSave = async () => {
-    if (dirtyRef.current.size === 0) return;
+    const aiDirty = dirtyRef.current.size > 0;
+    const fields = dirtyFieldsRef.current;
+    if (!aiDirty && fields.size === 0) return;
     setSaving(true);
     setError(null);
     try {
-      const merged: AiInstructionsWrapper = {
-        version: initialWrapper.version || 1,
-        aiPlaybookV2: v2,
-        passthrough: initialWrapper.passthrough,
-      };
-      const aiInstructionsJson = serializeWrapper(merged);
-      await serviceProfilesApi.update(profile.id, { aiInstructionsJson });
+      // Build a single PATCH covering every dirty field. Undefined fields
+      // are not sent, so untouched data stays untouched on the server.
+      const patch: Record<string, unknown> = {};
+      if (aiDirty) {
+        const merged: AiInstructionsWrapper = {
+          version: initialWrapper.version || 1,
+          aiPlaybookV2: v2,
+          passthrough: initialWrapper.passthrough,
+        };
+        patch.aiInstructionsJson = serializeWrapper(merged);
+      }
+      if (fields.has('pricing')) patch.pricingJson = pricingDraft || null;
+      if (fields.has('faq')) patch.faqJson = faqDraft || null;
+      if (fields.has('qualification')) patch.qualificationSchemaJson = qualDraft || null;
+      await serviceProfilesApi.update(profile.id, patch as any);
       dirtyRef.current = new Set();
+      dirtyFieldsRef.current = new Set();
       setSavedAt(Date.now());
       onSaved();
     } catch (e: any) {
@@ -781,7 +1002,7 @@ function ServicePlaybookEditor({
     }
   };
 
-  const hasDirty = dirtyRef.current.size > 0;
+  const hasDirty = dirtyRef.current.size > 0 || dirtyFieldsRef.current.size > 0;
   const serviceRules = useMemo(
     () => extractServiceRulesFromWrapper(initialWrapper),
     [initialWrapper],
@@ -798,8 +1019,11 @@ function ServicePlaybookEditor({
       <ServiceHeader profile={profile} onRenamed={onSaved} />
       {isArchived && <ArchivedWarningBanner />}
       {isDraft && <DraftWarningBanner />}
-      <ServiceSummaryCard profile={profile} />
       {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
+
+      <ServicePricingCard value={pricingDraft} onChange={onPricingChange} />
+      <ServiceFaqCard value={faqDraft} onChange={onFaqChange} />
+      <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
 
       <HowSectionCard
         section="business_information"

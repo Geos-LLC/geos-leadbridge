@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText, Check, Layers,
+  Building, Phone, CalendarClock, Users, Plug, CreditCard, Share2, BookOpen, FileText, Check,
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
@@ -21,12 +21,19 @@ type TabKey =
   | 'templates' | 'team' | 'accounts' | 'billing' | 'partner-network'
   | 'services';
 
+// 'services' was a top-level sidebar tab through PR-B.1. In PR-D it
+// becomes a section inside General → Services Offered, and the AI
+// Playbook Service tabs hold the full service playbook content (pricing
+// + FAQ + qualification editors). The route + tab handler below stay
+// alive so existing `?tab=services` deep links and the standalone
+// SettingsServices page keep working — they're just not in the sidebar
+// any more. Direct URL access surfaces a deep-link banner at the top of
+// the legacy Services page nudging users to General.
 const TABS: { key: TabKey; label: string; icon: LucideIcon; sublabel: string; beta?: true }[] = [
-  { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile & timezone' },
+  { key: 'general',         label: 'General',           icon: Building,      sublabel: 'Profile, services & timezone' },
   { key: 'communication',   label: 'Communication',     icon: Phone,         sublabel: 'Phone & SMS' },
   { key: 'hours',           label: 'Business Hours',    icon: CalendarClock, sublabel: "When you're open" },
   { key: 'ai-playbook',     label: 'AI Playbook',       icon: BookOpen,      sublabel: 'How AI communicates' },
-  { key: 'services',        label: 'Services',          icon: Layers,        sublabel: 'Per-service config' },
   { key: 'templates',       label: 'Templates',         icon: FileText,      sublabel: 'Pre-written messages' },
   { key: 'team',            label: 'Team',              icon: Users,         sublabel: 'Members & roles' },
   { key: 'accounts',        label: 'Connected Sources', icon: Plug,          sublabel: 'Thumbtack, Yelp, Angi' },
@@ -52,13 +59,25 @@ const SUBTITLES: Record<TabKey, string> = {
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = (searchParams.get('tab') as TabKey | null) ?? 'general';
-  const tab: TabKey = TABS.some(t => t.key === tabParam) ? tabParam : 'general';
+  // `services` is no longer in TABS but the route stays accessible via
+  // ?tab=services (legacy deep links + a "Manage services" link from
+  // the General → Services Offered section). All other unknown tabs
+  // still fall back to General.
+  const KNOWN_TABS = new Set<TabKey>([...TABS.map(t => t.key), 'services']);
+  const tab: TabKey = KNOWN_TABS.has(tabParam) ? tabParam : 'general';
   const setTab = (next: TabKey) => {
     const sp = new URLSearchParams(searchParams);
     sp.set('tab', next);
     setSearchParams(sp, { replace: true });
   };
-  const meta = TABS.find(t => t.key === tab)!;
+  // Tabs hidden from the sidebar still render the same page chrome —
+  // borrow the meta off the closest sibling so the AutoPageHeader does
+  // not blow up when `?tab=services` lands here from a deep link.
+  const meta =
+    TABS.find(t => t.key === tab) ??
+    (tab === 'services'
+      ? { key: 'services' as TabKey, label: 'Services', icon: Building, sublabel: 'Per-service config' }
+      : TABS[0]);
 
   let body: ReactNode = null;
   switch (tab) {
