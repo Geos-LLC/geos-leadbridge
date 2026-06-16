@@ -566,6 +566,24 @@ function ServicesOfferedSection() {
     }
   };
 
+  // Archived → Active reactivation. Backend transitionStatus requires
+  // allowReactivate=true for this jump so a misclick on a draft Archive
+  // button can't accidentally promote a long-dormant profile back into
+  // the AI flow.
+  const handleReactivate = async (profile: ServiceProfile) => {
+    if (!confirm(`Reactivate "${displayName(profile)}"? AI replies will resume for leads matched to this service.`)) return;
+    setBusy(`reactivate-${profile.id}`);
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'active', true);
+      notify.success('Reactivated', `${displayName(profile)} is active again.`);
+      refresh();
+    } catch (err: any) {
+      notify.error('Could not reactivate', err?.response?.data?.message ?? err?.message ?? 'Reactivation failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const handleArchive = async (profile: ServiceProfile) => {
     if (!confirm(`Archive "${displayName(profile)}"? Matched leads will fall back to the default profile.`)) return;
     setBusy(`archive-${profile.id}`);
@@ -633,6 +651,7 @@ function ServicesOfferedSection() {
                 busy={busy}
                 onActivate={() => handleActivate(p)}
                 onArchive={() => handleArchive(p)}
+                onReactivate={() => handleReactivate(p)}
               />
             ))}
             {showArchived && archived.map((p) => (
@@ -642,6 +661,7 @@ function ServicesOfferedSection() {
                 busy={busy}
                 onActivate={() => handleActivate(p)}
                 onArchive={() => handleArchive(p)}
+                onReactivate={() => handleReactivate(p)}
               />
             ))}
             {archived.length > 0 && (
@@ -688,11 +708,13 @@ function ServiceRow({
   busy,
   onActivate,
   onArchive,
+  onReactivate,
 }: {
   profile: ServiceProfile;
   busy: string | null;
   onActivate: () => void;
   onArchive: () => void;
+  onReactivate: () => void;
 }) {
   const name = displayName(profile);
   const isActive = profile.status === 'active';
@@ -763,6 +785,23 @@ function ServiceRow({
           >
             {busy === `archive-${profile.id}` ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
             Archive
+          </button>
+        )}
+        {isArchived && (
+          <button
+            type="button"
+            onClick={onReactivate}
+            disabled={busy === `reactivate-${profile.id}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '7px 12px', borderRadius: 8,
+              border: '1px solid #bfdbfe',
+              background: '#2563eb', color: 'white',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {busy === `reactivate-${profile.id}` ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+            Reactivate
           </button>
         )}
       </div>

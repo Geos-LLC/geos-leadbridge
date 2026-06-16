@@ -24,7 +24,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe,
-  ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, MessageSquare, Trash2,
+  ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, CheckCircle2, MessageSquare, Trash2,
   Archive,
   type LucideIcon,
 } from 'lucide-react';
@@ -618,7 +618,10 @@ function ServicePricingCard({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
+  // hide behind a one-line summary. Open by default; users can collapse
+  // with the same toggle if they want to focus on AI instructions.
+  const [expanded, setExpanded] = useState(true);
   const summary = useMemo(() => {
     const parsed = safeParse(value);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -657,7 +660,10 @@ function ServiceFaqCard({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
+  // hide behind a one-line summary. Open by default; users can collapse
+  // with the same toggle if they want to focus on AI instructions.
+  const [expanded, setExpanded] = useState(true);
   const summary = useMemo(() => {
     const parsed = safeParse(value);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -700,7 +706,10 @@ function ServiceQualificationCard({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
+  // hide behind a one-line summary. Open by default; users can collapse
+  // with the same toggle if they want to focus on AI instructions.
+  const [expanded, setExpanded] = useState(true);
   const summary = useMemo(() => {
     const parsed = safeParse(value);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -855,7 +864,13 @@ function ServiceScopedInfoCard() {
 
 // ─── Status banners ──────────────────────────────────────────────────────
 
-function ArchivedWarningBanner() {
+function ArchivedWarningBanner({
+  onReactivate,
+  reactivating,
+}: {
+  onReactivate: () => void;
+  reactivating: boolean;
+}) {
   return (
     <div style={{
       padding: '12px 14px',
@@ -863,13 +878,32 @@ function ArchivedWarningBanner() {
       background: '#f3f4f6',
       border: '1px solid #e5e7eb',
       display: 'flex',
-      gap: 10,
+      gap: 12,
       alignItems: 'flex-start',
+      flexWrap: 'wrap',
     }}>
       <Archive size={16} style={{ color: '#6b7280', flexShrink: 0, marginTop: 2 }} />
-      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
-        <strong>This service is archived</strong> and is not used for AI replies. Edits stay saved, but the resolver will not match new leads to it. Reactivate from Settings → Services to bring it back into the AI flow.
+      <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+        <strong>This service is archived</strong> and is not used for AI replies. Edits stay saved, but the resolver will not match new leads to it. Reactivate to bring it back into the AI flow.
       </div>
+      <button
+        type="button"
+        onClick={onReactivate}
+        disabled={reactivating}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '7px 12px', borderRadius: 8,
+          border: '1px solid #bfdbfe',
+          background: '#2563eb', color: 'white',
+          fontSize: 12.5, fontWeight: 600,
+          cursor: reactivating ? 'not-allowed' : 'pointer',
+          fontFamily: 'inherit',
+          flexShrink: 0,
+        }}
+      >
+        {reactivating ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+        Reactivate
+      </button>
     </div>
   );
 }
@@ -919,6 +953,7 @@ function ServicePlaybookEditor({
   const [faqDraft, setFaqDraft] = useState<string>(profile.faqJson ?? '');
   const [qualDraft, setQualDraft] = useState<string>(profile.qualificationSchemaJson ?? '');
   const [saving, setSaving] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef<Set<PlaybookSectionKey>>(new Set());
@@ -926,6 +961,22 @@ function ServicePlaybookEditor({
   // Force a re-render when dirty state changes so the Save button enables/
   // disables. Ref-only tracking would otherwise keep the button stale.
   const [, bumpDirty] = useState(0);
+
+  const handleReactivate = async () => {
+    if (!confirm(`Reactivate "${profile.name}"? AI replies will resume for leads matched to this service.`)) return;
+    setReactivating(true);
+    setError(null);
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'active', true);
+      notify.success('Reactivated', `${profile.name} is active again.`);
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'Reactivation failed');
+      notify.error('Could not reactivate', err?.response?.data?.message ?? err?.message ?? 'Reactivation failed');
+    } finally {
+      setReactivating(false);
+    }
+  };
 
   // Reset state when profile changes (parent uses key=profile.id, so this
   // is belt-and-suspenders — the key already forces a remount).
@@ -1017,7 +1068,12 @@ function ServicePlaybookEditor({
       {!error && !saving && savedAt && <StatusPill status="saved" />}
 
       <ServiceHeader profile={profile} onRenamed={onSaved} />
-      {isArchived && <ArchivedWarningBanner />}
+      {isArchived && (
+        <ArchivedWarningBanner
+          onReactivate={handleReactivate}
+          reactivating={reactivating}
+        />
+      )}
       {isDraft && <DraftWarningBanner />}
       {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
 
@@ -1025,22 +1081,31 @@ function ServicePlaybookEditor({
       <ServiceFaqCard value={faqDraft} onChange={onFaqChange} />
       <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
 
+      {/* Service-scoped HOW labels make clear these are additions, not
+          global facts. Storage keys + runtime prompt assembly stay the
+          same — only the UI label changes. */}
       <HowSectionCard
         section="business_information"
         value={v2.business_information?.customInstructions ?? ''}
         onChange={(v) => onSectionChange('business_information', v)}
+        titleOverride="Service business details"
+        subtitleOverride={`What AI should know specifically when handling ${getServiceDisplayName(profile)} leads. Layered on top of Global business info.`}
       />
 
       <HowSectionCard
         section="pricing_guidance"
         value={v2.pricing_guidance?.customInstructions ?? ''}
         onChange={(v) => onSectionChange('pricing_guidance', v)}
+        titleOverride="Service pricing instructions"
+        subtitleOverride={`How AI should discuss pricing for ${getServiceDisplayName(profile)}. The pricing table above is the source of truth for numbers.`}
       />
 
       <HowSectionCard
         section="personality_brand_voice"
         value={v2.personality_brand_voice?.customInstructions ?? ''}
         onChange={(v) => onSectionChange('personality_brand_voice', v)}
+        titleOverride="Service communication style"
+        subtitleOverride={`Tone + voice tweaks specifically for ${getServiceDisplayName(profile)}. Layered on top of the Global brand voice.`}
       />
 
       {advancedMode && (
@@ -1361,6 +1426,7 @@ function HelpBlock() {
 
 function HowSectionCard({
   section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
+  titleOverride, subtitleOverride,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -1378,13 +1444,19 @@ function HowSectionCard({
    *  mode (qualification_guidance, booking_guidance, etc.). The textarea
    *  is fully editable; behavior is unchanged. */
   legacyAdvanced?: boolean;
+  /** PR-D.1 — override the canonical section label. Used on Service tabs
+   *  to clarify "Service business details" vs the Global "Business
+   *  Information" section; the storage key stays the same so runtime
+   *  prompt assembly is unchanged. */
+  titleOverride?: string;
+  subtitleOverride?: string;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
     <PlaybookSectionShell
       icon={Icon}
-      title={PLAYBOOK_SECTION_UI_LABELS[section]}
-      subtitle={PLAYBOOK_SECTION_SUBTITLES[section]}
+      title={titleOverride ?? PLAYBOOK_SECTION_UI_LABELS[section]}
+      subtitle={subtitleOverride ?? PLAYBOOK_SECTION_SUBTITLES[section]}
     >
       {isSuggested && <SuggestedFromWebsiteBadge />}
       {managedByGoals && <ManagedByGoalsBadge />}
