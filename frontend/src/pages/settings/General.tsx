@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { Building, Globe, Info, Loader2, Phone } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Building, Globe, Info, Loader2, Phone, Layers, Plus, Edit3,
+  CheckCircle2, Archive,
+} from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
 } from '../../components/automation/ui';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
-import { usersApi, authApi } from '../../services/api';
+import { usersApi, authApi, serviceProfilesApi, type ServiceProfile } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
+import { PresetPickerModal } from './Services';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -451,6 +455,8 @@ export function SettingsGeneral() {
         </FieldRow>
       </SettingCard>
 
+      <ServicesOfferedSection />
+
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />
     </div>
   );
@@ -470,5 +476,322 @@ function SettingsInput({ value, onChange, placeholder }: { value: string; onChan
         outline: 'none',
       }}
     />
+  );
+}
+
+// ─── Services Offered section (PR-D) ─────────────────────────────────────
+//
+// Services are part of business setup, so they live here in General as a
+// section rather than as their own top-level Settings tab. This list shows
+// every non-archived ServiceProfile with quick status transitions and a
+// "View / Edit playbook" deep link to AI Playbook (the canonical service
+// content surface now). "Create from preset" reuses the same modal the old
+// /settings?tab=services page used so the create flow stays one-click.
+//
+// Archived profiles are revealed via a "Show N archived" toggle, mirroring
+// the AI Playbook tab strip pattern from PR-B.1.
+
+const SECTION_ANCHOR = 'services-offered';
+const HOUSE_CLEANING_INDICATORS = /\b(bedroom|bathroom|sq ?ft|square ?feet|cleaning)\b/i;
+
+function detectHouseCleaning(profile: ServiceProfile): boolean {
+  try {
+    if (profile.pricingJson) {
+      const pricing = JSON.parse(profile.pricingJson);
+      if (pricing && pricing.pricingModel === 'bed_bath_grid') return true;
+    }
+  } catch { /* fall through */ }
+  const blob = `${profile.pricingJson ?? ''} ${profile.faqJson ?? ''}`;
+  return HOUSE_CLEANING_INDICATORS.test(blob);
+}
+
+function displayName(profile: ServiceProfile): string {
+  if (profile.isDefault && profile.name === 'Default Service' && detectHouseCleaning(profile)) {
+    return 'House Cleaning';
+  }
+  return profile.name;
+}
+
+function ServicesOfferedSection() {
+  const [profiles, setProfiles] = useState<ServiceProfile[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshTok, setRefreshTok] = useState(0);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
+    serviceProfilesApi
+      .list()
+      .then((r) => { if (!cancelled) setProfiles(r.profiles); })
+      .catch((err: any) => {
+        if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load services');
+      });
+    return () => { cancelled = true; };
+  }, [refreshTok]);
+
+  const refresh = () => setRefreshTok((t) => t + 1);
+
+  const { primary, archived } = useMemo(() => {
+    if (!profiles) return { primary: [] as ServiceProfile[], archived: [] as ServiceProfile[] };
+    const rank = (p: ServiceProfile) =>
+      p.status === 'active' ? (p.isDefault ? 0 : 1) : 2;
+    const primarySorted = profiles
+      .filter((p) => p.status !== 'archived')
+      .slice()
+      .sort((a, b) => {
+        const d = rank(a) - rank(b);
+        if (d !== 0) return d;
+        return displayName(a).localeCompare(displayName(b));
+      });
+    const archivedSorted = profiles
+      .filter((p) => p.status === 'archived')
+      .slice()
+      .sort((a, b) => displayName(a).localeCompare(displayName(b)));
+    return { primary: primarySorted, archived: archivedSorted };
+  }, [profiles]);
+
+  const handleActivate = async (profile: ServiceProfile) => {
+    setBusy(`activate-${profile.id}`);
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'active');
+      notify.success('Activated', `${displayName(profile)} is now active. AI replies will use this profile for matched leads.`);
+      refresh();
+    } catch (err: any) {
+      notify.error('Could not activate', err?.response?.data?.message ?? err?.message ?? 'Activation failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleArchive = async (profile: ServiceProfile) => {
+    if (!confirm(`Archive "${displayName(profile)}"? Matched leads will fall back to the default profile.`)) return;
+    setBusy(`archive-${profile.id}`);
+    try {
+      await serviceProfilesApi.transitionStatus(profile.id, 'archived');
+      notify.success('Archived', `${displayName(profile)} is archived.`);
+      refresh();
+    } catch (err: any) {
+      notify.error('Could not archive', err?.response?.data?.message ?? err?.message ?? 'Archive failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div id={SECTION_ANCHOR}>
+      <SettingCard
+        icon={Layers}
+        iconTone="blue"
+        title="Services offered"
+        subtitle="Each service has its own pricing, FAQ, and qualification questions. AI replies use the profile that matches the lead's category. Edit a service's playbook in AI Playbook → service tab."
+        contentPad="8px 24px 24px"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+          <button
+            type="button"
+            onClick={() => setShowPresetModal(true)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 14px', borderRadius: 8,
+              border: '1px solid #bfdbfe',
+              background: '#2563eb', color: 'white',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <Plus size={14} /> Create from preset
+          </button>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
+            New profiles start as drafts — AI replies stay paused until you activate.
+          </div>
+        </div>
+
+        {loadError && (
+          <div style={{
+            padding: 12, borderRadius: 8, background: '#fef2f2', color: '#b91c1c',
+            fontSize: 13, marginBottom: 12,
+          }}>{loadError}</div>
+        )}
+        {!profiles && !loadError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-ink-5)', fontSize: 13 }}>
+            <Loader2 size={14} className="animate-spin" /> Loading services…
+          </div>
+        )}
+        {profiles && profiles.length === 0 && (
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            No services yet. Click "Create from preset" above to get started with curated pricing + FAQ + qualification.
+          </div>
+        )}
+        {profiles && profiles.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {primary.map((p) => (
+              <ServiceRow
+                key={p.id}
+                profile={p}
+                busy={busy}
+                onActivate={() => handleActivate(p)}
+                onArchive={() => handleArchive(p)}
+              />
+            ))}
+            {showArchived && archived.map((p) => (
+              <ServiceRow
+                key={p.id}
+                profile={p}
+                busy={busy}
+                onActivate={() => handleActivate(p)}
+                onArchive={() => handleArchive(p)}
+              />
+            ))}
+            {archived.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowArchived((v) => !v)}
+                style={{
+                  alignSelf: 'flex-start',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 10px', borderRadius: 8,
+                  border: '1px dashed var(--lb-line)',
+                  background: 'transparent', color: 'var(--lb-ink-5)',
+                  fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  marginTop: 6,
+                }}
+              >
+                <Archive size={12} />
+                {showArchived ? 'Hide archived' : `Show ${archived.length} archived`}
+              </button>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, fontSize: 12, color: 'var(--lb-ink-5)' }}>
+          Per-account overrides and advanced settings live in{' '}
+          <a href="/settings?tab=services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
+            advanced services management
+          </a>.
+        </div>
+      </SettingCard>
+
+      {showPresetModal && (
+        <PresetPickerModal
+          onClose={() => setShowPresetModal(false)}
+          onCreated={() => { setShowPresetModal(false); refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ServiceRow({
+  profile,
+  busy,
+  onActivate,
+  onArchive,
+}: {
+  profile: ServiceProfile;
+  busy: string | null;
+  onActivate: () => void;
+  onArchive: () => void;
+}) {
+  const name = displayName(profile);
+  const isActive = profile.status === 'active';
+  const isDraft = profile.status === 'draft';
+  const isArchived = profile.status === 'archived';
+  return (
+    <div style={{
+      border: '1px solid var(--lb-line)',
+      borderRadius: 10,
+      padding: 14,
+      background: 'white',
+      display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap',
+    }}>
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{name}</div>
+          <StatusBadge status={profile.status} />
+          {profile.isDefault && <DefaultBadge />}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+          {isActive && !isArchived && 'AI replies use this profile for matched leads.'}
+          {isDraft && 'AI replies stay paused until you activate.'}
+          {isArchived && 'Not used for AI replies. Edits stay saved.'}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+        <a
+          href={`/settings?tab=ai-playbook&scope=${encodeURIComponent(profile.id)}`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '7px 12px', borderRadius: 8,
+            border: '1px solid var(--lb-line)',
+            background: 'white', color: 'var(--lb-ink-2)',
+            fontSize: 12.5, fontWeight: 600, textDecoration: 'none',
+          }}
+        >
+          <Edit3 size={13} /> View / edit playbook
+        </a>
+        {isDraft && (
+          <button
+            type="button"
+            onClick={onActivate}
+            disabled={busy === `activate-${profile.id}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '7px 12px', borderRadius: 8,
+              border: '1px solid #bfdbfe',
+              background: '#2563eb', color: 'white',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {busy === `activate-${profile.id}` ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+            Activate
+          </button>
+        )}
+        {isActive && (
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={busy === `archive-${profile.id}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '7px 12px', borderRadius: 8,
+              border: '1px solid var(--lb-line)',
+              background: 'white', color: 'var(--lb-ink-2)',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {busy === `archive-${profile.id}` ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
+            Archive
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ServiceProfile['status'] }) {
+  const styles: Record<ServiceProfile['status'], { bg: string; fg: string; border: string; label: string }> = {
+    draft:    { bg: '#fef3c7', fg: '#b45309', border: '#fde68a', label: 'DRAFT' },
+    active:   { bg: '#dcfce7', fg: '#15803d', border: '#bbf7d0', label: 'ACTIVE' },
+    archived: { bg: '#f3f4f6', fg: '#6b7280', border: '#e5e7eb', label: 'ARCHIVED' },
+  };
+  const s = styles[status];
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4,
+      background: s.bg, color: s.fg, border: `1px solid ${s.border}`,
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+    }}>{s.label}</span>
+  );
+}
+
+function DefaultBadge() {
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4,
+      background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe',
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+    }}>DEFAULT</span>
   );
 }

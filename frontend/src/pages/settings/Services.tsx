@@ -33,20 +33,52 @@ export function SettingsServices() {
   const [refreshTok, setRefreshTok] = useState(0);
   const refresh = () => setRefreshTok((t) => t + 1);
 
-  if (selectedId) {
-    return (
-      <ProfileDetail
-        profileId={selectedId}
-        onBack={() => setSelectedId(null)}
-      />
-    );
-  }
   return (
-    <ProfileList
-      onSelect={(id) => setSelectedId(id)}
-      refreshTok={refreshTok}
-      onChanged={refresh}
-    />
+    <div>
+      <LegacyServicesBanner />
+      {selectedId ? (
+        <ProfileDetail
+          profileId={selectedId}
+          onBack={() => setSelectedId(null)}
+        />
+      ) : (
+        <ProfileList
+          onSelect={(id) => setSelectedId(id)}
+          refreshTok={refreshTok}
+          onChanged={refresh}
+        />
+      )}
+    </div>
+  );
+}
+
+function LegacyServicesBanner() {
+  return (
+    <div style={{
+      padding: '12px 14px',
+      marginBottom: 16,
+      borderRadius: 10,
+      background: '#eff6ff',
+      border: '1px solid #bfdbfe',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-start',
+      fontSize: 13,
+      color: 'var(--lb-ink-2, #132044)',
+      lineHeight: 1.5,
+    }}>
+      <span style={{ flex: 1 }}>
+        <strong>Services moved.</strong> Service profiles are now managed under{' '}
+        <a href="/settings?tab=general#services-offered" style={{ color: '#1d4ed8', fontWeight: 600 }}>
+          General → Services Offered
+        </a>
+        . Pricing, FAQ, and qualification editors live on the per-service tabs in{' '}
+        <a href="/settings?tab=ai-playbook" style={{ color: '#1d4ed8', fontWeight: 600 }}>
+          AI Playbook
+        </a>
+        . This page is still accessible for advanced management (per-account overrides).
+      </span>
+    </div>
   );
 }
 
@@ -567,7 +599,7 @@ function OverridesSection({ profileId, profileName }: { profileId: string; profi
 
 // ─── Preset picker (unchanged from PR #255) ────────────────────────
 
-function PresetPickerModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [presets, setPresets] = useState<ServiceProfilePreset[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creatingKey, setCreatingKey] = useState<string | null>(null);
@@ -709,7 +741,7 @@ function slugifyKey(input: string): string {
     .slice(0, 48);
 }
 
-function PricingEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+export function PricingEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   const initial = useMemo(() => decidePricingMode(value), [value]);
   const [mode, setMode] = useState<PricingMode>(initial.mode);
 
