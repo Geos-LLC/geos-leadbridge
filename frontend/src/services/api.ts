@@ -323,8 +323,13 @@ export const platformsApi = {
     const { data } = await api.get('/v1/platforms/health');
     return data;
   },
-  getAuthUrl: async (forceLogin = false): Promise<{ authUrl: string }> => {
-    const { data } = await api.get('/v1/thumbtack/auth/url', { params: forceLogin ? { forceLogin: 'true' } : undefined });
+  getAuthUrl: async (forceLogin = false, loginHint?: string): Promise<{ authUrl: string }> => {
+    const params: Record<string, string> = {};
+    if (forceLogin) params.forceLogin = 'true';
+    if (loginHint) params.loginHint = loginHint;
+    const { data } = await api.get('/v1/thumbtack/auth/url', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
     return data;
   },
   disconnect: async (): Promise<void> => {

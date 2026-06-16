@@ -289,7 +289,7 @@ export class PlatformService {
    * Get OAuth authorization URL
    * State is an encrypted token containing userId + expiry — survives server restarts.
    */
-  async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string): Promise<string> {
+  async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string, loginHint?: string): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
 
     // Encode userId + expiry into the state param itself (no in-memory Map needed).
@@ -299,7 +299,7 @@ export class PlatformService {
     const encrypted = EncryptionUtil.encrypt(statePayload, this.encryptionKey);
     const state = encrypted.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl);
+    return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl, loginHint);
   }
 
   /**

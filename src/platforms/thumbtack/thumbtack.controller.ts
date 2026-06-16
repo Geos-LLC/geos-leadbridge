@@ -196,8 +196,19 @@ export class ThumbtackController {
   // ==========================================
 
   @Get('auth/url')
-  async getAuthUrl(@CurrentUser() user: any, @Query('forceLogin') forceLogin?: string) {
-    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK, forceLogin === 'true');
+  async getAuthUrl(
+    @CurrentUser() user: any,
+    @Query('forceLogin') forceLogin?: string,
+    @Query('loginHint') loginHint?: string,
+  ) {
+    const trimmedHint = loginHint?.trim() || undefined;
+    const authUrl = await this.platformService.getAuthUrl(
+      user.id,
+      PlatformName.THUMBTACK,
+      forceLogin === 'true',
+      undefined,
+      trimmedHint,
+    );
     return { authUrl };
   }
 

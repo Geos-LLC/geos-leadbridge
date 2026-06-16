@@ -69,7 +69,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // OAuth & Connection Management
   // ==========================================
 
-  getAuthUrl(_userId: string, state: string, forceLogin = false, callbackUrl?: string): string {
+  getAuthUrl(_userId: string, state: string, forceLogin = false, callbackUrl?: string, loginHint?: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: callbackUrl || this.redirectUri,
@@ -90,6 +90,18 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     // max_age=0 tells the OIDC provider the auth must be fresh (no cached session)
     params.set('prompt', 'login');
     params.set('max_age', '0');
+
+    // OIDC login_hint — tells TT/Hydra which identity the user wants to
+    // authenticate as. Without it, TT's login page pre-fills the email of
+    // whichever account last used this browser's TT session cookie, which
+    // makes connecting a *second* TT account to the same LB tenant nearly
+    // impossible — the popup-based logout in ConnectionModal is unreliable
+    // and `prompt=login` only forces password re-entry for the same email.
+    // Passing login_hint=<email> bypasses that: TT pre-fills the chosen
+    // email and treats it as a fresh login.
+    if (loginHint) {
+      params.set('login_hint', loginHint);
+    }
 
     return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
