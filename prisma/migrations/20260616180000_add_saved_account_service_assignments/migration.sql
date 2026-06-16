@@ -5,5 +5,5 @@
 -- Availability surface. NULL preserves the current resolver behavior
 -- (pure category matching), so this migration is a pure no-op for any
 -- tenant that hasn't configured assignments yet.
-ALTER TABLE "SavedAccount"
+ALTER TABLE "saved_accounts"
   ADD COLUMN "serviceProfileAssignmentsJson" TEXT;
