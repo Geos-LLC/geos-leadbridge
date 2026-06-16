@@ -952,3 +952,202 @@ describe('ServiceProfileService — per-field fallback (Phase 1b)', () => {
     expect(out.fieldSources.pricing).toBe('service_profile');
   });
 });
+
+// ─── PR-E: account ↔ service assignments ─────────────────────────────
+
+describe('ServiceProfileService — account-service assignments (PR-E)', () => {
+  it('case 1: account with no assignments uses current resolver behavior', async () => {
+    // serviceProfileAssignmentsJson=null → pre-PR-E behavior preserved
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          name: 'House Cleaning',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
+          pricingJson: '{"base":219}',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        // serviceProfileAssignmentsJson omitted — undefined treated as null
+      },
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-cleaning');
+  });
+
+  it('case 2: account with House Cleaning enabled resolves House Cleaning', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          name: 'House Cleaning',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
+        }),
+        buildProfile({
+          id: 'prof-uphol',
+          name: 'Upholstery',
+          slug: 'upholstery',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        serviceProfileAssignmentsJson: JSON.stringify({
+          enabledServiceProfileIds: ['prof-cleaning'],
+          defaultServiceProfileId: null,
+        }),
+      },
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-cleaning');
+  });
+
+  it('case 3: account with Upholstery NOT enabled but category matches Upholstery returns setup_mismatch ai_paused', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
+        }),
+        buildProfile({
+          id: 'prof-uphol',
+          name: 'Upholstery',
+          slug: 'upholstery',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Upholstery', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        serviceProfileAssignmentsJson: JSON.stringify({
+          enabledServiceProfileIds: ['prof-cleaning'],
+          defaultServiceProfileId: null,
+        }),
+      },
+    );
+    expect(result.status).toBe('ai_paused');
+    if (result.status !== 'ai_paused') throw new Error('typeguard');
+    expect(result.reason).toBe('setup_mismatch');
+    expect(result.profileId).toBe('prof-uphol');
+  });
+
+  it('case 4: account with Upholstery enabled resolves Upholstery', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-uphol',
+          name: 'Upholstery',
+          slug: 'upholstery',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
+          pricingJson: '{"sofa":96}',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Upholstery', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        serviceProfileAssignmentsJson: JSON.stringify({
+          enabledServiceProfileIds: ['prof-uphol'],
+          defaultServiceProfileId: 'prof-uphol',
+        }),
+      },
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-uphol');
+    expect(result.effectivePricingJson).toBe('{"sofa":96}');
+  });
+
+  it('case 5: empty enabledServiceProfileIds[] falls back to legacy behavior (no enforcement)', async () => {
+    // Spec: "If no services selected → use tenant default profile as fallback."
+    // Existing tenants with an empty array should NOT have AI paused —
+    // the resolver behaves like the not-configured case.
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        serviceProfileAssignmentsJson: JSON.stringify({
+          enabledServiceProfileIds: [],
+          defaultServiceProfileId: null,
+        }),
+      },
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-cleaning');
+  });
+
+  it('case 6: malformed assignments JSON behaves like not-configured', async () => {
+    // Resolver must never throw on bad JSON — parser returns null and
+    // legacy resolver behavior takes over so a corrupted blob doesn't
+    // brick AI replies for an account.
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
+      {
+        id: 'acct-1',
+        servicePricingJson: null,
+        faqJson: null,
+        serviceOverridesJson: null,
+        serviceProfileAssignmentsJson: 'not valid json {{',
+      },
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-cleaning');
+  });
+});

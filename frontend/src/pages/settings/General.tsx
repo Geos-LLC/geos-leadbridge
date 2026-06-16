@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building, Globe, Info, Loader2, Phone, Layers, Plus, Edit3,
-  CheckCircle2, Archive,
+  CheckCircle2, Archive, Settings2, X,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
@@ -512,20 +512,43 @@ function displayName(profile: ServiceProfile): string {
   return profile.name;
 }
 
+type SavedAccountAssignment = {
+  savedAccountId: string;
+  businessName: string;
+  platform: string;
+  configured: boolean;
+  enabledServiceProfileIds: string[];
+  defaultServiceProfileId: string | null;
+};
+
 function ServicesOfferedSection() {
   const [profiles, setProfiles] = useState<ServiceProfile[] | null>(null);
+  const [assignments, setAssignments] = useState<SavedAccountAssignment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshTok, setRefreshTok] = useState(0);
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [managingProfileId, setManagingProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
-    serviceProfilesApi
-      .list()
-      .then((r) => { if (!cancelled) setProfiles(r.profiles); })
+    Promise.all([
+      serviceProfilesApi.list(),
+      serviceProfilesApi.listSavedAccountAssignments().catch((err) => {
+        // Assignments endpoint is new in PR-E. If it fails on a tenant
+        // hitting an older deploy, we still show the services list.
+        // eslint-disable-next-line no-console
+        console.warn('listSavedAccountAssignments failed', err);
+        return { accounts: [] };
+      }),
+    ])
+      .then(([profileRes, assignRes]) => {
+        if (cancelled) return;
+        setProfiles(profileRes.profiles);
+        setAssignments(assignRes.accounts);
+      })
       .catch((err: any) => {
         if (!cancelled) setLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load services');
       });
@@ -649,9 +672,11 @@ function ServicesOfferedSection() {
                 key={p.id}
                 profile={p}
                 busy={busy}
+                assignments={assignments}
                 onActivate={() => handleActivate(p)}
                 onArchive={() => handleArchive(p)}
                 onReactivate={() => handleReactivate(p)}
+                onManageAvailability={() => setManagingProfileId(p.id)}
               />
             ))}
             {showArchived && archived.map((p) => (
@@ -659,9 +684,11 @@ function ServicesOfferedSection() {
                 key={p.id}
                 profile={p}
                 busy={busy}
+                assignments={assignments}
                 onActivate={() => handleActivate(p)}
                 onArchive={() => handleArchive(p)}
                 onReactivate={() => handleReactivate(p)}
+                onManageAvailability={() => setManagingProfileId(p.id)}
               />
             ))}
             {archived.length > 0 && (
@@ -699,6 +726,15 @@ function ServicesOfferedSection() {
           onCreated={() => { setShowPresetModal(false); refresh(); }}
         />
       )}
+
+      {managingProfileId && profiles && (
+        <ManageAvailabilityModal
+          profile={profiles.find((p) => p.id === managingProfileId) ?? null}
+          assignments={assignments ?? []}
+          onClose={() => setManagingProfileId(null)}
+          onSaved={() => { setManagingProfileId(null); refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -706,20 +742,41 @@ function ServicesOfferedSection() {
 function ServiceRow({
   profile,
   busy,
+  assignments,
   onActivate,
   onArchive,
   onReactivate,
+  onManageAvailability,
 }: {
   profile: ServiceProfile;
   busy: string | null;
+  assignments: SavedAccountAssignment[] | null;
   onActivate: () => void;
   onArchive: () => void;
   onReactivate: () => void;
+  onManageAvailability: () => void;
 }) {
   const name = displayName(profile);
   const isActive = profile.status === 'active';
   const isDraft = profile.status === 'draft';
   const isArchived = profile.status === 'archived';
+
+  // PR-E — derive "Offered by" from per-account assignments.
+  // - configured accounts that include this profile → counted as offering it
+  // - unconfigured accounts → treated as "not declared" (omitted from
+  //   the count so users don't conflate silence with explicit opt-in)
+  const accountsOffering = useMemo(() => {
+    if (!assignments) return [] as SavedAccountAssignment[];
+    return assignments.filter(
+      (a) => a.configured && a.enabledServiceProfileIds.includes(profile.id),
+    );
+  }, [assignments, profile.id]);
+
+  const totalConfigured = useMemo(() => {
+    if (!assignments) return 0;
+    return assignments.filter((a) => a.configured).length;
+  }, [assignments]);
+
   return (
     <div style={{
       border: '1px solid var(--lb-line)',
@@ -739,6 +796,31 @@ function ServiceRow({
           {isDraft && 'AI replies stay paused until you activate.'}
           {isArchived && 'Not used for AI replies. Edits stay saved.'}
         </div>
+        {assignments && !isArchived && (
+          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6 }}>
+            {accountsOffering.length === 0 && totalConfigured === 0 && (
+              <span>
+                <strong>Offered by:</strong>{' '}
+                <span style={{ color: 'var(--lb-ink-4)' }}>all connected accounts (no per-account setup)</span>
+              </span>
+            )}
+            {accountsOffering.length === 0 && totalConfigured > 0 && (
+              <span style={{ color: '#b45309' }}>
+                <strong>Not offered by any account.</strong> Click Manage availability to enable.
+              </span>
+            )}
+            {accountsOffering.length > 0 && (
+              <span>
+                <strong>Offered by:</strong>{' '}
+                {accountsOffering
+                  .slice(0, 3)
+                  .map((a) => a.businessName || a.platform)
+                  .join(', ')}
+                {accountsOffering.length > 3 && ` + ${accountsOffering.length - 3} more`}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
         <a
@@ -753,6 +835,21 @@ function ServiceRow({
         >
           <Edit3 size={13} /> View / edit playbook
         </a>
+        {!isArchived && (
+          <button
+            type="button"
+            onClick={onManageAvailability}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '7px 12px', borderRadius: 8,
+              border: '1px solid var(--lb-line)',
+              background: 'white', color: 'var(--lb-ink-2)',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <Settings2 size={13} /> Manage availability
+          </button>
+        )}
         {isDraft && (
           <button
             type="button"
@@ -832,5 +929,221 @@ function DefaultBadge() {
       background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe',
       fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
     }}>DEFAULT</span>
+  );
+}
+
+// ─── Manage Availability modal (PR-E) ────────────────────────────────────
+//
+// Lets the operator pick which connected accounts offer this service.
+// Save fans out one PUT per touched account (only accounts the user
+// actually toggled — untouched configured rows stay configured,
+// untouched unconfigured rows stay unconfigured).
+
+function ManageAvailabilityModal({
+  profile,
+  assignments,
+  onClose,
+  onSaved,
+}: {
+  profile: ServiceProfile | null;
+  assignments: SavedAccountAssignment[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  // Local checkbox state keyed by savedAccountId. true = this account
+  // OFFERS the profile. We seed from the assignments snapshot and only
+  // diff-PUT on save.
+  const initial = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const a of assignments) {
+      out[a.savedAccountId] = a.configured && profile
+        ? a.enabledServiceProfileIds.includes(profile.id)
+        : false;
+    }
+    return out;
+  }, [assignments, profile]);
+
+  const [picks, setPicks] = useState<Record<string, boolean>>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset when modal switches profiles (parent unmounts on close, so
+  // this mostly covers programmatic profile switching if we add it).
+  useEffect(() => { setPicks(initial); }, [initial]);
+
+  if (!profile) return null;
+
+  const dirty =
+    Object.keys(initial).some((id) => initial[id] !== picks[id]) ||
+    Object.keys(picks).some((id) => picks[id] !== initial[id]);
+
+  const handleSave = async () => {
+    if (!dirty) { onSaved(); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const writes: Promise<unknown>[] = [];
+      for (const a of assignments) {
+        const wasEnabled = a.configured && a.enabledServiceProfileIds.includes(profile.id);
+        const willEnable = picks[a.savedAccountId] === true;
+        if (wasEnabled === willEnable && a.configured) continue;
+        // Build the new list: existing enabled ± this profile.
+        const baseList = a.configured
+          ? a.enabledServiceProfileIds.filter((id) => id !== profile.id)
+          : [];
+        const nextList = willEnable ? [...baseList, profile.id] : baseList;
+        writes.push(
+          serviceProfilesApi.setSavedAccountAssignments(a.savedAccountId, {
+            enabledServiceProfileIds: nextList,
+            defaultServiceProfileId: a.defaultServiceProfileId,
+          }),
+        );
+      }
+      const results = await Promise.allSettled(writes);
+      const failures = results.filter((r) => r.status === 'rejected');
+      if (failures.length > 0) {
+        setError(`${failures.length} of ${writes.length} accounts failed to update`);
+        notify.error('Could not save availability', `${failures.length} of ${writes.length} updates failed`);
+      } else {
+        notify.success('Availability saved', `${displayName(profile)} availability updated.`);
+        onSaved();
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'Save failed');
+      notify.error('Could not save availability', err?.response?.data?.message ?? err?.message ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+        zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'white', borderRadius: 16, width: 'min(560px, 100%)',
+          maxHeight: '85vh', overflow: 'auto',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', padding: 24,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
+              Service availability for {displayName(profile)}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', lineHeight: 1.45 }}>
+              Pick which connected accounts offer this service. Leads from accounts that don't offer it will pause AI replies and flag a setup mismatch.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              padding: 6, background: 'transparent', border: 'none',
+              color: 'var(--lb-ink-5)', cursor: 'pointer', borderRadius: 6,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {assignments.length === 0 && (
+          <div style={{
+            padding: 12, borderRadius: 8, background: '#fef3c7',
+            color: '#92400e', fontSize: 13,
+          }}>
+            No connected accounts yet. Connect Thumbtack / Yelp / Angi first to assign services per location.
+          </div>
+        )}
+
+        {assignments.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+            {assignments.map((a) => {
+              const checked = picks[a.savedAccountId] === true;
+              return (
+                <label
+                  key={a.savedAccountId}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 12px', borderRadius: 10,
+                    border: `1px solid ${checked ? 'var(--lb-accent-line, #bfdbfe)' : 'var(--lb-line)'}`,
+                    background: checked ? 'var(--lb-accent-tint, #eff6ff)' : 'white',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => setPicks((prev) => ({ ...prev, [a.savedAccountId]: e.target.checked }))}
+                    style={{ width: 16, height: 16, accentColor: '#2563eb' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                      {a.businessName || '(unnamed)'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+                      {a.platform || 'unknown'}
+                      {!a.configured && (
+                        <span style={{ marginLeft: 8, color: '#92400e' }}>· no per-account setup yet</span>
+                      )}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        {error && (
+          <div style={{
+            marginTop: 12, padding: 10, borderRadius: 8,
+            background: '#fee2e2', color: '#b91c1c', fontSize: 12.5,
+          }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            style={{
+              padding: '8px 14px', borderRadius: 8,
+              border: '1px solid var(--lb-line)',
+              background: 'white', color: 'var(--lb-ink-2)',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !dirty || assignments.length === 0}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 14px', borderRadius: 8,
+              border: 'none',
+              background: !dirty || assignments.length === 0 ? '#cbd5e1' : '#2563eb',
+              color: 'white',
+              fontSize: 13, fontWeight: 600,
+              cursor: saving || !dirty || assignments.length === 0 ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            Save availability
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -137,6 +137,7 @@ export class InstantTextAiService {
         servicePricingJson: true,
         faqJson: true,
         serviceOverridesJson: true,
+        serviceProfileAssignmentsJson: true,
         followUpSettingsJson: true,
         followUpTimezone: true,
         userId: true,

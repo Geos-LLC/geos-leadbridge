@@ -52,8 +52,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, serviceProfileAssignmentsJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, serviceProfileAssignmentsJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     // Dual-read seam — resolve a ServiceProfile for this lead and
@@ -160,8 +160,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, globalAiChatInstructionsJson: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, serviceProfileAssignmentsJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { id: true, businessName: true, servicePricingJson: true, faqJson: true, serviceOverridesJson: true, serviceProfileAssignmentsJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     // Dual-read seam — same call as preview-for-lead. Returns the

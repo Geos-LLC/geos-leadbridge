@@ -234,6 +234,46 @@ export class ServiceProfileController {
     }
   }
 
+  // ─── PR-E: account ↔ service assignments ──────────────────────────
+
+  @Get('saved-accounts/service-assignments')
+  async listSavedAccountAssignments(@Req() req: any) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    return { accounts: await this.service.listSavedAccountAssignments(userId) };
+  }
+
+  @Put('saved-accounts/:savedAccountId/service-assignments')
+  async setSavedAccountAssignments(
+    @Req() req: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: {
+      enabledServiceProfileIds?: string[] | null;
+      defaultServiceProfileId?: string | null;
+    },
+  ) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    // null is the explicit "clear assignments" signal; anything else
+    // must be an array. Treat undefined as "no change" — but since
+    // PUT semantics are full-replace, we require the caller to pass
+    // either an explicit array or explicit null.
+    const enabled = body?.enabledServiceProfileIds;
+    if (enabled !== null && !Array.isArray(enabled)) {
+      throw new BadRequestException('enabledServiceProfileIds must be an array or null');
+    }
+    try {
+      return await this.service.setSavedAccountAssignments(userId, savedAccountId, {
+        enabledServiceProfileIds: enabled,
+        defaultServiceProfileId: body?.defaultServiceProfileId ?? null,
+      });
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      if (err?.code === 'INVALID_ASSIGNMENT') throw new BadRequestException(err.message);
+      throw err;
+    }
+  }
+
   @Delete('service-profiles/:id/overrides/:savedAccountId')
   async clearOverride(
     @Req() req: any,
