@@ -11,7 +11,6 @@ import { useAppStore } from '../../store/appStore';
 import { usersApi, authApi, serviceProfilesApi, type ServiceProfile } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
-import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
 import { ManualBusinessInfoModal } from '../../components/ManualBusinessInfoModal';
 import { AddServiceModal } from './Services';
 
@@ -35,7 +34,13 @@ export function SettingsGeneral() {
 
   const [business, setBusiness] = useState<string>((user as any)?.businessName || user?.name || '');
   const [tz, setTz] = useState<string>('America/New_York');
-  const [website, setWebsite] = useState<string>(user?.website ?? '');
+  // Default to empty — the URL field is hydrated authoritatively by the
+  // getBusinessProfileUrl effect below (TT > Yelp > User.website server-
+  // side resolution). Seeding from user.website here races the API call:
+  // on reload, the bookingkoala value would land before the TT URL,
+  // and the effect's !website.trim() guard then bailed (reported
+  // 2026-06-17 after the effect-level fix in 07cd20ae).
+  const [website, setWebsite] = useState<string>('');
   const [websiteMetadata, setWebsiteMetadata] = useState<any>((user as any)?.websiteMetadataJson ?? null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
@@ -463,13 +468,11 @@ export function SettingsGeneral() {
               {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
               {verifying ? 'Fetching…' : 'Fetch & save'}
             </button>
-            {/* Apply-to-Playbook stays for the website path — only shows
-                a usable seed when a generic website was the source. The
-                TT/Yelp paths apply automatically during Fetch & save. */}
-            <ApplyToPlaybookButton
-              hasSeed={!!websiteMetadata?.playbookSeed}
-              tone="settings"
-            />
+            {/* "Apply to AI Playbook" button removed 2026-06-17 — Fetch &
+                save already runs applyPlaybookSeedToAccounts +
+                applyFaqFromWebsiteSeed for ALL three branches (website,
+                TT, Yelp), so the second button was a confusing no-op
+                that just re-ran what already happened. */}
           </div>
         </FieldRow>
         {verifyError && (
