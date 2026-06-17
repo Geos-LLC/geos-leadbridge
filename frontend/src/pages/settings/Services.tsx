@@ -699,10 +699,14 @@ export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void;
 // Replaces the old "Create from preset" entry point. The choice screen
 // gives tenants two paths:
 //
-//   "Start from scratch" — POST /v1/service-profiles with just a name.
-//     The new draft profile has null pricingJson/faqJson, so the
-//     per-Service tab in AI Playbook falls into its generic editor
-//     (item rows + Q&A pairs). For services we don't ship a preset for.
+//   "Create custom service" — POST /v1/service-profiles with just a
+//     name. The backend seeds the new draft from the generic
+//     "Custom Service" preset: hourly $100 rate + $100 minimum,
+//     quote-required, 6 generic FAQs, 4 required + 2 optional
+//     qualification questions, and service rules that lock the AI out
+//     of making license / insurance / final-price promises. Tenants
+//     reach this path when none of the curated presets fits their
+//     actual line of work (roofing, mobile mechanic, photography…).
 //
 //   "Use a template" — same preset list the old PresetPickerModal showed.
 //     House Cleaning + Upholstery & Furniture Cleaning (currently).
@@ -722,7 +726,7 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
   const [creatingKey, setCreatingKey] = useState<string | null>(null);
 
   // Lazy-load presets only when the user picks "Use a template" — keeps
-  // the modal snappy when they're going to "Start from scratch" anyway.
+  // the modal snappy when they're going to "Create custom service" anyway.
   useEffect(() => {
     if (view !== 'preset' || presets !== null || presetLoadError !== null) return;
     let cancelled = false;
@@ -738,7 +742,10 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
     setCreatingBlank(true);
     try {
       await serviceProfilesApi.createBlank(name);
-      notify.success('Service created', `${name} is in draft. Add pricing and FAQ in AI Playbook → service tab.`);
+      notify.success(
+        'Service created',
+        `${name} is in draft with the generic starter template. Review the pricing, FAQ, and qualification questions in AI Playbook → service tab before activating.`,
+      );
       onCreated();
     } catch (err: any) {
       const status = err?.response?.status;
@@ -773,11 +780,11 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
   };
 
   const headerTitle =
-    view === 'blank' ? 'Start from scratch' :
+    view === 'blank' ? 'Create custom service' :
     view === 'preset' ? 'Pick a template' :
     'Add service';
   const headerSubtitle =
-    view === 'blank' ? 'Give your service a name. You can add pricing, FAQ, and qualification questions later from AI Playbook → service tab.' :
+    view === 'blank' ? 'Give your service a name. We pre-fill safe defaults (hourly rate, generic FAQ, scope-first questions) — review and edit them in AI Playbook → service tab before activating.' :
     view === 'preset' ? 'Each template bundles pricing, FAQ, and qualification questions sourced from the platform.' :
     'How do you want to start?';
 
@@ -824,9 +831,22 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
               }}
             >
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Start from scratch</div>
-                <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
-                  Empty pricing, empty FAQ. Best when none of the templates fit your service.
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Create custom service</div>
+                <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 6 }}>
+                  Pre-filled with safe generic defaults (hourly rate, scope-first questions, neutral FAQ). Best when none of the templates fit your line of work.
+                </div>
+                <div style={{
+                  display: 'inline-block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#92400e',
+                  background: '#fef3c7',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.04,
+                }}>
+                  Generic starter template — review before activating
                 </div>
               </div>
               <Plus size={16} color="var(--lb-text-muted)" />

@@ -58,8 +58,16 @@ export type PresetQualificationSchema = {
  *                    preset comment for the safe AI fallback contract.
  *
  *   flat_rate      — single price (cleanouts, simple jobs).
+ *
+ *   hourly         — labor-rate + minimum-charge. Used by the generic
+ *                    "Custom Service" preset that powers the "Create
+ *                    custom service" flow when no provider category
+ *                    matches. The deterministic engine does NOT quote
+ *                    finals from this shape; the AI shares the rate as
+ *                    guidance ("starts around $X/hour") and defers the
+ *                    bound number to the owner until scope is confirmed.
  */
-export type PricingModel = 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
+export type PricingModel = 'bed_bath_grid' | 'item_quantity' | 'flat_rate' | 'hourly';
 
 export type PresetItemPrice = {
   key: string;
@@ -97,6 +105,22 @@ export type PresetPricing = {
   items?: PresetItemPrice[];
   /** Add-ons that customers can layer onto the base order. */
   addOns?: PresetAddOnPrice[];
+  /** ISO currency code — defaults to USD when omitted. Used by the
+   *  hourly model and any future flat-rate quoter. */
+  currency?: string;
+  /** Hourly labor rate the AI surfaces as "starts around $X/hour". Only
+   *  meaningful when pricingModel === 'hourly'. */
+  laborRate?: number;
+  /** Floor the AI may quote — "most projects start around $X". Only
+   *  meaningful when pricingModel === 'hourly' or 'flat_rate'. */
+  minimumCharge?: number;
+  /** When true, the AI MUST NOT present any number as a guaranteed
+   *  final price; it shares the rate/floor as guidance and routes the
+   *  bound quote to the owner. Defaults to true for hourly. */
+  quoteRequired?: boolean;
+  /** Free-text caveat shown alongside the rate ("Final pricing depends
+   *  on scope, complexity, and location"). Used by the hourly model. */
+  notes?: string;
 };
 
 /**
