@@ -1916,6 +1916,9 @@ export const usersApi = {
      *  Gap between this and fieldsApplied means "scrape worked, data
      *  already saved." Use it to choose the right confirmation copy. */
     fieldsExtracted?: number;
+    /** TT/Yelp only — actual key/value pairs the scrape returned, for
+     *  rendering an expandable "what we pulled" panel without a 2nd call. */
+    extractedFields?: Record<string, string | string[]>;
     conflictsRaised: number;
     websiteMetadata?: WebsiteMetadataPayload;
     warning?: string;

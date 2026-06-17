@@ -1136,6 +1136,11 @@ export class UsersService {
      *  fieldsExtracted>0 — the UI uses the gap to distinguish "page has
      *  no usable data" from "page's data already matches what we have." */
     fieldsExtracted: number;
+    /** The actual key/value pairs the scrape returned. Lets the UI
+     *  render an expandable "what we found" view without a second API
+     *  call. Arrays land as-is; scalars as plain strings. Empty when
+     *  fieldsExtracted=0. */
+    extractedFields?: Record<string, string | string[]>;
     conflictsRaised: number;
     warning?: string;
   }> {
@@ -1235,6 +1240,7 @@ export class UsersService {
       success: true,
       fieldsApplied: Math.max(0, fieldsApplied),
       fieldsExtracted,
+      extractedFields: patch as Record<string, string | string[]>,
       conflictsRaised: newConflicts.length,
     };
   }
@@ -1265,6 +1271,9 @@ export class UsersService {
      *  extractor returned BEFORE the merge — lets the UI tell "extractor
      *  found nothing" from "everything found already matches." */
     fieldsExtracted: number;
+    /** See seedBusinessInfoFromAccount — actual key/value pairs the
+     *  extractor produced, so the UI can render a "what we found" panel. */
+    extractedFields?: Record<string, string | string[]>;
     conflictsRaised: number;
     warning?: string;
   }> {
@@ -1346,6 +1355,7 @@ export class UsersService {
       success: true,
       fieldsApplied,
       fieldsExtracted,
+      extractedFields: patch as Record<string, string | string[]>,
       conflictsRaised: newConflicts.length,
     };
   }
@@ -1493,6 +1503,9 @@ export class UsersService {
      *  The website branch doesn't populate this (its surface is the
      *  WebsitePreviewCard, not the emerald confirmation card). */
     fieldsExtracted?: number;
+    /** TT/Yelp only — actual key/value pairs the scrape returned, so the
+     *  confirmation card can render an expandable "what we pulled" panel. */
+    extractedFields?: Record<string, string | string[]>;
     conflictsRaised: number;
     websiteMetadata?: VerifyWebsiteResult['metadata'];
     warning?: string;
@@ -1628,6 +1641,7 @@ export class UsersService {
     // account would double-merge conflicts.
     let fieldsApplied = 0;
     let fieldsExtracted = 0;
+    let extractedFields: Record<string, string | string[]> | undefined;
     let conflictsRaised = 0;
     let seededOk = false;
     try {
@@ -1639,6 +1653,7 @@ export class UsersService {
       // bizInfo" — the merge collapses both to fieldsApplied=0 but the
       // tenant-facing message is very different.
       fieldsExtracted = seed?.fieldsExtracted ?? 0;
+      extractedFields = seed?.extractedFields;
       if (seed?.success) {
         fieldsApplied = seed.fieldsApplied ?? 0;
         conflictsRaised = seed.conflictsRaised ?? 0;
@@ -1680,6 +1695,7 @@ export class UsersService {
       accountsAffected: accounts.length,
       fieldsApplied,
       fieldsExtracted,
+      extractedFields,
       conflictsRaised,
     };
   }

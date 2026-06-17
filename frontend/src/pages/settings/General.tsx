@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building, Globe, Info, Loader2, Phone, Layers, Plus, Edit3,
-  CheckCircle2, Archive, Settings2, X,
+  CheckCircle2, Archive, Settings2, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
@@ -64,8 +64,13 @@ export function SettingsGeneral() {
     // structured info was extracted" when the scrape was extracting 7
     // fields every time (just all already saved).
     fieldsExtracted: number;
+    /** Actual key/value pairs the scrape returned. Powers the
+     *  expandable "Show what we pulled" disclosure under the card. */
+    extractedFields?: Record<string, string | string[]>;
     accountsAffected: number;
   } | null>(null);
+  // Expand/collapse the "what we pulled" disclosure under the emerald card.
+  const [showExtracted, setShowExtracted] = useState(false);
   const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone || '');
   const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
   const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
@@ -206,8 +211,12 @@ export function SettingsGeneral() {
         url: res.savedUrl,
         fieldsApplied: res.fieldsApplied ?? 0,
         fieldsExtracted: res.fieldsExtracted ?? 0,
+        extractedFields: res.extractedFields,
         accountsAffected: res.accountsAffected ?? 0,
       });
+      // Default the disclosure to collapsed on each fresh fetch so the
+      // card doesn't visually balloon every Pull click.
+      setShowExtracted(false);
       if (res.platform === 'website') {
         // Generic site path also updated User.website + metadata.
         setWebsiteMetadata((res.websiteMetadata as any) ?? null);
@@ -539,6 +548,58 @@ export function SettingsGeneral() {
                     to fill the Playbook by hand.
                   </div>
                 )}
+                {/* Expandable "Show what we pulled" — renders the extractedFields
+                    blob the backend now returns. Tenants asked for inline
+                    visibility of WHICH fields were saved; tells them more
+                    than a count and saves a trip to Settings → AI Playbook
+                    just to verify the scrape did the right thing. */}
+                {lastApply.extractedFields && Object.keys(lastApply.extractedFields).length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowExtracted((v) => !v)}
+                      style={{
+                        background: 'transparent', border: 0, padding: 0,
+                        color: '#065f46', fontSize: 11.5, fontWeight: 600,
+                        cursor: 'pointer', fontFamily: 'inherit',
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      {showExtracted ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      {showExtracted ? 'Hide details' : 'Show what we pulled'}
+                    </button>
+                    {showExtracted && (
+                      <div style={{
+                        marginTop: 6,
+                        padding: '8px 10px',
+                        background: 'white',
+                        border: '1px solid #d1fae5',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: '#064e3b',
+                        display: 'grid',
+                        gridTemplateColumns: 'auto 1fr',
+                        columnGap: 12,
+                        rowGap: 4,
+                      }}>
+                        {Object.entries(lastApply.extractedFields).map(([key, value]) => {
+                          const display = formatExtractedValue(value as any);
+                          if (!display) return null;
+                          return (
+                            <React.Fragment key={key}>
+                              <div style={{ fontWeight: 600, color: '#047857', whiteSpace: 'nowrap' }}>
+                                {humanizeFieldKey(key)}
+                              </div>
+                              <div style={{ color: '#1f2937', wordBreak: 'break-word' }}>
+                                {display}
+                              </div>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -635,6 +696,40 @@ export function SettingsGeneral() {
       />
     </div>
   );
+}
+
+// Maps the playbookSeed.businessInformation camelCase keys to the labels
+// the user sees in Settings → AI Playbook. Anything not in the map falls
+// back to a humanized version of the key. Kept inline rather than
+// imported so the seed schema and its display strings don't drift; the
+// schema is the source of truth.
+const EXTRACTED_FIELD_LABELS: Record<string, string> = {
+  serviceArea: 'Service area',
+  teamSize: 'Team size',
+  yearsInBusiness: 'Years in business',
+  ownerName: 'Owner / founder',
+  suppliesPolicy: 'Supplies policy',
+  petsPolicy: 'Pets policy',
+  paymentMethods: 'Payment methods',
+  officeLocations: 'Office locations',
+  insurance: 'Insurance',
+  bonding: 'Bonding',
+  licensing: 'Licensing',
+  guarantees: 'Guarantees',
+  ecoFriendly: 'Eco-friendly',
+};
+
+function humanizeFieldKey(key: string): string {
+  if (EXTRACTED_FIELD_LABELS[key]) return EXTRACTED_FIELD_LABELS[key];
+  // camelCase → "Camel Case"
+  return key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+function formatExtractedValue(v: string | string[]): string {
+  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
+  return String(v);
 }
 
 function SettingsInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
