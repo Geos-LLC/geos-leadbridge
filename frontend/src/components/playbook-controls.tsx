@@ -13,8 +13,8 @@
  * each form.
  */
 
-import { Loader2, Plus, Save } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { ChevronDown, ChevronUp, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 
 export function UnifiedSaveButton({
   label,
@@ -24,6 +24,7 @@ export function UnifiedSaveButton({
   onClick,
   align = 'end',
   idleLabel = 'No changes',
+  fullWidth = false,
 }: {
   label: string;
   dirty: boolean;
@@ -32,6 +33,7 @@ export function UnifiedSaveButton({
   onClick: () => void;
   align?: 'start' | 'end';
   idleLabel?: string;
+  fullWidth?: boolean;
 }) {
   return (
     <div
@@ -39,10 +41,10 @@ export function UnifiedSaveButton({
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
+        justifyContent: fullWidth ? 'stretch' : align === 'end' ? 'flex-end' : 'flex-start',
       }}
     >
-      {savedAt && (
+      {savedAt && !fullWidth && (
         <span
           style={{
             fontSize: 12,
@@ -60,30 +62,322 @@ export function UnifiedSaveButton({
         style={{
           display: 'inline-flex',
           alignItems: 'center',
+          justifyContent: 'center',
           gap: 6,
-          padding: '8px 14px',
-          borderRadius: 8,
+          padding: fullWidth ? '12px 16px' : '8px 14px',
+          borderRadius: 10,
           background: dirty ? 'var(--lb-accent, #2563eb)' : '#cbd5e1',
           color: 'white',
           border: 0,
-          fontSize: 13,
+          fontSize: fullWidth ? 13.5 : 13,
           fontWeight: 600,
           cursor: dirty && !saving ? 'pointer' : 'not-allowed',
           fontFamily: 'inherit',
           opacity: saving ? 0.7 : 1,
           transition: 'background 160ms ease',
+          width: fullWidth ? '100%' : undefined,
+          boxShadow: fullWidth ? '0 1px 2px rgba(10,21,48,0.05)' : undefined,
         }}
       >
         {saving ? (
-          <Loader2 size={13} className="animate-spin" />
+          <Loader2 size={fullWidth ? 14 : 13} className="animate-spin" />
         ) : (
-          <Save size={13} />
+          <Save size={fullWidth ? 14 : 13} />
         )}
-        {saving ? 'Saving…' : dirty ? label : idleLabel}
+        {saving
+          ? 'Saving…'
+          : !dirty && savedAt && fullWidth
+            ? 'Saved!'
+            : dirty
+              ? label
+              : idleLabel}
       </button>
     </div>
   );
 }
+
+/**
+ * Tinted price chip — `$amount` rendered in mono, optionally tagged
+ * (REGULAR / DEEP / per hour / flat). Used for the unified pricing
+ * row layout across cleaning grid, item table, and hourly forms.
+ */
+export function PriceChip({
+  amount,
+  tag,
+  editable,
+  onChange,
+  prefix = '$',
+}: {
+  amount: number;
+  tag?: string;
+  editable?: boolean;
+  onChange?: (n: number) => void;
+  prefix?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: editable ? '4px 8px' : '6px 12px',
+        borderRadius: 999,
+        background: 'var(--lb-ink-10, #f3f5fa)',
+        color: 'var(--lb-ink-2, #1f2a44)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 12.5,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {tag && (
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            color: 'var(--lb-ink-5, #64748b)',
+            textTransform: 'uppercase',
+          }}
+        >
+          {tag}
+        </span>
+      )}
+      <span style={{ color: 'var(--lb-ink-3, #334155)' }}>{prefix}</span>
+      {editable && onChange ? (
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={Number.isFinite(amount) ? amount : 0}
+          onChange={(e) => onChange(Number(e.target.value) || 0)}
+          style={{
+            width: 56,
+            padding: '2px 4px',
+            border: '1px solid transparent',
+            borderRadius: 6,
+            background: 'transparent',
+            fontFamily: 'inherit',
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: 'var(--lb-ink-1, #0a1530)',
+            textAlign: 'right',
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.background = 'white';
+            e.currentTarget.style.borderColor = 'var(--lb-line, #e5e9f2)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.borderColor = 'transparent';
+          }}
+        />
+      ) : (
+        <span style={{ color: 'var(--lb-ink-1, #0a1530)' }}>{amount}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Collapsible "Price table" / "Add-ons" / "Discounts" section wrapper.
+ * The header carries an icon tile, the title, an optional right-side
+ * badge (row count, "per hour", etc), and a chevron. Closed by default
+ * only when `defaultOpen=false`.
+ */
+export function PriceTableSection({
+  title,
+  icon,
+  rightBadge,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon?: ReactNode;
+  rightBadge?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div
+      style={{
+        border: '1px solid var(--lb-line, #e5e9f2)',
+        borderRadius: 12,
+        overflow: 'hidden',
+        background: 'white',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 14px',
+          background: 'transparent',
+          border: 0,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          textAlign: 'left',
+        }}
+      >
+        {icon}
+        <span
+          style={{
+            flex: 1,
+            fontSize: 13.5,
+            fontWeight: 700,
+            color: 'var(--lb-ink-1, #0a1530)',
+          }}
+        >
+          {title}
+        </span>
+        {rightBadge}
+        {open ? (
+          <ChevronUp size={16} color="var(--lb-ink-5, #64748b)" />
+        ) : (
+          <ChevronDown size={16} color="var(--lb-ink-5, #64748b)" />
+        )}
+      </button>
+      {open && (
+        <div
+          style={{
+            borderTop: '1px solid var(--lb-line-soft, #eef1f7)',
+            padding: '4px 0 12px',
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact single-line price row — label (+ optional editable),
+ * mono sub-line, one or two PriceChips on the right, trash icon to
+ * remove. The label / sub editing affordances are inline-on-hover so
+ * the row keeps a tidy default look but stays fully editable.
+ */
+export function PriceRow({
+  label,
+  sub,
+  chips,
+  onChangeLabel,
+  onChangeSub,
+  onRemove,
+}: {
+  label: string;
+  sub?: string;
+  chips: ReactNode;
+  onChangeLabel?: (next: string) => void;
+  onChangeSub?: (next: string) => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 14px',
+        borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {onChangeLabel ? (
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => onChangeLabel(e.target.value)}
+            style={INLINE_LABEL_INPUT}
+            placeholder="Item name"
+          />
+        ) : (
+          <span
+            style={{
+              fontSize: 13.5,
+              fontWeight: 600,
+              color: 'var(--lb-ink-1, #0a1530)',
+            }}
+          >
+            {label}
+          </span>
+        )}
+        {(sub !== undefined || onChangeSub) && (
+          onChangeSub ? (
+            <input
+              type="text"
+              value={sub ?? ''}
+              onChange={(e) => onChangeSub(e.target.value)}
+              placeholder="per piece"
+              style={INLINE_SUB_INPUT}
+            />
+          ) : (
+            <span
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 11.5,
+                color: 'var(--lb-ink-5, #64748b)',
+              }}
+            >
+              {sub}
+            </span>
+          )
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{chips}</div>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          title="Remove row"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            border: '1px solid var(--lb-line, #e5e9f2)',
+            background: 'white',
+            color: 'var(--lb-ink-5, #64748b)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+const INLINE_LABEL_INPUT: CSSProperties = {
+  width: '100%',
+  padding: '2px 4px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  fontSize: 13.5,
+  fontWeight: 600,
+  color: 'var(--lb-ink-1, #0a1530)',
+};
+
+const INLINE_SUB_INPUT: CSSProperties = {
+  width: '100%',
+  padding: '2px 4px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: 11.5,
+  color: 'var(--lb-ink-5, #64748b)',
+};
 
 export const UNIFIED_ADD_ROW_STYLE: CSSProperties = {
   display: 'inline-flex',

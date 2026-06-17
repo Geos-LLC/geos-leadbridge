@@ -761,11 +761,12 @@ function ItemPricingForm({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <PricingEditor value={value} onChange={setValue} />
       <UnifiedSaveButton
-        label="Save pricing"
+        label="Save Pricing"
         dirty={dirty}
         saving={saving}
         savedAt={savedAt}
         onClick={() => void handleSave()}
+        fullWidth
       />
     </div>
   );
