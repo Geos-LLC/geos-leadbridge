@@ -20,7 +20,6 @@ interface Props {
 // so a user who tweaks here and later visits Settings sees the same
 // values, not a wizard-only ghost set.
 const DEFAULTS = {
-  firstMsgDuringBusinessHours: false,
   callDuringBusinessHours: true,
   followUpsApplyQuietHours: true,
   fuReEnrollOnSilence: true,
@@ -128,7 +127,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         const s = (settings as any)?.settings ?? {};
         setOpts(prev => ({
           ...prev,
-          firstMsgDuringBusinessHours: hours?.firstMsgDuringBusinessHours ?? prev.firstMsgDuringBusinessHours,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
           followUpsApplyQuietHours: hours?.followUpsApplyQuietHours ?? prev.followUpsApplyQuietHours,
           fuReEnrollOnSilence: s.fuReEnrollOnSilence ?? prev.fuReEnrollOnSilence,
@@ -176,8 +174,10 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       for (const acct of savedAccounts) {
         try {
           await followUpApi.saveWizardSettings(acct.id, wizardPayload);
+          // firstMsgDuringBusinessHours intentionally omitted — the
+          // wizard no longer surfaces that toggle, so we don't want to
+          // overwrite whatever the account already has saved for it.
           await usersApi.updateAccountHours(acct.id, {
-            firstMsgDuringBusinessHours: opts.firstMsgDuringBusinessHours,
             callDuringBusinessHours: opts.callDuringBusinessHours,
             followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
           });
@@ -255,9 +255,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Timing — instant text + call gates. No master toggle: both
-                rows are independent gates that share the same business-
-                hours window. */}
+            {/* Timing — call gate + overnight follow-ups quiet-hours
+                gate. Two independent toggles sharing one card, each
+                covering a different time window: calls obey business
+                hours, follow-ups obey the quiet-hours window. The
+                instant-text-during-business-hours gate was dropped from
+                the wizard (still editable later on Automation) so users
+                aren't asked about it during a fast first-run setup. */}
             <SettingCard
               icon={Clock}
               iconTone="blue"
@@ -267,31 +271,21 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <ToggleRow
-                  icon={Clock}
-                  iconTone="gray"
-                  label="Only send instant text during business hours"
-                  on={opts.firstMsgDuringBusinessHours}
-                  onChange={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
-                />
-                <ToggleRow
                   icon={PhoneCall}
                   iconTone="gray"
                   label="Only call during business hours"
                   on={opts.callDuringBusinessHours}
                   onChange={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
                 />
+                <ToggleRow
+                  icon={Moon}
+                  iconTone="gray"
+                  label="Don't send follow-ups overnight"
+                  on={opts.followUpsApplyQuietHours}
+                  onChange={v => setOpts(o => ({ ...o, followUpsApplyQuietHours: v }))}
+                />
               </div>
             </SettingCard>
-
-            {/* Quiet hours — single master toggle gates the overnight rule. */}
-            <SettingCard
-              icon={Moon}
-              iconTone="violet"
-              title="Quiet hours"
-              subtitle="Don't send follow-ups overnight."
-              enabled={opts.followUpsApplyQuietHours}
-              onToggle={v => setOpts(o => ({ ...o, followUpsApplyQuietHours: v }))}
-            />
 
             {/* Resume after silence — master toggle + delay picker. */}
             <SettingCard
