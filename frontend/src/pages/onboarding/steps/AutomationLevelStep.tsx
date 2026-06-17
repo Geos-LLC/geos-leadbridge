@@ -399,35 +399,121 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
  * inline because the main pages don't have a 6-option pill picker — the
  * closest equivalent is PlanSwitcher's segmented control, which has its
  * own larger sizing.
+ *
+ * A trailing "Custom…" pill appears when none of the presets match the
+ * current value (or when a user clicks it). It reveals an inline
+ * number + unit editor that serializes to the same `${val} ${unit}`
+ * shape the backend parseDelay() understands.
  */
+type CustomUnit = 'min' | 'hour' | 'day' | 'week' | 'month';
+const PILL_CUSTOM_UNITS: { value: CustomUnit; label: string }[] = [
+  { value: 'min',   label: 'minutes' },
+  { value: 'hour',  label: 'hours' },
+  { value: 'day',   label: 'days' },
+  { value: 'week',  label: 'weeks' },
+  { value: 'month', label: 'months' },
+];
+
+function parseCustomDelay(value: string): { val: number; unit: CustomUnit } {
+  const d = (value || '').toLowerCase().trim();
+  const val = Math.max(1, Math.round(parseFloat(d) || 1));
+  if (d.includes('min')) return { val, unit: 'min' };
+  if (d.includes('hour') || d.includes('hr')) return { val, unit: 'hour' };
+  if (d.includes('day')) return { val, unit: 'day' };
+  if (d.includes('week') || d.includes('wk')) return { val, unit: 'week' };
+  if (d.includes('month') || d.includes('mo')) return { val, unit: 'month' };
+  return { val: 1, unit: 'day' };
+}
+
 function PillRow({
   value, options, onChange,
 }: { value: string; options: string[]; onChange: (v: string) => void }) {
+  const isCustom = !options.includes(value);
+  const custom = parseCustomDelay(value);
+  const customLabel = (() => {
+    const u = PILL_CUSTOM_UNITS.find(x => x.value === custom.unit)?.label ?? 'days';
+    return `${custom.val} ${u}`;
+  })();
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {options.map(opt => {
-        const active = value === opt;
-        return (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => onChange(opt)}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {options.map(opt => {
+          const active = value === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => onChange(opt)}
+              style={{
+                padding: '7px 14px',
+                fontSize: 12.5, fontWeight: 600,
+                background: active ? 'var(--lb-accent)' : 'white',
+                color: active ? 'white' : 'var(--lb-ink-3)',
+                border: '1px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'background 120ms, border-color 120ms, color 120ms',
+              }}
+            >
+              {opt}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => onChange(`${custom.val} ${custom.unit}`)}
+          style={{
+            padding: '7px 14px',
+            fontSize: 12.5, fontWeight: 600,
+            background: isCustom ? 'var(--lb-accent)' : 'white',
+            color: isCustom ? 'white' : 'var(--lb-ink-3)',
+            border: '1px solid ' + (isCustom ? 'var(--lb-accent)' : 'var(--lb-line)'),
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'background 120ms, border-color 120ms, color 120ms',
+          }}
+        >
+          {isCustom ? customLabel : 'Custom…'}
+        </button>
+      </div>
+      {isCustom && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="number"
+            min={1}
+            value={custom.val}
+            onChange={e => {
+              const n = parseInt(e.target.value, 10);
+              const safe = Math.max(1, Number.isFinite(n) ? n : 1);
+              onChange(`${safe} ${custom.unit}`);
+            }}
             style={{
-              padding: '7px 14px',
-              fontSize: 12.5, fontWeight: 600,
-              background: active ? 'var(--lb-accent)' : 'white',
-              color: active ? 'white' : 'var(--lb-ink-3)',
-              border: '1px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
-              borderRadius: 8,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'background 120ms, border-color 120ms, color 120ms',
+              width: 72, padding: '7px 10px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 12.5, fontWeight: 500, fontFamily: 'inherit',
+              background: 'white', color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
+          />
+          <select
+            value={custom.unit}
+            onChange={e => onChange(`${custom.val} ${e.target.value as CustomUnit}`)}
+            style={{
+              padding: '7px 28px 7px 10px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 12.5, fontWeight: 500, fontFamily: 'inherit',
+              background: 'white', color: 'var(--lb-ink-1)',
+              appearance: 'none', cursor: 'pointer', outline: 'none',
             }}
           >
-            {opt}
-          </button>
-        );
-      })}
+            {PILL_CUSTOM_UNITS.map(u => (
+              <option key={u.value} value={u.value}>{u.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   );
 }
