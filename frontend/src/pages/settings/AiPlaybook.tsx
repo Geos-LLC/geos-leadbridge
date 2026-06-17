@@ -62,7 +62,7 @@ export function SettingsAiPlaybook() {
   // Follow-up Tone) that still emit at runtime via the backend renderer
   // but are no longer part of the normal Playbook UI. Each carries a
   // "preserved for compatibility" badge so it's obvious they're legacy.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const advancedMode =
     searchParams.get('advanced') === '1' ||
     searchParams.get('debug') === '1';
@@ -79,6 +79,25 @@ export function SettingsAiPlaybook() {
     const t = setTimeout(() => setSavedAt(null), 2000);
     return () => clearTimeout(t);
   }, [savedAt]);
+
+  // `?section=pricing` deep link — scrolls directly to the Pricing
+  // Guidance card after the Playbook finishes loading. Wizard "edit
+  // pricing" links use this so users land on the table instead of the
+  // top of the page. We clear `?section` after the scroll so back-nav
+  // doesn't keep snapping the user back to the same anchor.
+  useEffect(() => {
+    if (searchParams.get('section') !== 'pricing') return;
+    if (loading || accounts.length === 0) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById('ai-playbook-pricing');
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('section');
+      setSearchParams(sp, { replace: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [loading, accounts.length, searchParams, setSearchParams]);
 
   // Load aiPlaybookV2 from the first connected account (Playbook is shared
   // across all accounts in V1 — save fans out to every account below).
@@ -194,14 +213,19 @@ export function SettingsAiPlaybook() {
         />
 
         {/* 3. Pricing Guidance (with embedded Pricing Table) */}
-        <PricingGuidanceCard
-          value={v2.pricing_guidance?.customInstructions ?? ''}
-          onChange={v => onSectionChange('pricing_guidance', v)}
-          accountId={accounts[0].id}
-          accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
-          accountIds={accounts.map(a => a.id)}
-          isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
-        />
+        {/* id anchor — SettingsAiPlaybook's `?section=pricing` deep link
+            scrolls here so the wizard's "edit pricing" CTAs land users
+            directly on the table instead of the top of the Playbook. */}
+        <div id="ai-playbook-pricing" style={{ scrollMarginTop: 16 }}>
+          <PricingGuidanceCard
+            value={v2.pricing_guidance?.customInstructions ?? ''}
+            onChange={v => onSectionChange('pricing_guidance', v)}
+            accountId={accounts[0].id}
+            accountName={accounts[0].businessName ?? accounts[0].platform ?? 'Your account'}
+            accountIds={accounts.map(a => a.id)}
+            isSuggested={!!v2.pricing_guidance?.suggestedFromWebsite}
+          />
+        </div>
 
         {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
               These 5 backend section keys still emit their default prompts
