@@ -1176,27 +1176,20 @@ export class PlatformService {
       },
     });
 
-    // Link user's UNASSIGNED TenantPhoneNumbers to this savedAccount.
-    // Only re-link phones that have no savedAccountId (orphaned) or point to a non-existent account.
-    // Do NOT steal phones from other valid savedAccounts — that causes the last-saved account
-    // to grab all phones in multi-business setups.
-    this.prisma.tenantPhoneNumber.updateMany({
-      where: {
-        userId,
-        status: 'ACTIVE',
-        OR: [
-          { savedAccountId: null },
-          { savedAccountId: savedAccount.id }, // already linked to this account — no-op but safe
-        ],
-      },
-      data: { savedAccountId: savedAccount.id },
-    }).then((result) => {
-      if (result.count > 0) {
-        this.logger.log(`[saveAccount] Linked ${result.count} tenant phone(s) to savedAccount ${savedAccount.id} (${businessName})`);
-      }
-    }).catch((err) => {
-      this.logger.warn(`[saveAccount] Failed to link tenant phones: ${err.message}`);
-    });
+    // Phones are bound to their owning savedAccount at purchase time
+    // (notifications.service.ts purchaseTenantPhoneNumber). An UNASSIGNED
+    // (savedAccountId=null) TenantPhoneNumber is INTENTIONALLY shared: it
+    // serves all of the user's accounts via resolveBotPhone's "unassigned"
+    // fallback, and Sigcore's workspace-level PPAs let each tenant send
+    // from it with its own API key.
+    //
+    // We must NOT auto-claim a null phone here: doing so makes
+    // resolveApiKeyForFromPhone trigger the cross-tenant swap for every
+    // sibling account, which hits the just-saved account's sc_tenant_*
+    // key and Sigcore rejects with 422 INVALID_PROFILE_PHONE because the
+    // phone isn't bound to that tenant on the Sigcore side. Regression
+    // 2026-06-16: Spotless Tampa reconnect stole +19045778584 from the
+    // shared pool and broke outbound SMS across 7 sibling accounts.
 
     // Auto-provision Sigcore workspace for this account (idempotent, non-blocking).
     // After provisioning, seed default notification settings (first account) or
