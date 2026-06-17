@@ -1151,3 +1151,70 @@ describe('ServiceProfileService — account-service assignments (PR-E)', () => {
     expect(result.profileId).toBe('prof-cleaning');
   });
 });
+
+/**
+ * createBlank — the "Create custom service" backend path. Pins that
+ * the new profile carries the generic preset's data (so the AI has
+ * safe defaults from the first message) and that the slug-collision
+ * loop deterministically appends -2, -3, … rather than relying on
+ * P2002 for the common case.
+ */
+describe('ServiceProfileService — createBlank (generic Custom Service preset)', () => {
+  it('seeds the new profile from GENERIC_CUSTOM_SERVICE_PRESET', async () => {
+    const prisma = buildPrismaMock();
+    const svc = new ServiceProfileService(prisma);
+    const created = await svc.createBlank({ userId: USER_ID, name: 'Roof inspection' });
+
+    // The mock's create returns the row it persisted — find it back in
+    // state so we can inspect every column the service wrote.
+    const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
+    expect(row).toBeDefined();
+    expect(row.name).toBe('Roof inspection'); // user's chosen name overrides the preset label
+    expect(row.slug).toBe('roof-inspection');
+    expect(row.status).toBe('draft');
+    expect(row.isDefault).toBe(false);
+    expect(row.providerCategoryMappingsJson).toEqual([]); // generic preset has no provider mapping
+
+    // Pricing / FAQ / qualification land verbatim from the preset.
+    const pricing = JSON.parse(row.pricingJson);
+    expect(pricing.pricingModel).toBe('hourly');
+    expect(pricing.laborRate).toBe(100);
+    expect(pricing.minimumCharge).toBe(100);
+    expect(pricing.quoteRequired).toBe(true);
+
+    const faq = JSON.parse(row.faqJson);
+    expect(faq.customQA).toHaveLength(6);
+
+    const qual = JSON.parse(row.qualificationSchemaJson);
+    expect(qual.questions.map((q: { key: string }) => q.key)).toEqual(
+      expect.arrayContaining(['phone_number', 'service_address', 'desired_service_date', 'project_description']),
+    );
+
+    // Service rules land in the aiInstructionsJson wrapper.
+    const wrapper = JSON.parse(row.aiInstructionsJson);
+    expect(wrapper.serviceRules.workflowSteps.join(' ')).toMatch(/do not guarantee/i);
+  });
+
+  it('appends -2, -3, … on slug collision instead of relying on P2002', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({ id: 'p1', userId: USER_ID, slug: 'window-cleaning' }),
+        buildProfile({ id: 'p2', userId: USER_ID, slug: 'window-cleaning-2' }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const created = await svc.createBlank({ userId: USER_ID, name: 'Window cleaning' });
+    const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
+    expect(row.slug).toBe('window-cleaning-3');
+  });
+
+  it('falls back to "new-service" when the name has no slug-safe chars', async () => {
+    const prisma = buildPrismaMock();
+    const svc = new ServiceProfileService(prisma);
+    const created = await svc.createBlank({ userId: USER_ID, name: '!!!' });
+    const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
+    expect(row.slug).toBe('new-service');
+  });
+});
+

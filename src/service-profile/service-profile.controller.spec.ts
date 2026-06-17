@@ -14,7 +14,12 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ServiceProfileController } from './service-profile.controller';
 import { ServiceProfileService } from './service-profile.service';
 
-function buildSvcMock(opts: { createReturn?: any; createThrows?: any } = {}) {
+function buildSvcMock(opts: {
+  createReturn?: any;
+  createThrows?: any;
+  createBlankReturn?: any;
+  createBlankThrows?: any;
+} = {}) {
   return {
     createFromPreset: jest.fn().mockImplementation(async () => {
       if (opts.createThrows) throw opts.createThrows;
@@ -23,6 +28,17 @@ function buildSvcMock(opts: { createReturn?: any; createThrows?: any } = {}) {
           id: 'profile-1',
           name: 'Upholstery and Furniture Cleaning',
           slug: 'upholstery-furniture-cleaning',
+          status: 'draft',
+        }
+      );
+    }),
+    createBlank: jest.fn().mockImplementation(async (args: { name: string }) => {
+      if (opts.createBlankThrows) throw opts.createBlankThrows;
+      return (
+        opts.createBlankReturn ?? {
+          id: 'profile-blank-1',
+          name: args.name,
+          slug: args.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
           status: 'draft',
         }
       );
@@ -124,6 +140,76 @@ describe('ServiceProfileController.createFromPreset', () => {
     const c = new ServiceProfileController(svc);
     await expect(
       c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' }),
+    ).rejects.toThrow(/db down/);
+  });
+});
+
+describe('ServiceProfileController.createBlankService', () => {
+  it('creates a draft custom service and returns the slim record', async () => {
+    const svc = buildSvcMock();
+    const c = new ServiceProfileController(svc);
+    const out = await c.createBlankService(USER_REQ, { name: 'Roof inspection' });
+    expect(out).toEqual({
+      profileId: 'profile-blank-1',
+      slug: 'roof-inspection',
+      status: 'draft',
+      name: 'Roof inspection',
+    });
+    expect(svc.createBlank).toHaveBeenCalledTimes(1);
+    const call = (svc.createBlank as jest.Mock).mock.calls[0][0];
+    expect(call.userId).toBe('user-1');
+    expect(call.name).toBe('Roof inspection');
+  });
+
+  it('trims surrounding whitespace before passing to the service', async () => {
+    const svc = buildSvcMock();
+    const c = new ServiceProfileController(svc);
+    await c.createBlankService(USER_REQ, { name: '   Mobile mechanic   ' });
+    const call = (svc.createBlank as jest.Mock).mock.calls[0][0];
+    expect(call.name).toBe('Mobile mechanic');
+  });
+
+  it('throws 400 when name is missing or empty', async () => {
+    const c = new ServiceProfileController(buildSvcMock());
+    await expect(c.createBlankService(USER_REQ, {})).rejects.toThrow(BadRequestException);
+    await expect(c.createBlankService(USER_REQ, { name: '' })).rejects.toThrow(BadRequestException);
+    await expect(c.createBlankService(USER_REQ, { name: '   ' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('throws 400 when name is longer than 80 characters', async () => {
+    const c = new ServiceProfileController(buildSvcMock());
+    const longName = 'x'.repeat(81);
+    await expect(c.createBlankService(USER_REQ, { name: longName })).rejects.toThrow(/80/);
+  });
+
+  it('accepts exactly 80 characters', async () => {
+    const c = new ServiceProfileController(buildSvcMock());
+    const exactName = 'x'.repeat(80);
+    await expect(c.createBlankService(USER_REQ, { name: exactName })).resolves.toBeDefined();
+  });
+
+  it('throws 400 when no authenticated user', async () => {
+    const c = new ServiceProfileController(buildSvcMock());
+    await expect(
+      c.createBlankService({ user: null } as any, { name: 'Roof inspection' }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('converts Prisma P2002 into a 409 ConflictException', async () => {
+    const svc = buildSvcMock({
+      createBlankThrows: Object.assign(new Error('unique'), { code: 'P2002' }),
+    });
+    const c = new ServiceProfileController(svc);
+    await expect(
+      c.createBlankService(USER_REQ, { name: 'Roof inspection' }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('propagates non-P2002 errors unchanged', async () => {
+    const svc = buildSvcMock({ createBlankThrows: new Error('db down') });
+    const c = new ServiceProfileController(svc);
+    await expect(
+      c.createBlankService(USER_REQ, { name: 'Roof inspection' }),
     ).rejects.toThrow(/db down/);
   });
 });

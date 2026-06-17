@@ -165,8 +165,127 @@ export const UPHOLSTERY_FURNITURE_CLEANING_PRESET: ServicePreset = {
  * presets are tenant-facing data, not arbitrary configuration. Adding
  * a new preset is a deliberate PR-level decision.
  */
+/**
+ * Generic "Custom Service" starter — powers the "Create custom service"
+ * flow in AddServiceModal when none of the curated presets match the
+ * tenant's actual line of work (roofing, mobile mechanic, photography,
+ * etc.). The data here is deliberately neutral:
+ *
+ *   - hourly pricing model with a $100 laborRate + $100 minimumCharge.
+ *     The AI shares those as "starts around $100 / starts around
+ *     $100/hour" — never as guaranteed finals. quoteRequired=true
+ *     locks the AI into deferring the bound quote until scope is
+ *     confirmed with the owner.
+ *
+ *   - FAQ stays generic: no insurance/license claims, no service-area
+ *     promises, no payment-method commitments. The questions exist so
+ *     the AI has something to say, but every answer either defers or
+ *     asks for more info.
+ *
+ *   - Qualification asks for the four details we need on any first
+ *     contact (phone, address, date, project description) plus optional
+ *     photos / ZIP. No service-specific fields — those would be wrong
+ *     more often than they'd be right.
+ *
+ *   - Service rules force the AI to gather scope before quoting and
+ *     forbid claims about licensing, insurance, warranty, or
+ *     certifications until the tenant explicitly configures them.
+ *
+ * provider='manual' because there's no platform category to map this
+ * to — `suggestPresetForCategory` will never return this preset
+ * automatically. Tenants reach it via the explicit "Create custom
+ * service" path only.
+ */
+export const GENERIC_CUSTOM_SERVICE_PRESET: ServicePreset = {
+  key: 'generic_custom_service',
+  provider: 'manual',
+  providerCategoryName: 'Custom Service',
+  aliases: [
+    'custom service',
+    'general home service',
+    'other',
+  ],
+  label: 'Custom Service',
+  description:
+    'Generic starter template for any local service business. Review pricing, FAQ, and questions before activating.',
+  qualificationSchemaJson: {
+    questions: [
+      { key: 'phone_number', label: 'Phone number', type: 'text', required: true },
+      { key: 'service_address', label: 'Service address', type: 'text', required: true },
+      { key: 'desired_service_date', label: 'Desired service date', type: 'date', required: true },
+      { key: 'project_description', label: 'Project description', type: 'text', required: true },
+      { key: 'photos', label: 'Photos (optional)', type: 'text' },
+      { key: 'zip_code', label: 'ZIP code (optional)', type: 'text' },
+    ],
+  },
+  pricingJson: {
+    pricingModel: 'hourly',
+    currency: 'USD',
+    laborRate: 100,
+    minimumCharge: 100,
+    quoteRequired: true,
+    notes:
+      'Final pricing depends on the scope, complexity, and location of the job.',
+  },
+  faqJson: {
+    customQA: [
+      {
+        question: 'Do you provide estimates?',
+        answer:
+          'Yes. Pricing depends on the scope of work, and we can provide an estimate after learning more about your project.',
+      },
+      {
+        question: 'What areas do you serve?',
+        answer:
+          'We serve the local area and nearby communities. Please provide your address or ZIP code so we can confirm availability.',
+      },
+      {
+        question: 'How soon can service be scheduled?',
+        answer:
+          'Availability varies based on demand. Let us know your preferred date and we will confirm available times.',
+      },
+      {
+        question: 'What payment methods do you accept?',
+        answer:
+          'We accept most common payment methods. Final payment options can be confirmed when scheduling.',
+      },
+      {
+        question: 'Are you insured and licensed?',
+        answer:
+          'Licensing and insurance requirements vary by service. Please contact us for details about coverage and credentials.',
+      },
+      {
+        question: 'Does someone need to be on-site?',
+        answer:
+          'Requirements vary by service. We will confirm access instructions during scheduling.',
+      },
+    ],
+  },
+  serviceRules: {
+    requiredDetails: [
+      'Short description of the project',
+      'Service address or ZIP code',
+      'Desired service date',
+      'Photos if they would help estimate the work',
+    ],
+    unsupportedServices: [],
+    workflowSteps: [
+      'Greet the customer and ask what service they need',
+      'Ask for a short description of the project',
+      'Ask for the service address or ZIP code',
+      'Ask for the desired service date',
+      'Ask for photos if they would help estimate the work',
+      'Share the starting labor rate as guidance, not as a guaranteed quote',
+      'Do not guarantee a final price until scope is confirmed',
+      'Do not claim licensing, insurance, warranty, or certifications unless explicitly configured by the business',
+      'Confirm a preferred date / time window and hand off to the owner',
+    ],
+  },
+};
+
 export const SERVICE_PRESETS: readonly ServicePreset[] = [
   UPHOLSTERY_FURNITURE_CLEANING_PRESET,
+  GENERIC_CUSTOM_SERVICE_PRESET,
 ];
 
 /**

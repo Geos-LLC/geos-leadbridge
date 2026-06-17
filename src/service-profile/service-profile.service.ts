@@ -40,7 +40,7 @@ import {
   parseServiceOverrides,
   parseServiceAssignments,
 } from './service-profile.types';
-import { buildServiceProfileFromPreset } from './presets/service-presets';
+import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
 
 /**
@@ -364,27 +364,38 @@ export class ServiceProfileService {
   }
 
   /**
-   * Blank-service factory — same call signature as createFromPreset but
-   * skips the preset entirely. Tenants land on this path when none of
-   * the curated presets fits their service ("Roof inspection",
-   * "Custom upholstery", etc.). The new profile carries:
+   * Custom-service factory — powers the "Create custom service" tile in
+   * AddServiceModal. Tenants land here when none of the curated presets
+   * fits their actual line of work (roofing, mobile mechanic,
+   * photography, etc.).
    *
-   *   - pricingJson=null + faqJson=null  → the per-Service tab in
-   *     AI Playbook falls into its generic editor (item rows for
-   *     pricing, Q&A pairs for FAQ — no cleaning-specific fields)
-   *   - qualificationSchemaJson=null     → the qualification tab starts
-   *     empty; operators add the questions that matter for their service
-   *   - providerCategoryMappingsJson=[]  → no provider routing yet;
-   *     operators wire mappings later via the Services page once they
-   *     know which TT/Yelp categories should fall to this profile
-   *   - status='draft'                   → same gate as preset profiles,
-   *     no AI replies until the operator promotes
+   * We seed the new profile from GENERIC_CUSTOM_SERVICE_PRESET so the
+   * AI has safe defaults from the moment the row exists:
    *
-   * Slug uniqueness: we derive a slug from the name, and if it collides
-   * with an existing slug for this user we append -2, -3, ... until we
-   * find a free one. The Prisma partial unique index (userId, slug)
-   * prevents the race-condition window — a duplicate Postgres write
-   * still surfaces as P2002 and the caller maps it to a 409.
+   *   - hourly pricing model with a $100 laborRate + minimumCharge.
+   *     AI shares those as guidance ("starts around $X / $X/hour") and
+   *     defers any bound quote to the owner (quoteRequired=true).
+   *   - generic FAQ that defers on insurance, area, payment, on-site
+   *     access — nothing the AI could turn into a wrong promise.
+   *   - 4 required qualification questions (phone / address / date /
+   *     project description) + 2 optional (photos / ZIP).
+   *   - service rules that force scope-first questioning and forbid
+   *     license / insurance / warranty claims until the tenant
+   *     explicitly opts in.
+   *
+   * We override the preset's display fields with the tenant's chosen
+   * name (the preset label "Custom Service" would be wrong for every
+   * tenant after the first) and clear providerCategoryMappingsJson
+   * because there's no provider category to map this to.
+   *
+   * The new profile is always status='draft' regardless of the preset's
+   * default — a custom service should never auto-activate without the
+   * operator reviewing the starter text first.
+   *
+   * Slug uniqueness: derive from name, then append -2, -3, ... on
+   * collision. The Prisma partial unique index (userId, slug) prevents
+   * the race-condition window — a duplicate Postgres write still
+   * surfaces as P2002 and the caller maps it to a 409.
    */
   async createBlank(args: { userId: string; name: string }) {
     const trimmed = args.name.trim();
@@ -397,11 +408,14 @@ export class ServiceProfileService {
     let suffix = 1;
     // Loop is bounded: the slug column is varchar(64), so worst-case
     // ~9999 attempts before we'd need a longer suffix. In practice
-    // tenants rarely have more than ~10 profiles.
+    // tenants rarely have more than ~10 profiles. The lookup uses the
+    // compound unique key (userId, slug) — race-condition window still
+    // exists, but P2002 from the subsequent create() surfaces a clean
+    // 409 in that path.
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const existing = await this.prisma.serviceProfile.findFirst({
-        where: { userId: args.userId, slug },
+      const existing = await this.prisma.serviceProfile.findUnique({
+        where: { userId_slug: { userId: args.userId, slug } },
         select: { id: true },
       });
       if (!existing) break;
@@ -409,21 +423,30 @@ export class ServiceProfileService {
       slug = `${baseSlug}-${suffix}`;
       if (suffix > 999) break; // safety net — P2002 will surface a clean 409 if we hit this
     }
+    // Seed from the generic preset, then override name + slug + clear
+    // provider mappings. Status is forced to 'draft' regardless of any
+    // preset-side default — custom services must be reviewed before
+    // they go live.
+    const payload = buildServiceProfileFromPreset(
+      GENERIC_CUSTOM_SERVICE_PRESET,
+      { userId: args.userId, slug, status: 'draft' },
+    );
     this.logger.log(
-      `[service-profile] createBlank userId=${args.userId} name="${trimmed}" slug=${slug}`,
+      `[service-profile] createBlank userId=${args.userId} name="${trimmed}" slug=${slug} ` +
+      `preset=${GENERIC_CUSTOM_SERVICE_PRESET.key}`,
     );
     return this.prisma.serviceProfile.create({
       data: {
-        userId: args.userId,
+        userId: payload.userId,
         name: trimmed,
-        slug,
-        status: 'draft',
-        isDefault: false,
+        slug: payload.slug,
+        status: payload.status,
+        isDefault: payload.isDefault,
         providerCategoryMappingsJson: [] as any,
-        pricingJson: null,
-        faqJson: null,
-        qualificationSchemaJson: null,
-        aiInstructionsJson: null,
+        pricingJson: payload.pricingJson,
+        faqJson: payload.faqJson,
+        qualificationSchemaJson: payload.qualificationSchemaJson,
+        aiInstructionsJson: payload.aiInstructionsJson,
       },
       select: {
         id: true,
