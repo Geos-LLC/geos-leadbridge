@@ -32,6 +32,7 @@ import { extractLeadDetails } from '../leads/extract-lead-details';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
+import { buildAvailabilityBlockForStrategy } from '../ai/booking-availability';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
 import OpenAI from 'openai';
@@ -226,6 +227,15 @@ export class FollowUpGeneratorService {
       strategyKey,
       accountSettings?.qualificationV2?.requiredFields,
       accountSettings?.qualificationV2?.customFields,
+    );
+    // AVAILABILITY block — only injected when goal is 'booking'. When
+    // the tenant has nothing saved, the normalizer falls back to
+    // DEFAULT_BOOKING_AVAILABILITY (Mon–Fri morning + afternoon) so the
+    // AI always sees a sensible windows list. See
+    // src/ai/booking-availability.ts.
+    const availabilityBlockBody: string = buildAvailabilityBlockForStrategy(
+      strategyKey,
+      accountSettings?.bookingAvailability,
     );
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
@@ -536,6 +546,14 @@ export class FollowUpGeneratorService {
         '',
         '=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===',
         qualificationBlockBody,
+      );
+    }
+
+    if (availabilityBlockBody) {
+      systemParts.push(
+        '',
+        '=== REFERENCE: AVAILABILITY (Booking goal only) ===',
+        availabilityBlockBody,
       );
     }
 

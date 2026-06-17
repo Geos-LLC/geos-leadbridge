@@ -90,6 +90,18 @@ export interface AiReplyContext {
    * keeps the legacy hardcoded priority order from STRATEGY_PROMPTS.
    */
   qualificationBlock?: string;
+  /**
+   * REFERENCE — Booking-availability windows (Booking goal only).
+   * Pre-formatted block listing the day/period windows the tenant has
+   * marked as bookable. Built by the caller from
+   * `followUpSettingsJson.bookingAvailability` via
+   * `buildAvailabilityBlockForStrategy` — only non-empty when strategy
+   * is 'booking' AND at least one (day, period) toggle is on. Existing
+   * accounts without saved availability fall back to Mon–Fri morning +
+   * afternoon (DEFAULT_BOOKING_AVAILABILITY). See
+   * src/ai/booking-availability.ts.
+   */
+  availabilityBlock?: string;
   conversationHistory?: ConversationMessage[];
   leadDetails?: Record<string, string>;
   /** "Now" — defaults to new Date() at generation time. */
@@ -154,6 +166,9 @@ export class AiService {
     }
     if (ctx.qualificationBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===\n${ctx.qualificationBlock.trim()}`);
+    }
+    if (ctx.availabilityBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: AVAILABILITY (Booking goal only) ===\n${ctx.availabilityBlock.trim()}`);
     }
 
     // Assemble the system prompt with explicit section labels so the model
