@@ -1,6 +1,6 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Loader2, ChevronDown,
+  Plus, Trash2, Loader2, ChevronDown, X,
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
@@ -290,6 +290,51 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
     setPricing((p: any) => ({ ...p, priceTable: p.priceTable.filter((_: any, i: number) => i !== idx) }));
   };
 
+  // Cleaning equivalent of the item_quantity "Add column": adds a new
+  // cleaningType to the schema and seeds every existing priceTable row
+  // at $0 for the new key. The operator names the column; we derive a
+  // slug key the pricing engine can look up.
+  const addCleaningType = () => {
+    const name = window.prompt('Cleaning type (e.g. Move-out, Post-construction):');
+    if (!name) return;
+    const label = name.trim().slice(0, 40);
+    if (!label) return;
+    const key = label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 32);
+    if (!key) return;
+    setPricing((p: any) => {
+      const existing = (p.cleaningTypes || []) as Array<{ key: string }>;
+      if (existing.some((t) => t.key === key)) return p; // dedupe by key
+      return {
+        ...p,
+        cleaningTypes: [...existing, { key, label, enabled: true }],
+        priceTable: (p.priceTable || []).map((row: any) => ({ ...row, [key]: 0 })),
+      };
+    });
+  };
+
+  const removeCleaningType = (key: string) => {
+    const remaining = (pricing?.cleaningTypes || []).filter((t: any) => t.key !== key);
+    if (remaining.length === 0) {
+      alert('Keep at least one cleaning type — add another before removing this one.');
+      return;
+    }
+    const target = (pricing?.cleaningTypes || []).find((t: any) => t.key === key);
+    if (!window.confirm(`Remove the "${target?.label ?? key}" column? Prices in that column will be discarded.`)) return;
+    setPricing((p: any) => ({
+      ...p,
+      cleaningTypes: remaining,
+      priceTable: (p.priceTable || []).map((row: any) => {
+        const { [key]: _drop, ...rest } = row;
+        void _drop;
+        return rest;
+      }),
+    }));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -431,8 +476,37 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             <span style={{ flex: 1 }}>Size band</span>
             <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
               {allTypes.map((t: any) => (
-                <span key={t.key} style={{ minWidth: 96, textAlign: 'right' }}>
+                <span
+                  key={t.key}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    minWidth: 96,
+                    justifyContent: 'flex-end',
+                  }}
+                >
                   {t.label}
+                  <button
+                    type="button"
+                    onClick={() => removeCleaningType(t.key)}
+                    title={`Remove ${t.label} column`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 16,
+                      height: 16,
+                      borderRadius: 999,
+                      border: 0,
+                      background: 'transparent',
+                      color: 'var(--lb-ink-5, #64748b)',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    <X size={11} />
+                  </button>
                 </span>
               ))}
             </span>
@@ -580,13 +654,27 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
               </div>
             );
           })}
-          <div style={{ padding: '12px 14px 4px' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              padding: '12px 14px 4px',
+            }}
+          >
             <button
               type="button"
               onClick={addPriceRow}
               style={{ ...UNIFIED_ADD_ROW_STYLE }}
             >
               <Plus size={13} /> Add row
+            </button>
+            <button
+              type="button"
+              onClick={addCleaningType}
+              style={{ ...UNIFIED_ADD_ROW_STYLE }}
+            >
+              <Plus size={13} /> Add column
             </button>
           </div>
         </div>
