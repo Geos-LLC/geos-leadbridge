@@ -935,6 +935,10 @@ export const serviceProfilesApi = {
     const { data } = await api.get(`/v1/service-profiles/${id}`);
     return data;
   },
+  createBlank: async (name: string): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
+    const { data } = await api.post('/v1/service-profiles', { name });
+    return data;
+  },
   update: async (
     id: string,
     patch: Partial<{

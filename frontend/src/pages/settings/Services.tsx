@@ -122,7 +122,7 @@ function ProfileList({
             onClick={() => setPresetModalOpen(true)}
             style={primaryBtn}
           >
-            <Plus size={16} /> Create from preset
+            <Plus size={16} /> Add service
           </button>
           <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
             New profiles start as drafts — AI replies stay paused until you activate.
@@ -158,7 +158,7 @@ function ProfileList({
       </div>
 
       {presetModalOpen && (
-        <PresetPickerModal
+        <AddServiceModal
           onClose={() => setPresetModalOpen(false)}
           onCreated={() => { setPresetModalOpen(false); onChanged(); }}
         />
@@ -688,6 +688,273 @@ export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void;
               </div>
             ))}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Service modal (choice → blank or preset) ─────────────────
+//
+// Replaces the old "Create from preset" entry point. The choice screen
+// gives tenants two paths:
+//
+//   "Start from scratch" — POST /v1/service-profiles with just a name.
+//     The new draft profile has null pricingJson/faqJson, so the
+//     per-Service tab in AI Playbook falls into its generic editor
+//     (item rows + Q&A pairs). For services we don't ship a preset for.
+//
+//   "Use a template" — same preset list the old PresetPickerModal showed.
+//     House Cleaning + Upholstery & Furniture Cleaning (currently).
+//
+// We keep PresetPickerModal exported and unchanged so any place still
+// linking directly to the preset list keeps working; AddServiceModal is
+// the new primary entry point.
+
+type AddServiceView = 'choice' | 'blank' | 'preset';
+
+export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [view, setView] = useState<AddServiceView>('choice');
+  const [blankName, setBlankName] = useState('');
+  const [creatingBlank, setCreatingBlank] = useState(false);
+  const [presets, setPresets] = useState<ServiceProfilePreset[] | null>(null);
+  const [presetLoadError, setPresetLoadError] = useState<string | null>(null);
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
+
+  // Lazy-load presets only when the user picks "Use a template" — keeps
+  // the modal snappy when they're going to "Start from scratch" anyway.
+  useEffect(() => {
+    if (view !== 'preset' || presets !== null || presetLoadError !== null) return;
+    let cancelled = false;
+    serviceProfilePresetsApi.list()
+      .then((res) => { if (!cancelled) setPresets(res.presets); })
+      .catch((err) => { if (!cancelled) setPresetLoadError(err?.response?.data?.message ?? err?.message ?? 'Failed to load presets'); });
+    return () => { cancelled = true; };
+  }, [view, presets, presetLoadError]);
+
+  const handleCreateBlank = async () => {
+    const name = blankName.trim();
+    if (!name) return;
+    setCreatingBlank(true);
+    try {
+      await serviceProfilesApi.createBlank(name);
+      notify.success('Service created', `${name} is in draft. Add pricing and FAQ in AI Playbook → service tab.`);
+      onCreated();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Failed to create service';
+      if (status === 409) {
+        notify.error('Name already used', `You already have a service called "${name}".`);
+      } else {
+        notify.error('Could not create service', msg);
+      }
+    } finally {
+      setCreatingBlank(false);
+    }
+  };
+
+  const handleCreatePreset = async (preset: ServiceProfilePreset) => {
+    setCreatingKey(preset.key);
+    try {
+      await serviceProfilePresetsApi.createFromPreset(preset.key);
+      notify.success('Service created', `${preset.label} is in draft. Click Activate when ready.`);
+      onCreated();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Failed to create service';
+      if (status === 409) {
+        notify.error('Already created', `You already have a service profile for ${preset.label}.`);
+      } else {
+        notify.error('Could not create service', msg);
+      }
+    } finally {
+      setCreatingKey(null);
+    }
+  };
+
+  const headerTitle =
+    view === 'blank' ? 'Start from scratch' :
+    view === 'preset' ? 'Pick a template' :
+    'Add service';
+  const headerSubtitle =
+    view === 'blank' ? 'Give your service a name. You can add pricing, FAQ, and qualification questions later from AI Playbook → service tab.' :
+    view === 'preset' ? 'Each template bundles pricing, FAQ, and qualification questions sourced from the platform.' :
+    'How do you want to start?';
+
+  return (
+    <div onClick={onClose} style={modalBg}>
+      <div onClick={(e) => e.stopPropagation()} style={modalBox}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+            {view !== 'choice' && (
+              <button
+                type="button"
+                onClick={() => setView('choice')}
+                aria-label="Back"
+                style={iconBtn}
+                title="Back"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                {view === 'preset' && <Sparkles size={18} color="var(--lb-blue-600, #2563eb)" />}
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{headerTitle}</h3>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-text-muted)' }}>
+                {headerSubtitle}
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={iconBtn}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {view === 'choice' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setView('blank')}
+              style={{
+                ...card,
+                cursor: 'pointer', textAlign: 'left',
+                background: 'white', border: '1.5px solid var(--lb-border, #e5e7eb)',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Start from scratch</div>
+                <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
+                  Empty pricing, empty FAQ. Best when none of the templates fit your service.
+                </div>
+              </div>
+              <Plus size={16} color="var(--lb-text-muted)" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('preset')}
+              style={{
+                ...card,
+                cursor: 'pointer', textAlign: 'left',
+                background: 'white', border: '1.5px solid var(--lb-border, #e5e7eb)',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={14} color="var(--lb-blue-600, #2563eb)" /> Use a template
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>
+                  Pre-filled pricing, FAQ, and qualification questions — sourced from the platform's category data.
+                </div>
+              </div>
+              <Plus size={16} color="var(--lb-text-muted)" />
+            </button>
+          </div>
+        )}
+
+        {view === 'blank' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--lb-ink-2)', display: 'block', marginBottom: 6 }}>
+                Service name
+              </label>
+              <input
+                value={blankName}
+                onChange={(e) => setBlankName(e.target.value)}
+                placeholder="e.g. Tile and grout cleaning"
+                maxLength={80}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && blankName.trim()) {
+                    e.preventDefault();
+                    void handleCreateBlank();
+                  }
+                }}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  border: '1.5px solid var(--lb-border, #e5e7eb)', borderRadius: 8,
+                  fontSize: 14, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+                  background: 'white', outline: 'none',
+                }}
+              />
+              <div style={{ fontSize: 11.5, color: 'var(--lb-text-muted)', marginTop: 6 }}>
+                You can rename it later from the service's tab in AI Playbook.
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setView('choice')}
+                disabled={creatingBlank}
+                style={{
+                  padding: '8px 14px', borderRadius: 8,
+                  border: '1px solid var(--lb-border, #e5e7eb)',
+                  background: 'white', color: 'var(--lb-ink-2)',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreateBlank()}
+                disabled={!blankName.trim() || creatingBlank}
+                style={{
+                  ...primaryBtn,
+                  opacity: !blankName.trim() || creatingBlank ? 0.6 : 1,
+                  cursor: !blankName.trim() || creatingBlank ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {creatingBlank ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Create service
+              </button>
+            </div>
+          </div>
+        )}
+
+        {view === 'preset' && (
+          <>
+            {presetLoadError && <div style={errorBanner}>{presetLoadError}</div>}
+            {!presets && !presetLoadError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)', fontSize: 13 }}>
+                <Loader2 size={14} className="animate-spin" /> Loading templates…
+              </div>
+            )}
+            {presets && presets.length === 0 && (
+              <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>No templates available.</div>
+            )}
+            {presets && presets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {presets.map((p) => (
+                  <div key={p.key} style={card}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
+                      <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
+                        <span>{p.pricingJson.items?.length ?? 0} items</span>
+                        <span>{p.qualificationSchemaJson.questions.length} questions</span>
+                        <span>{p.faqJson.customQA.length} FAQs</span>
+                        {p.serviceRules && (
+                          <span style={{ color: '#b45309', fontWeight: 600 }}>+ service rules</span>
+                        )}
+                        <span>via {p.provider}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCreatePreset(p)}
+                      disabled={creatingKey !== null && creatingKey !== p.key}
+                      style={primaryBtn}
+                    >
+                      {creatingKey === p.key ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                      Create
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

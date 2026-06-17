@@ -13,7 +13,7 @@ import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
 import { ManualBusinessInfoModal } from '../../components/ManualBusinessInfoModal';
-import { PresetPickerModal } from './Services';
+import { AddServiceModal } from './Services';
 
 export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
@@ -943,7 +943,7 @@ function ServicesOfferedSection() {
               fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
-            <Plus size={14} /> Create from preset
+            <Plus size={14} /> Add service
           </button>
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)' }}>
             New profiles start as drafts — AI replies stay paused until you activate.
@@ -1022,7 +1022,7 @@ function ServicesOfferedSection() {
       </SettingCard>
 
       {showPresetModal && (
-        <PresetPickerModal
+        <AddServiceModal
           onClose={() => setShowPresetModal(false)}
           onCreated={() => { setShowPresetModal(false); refresh(); }}
         />

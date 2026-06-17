@@ -363,6 +363,77 @@ export class ServiceProfileService {
     });
   }
 
+  /**
+   * Blank-service factory — same call signature as createFromPreset but
+   * skips the preset entirely. Tenants land on this path when none of
+   * the curated presets fits their service ("Roof inspection",
+   * "Custom upholstery", etc.). The new profile carries:
+   *
+   *   - pricingJson=null + faqJson=null  → the per-Service tab in
+   *     AI Playbook falls into its generic editor (item rows for
+   *     pricing, Q&A pairs for FAQ — no cleaning-specific fields)
+   *   - qualificationSchemaJson=null     → the qualification tab starts
+   *     empty; operators add the questions that matter for their service
+   *   - providerCategoryMappingsJson=[]  → no provider routing yet;
+   *     operators wire mappings later via the Services page once they
+   *     know which TT/Yelp categories should fall to this profile
+   *   - status='draft'                   → same gate as preset profiles,
+   *     no AI replies until the operator promotes
+   *
+   * Slug uniqueness: we derive a slug from the name, and if it collides
+   * with an existing slug for this user we append -2, -3, ... until we
+   * find a free one. The Prisma partial unique index (userId, slug)
+   * prevents the race-condition window — a duplicate Postgres write
+   * still surfaces as P2002 and the caller maps it to a 409.
+   */
+  async createBlank(args: { userId: string; name: string }) {
+    const trimmed = args.name.trim();
+    const baseSlug = trimmed
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'new-service';
+    let slug = baseSlug;
+    let suffix = 1;
+    // Loop is bounded: the slug column is varchar(64), so worst-case
+    // ~9999 attempts before we'd need a longer suffix. In practice
+    // tenants rarely have more than ~10 profiles.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const existing = await this.prisma.serviceProfile.findFirst({
+        where: { userId: args.userId, slug },
+        select: { id: true },
+      });
+      if (!existing) break;
+      suffix += 1;
+      slug = `${baseSlug}-${suffix}`;
+      if (suffix > 999) break; // safety net — P2002 will surface a clean 409 if we hit this
+    }
+    this.logger.log(
+      `[service-profile] createBlank userId=${args.userId} name="${trimmed}" slug=${slug}`,
+    );
+    return this.prisma.serviceProfile.create({
+      data: {
+        userId: args.userId,
+        name: trimmed,
+        slug,
+        status: 'draft',
+        isDefault: false,
+        providerCategoryMappingsJson: [] as any,
+        pricingJson: null,
+        faqJson: null,
+        qualificationSchemaJson: null,
+        aiInstructionsJson: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+      },
+    });
+  }
+
   // ─── Phase 1 management endpoints ─────────────────────────────────
 
   /**

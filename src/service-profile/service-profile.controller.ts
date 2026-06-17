@@ -62,6 +62,40 @@ export class ServiceProfileController {
     };
   }
 
+  /**
+   * Blank-service creation — for the "Start from scratch" tile in the
+   * Add Service modal. Body just carries a name; everything else
+   * (pricing, FAQ, qualification, mappings) is left null/empty so the
+   * AI Playbook per-Service tab renders its generic editors.
+   */
+  @Post('service-profiles')
+  async createBlankService(
+    @Req() req: any,
+    @Body() body: { name?: string },
+  ) {
+    const name = (body?.name ?? '').trim();
+    if (!name) throw new BadRequestException('name is required');
+    if (name.length > 80) {
+      throw new BadRequestException('name must be 80 characters or fewer');
+    }
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      const profile = await this.service.createBlank({ userId, name });
+      return {
+        profileId: profile.id,
+        slug: profile.slug,
+        status: profile.status,
+        name: profile.name,
+      };
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictException('A service profile with that name already exists');
+      }
+      throw err;
+    }
+  }
+
   @Post('service-profiles/from-preset')
   async createFromPreset(
     @Req() req: any,
