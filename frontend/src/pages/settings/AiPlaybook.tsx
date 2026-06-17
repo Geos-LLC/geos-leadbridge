@@ -40,15 +40,25 @@ import {
 } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
-// PR-D.2 — Service tab reuses the canonical Wizard surfaces (AccountFaqForm
-// and ServicePricingForm) so users see a real form instead of raw JSON.
-// Both forms are self-contained: they own load + save against the user's
-// SavedAccount (FAQ → SavedAccount.faqJson, pricing →
-// SavedAccount.servicePricingJson). With saveToAll they cascade across
-// every connected account in one click. Only qualification questions
-// remain a ServiceProfile-scoped field on this tab.
+// PR-D.3 — Service tab branches the pricing/FAQ form by the stored
+// shape, so each service template renders its own UI:
+//
+//   Cleaning shape (priceTable + cleaningTypes / AccountFaq cleaning
+//   fields) → ServicePricingForm + AccountFaqForm. These are the
+//   canonical Wizard surfaces, correct for the House Cleaning preset
+//   and any other tenant whose service stores cleaning grids.
+//
+//   item_quantity shape (or no stored shape at all) → PricingEditor
+//   (item rows: label, unit, price + add/remove) and a Q&A pairs
+//   editor for faqJson.customQA. This is what the Upholstery preset
+//   ships with, and the same generic editor doubles as the
+//   non-service-specific fallback when no preset matches.
+//
+// Both forms self-save against ServiceProfile.pricingJson /
+// ServiceProfile.faqJson via serviceProfilesApi.update.
 import AccountFaqForm from '../../components/AccountFaqForm';
 import ServicePricingForm from '../../components/ServicePricingForm';
+import { PricingEditor } from './Services';
 import {
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
@@ -638,14 +648,22 @@ function safeParse(value: string): unknown {
   }
 }
 
-// ─── Pricing + FAQ panes (PR-D.2) ────────────────────────────────────────
+// ─── Pricing + FAQ panes (PR-D.3) ────────────────────────────────────────
 //
-// Both reuse the canonical Wizard forms (ServicePricingForm /
-// AccountFaqForm). The Service tab passes serviceProfileId so the forms
-// load + save against ServiceProfile.pricingJson / .faqJson — each
-// service ("House Cleaning", "Upholstery & Furniture Cleaning") has its
-// own data. The Global tab (no serviceProfileId) keeps the original
-// SavedAccount-scoped behaviour with saveToAll cascade.
+// On the Global tab (no profile) both panes write to the user's
+// SavedAccount via AccountFaqForm / ServicePricingForm — the canonical
+// Wizard surfaces with the saveToAll cascade.
+//
+// On a per-Service tab we branch by the stored shape of the
+// ServiceProfile's pricingJson / faqJson:
+//
+//   Cleaning shape → ServicePricingForm + AccountFaqForm (the cleaning
+//     bed/bath grid + insured/bonded/supplies/scope FAQ fields). This
+//     is what the House Cleaning preset writes.
+//   item_quantity / no shape → PricingEditor (item rows: label/unit/price)
+//     + a Q&A pairs editor for faqJson.customQA. This is what the
+//     Upholstery preset writes, and the same form doubles as the generic
+//     fallback for any service with no preset.
 
 function useConnectedAccountsForPane() {
   const accounts = useAppStore((s) => s.savedAccounts);
@@ -654,9 +672,273 @@ function useConnectedAccountsForPane() {
   return { primary, allIds };
 }
 
-function ServicePricingPane({ serviceProfileId, serviceName }: { serviceProfileId?: string; serviceName?: string }) {
+// Cleaning pricing has the bed/bath grid (priceTable + cleaningTypes).
+// item_quantity pricing has items[] and pricingModel='item_quantity'.
+// Anything else (empty, malformed, unknown) falls into the item-row form
+// so users can edit pricing without seeing JSON.
+function isCleaningPricing(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return false;
+    if ((parsed as Record<string, unknown>).pricingModel === 'item_quantity') return false;
+    return Array.isArray((parsed as Record<string, unknown>).priceTable)
+      || Array.isArray((parsed as Record<string, unknown>).cleaningTypes);
+  } catch {
+    return false;
+  }
+}
+
+// Cleaning FAQ has cleaning-specific fields (insured/bonded, pet policy,
+// scopes, labor rate, etc.). The Upholstery preset and generic services
+// only carry customQA pairs — branch them into the simple Q&A editor.
+const CLEANING_FAQ_KEYS = [
+  'insuredAndBonded', 'bringsSupplies', 'petPolicy', 'paymentMethods',
+  'customerMustBeHome', 'sameCleanerForRecurring', 'standardScope',
+  'deepScope', 'laborRatePerCleanerHour', 'crewSizeRule',
+] as const;
+
+function isCleaningFaq(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return false;
+    return CLEANING_FAQ_KEYS.some((k) => k in (parsed as Record<string, unknown>));
+  } catch {
+    return false;
+  }
+}
+
+// Item-row pricing editor for non-cleaning services. Loads the
+// ServiceProfile's pricingJson into PricingEditor (item_quantity mode),
+// tracks dirty state, and saves the new JSON back via
+// serviceProfilesApi.update. Used for Upholstery and any generic service.
+function ItemPricingForm({
+  serviceProfileId,
+  initialJson,
+}: {
+  serviceProfileId: string;
+  initialJson: string | null;
+}) {
+  const [value, setValue] = useState<string>(initialJson ?? '');
+  const [savedJson, setSavedJson] = useState<string>(initialJson ?? '');
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const dirty = value !== savedJson;
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
+
+  const handleSave = async () => {
+    if (!dirty) return;
+    setSaving(true);
+    try {
+      await serviceProfilesApi.update(serviceProfileId, { pricingJson: value || null });
+      setSavedJson(value);
+      setSavedAt(Date.now());
+    } catch (e) {
+      const msg = (e as { message?: string })?.message ?? 'Failed to save pricing';
+      alert(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <PricingEditor value={value} onChange={setValue} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+        {savedAt && <span style={{ fontSize: 12, color: 'var(--lb-success, #16a34a)', fontWeight: 600 }}>Saved.</span>}
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={!dirty || saving}
+          style={{
+            padding: '8px 14px', borderRadius: 8,
+            background: dirty ? 'var(--lb-accent, #2563eb)' : '#cbd5e1',
+            color: 'white', border: 0, fontSize: 13, fontWeight: 600,
+            cursor: dirty && !saving ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+            opacity: saving ? 0.7 : 1,
+          }}
+        >
+          {saving ? 'Saving…' : dirty ? 'Save pricing' : 'No changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Q&A pair editor for non-cleaning services. Reads/writes only
+// faqJson.customQA (one row = question + answer). No cleaning-specific
+// fields (insured/bonded, etc.) — those would not apply to e.g. an
+// Upholstery service. Saves the wrapped { customQA: [...] } shape back
+// to ServiceProfile.faqJson.
+type QAPair = { question: string; answer: string };
+
+function parseCustomQA(value: string | null | undefined): QAPair[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return [];
+    const arr = (parsed as Record<string, unknown>).customQA;
+    if (!Array.isArray(arr)) return [];
+    return arr.map((row: any) => ({
+      question: typeof row?.question === 'string' ? row.question : '',
+      answer: typeof row?.answer === 'string' ? row.answer : '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function CustomQAForm({
+  serviceProfileId,
+  initialJson,
+}: {
+  serviceProfileId: string;
+  initialJson: string | null;
+}) {
+  const [rows, setRows] = useState<QAPair[]>(() => parseCustomQA(initialJson));
+  const [savedRows, setSavedRows] = useState<QAPair[]>(rows);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const dirty = JSON.stringify(rows) !== JSON.stringify(savedRows);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
+
+  const updateRow = (i: number, field: keyof QAPair, v: string) => {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: v } : r)));
+  };
+  const addRow = () => setRows((prev) => [...prev, { question: '', answer: '' }]);
+  const removeRow = (i: number) => setRows((prev) => prev.filter((_, idx) => idx !== i));
+
+  const handleSave = async () => {
+    if (!dirty) return;
+    setSaving(true);
+    try {
+      const cleaned = rows.filter((r) => r.question.trim() && r.answer.trim());
+      const payload = JSON.stringify({ customQA: cleaned });
+      await serviceProfilesApi.update(serviceProfileId, { faqJson: payload });
+      setSavedRows(rows);
+      setSavedAt(Date.now());
+    } catch (e) {
+      const msg = (e as { message?: string })?.message ?? 'Failed to save FAQ';
+      alert(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          No Q&amp;A pairs yet. Click <strong>Add Q&amp;A</strong> to add your first.
+        </div>
+      )}
+      {rows.map((row, i) => (
+        <div
+          key={i}
+          style={{
+            border: '1px solid var(--lb-line)', borderRadius: 10, padding: 12,
+            background: 'white', display: 'flex', flexDirection: 'column', gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              Q&amp;A {i + 1}
+            </div>
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              title="Remove this Q&A"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '5px 10px', borderRadius: 7,
+                border: '1px solid var(--lb-line)', background: 'white',
+                color: 'var(--lb-ink-3)', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          </div>
+          <input
+            value={row.question}
+            onChange={(e) => updateRow(i, 'question', e.target.value)}
+            placeholder="Question"
+            style={{
+              width: '100%', padding: '9px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+              background: 'white',
+            }}
+          />
+          <textarea
+            value={row.answer}
+            onChange={(e) => updateRow(i, 'answer', e.target.value)}
+            placeholder="Answer the AI should give"
+            rows={3}
+            style={{
+              width: '100%', padding: '9px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+              background: 'white', resize: 'vertical',
+            }}
+          />
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <button
+          type="button"
+          onClick={addRow}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 8,
+            border: '1px dashed var(--lb-line)',
+            background: 'white', color: 'var(--lb-ink-2)',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <Plus size={13} /> Add Q&amp;A
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {savedAt && <span style={{ fontSize: 12, color: 'var(--lb-success, #16a34a)', fontWeight: 600 }}>Saved.</span>}
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={!dirty || saving}
+            style={{
+              padding: '8px 14px', borderRadius: 8,
+              background: dirty ? 'var(--lb-accent, #2563eb)' : '#cbd5e1',
+              color: 'white', border: 0, fontSize: 13, fontWeight: 600,
+              cursor: dirty && !saving ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : dirty ? 'Save FAQ' : 'No changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   const { primary, allIds } = useConnectedAccountsForPane();
-  const scoped = !!serviceProfileId;
+  const scoped = !!profile;
+  const serviceName = profile ? getServiceDisplayName(profile) : undefined;
+  // Global tab: always use the cleaning form (the SavedAccount pricing
+  // shape is cleaning-grid). Service tab: branch by the stored shape.
+  const cleaning = profile ? isCleaningPricing(profile.pricingJson) : true;
+
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
     // the user directly to this card after the editor renders.
@@ -676,15 +958,21 @@ function ServicePricingPane({ serviceProfileId, serviceName }: { serviceProfileI
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
             Connect an account to set pricing.
           </div>
+        ) : scoped && !cleaning ? (
+          <ItemPricingForm
+            key={profile!.id}
+            serviceProfileId={profile!.id}
+            initialJson={profile!.pricingJson}
+          />
         ) : (
           <ServicePricingForm
             // Re-mount on profile switch so internal state (pricing draft,
             // expanded sections) resets to the new service's data.
-            key={serviceProfileId ?? 'global'}
+            key={profile?.id ?? 'global'}
             accountId={primary.id}
             accountName={scoped ? (serviceName ?? 'This service') : (primary.businessName ?? primary.platform ?? 'Your account')}
             saveToAll={scoped ? undefined : (allIds.length > 1 ? allIds : undefined)}
-            serviceProfileId={serviceProfileId}
+            serviceProfileId={profile?.id}
           />
         )}
       </SectionCard>
@@ -692,9 +980,12 @@ function ServicePricingPane({ serviceProfileId, serviceName }: { serviceProfileI
   );
 }
 
-function ServiceFaqPane({ serviceProfileId, serviceName }: { serviceProfileId?: string; serviceName?: string }) {
+function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
   const { primary, allIds } = useConnectedAccountsForPane();
-  const scoped = !!serviceProfileId;
+  const scoped = !!profile;
+  const serviceName = profile ? getServiceDisplayName(profile) : undefined;
+  const cleaning = profile ? isCleaningFaq(profile.faqJson) : true;
+
   return (
     <SectionCard padding="16px 20px">
       <div style={{ marginBottom: 14 }}>
@@ -711,13 +1002,19 @@ function ServiceFaqPane({ serviceProfileId, serviceName }: { serviceProfileId?: 
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
           Connect an account to fill out the FAQ.
         </div>
+      ) : scoped && !cleaning ? (
+        <CustomQAForm
+          key={profile!.id}
+          serviceProfileId={profile!.id}
+          initialJson={profile!.faqJson}
+        />
       ) : (
         <AccountFaqForm
-          key={serviceProfileId ?? 'global'}
+          key={profile?.id ?? 'global'}
           accountId={primary.id}
           accountName={scoped ? (serviceName ?? 'This service') : (primary.businessName ?? primary.platform ?? 'Your account')}
           saveToAll={scoped ? undefined : (allIds.length > 1 ? allIds : undefined)}
-          serviceProfileId={serviceProfileId}
+          serviceProfileId={profile?.id}
         />
       )}
     </SectionCard>
@@ -1249,8 +1546,8 @@ function ServicePlaybookEditor({
       {isDraft && <DraftWarningBanner />}
       {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
 
-      <ServicePricingPane serviceProfileId={profile.id} serviceName={getServiceDisplayName(profile)} />
-      <ServiceFaqPane serviceProfileId={profile.id} serviceName={getServiceDisplayName(profile)} />
+      <ServicePricingPane profile={profile} />
+      <ServiceFaqPane profile={profile} />
       <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
 
       {/* Service-scoped HOW labels make clear these are additions, not
