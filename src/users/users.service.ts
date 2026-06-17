@@ -1095,6 +1095,38 @@ export class UsersService {
   }
 
   /**
+   * Persist a per-apply snapshot for the Settings → General TT/Yelp
+   * confirmation card. We keep one slot (always overwrite); the card is
+   * scoped to "the URL the user just saved" so a per-platform history
+   * isn't useful. Lives on `User.websiteMetadataJson.lastBusinessApply`
+   * to avoid a schema migration — the JSON column already holds
+   * playbookSeed and friends.
+   */
+  private async persistLastBusinessApply(
+    userId: string,
+    snapshot: {
+      url: string;
+      platform: 'thumbtack' | 'yelp' | 'website';
+      summary?: string;
+      extractedFields?: Record<string, string | string[]>;
+      accountsAffected: number;
+      appliedAt: string;
+    },
+  ): Promise<void> {
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { websiteMetadataJson: true },
+    });
+    const metadata = (current?.websiteMetadataJson as any) || {};
+    metadata.lastBusinessApply = snapshot;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { websiteMetadataJson: metadata },
+    });
+    await this.cache.del(CacheKeys.me(userId));
+  }
+
+  /**
    * Pull business-info from a connected SavedAccount and silently merge
    * what's mergeable (rules 1/2/3/5/arrays). New conflicts (rule 4) are
    * appended to `pendingConflicts` for later review — never written
@@ -1716,6 +1748,27 @@ export class UsersService {
       } catch (err: any) {
         this.logger.warn(`[applyBusinessProfileUrl] faq apply failed for ${platform} url=${normalized}: ${err?.message || err}`);
       }
+    }
+
+    // Persist a snapshot of this apply on user.websiteMetadataJson so
+    // the TT/Yelp confirmation card survives a page reload. Frontend
+    // reads it on mount and seeds its in-memory lastApply state — the
+    // existing card render conditions (url-match, fieldsApplied vs
+    // fieldsExtracted gap) work unchanged when restored: we save
+    // fieldsApplied=0 (delta is meaningless across sessions) and
+    // fieldsExtracted = the patch size, so the card reads as "N fields
+    // already saved" on reload (which is true).
+    try {
+      await this.persistLastBusinessApply(userId, {
+        url: normalized,
+        platform,
+        summary,
+        extractedFields,
+        accountsAffected: accounts.length,
+        appliedAt: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`[applyBusinessProfileUrl] snapshot persist failed: ${err?.message || err}`);
     }
 
     this.logger.log(`[applyBusinessProfileUrl] userId=${userId} platform=${platform} accounts=${accounts.length} fieldsExtracted=${fieldsExtracted} fieldsApplied=${fieldsApplied} url=${normalized.slice(0, 60)}…`);

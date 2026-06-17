@@ -156,6 +156,32 @@ export function SettingsGeneral() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts.length]);
 
+  // Rehydrate the TT/Yelp confirmation card from the persisted snapshot
+  // on user.websiteMetadataJson.lastBusinessApply. Without this the
+  // emerald card vanished on every reload even though the URL + fields
+  // were saved server-side (reported 2026-06-17: "the fetched info
+  // should stay among with url after reloading"). fieldsApplied is
+  // saved as 0 (delta is meaningless across sessions) and
+  // fieldsExtracted = patch size, so the existing card-body logic
+  // reads as "N fields already saved" on restore — accurate.
+  useEffect(() => {
+    if (lastApply) return; // a fresh apply in this session wins over the snapshot
+    const snap = (user as any)?.websiteMetadataJson?.lastBusinessApply;
+    if (!snap || !snap.url || !snap.platform) return;
+    if (snap.platform === 'website') return; // website has its own WebsitePreviewCard
+    const extracted = snap.extractedFields && Object.keys(snap.extractedFields).length || 0;
+    setLastApply({
+      platform: snap.platform,
+      url: snap.url,
+      fieldsApplied: 0,
+      fieldsExtracted: extracted,
+      extractedFields: snap.extractedFields,
+      summary: snap.summary,
+      accountsAffected: snap.accountsAffected ?? 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // Force-refresh the cached user once on mount. The Apply-to-Playbook button
   // gates on `websiteMetadata.playbookSeed`, which only landed in the verify
   // flow recently; users who verified earlier have a stale auth-store entry
