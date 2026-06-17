@@ -200,6 +200,22 @@ export class UsersController {
   }
 
   /**
+   * Manual-paste fallback for the Business URL apply flow. When the URL
+   * scrape returns nothing (Cloudflare-blocked Yelp, BookingKoala SPA,
+   * meta-less generic site), the user pastes the business info as freeform
+   * text and we route it through the same GPT-4o-mini → playbookSeed →
+   * apply-to-accounts pipeline as the URL path.
+   *
+   * POST /v1/users/me/business-info/seed-from-text
+   *   body: { text: string }
+   *   returns: { success, fieldsApplied, conflictsRaised, warning? }
+   */
+  @Post('me/business-info/seed-from-text')
+  async seedBusinessInfoFromText(@Request() req: any, @Body() body: { text?: string }) {
+    return this.usersService.seedBusinessInfoFromText(req.user.id, body?.text ?? '');
+  }
+
+  /**
    * Resolve the current Business profile URL for the unified field —
    * used by both the wizard step and Settings → General to hydrate the
    * input on mount. Resolution order: TT publicProfileUrl > Yelp

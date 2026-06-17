@@ -12,6 +12,7 @@ import { usersApi, authApi, serviceProfilesApi, type ServiceProfile } from '../.
 import { notify } from '../../store/notificationStore';
 import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ApplyToPlaybookButton } from '../../components/ApplyToPlaybookButton';
+import { ManualBusinessInfoModal } from '../../components/ManualBusinessInfoModal';
 import { PresetPickerModal } from './Services';
 
 export function SettingsGeneral() {
@@ -38,6 +39,12 @@ export function SettingsGeneral() {
   const [websiteMetadata, setWebsiteMetadata] = useState<any>((user as any)?.websiteMetadataJson ?? null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Fallback modal — opens when the URL scrape returns nothing usable
+  // (failure or zero-fields), and can also be opened manually via the
+  // "paste it instead" link under the URL field. Tracks the URL that
+  // failed so the modal can echo it in its header.
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone || '');
   const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
   const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
@@ -159,6 +166,12 @@ export function SettingsGeneral() {
       const res = await usersApi.applyBusinessProfileUrl(trimmed);
       if (!res.success || !res.savedUrl) {
         setVerifyError(res.warning || "We couldn't load that link.");
+        // Site couldn't be reached or returned no usable data — surface
+        // the fallback modal so the tenant has an immediate next step
+        // (try a Thumbtack URL OR paste the info manually) without
+        // having to hunt for a workflow.
+        setFallbackUrl(trimmed);
+        setFallbackOpen(true);
         return;
       }
       setDetectedPlatform(res.platform);
@@ -188,11 +201,17 @@ export function SettingsGeneral() {
           4500,
         );
       } else {
+        // Scrape technically succeeded (URL was reachable) but nothing
+        // structured came back — the BookingKoala-SPA / meta-less-site
+        // case. Save the URL silently but also offer the fallback so the
+        // tenant isn't stuck wondering why "no fields" happened.
         notify.success(
           `${platformWord} link saved`,
-          'No new fields to add — everything looked up-to-date.',
-          3500,
+          'No new fields to add — try pasting your business info if you want richer Playbook coverage.',
+          4500,
         );
+        setFallbackUrl(trimmed);
+        setFallbackOpen(true);
       }
       setSavedAt(Date.now());
     } catch (e: any) {
@@ -386,6 +405,27 @@ export function SettingsGeneral() {
             fontSize: 12, fontWeight: 600,
           }}>{verifyError}</div>
         )}
+        {/* Persistent fallback link — for tenants whose site can't be
+            scraped (Yelp/BookingKoala/Cloudflare) or who'd just rather
+            type the info than guess at a URL. The same modal auto-opens
+            on a failed apply, but having it surfaced here means a tenant
+            who already KNOWS their site won't scrape doesn't have to fail
+            once to find this path. */}
+        <div style={{ margin: '0 24px 14px', fontSize: 12, color: 'var(--lb-ink-5)' }}>
+          Site not scraping?{' '}
+          <button
+            type="button"
+            onClick={() => { setFallbackUrl(website.trim() || null); setFallbackOpen(true); }}
+            style={{
+              border: 0, background: 'transparent', padding: 0,
+              color: 'var(--lb-link, #2563eb)', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+              textDecoration: 'underline',
+            }}
+          >
+            Paste your business info instead
+          </button>
+        </div>
         {detectedPlatform === 'website' && (user?.website || websiteMetadata) && (
           <div style={{ padding: '0 24px 12px' }}>
             <WebsitePreviewCard
@@ -458,6 +498,33 @@ export function SettingsGeneral() {
       <ServicesOfferedSection />
 
       <FooterBanner icon={Info} body="Account-level changes apply across all your connected sources." />
+
+      {/* Manual-paste fallback — auto-opens when the URL fetch fails or
+          returns zero new fields; also reachable via the "paste it
+          instead" link beneath the URL row. */}
+      <ManualBusinessInfoModal
+        isOpen={fallbackOpen}
+        failedUrl={fallbackUrl}
+        onClose={() => setFallbackOpen(false)}
+        onSuccess={async ({ platform }) => {
+          // Same post-success rehydrate as the URL path so the AI Playbook
+          // / Business-info card see the freshly-merged seed without a
+          // full page reload.
+          if (platform) setDetectedPlatform(platform as any);
+          if (token) {
+            try {
+              const fresh: any = await authApi.getProfile();
+              const u = fresh?.user ?? fresh;
+              if (u?.id) {
+                setAuth(u, token);
+                setWebsiteMetadata((u as any).websiteMetadataJson ?? null);
+              }
+            } catch { /* silent */ }
+          }
+          setSavedAt(Date.now());
+          setFallbackOpen(false);
+        }}
+      />
     </div>
   );
 }
