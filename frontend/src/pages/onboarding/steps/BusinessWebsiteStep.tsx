@@ -10,6 +10,7 @@ import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import type { SavedAccount } from '../../../types';
 import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
+import { ManualBusinessInfoModal } from '../../../components/ManualBusinessInfoModal';
 import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
 import { WizardStepActions } from '../WizardStepActions';
 
@@ -69,6 +70,13 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     | { kind: 'invalid'; outcome: VerifyOutcome }
     | { kind: 'valid'; outcome: VerifyOutcome }
   >({ kind: 'idle' });
+  // True when the URL fetched fine but the scrape produced no usable
+  // Playbook seed (BookingKoala SPA, meta-less site, etc.). Drives the
+  // "not enough info" banner that surfaces the fallback modal — the
+  // green VERIFIED card on its own is misleading when only the page
+  // title was extracted.
+  const [lowYieldScrape, setLowYieldScrape] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
 
   // ── LeadBridge phone state (TenantPhoneNumber) ─────────────────────
   const savedAccounts = useAppStore(s => s.savedAccounts);
@@ -274,14 +282,13 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           `Filled ${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'}. Review on the next step or in Settings → AI Playbook.`,
           5000,
         );
-      } else if (res.platform !== 'website') {
-        // TT / Yelp scrape returned nothing extractable — surface as a
-        // soft warning so the user isn't confused by a silent no-op.
-        notify.info?.(
-          `${platformWord} link saved`,
-          "We didn't pull new info this time — the page may be light on structured details. Your AI still works.",
-          4500,
-        );
+        setLowYieldScrape(false);
+      } else {
+        // Scrape was reachable but extracted no usable fields — the
+        // BookingKoala SPA / meta-less site / Yelp-403 cases. Flag for
+        // the in-step warning banner; the banner offers the fallback
+        // modal (Try a TT URL OR paste business info manually).
+        setLowYieldScrape(true);
       }
       const outcome: VerifyOutcome = {
         reachable: true,
@@ -690,6 +697,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
                 if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
                   setVerifyState({ kind: 'idle' });
                 }
+                if (lowYieldScrape) setLowYieldScrape(false);
               }}
               disabled={isChecking}
               className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border-2 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
@@ -749,7 +757,64 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
             <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
           </div>
         )}
+
+        {/* Low-yield warning — fires when the URL was reachable but the
+            scrape returned no Playbook seed (BookingKoala SPA, meta-less
+            site, Cloudflare-protected page). The green VERIFIED card
+            alone is misleading; this banner tells the user what didn't
+            happen and offers a fallback (TT URL OR paste manually). */}
+        {lowYieldScrape && verifyState.kind === 'valid' && !isBusy && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 flex items-start gap-2.5" role="alert">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="min-w-0 text-xs flex-1">
+              <div className="font-bold text-amber-900">
+                Site loaded — but we couldn't pull much detail.
+              </div>
+              <div className="text-amber-800 mt-0.5 leading-snug">
+                That page is light on structured info (services, pricing, hours). Your AI Playbook will be
+                close to empty unless you give us another source.
+              </div>
+              <div className="mt-2 flex items-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setFallbackOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition"
+                >
+                  Try another source
+                </button>
+                <span className="text-[11px] text-amber-700">
+                  Use a Thumbtack URL or paste your business info as text.
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
+
+      <ManualBusinessInfoModal
+        isOpen={fallbackOpen}
+        failedUrl={value.trim() || null}
+        onClose={() => setFallbackOpen(false)}
+        onSuccess={async ({ platform }) => {
+          // Refresh the cached user so the next wizard step (FAQ, Pricing)
+          // sees the freshly-applied Playbook seed without a hard reload.
+          try {
+            const fresh: any = await authApi.getProfile();
+            const u = fresh?.user ?? fresh;
+            if (u?.id && user) {
+              const token = localStorage.getItem('token') || '';
+              setAuth(u, token);
+            }
+          } catch { /* non-fatal */ }
+          if (platform === 'thumbtack' || platform === 'yelp' || platform === 'website') {
+            setDetectedPlatform(platform);
+          }
+          // Modal succeeded → the low-yield warning no longer applies
+          // (we just landed real data through the fallback).
+          setLowYieldScrape(false);
+          setFallbackOpen(false);
+        }}
+      />
 
     </div>
   );
