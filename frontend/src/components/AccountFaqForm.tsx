@@ -364,7 +364,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
               onClick={() => standardFileRef.current?.click()}
               disabled={uploading === 'standard'}
               className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
-              title="Upload a checklist file (PDF, DOCX, TXT, MD)"
+              title="Upload a checklist file (PDF, Word, Excel, image, TXT, CSV, MD)"
             >
               {uploading === 'standard' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
               Upload checklist
@@ -372,7 +372,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
             <input
               ref={standardFileRef}
               type="file"
-              accept=".pdf,.docx,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.txt,.md,.markdown,.csv,.tsv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/plain,text/markdown,text/csv,text/tab-separated-values,text/rtf,image/*"
               onChange={e => handleChecklistUpload('standard', e)}
               className="hidden"
             />
@@ -393,7 +393,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
               onClick={() => deepFileRef.current?.click()}
               disabled={uploading === 'deep'}
               className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
-              title="Upload a checklist file (PDF, DOCX, TXT, MD)"
+              title="Upload a checklist file (PDF, Word, Excel, image, TXT, CSV, MD)"
             >
               {uploading === 'deep' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
               Upload checklist
@@ -401,7 +401,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
             <input
               ref={deepFileRef}
               type="file"
-              accept=".pdf,.docx,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.txt,.md,.markdown,.csv,.tsv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/plain,text/markdown,text/csv,text/tab-separated-values,text/rtf,image/*"
               onChange={e => handleChecklistUpload('deep', e)}
               className="hidden"
             />
