@@ -22,13 +22,15 @@ import { useAuthStore } from '../../store/authStore';
 // surfaces (Respond + Followups) don't expose Goal selection — Goals live
 // only on AI Conversation. The type stays for the save-merge logic that
 // reads/writes followUpStrategy from cachedAccount.
-type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
 // Accept legacy 'hybrid' and 'convert' as valid saved values for back-compat.
-// The backend runtime continues to honour them via STRATEGY_PROMPTS — no DB
+// 'booking' (2026-06-16) is the new user-selectable scheduling goal; 'phone'
+// is the Call Handoff goal (key kept for back-compat with the old label).
+// The backend runtime honours all of these via STRATEGY_PROMPTS — no DB
 // write happens from this page (Followups preserves prev.followUpStrategy
 // on save).
 const isStrategyKey = (v: unknown): v is StrategyKey =>
-  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
+  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone' || v === 'booking';
 
 // Module-level cache for instant tab switching + delay-free mixed detection.
 type PlanStepData = { val: number; unit: PlanUnit };

@@ -15,8 +15,9 @@
  * deliberately does NOT receive the QUALIFICATION REQUIRED FIELDS block —
  * letting the two surfaces stay clean (Price = pricing rules, Qualify =
  * info collection). Accounts with no `qualificationV2` entry skip the
- * block entirely — the AI then falls back to the legacy hardcoded priority
- * order defined in STRATEGY_PROMPTS.qualify. No migration is required.
+ * block entirely — the AI then falls back to the generic "ask whichever
+ * decision-relevant detail is most clearly missing" guidance in
+ * STRATEGY_PROMPTS.qualify. No migration is required.
  *
  * Unknown / malformed keys are silently dropped to keep the block tidy and
  * forward-compatible: when we ship a new field key later, older
@@ -24,10 +25,18 @@
  * the prompt.
  */
 
-/** Stable list of every supported field key + its human-readable label. */
+/**
+ * Stable list of every supported field key + its human-readable label.
+ *
+ * `service_date` is the built-in "Desired service date" field
+ * (2026-06-16). It belongs to Qualify (collect before quoting/booking)
+ * AND to Booking (it's the date the booking is for). The key stays
+ * `service_date` for back-compat with any account that already saved
+ * this field under the old "Service Date" label.
+ */
 const FIELD_LABELS: Record<string, string> = {
   square_footage: 'Square Footage',
-  service_date:   'Service Date',
+  service_date:   'Desired Service Date',
   phone_number:   'Phone Number',
   bedrooms:       'Bedrooms',
   bathrooms:      'Bathrooms',
@@ -125,8 +134,16 @@ export function buildQualificationBlock(
  * on the prompt side keeps the two surfaces semantically clean — Price never
  * receives a QUALIFICATION REQUIRED FIELDS block, so it can't accidentally
  * lead with "I need square footage" before quoting from the table.
+ *
+ * `booking` (2026-06-16) is included because the Booking goal's prompt
+ * explicitly asks "is one required field still missing AND is it
+ * booking-critical?" — that question only makes sense when the prompt
+ * sees the REQUIRED FIELDS list. The prompt itself enforces the
+ * "booking-critical fields only" filter (address / zip / service type /
+ * desired date) so the AI doesn't chain through every Qualify field
+ * during a Booking flow. See strategy-prompts.ts → booking.
  */
-const QUALIFICATION_STRATEGIES = new Set(['qualify']);
+const QUALIFICATION_STRATEGIES = new Set(['qualify', 'booking']);
 
 /** Convenience: returns the block ONLY when the strategy warrants it. */
 export function buildQualificationBlockForStrategy(

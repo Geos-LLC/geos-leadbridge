@@ -26,8 +26,16 @@
 
 import { STRATEGY_PROMPTS } from './strategy-prompts';
 
-/** Internal canonical key set. Auto is a router, never a final goal. */
-export type GoalKey = 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+/**
+ * Internal canonical key set. Auto is a router, never a final goal.
+ *
+ * `booking` (2026-06-16) is the new user-selectable "schedule the job"
+ * goal. `phone` is the internal key for the Call Handoff goal — the UI
+ * label changed but the key stays put so existing
+ * `SavedAccount.followUpSettingsJson.followUpStrategy='phone'` values
+ * resolve unchanged.
+ */
+export type GoalKey = 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
 
 /**
  * All goal keys the prompt layer understands. Used by tests + callers that
@@ -35,7 +43,7 @@ export type GoalKey = 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
  * this list — it is a routing instruction, not a goal.
  */
 export const SUPPORTED_GOAL_KEYS: readonly GoalKey[] =
-  ['hybrid', 'price', 'qualify', 'convert', 'phone'] as const;
+  ['hybrid', 'price', 'qualify', 'convert', 'phone', 'booking'] as const;
 
 /**
  * Goal keys the UI may render as selectable cards. `hybrid` and `convert`
@@ -43,9 +51,12 @@ export const SUPPORTED_GOAL_KEYS: readonly GoalKey[] =
  * back-compat with accounts that saved them before the picker was
  * narrowed, but new selections cannot produce them. See parseSettings in
  * frontend/src/pages/automation/Conversation.tsx for the display remap.
+ *
+ * Order matters — this is also the on-screen card order. `phone` displays
+ * as "Call Handoff" in the UI; the saved key stays `phone` for back-compat.
  */
 export const SELECTABLE_GOAL_KEYS: readonly ('auto' | GoalKey)[] =
-  ['auto', 'price', 'qualify', 'phone'] as const;
+  ['auto', 'price', 'qualify', 'booking', 'phone'] as const;
 
 export interface ResolveGoalInput {
   /**
