@@ -114,6 +114,16 @@ function buildPrismaMock(
         state.profiles.push(row);
         return row;
       }),
+      delete: jest.fn().mockImplementation(async ({ where }: any) => {
+        const idx = state.profiles.findIndex((p) => p.id === where.id);
+        if (idx === -1) {
+          const e: any = new Error('Record not found');
+          e.code = 'P2025';
+          throw e;
+        }
+        const [removed] = state.profiles.splice(idx, 1);
+        return removed;
+      }),
     },
     user: {
       findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
@@ -1215,6 +1225,64 @@ describe('ServiceProfileService — createBlank (generic Custom Service preset)'
     const created = await svc.createBlank({ userId: USER_ID, name: '!!!' });
     const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
     expect(row.slug).toBe('new-service');
+  });
+});
+
+describe('ServiceProfileService — deleteProfile', () => {
+  it('removes the row when no default constraint applies', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({ id: 'prof-x', userId: USER_ID, slug: 'roof-inspection', isDefault: false }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    const result = await svc.deleteProfile(USER_ID, 'prof-x');
+    expect(result).toEqual({ id: 'prof-x', deleted: true });
+    expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-x')).toBeUndefined();
+  });
+
+  it('throws NOT_FOUND when the profile does not exist', async () => {
+    const prisma = buildPrismaMock({
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    await expect(svc.deleteProfile(USER_ID, 'missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('throws NOT_FOUND when the profile belongs to a different user (no cross-tenant delete)', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [buildProfile({ id: 'prof-other', userId: 'someone-else', slug: 'other' })],
+      users: [
+        { id: USER_ID, defaultServiceProfileId: null },
+        { id: 'someone-else', defaultServiceProfileId: null },
+      ],
+    });
+    const svc = new ServiceProfileService(prisma);
+    await expect(svc.deleteProfile(USER_ID, 'prof-other')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-other')).toBeDefined();
+  });
+
+  it('blocks delete when the profile is the tenant fallback (isDefault=true)', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [buildProfile({ id: 'prof-def', userId: USER_ID, slug: 'default-service', isDefault: true })],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    await expect(svc.deleteProfile(USER_ID, 'prof-def')).rejects.toMatchObject({ code: 'DEFAULT_BLOCKED' });
+    expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-def')).toBeDefined();
+  });
+
+  it('blocks delete when the User.defaultServiceProfileId still points at this row', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [buildProfile({ id: 'prof-pointed-at', userId: USER_ID, slug: 'roof', isDefault: false })],
+      users: [{ id: USER_ID, defaultServiceProfileId: 'prof-pointed-at' }],
+    });
+    const svc = new ServiceProfileService(prisma);
+    await expect(svc.deleteProfile(USER_ID, 'prof-pointed-at')).rejects.toMatchObject({
+      code: 'DEFAULT_BLOCKED',
+    });
+    expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-pointed-at')).toBeDefined();
   });
 });
 

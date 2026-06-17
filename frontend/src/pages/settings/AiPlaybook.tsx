@@ -198,6 +198,12 @@ export function SettingsAiPlaybook() {
           key={activeProfile.id}
           profile={activeProfile}
           onSaved={() => setRefreshTok((t) => t + 1)}
+          onDeleted={() => {
+            const sp = new URLSearchParams(searchParams);
+            sp.delete('scope');
+            setSearchParams(sp, { replace: true });
+            setRefreshTok((t) => t + 1);
+          }}
         />
       )}
       {scope.kind === 'service' && profiles && !activeProfile && (
@@ -1416,9 +1422,11 @@ function DraftWarningBanner() {
 function ServicePlaybookEditor({
   profile,
   onSaved,
+  onDeleted,
 }: {
   profile: ServiceProfile;
   onSaved: () => void;
+  onDeleted: () => void;
 }) {
   const [searchParams] = useSearchParams();
   const advancedMode =
@@ -1632,6 +1640,220 @@ function ServicePlaybookEditor({
         >
           {saving ? 'Saving…' : hasDirty ? 'Save service playbook' : 'No changes'}
         </button>
+      </div>
+
+      <DangerZoneCard profile={profile} onDeleted={onDeleted} />
+    </div>
+  );
+}
+
+// ─── Danger zone ──────────────────────────────────────────────────────
+//
+// Hidden by default behind a "Show advanced" disclosure so it doesn't
+// invite accidental clicks. The visible affordance is just a tiny grey
+// link below the Save button; expanding it reveals the red Delete
+// button. The default service can't be deleted (backend rejects the
+// call), so the card is hidden entirely on isDefault profiles to keep
+// the UI honest.
+//
+// Delete itself goes through a typed-name confirmation modal — the
+// operator must enter the exact service name before the Delete button
+// enables. That's enough friction to make accidental deletion very
+// unlikely without putting up a separate "type DELETE in caps" hurdle.
+
+function DangerZoneCard({
+  profile,
+  onDeleted,
+}: {
+  profile: ServiceProfile;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  if (profile.isDefault) {
+    return null;
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{
+            background: 'transparent', border: 0, padding: '4px 0',
+            color: 'var(--lb-ink-5)', fontSize: 12.5, cursor: 'pointer',
+            textDecoration: 'underline', fontFamily: 'inherit',
+          }}
+        >
+          Show advanced (delete this service)
+        </button>
+      )}
+      {open && (
+        <SectionCard
+          padding="16px 20px"
+          style={{ border: '1px solid #fecaca', background: '#fef2f2' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                Danger zone
+              </div>
+              <div style={{ fontSize: 12.5, color: '#7f1d1d', lineHeight: 1.5 }}>
+                Deleting <strong>{getServiceDisplayName(profile)}</strong> permanently removes its
+                pricing, FAQ, qualification questions, and AI playbook overrides. Lead history that
+                referenced this service stays intact. Prefer <em>Archive</em> if you might bring it
+                back later.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  padding: '8px 12px', borderRadius: 8, background: 'white',
+                  border: '1px solid #e5e7eb', color: 'var(--lb-ink-3)',
+                  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalOpen(true)}
+                style={{
+                  padding: '8px 14px', borderRadius: 8, background: '#dc2626',
+                  border: 0, color: 'white', fontSize: 12.5, fontWeight: 700,
+                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+                  fontFamily: 'inherit',
+                }}
+              >
+                <Trash2 size={13} /> Delete this service…
+              </button>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+      {modalOpen && (
+        <DeleteServiceConfirmModal
+          profile={profile}
+          onClose={() => setModalOpen(false)}
+          onDeleted={onDeleted}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteServiceConfirmModal({
+  profile,
+  onClose,
+  onDeleted,
+}: {
+  profile: ServiceProfile;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const expectedName = getServiceDisplayName(profile);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enabled = typed.trim() === expectedName && !busy;
+
+  const handleDelete = async () => {
+    if (!enabled) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await serviceProfilesApi.delete(profile.id);
+      notify.success('Service deleted', `${expectedName} has been removed.`);
+      onDeleted();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? e?.message ?? 'Delete failed';
+      setError(msg);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+        zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+      onClick={busy ? undefined : onClose}
+    >
+      <div
+        style={{
+          background: 'white', borderRadius: 16, width: 'min(520px, 100%)',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', padding: 24,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <Trash2 size={16} color="#dc2626" />
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
+            Delete this service?
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55, marginBottom: 14 }}>
+          This will permanently delete <strong>{expectedName}</strong>, including its pricing, FAQ,
+          qualification questions, and AI playbook overrides. This cannot be undone.
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginBottom: 6 }}>
+          Type <strong style={{ color: 'var(--lb-ink-1)' }}>{expectedName}</strong> to confirm:
+        </div>
+        <input
+          autoFocus
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          disabled={busy}
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: 8,
+            border: '1px solid var(--lb-border, #e5e7eb)', fontSize: 13.5,
+            fontFamily: 'inherit', boxSizing: 'border-box',
+          }}
+        />
+        {error && (
+          <div
+            style={{
+              marginTop: 10, padding: 10, borderRadius: 8,
+              background: '#fef2f2', color: '#b91c1c', fontSize: 12.5,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              padding: '8px 14px', borderRadius: 8, background: 'white',
+              border: '1px solid #e5e7eb', color: 'var(--lb-ink-3)',
+              fontSize: 13, fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', opacity: busy ? 0.6 : 1,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDelete()}
+            disabled={!enabled}
+            style={{
+              padding: '8px 14px', borderRadius: 8,
+              background: enabled ? '#dc2626' : '#fecaca',
+              border: 0, color: 'white', fontSize: 13, fontWeight: 700,
+              cursor: enabled ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+            }}
+          >
+            {busy ? 'Deleting…' : 'Delete service'}
+          </button>
+        </div>
       </div>
     </div>
   );
