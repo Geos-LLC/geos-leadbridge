@@ -7,6 +7,10 @@ import {
   UnifiedAddRowButton,
   UnifiedSaveButton,
 } from './playbook-controls';
+import {
+  StructuredFaqGroups,
+  type StructuredFaqValue,
+} from './StructuredFaqGroups';
 import { MessageSquare } from 'lucide-react';
 
 export interface AccountFaq {
@@ -37,16 +41,6 @@ const DEFAULT_FAQ: AccountFaq = {
   customQA: [],
 };
 
-const PAYMENT_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: 'cash', label: 'Cash' },
-  { key: 'check', label: 'Check' },
-  { key: 'venmo', label: 'Venmo' },
-  { key: 'zelle', label: 'Zelle' },
-  { key: 'credit_card', label: 'Credit card' },
-  { key: 'debit_card', label: 'Debit card' },
-  { key: 'invoice', label: 'Invoice' },
-  { key: 'paypal', label: 'PayPal' },
-];
 
 interface AccountFaqFormProps {
   accountId: string;
@@ -103,14 +97,6 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
 
   const update = <K extends keyof AccountFaq>(key: K, value: AccountFaq[K]) => {
     setFaq(prev => ({ ...(prev || DEFAULT_FAQ), [key]: value }));
-  };
-
-  const togglePayment = (key: string) => {
-    setFaq(prev => {
-      const current = prev?.paymentMethods || [];
-      const next = current.includes(key) ? current.filter(k => k !== key) : [...current, key];
-      return { ...(prev || DEFAULT_FAQ), paymentMethods: next };
-    });
   };
 
   const updateCustomQA = (idx: number, field: 'question' | 'answer', value: string) => {
@@ -222,157 +208,26 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         These answers are injected into the AI prompt so it can respond accurately to common customer questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
       </p>
 
-      {/* Insurance / bonded */}
-      <div>
-        <label className={labelCls}>Are you insured & bonded?</label>
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { key: 'unset', label: 'Not set' },
-            { key: 'yes', label: 'Yes' },
-            { key: 'no', label: 'No' },
-          ].map(o => {
-            const active = (faq.insuredAndBonded?.value || 'unset') === o.key;
-            return (
-              <button
-                key={o.key}
-                type="button"
-                onClick={() => update('insuredAndBonded', { ...faq.insuredAndBonded, value: o.key as any })}
-                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-        {faq.insuredAndBonded?.value === 'yes' && (
-          <input
-            type="text"
-            value={faq.insuredAndBonded?.details || ''}
-            onChange={e => update('insuredAndBonded', { ...faq.insuredAndBonded, details: e.target.value })}
-            placeholder="Optional details (e.g. carrier, coverage amount)"
-            className={`${inputCls} mt-2`}
-          />
-        )}
-      </div>
-
-      {/* Supplies */}
-      <div>
-        <label className={labelCls}>Do you bring supplies & equipment?</label>
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { key: 'unset', label: 'Not set' },
-            { key: 'yes', label: 'Yes, we bring everything' },
-            { key: 'no', label: 'No, customer provides' },
-          ].map(o => {
-            const active = (faq.bringsSupplies?.value || 'unset') === o.key;
-            return (
-              <button
-                key={o.key}
-                type="button"
-                onClick={() => update('bringsSupplies', { ...faq.bringsSupplies, value: o.key as any })}
-                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-        <input
-          type="text"
-          value={faq.bringsSupplies?.details || ''}
-          onChange={e => update('bringsSupplies', { ...faq.bringsSupplies, details: e.target.value })}
-          placeholder="Optional notes (e.g. eco-friendly products, fragrance-free available on request)"
-          className={`${inputCls} mt-2`}
-        />
-      </div>
-
-      {/* Pet policy */}
-      <div>
-        <label className={labelCls}>Pet policy</label>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { key: 'unset', label: 'Not set' },
-            { key: 'pet_friendly', label: 'Pet-friendly, no charge' },
-            { key: 'extra_charge', label: 'Extra charge for pets' },
-            { key: 'no_pets', label: "We don't service homes with pets" },
-          ].map(o => {
-            const active = (faq.petPolicy?.value || 'unset') === o.key;
-            return (
-              <button
-                key={o.key}
-                type="button"
-                onClick={() => update('petPolicy', { ...faq.petPolicy, value: o.key as any })}
-                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-        {faq.petPolicy?.value === 'extra_charge' && (
-          <input
-            type="text"
-            value={faq.petPolicy?.details || ''}
-            onChange={e => update('petPolicy', { ...faq.petPolicy, details: e.target.value })}
-            placeholder="Pet surcharge details (e.g. $20 per visit)"
-            className={`${inputCls} mt-2`}
-          />
-        )}
-      </div>
-
-      {/* Payment methods */}
-      <div>
-        <label className={labelCls}>Accepted payment methods</label>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {PAYMENT_OPTIONS.map(opt => {
-            const active = (faq.paymentMethods || []).includes(opt.key);
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => togglePayment(opt.key)}
-                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Must be home */}
-      <div>
-        <label className={labelCls}>Does the customer need to be home?</label>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { key: 'unset', label: 'Not set' },
-            { key: 'no', label: 'No, just need access' },
-            { key: 'yes', label: 'Yes, they should be home' },
-            { key: 'optional', label: 'Either way works' },
-          ].map(o => {
-            const active = (faq.customerMustBeHome?.value || 'unset') === o.key;
-            return (
-              <button
-                key={o.key}
-                type="button"
-                onClick={() => update('customerMustBeHome', { ...faq.customerMustBeHome, value: o.key as any })}
-                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-        {faq.customerMustBeHome?.value === 'no' && (
-          <input
-            type="text"
-            value={faq.customerMustBeHome?.details || ''}
-            onChange={e => update('customerMustBeHome', { ...faq.customerMustBeHome, details: e.target.value })}
-            placeholder="How we get in (e.g. lockbox code, key under mat, doorman)"
-            className={`${inputCls} mt-2`}
-          />
-        )}
-      </div>
+      {/* Five baseline chip groups — shared with every non-cleaning
+          service so the FAQ chrome is identical across verticals. The
+          remaining cleaning-specific groups (same cleaner, scope text,
+          labor rate, crew sizing) keep rendering inline below. */}
+      <StructuredFaqGroups
+        value={{
+          insuredAndBonded: faq.insuredAndBonded as StructuredFaqValue['insuredAndBonded'],
+          bringsSupplies: faq.bringsSupplies as StructuredFaqValue['bringsSupplies'],
+          petPolicy: faq.petPolicy as StructuredFaqValue['petPolicy'],
+          paymentMethods: faq.paymentMethods,
+          customerMustBeHome: faq.customerMustBeHome as StructuredFaqValue['customerMustBeHome'],
+        }}
+        onChange={(next) => {
+          if (next.insuredAndBonded !== undefined) update('insuredAndBonded', next.insuredAndBonded as AccountFaq['insuredAndBonded']);
+          if (next.bringsSupplies !== undefined) update('bringsSupplies', next.bringsSupplies as AccountFaq['bringsSupplies']);
+          if (next.petPolicy !== undefined) update('petPolicy', next.petPolicy as AccountFaq['petPolicy']);
+          if (next.paymentMethods !== undefined) update('paymentMethods', next.paymentMethods);
+          if (next.customerMustBeHome !== undefined) update('customerMustBeHome', next.customerMustBeHome as AccountFaq['customerMustBeHome']);
+        }}
+      />
 
       {/* Same cleaner */}
       <div>
