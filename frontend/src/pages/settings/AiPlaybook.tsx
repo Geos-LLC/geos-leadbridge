@@ -1428,9 +1428,16 @@ function ServicePlaybookEditor({
   onSaved: () => void;
   onDeleted: () => void;
 }) {
-  const [searchParams] = useSearchParams();
-  const advancedMode =
-    searchParams.get('advanced') === '1' || searchParams.get('debug') === '1';
+  // PR — service tab is structured-data-first. The three legacy service
+  // HOW cards (Service business details / Service pricing instructions /
+  // Service communication style) and the ?advanced=1 legacy block have
+  // been removed from rendering. Existing aiPlaybookV2 data on the
+  // wrapper is preserved untouched: nothing dirties dirtyRef anymore, so
+  // handleSave never writes aiInstructionsJson unless the operator edits
+  // qualification questions. Service Rules already render via
+  // ServiceRulesViewer above; pricing / FAQ / qualification own their
+  // own forms. See spec "AI Playbook Cleanup — Hide Unused Duplicate
+  // Sections" (2026-06-17).
 
   const initialWrapper = useMemo(
     () => parseAiInstructionsWrapper(profile.aiInstructionsJson),
@@ -1483,15 +1490,6 @@ function ServicePlaybookEditor({
     const t = setTimeout(() => setSavedAt(null), 2000);
     return () => clearTimeout(t);
   }, [savedAt]);
-
-  const onSectionChange = (section: PlaybookSectionKey, value: string) => {
-    dirtyRef.current.add(section);
-    setV2((prev) => ({
-      ...prev,
-      [section]: { customInstructions: value, suggestedFromWebsite: false },
-    }));
-    bumpDirty((n) => n + 1);
-  };
 
   const onQualChange = (next: string) => {
     dirtyFieldsRef.current.add('qualification');
@@ -1557,69 +1555,6 @@ function ServicePlaybookEditor({
       <ServicePricingPane profile={profile} />
       <ServiceFaqPane profile={profile} />
       <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
-
-      {/* Service-scoped HOW labels make clear these are additions, not
-          global facts. Storage keys + runtime prompt assembly stay the
-          same — only the UI label changes. */}
-      <HowSectionCard
-        section="business_information"
-        value={v2.business_information?.customInstructions ?? ''}
-        onChange={(v) => onSectionChange('business_information', v)}
-        titleOverride="Service business details"
-        subtitleOverride={`What AI should know specifically when handling ${getServiceDisplayName(profile)} leads. Layered on top of Global business info.`}
-      />
-
-      <HowSectionCard
-        section="pricing_guidance"
-        value={v2.pricing_guidance?.customInstructions ?? ''}
-        onChange={(v) => onSectionChange('pricing_guidance', v)}
-        titleOverride="Service pricing instructions"
-        subtitleOverride={`How AI should discuss pricing for ${getServiceDisplayName(profile)}. The pricing table above is the source of truth for numbers.`}
-      />
-
-      <HowSectionCard
-        section="personality_brand_voice"
-        value={v2.personality_brand_voice?.customInstructions ?? ''}
-        onChange={(v) => onSectionChange('personality_brand_voice', v)}
-        titleOverride="Service communication style"
-        subtitleOverride={`Tone + voice tweaks specifically for ${getServiceDisplayName(profile)}. Layered on top of the Global brand voice.`}
-      />
-
-      {advancedMode && (
-        <>
-          <AdvancedSectionsBanner />
-          <HowSectionCard
-            section="qualification_guidance"
-            value={v2.qualification_guidance?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('qualification_guidance', v)}
-            legacyAdvanced
-          />
-          <HowSectionCard
-            section="booking_guidance"
-            value={v2.booking_guidance?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('booking_guidance', v)}
-            legacyAdvanced
-          />
-          <HowSectionCard
-            section="human_handoff_guidance"
-            value={v2.human_handoff_guidance?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('human_handoff_guidance', v)}
-            legacyAdvanced
-          />
-          <HowSectionCard
-            section="objection_handling"
-            value={v2.objection_handling?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('objection_handling', v)}
-            legacyAdvanced
-          />
-          <HowSectionCard
-            section="followup_tone"
-            value={v2.followup_tone?.customInstructions ?? ''}
-            onChange={(v) => onSectionChange('followup_tone', v)}
-            legacyAdvanced
-          />
-        </>
-      )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
         <span style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginRight: 'auto' }}>
