@@ -147,7 +147,12 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     if (accountToReconnect.platform === 'yelp') {
       handleStartYelpOAuth();
     } else {
-      handleSwitchAccount();
+      // Reconnecting an EXISTING TT account → go straight to the legacy
+      // popup-logout + OAuth flow. The email-prompt that handleSwitchAccount
+      // would open is intended for ADDING a SECOND, DIFFERENT TT account,
+      // and it never renders when `accountToReconnect` is set — routing
+      // through it caused clicks to silently no-op (incident 2026-06-16).
+      handleSwitchAccountLegacy();
     }
   };
 
