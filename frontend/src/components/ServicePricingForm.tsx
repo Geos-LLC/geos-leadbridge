@@ -1,13 +1,15 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Loader2, ChevronDown, ChevronRight,
+  Plus, Trash2, Loader2, ChevronDown,
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
-  type LucideIcon,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
-import { IconTile, type IconTone } from './automation/ui';
-import { UNIFIED_ADD_ROW_STYLE, UnifiedSaveButton } from './playbook-controls';
+import {
+  CollapsibleSection,
+  UNIFIED_ADD_ROW_STYLE,
+  UnifiedSaveButton,
+} from './playbook-controls';
 
 // Re-export for downstream imports (Services.tsx, PricingSetupStep.tsx).
 // The canonical definition lives in `../data/defaultPricing` so the wizard
@@ -51,58 +53,26 @@ const textInputStyle: CSSProperties = {
   outline: 'none',
 };
 
-function SectionPanel({
-  icon, iconTone, title, count, open, onToggle, children,
-}: {
-  icon: LucideIcon;
-  iconTone: IconTone;
-  title: ReactNode;
-  count?: number | string;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
+/**
+ * Small right-aligned pill used by ServicePricingForm's CollapsibleSection
+ * headers — matches the row-count badge style used by the item_quantity
+ * Pricing card so cleaning and line items wear the same chrome.
+ */
+function UnifiedSectionBadge({ children }: { children: ReactNode }) {
   return (
-    <div style={{
-      background: 'var(--lb-surface)',
-      border: '1.5px solid var(--lb-line)',
-      borderRadius: 14,
-      boxShadow: 'var(--lb-shadow-sm)',
-      overflow: 'hidden',
-    }}>
-      <button
-        type="button"
-        onClick={onToggle}
-        style={{
-          width: '100%',
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '12px 14px',
-          background: 'var(--lb-surface)',
-          border: 0, cursor: 'pointer',
-          fontFamily: 'inherit', textAlign: 'left',
-        }}
-      >
-        <IconTile icon={icon} tone={iconTone} size="sm" />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</span>
-          {count !== undefined && (
-            <span style={{
-              ...MONO,
-              fontSize: 11, fontWeight: 600, color: 'var(--lb-ink-5)',
-              background: 'var(--lb-ink-10)',
-              padding: '2px 8px', borderRadius: 999,
-              letterSpacing: 0.02,
-            }}>{count}</span>
-          )}
-        </div>
-        {open ? <ChevronDown size={16} color="var(--lb-ink-5)" /> : <ChevronRight size={16} color="var(--lb-ink-5)" />}
-      </button>
-      {open && (
-        <div style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
-          {children}
-        </div>
-      )}
-    </div>
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'var(--lb-ink-5)',
+        background: 'var(--lb-ink-10, #f3f5fa)',
+        padding: '3px 8px',
+        borderRadius: 999,
+        letterSpacing: '0.02em',
+      }}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -313,12 +283,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         </div>
       </label>
 
-      {/* Price Table */}
-      <SectionPanel
-        icon={Table2}
-        iconTone="gray"
-        title="Price Table"
-        count={`${pricing.priceTable?.length || 0} rows`}
+      {/* Price Table — unified collapsible chrome shared with item_quantity pricing. */}
+      <CollapsibleSection
+        title="Price table"
+        icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
+        rightBadge={<UnifiedSectionBadge>{`${pricing.priceTable?.length || 0} rows`}</UnifiedSectionBadge>}
         open={!!expandedSections.priceTable}
         onToggle={() => toggleSection('priceTable')}
       >
@@ -428,13 +397,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             <Plus size={12} /> Add row
           </button>
         </div>
-      </SectionPanel>
+      </CollapsibleSection>
 
       {/* Frequency Discounts */}
-      <SectionPanel
-        icon={Repeat}
-        iconTone="purple"
-        title="Frequency Discounts"
+      <CollapsibleSection
+        title="Frequency discounts"
+        icon={<Repeat size={14} color="var(--lb-ink-5, #64748b)" />}
         open={!!expandedSections.frequency}
         onToggle={() => toggleSection('frequency')}
       >
@@ -453,14 +421,17 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             </div>
           ))}
         </div>
-      </SectionPanel>
+      </CollapsibleSection>
 
       {/* Add-ons / Extras */}
-      <SectionPanel
-        icon={PlusCircle}
-        iconTone="blue"
+      <CollapsibleSection
         title="Add-ons"
-        count={pricing.extras?.length || 0}
+        icon={<PlusCircle size={14} color="var(--lb-ink-5, #64748b)" />}
+        rightBadge={
+          (pricing.extras?.length || 0) > 0 ? (
+            <UnifiedSectionBadge>{pricing.extras.length}</UnifiedSectionBadge>
+          ) : undefined
+        }
         open={!!expandedSections.extras}
         onToggle={() => toggleSection('extras')}
       >
@@ -494,13 +465,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             <Plus size={12} /> Add extra
           </button>
         </div>
-      </SectionPanel>
+      </CollapsibleSection>
 
       {/* Condition Surcharges + Pet Surcharge */}
-      <SectionPanel
-        icon={AlertCircle}
-        iconTone="orange"
+      <CollapsibleSection
         title="Surcharges"
+        icon={<AlertCircle size={14} color="var(--lb-ink-5, #64748b)" />}
         open={!!expandedSections.surcharges}
         onToggle={() => toggleSection('surcharges')}
       >
@@ -531,13 +501,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             </div>
           </div>
         </div>
-      </SectionPanel>
+      </CollapsibleSection>
 
       {/* Discounts */}
-      <SectionPanel
-        icon={BadgePercent}
-        iconTone="green"
+      <CollapsibleSection
         title="Discounts"
+        icon={<BadgePercent size={14} color="var(--lb-ink-5, #64748b)" />}
         open={!!expandedSections.discounts}
         onToggle={() => toggleSection('discounts')}
       >
@@ -614,7 +583,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             </div>
           </div>
         </div>
-      </SectionPanel>
+      </CollapsibleSection>
 
       {/* Save Button — unified pill across all playbook forms. The
           cleaning grid used to ship a full-width hero button; that

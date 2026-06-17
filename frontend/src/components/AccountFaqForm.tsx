@@ -190,7 +190,19 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
   if (!faq) return null;
 
   const inputCls = 'w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all';
+  // Section label — uppercase grey, matches the structured FAQ language used in the design handoff.
   const labelCls = 'block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2';
+  // Unified outline-style chip selector. Selected = soft accent tint with
+  // accent border and accent text; unselected = white with grey border.
+  // Same class strings replace the older heavy-blue-fill chips across
+  // every structured FAQ group so the form feels consistent with the
+  // newer custom Q&A and pricing chrome.
+  const chipBaseCls =
+    'py-2 px-3 rounded-lg text-xs font-semibold border transition-colors';
+  const chipActiveCls =
+    'bg-blue-50 text-blue-700 border-blue-300';
+  const chipInactiveCls =
+    'bg-white text-slate-700 border-slate-200 hover:border-slate-300';
 
   return (
     <div className="space-y-5">
@@ -225,7 +237,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={o.key}
                 type="button"
                 onClick={() => update('insuredAndBonded', { ...faq.insuredAndBonded, value: o.key as any })}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {o.label}
               </button>
@@ -258,7 +270,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={o.key}
                 type="button"
                 onClick={() => update('bringsSupplies', { ...faq.bringsSupplies, value: o.key as any })}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {o.label}
               </button>
@@ -290,7 +302,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={o.key}
                 type="button"
                 onClick={() => update('petPolicy', { ...faq.petPolicy, value: o.key as any })}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all text-left ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {o.label}
               </button>
@@ -319,7 +331,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={opt.key}
                 type="button"
                 onClick={() => togglePayment(opt.key)}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {opt.label}
               </button>
@@ -344,7 +356,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={o.key}
                 type="button"
                 onClick={() => update('customerMustBeHome', { ...faq.customerMustBeHome, value: o.key as any })}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all text-left ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {o.label}
               </button>
@@ -378,7 +390,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
                 key={o.key}
                 type="button"
                 onClick={() => update('sameCleanerForRecurring', { ...faq.sameCleanerForRecurring, value: o.key as any })}
-                className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all text-left ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
               >
                 {o.label}
               </button>
