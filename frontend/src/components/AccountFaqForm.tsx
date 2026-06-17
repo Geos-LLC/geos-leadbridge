@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, Trash2, Upload } from 'lucide-react';
+import { Loader2, Upload } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import {
+  CollapsibleSection,
+  FaqRow,
   UnifiedAddRowButton,
   UnifiedSaveButton,
 } from './playbook-controls';
+import { MessageSquare } from 'lucide-react';
 
 export interface AccountFaq {
   insuredAndBonded?: { value?: 'yes' | 'no' | 'unset'; details?: string };
@@ -516,47 +519,68 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         </div>
       </div>
 
-      {/* Custom Q&A */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className={`${labelCls} mb-0`}>Custom Q&amp;A</label>
-          <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
-        </div>
-        <p className="text-[10px] text-slate-400 mb-2">Add anything the AI should know how to answer. Examples: weekend availability, eco product brands, parking instructions.</p>
-        {(faq.customQA || []).length === 0 && (
-          <div className="text-[11px] text-slate-400 italic px-3 py-3 bg-slate-50 border border-dashed border-slate-200 rounded-xl">No custom entries yet.</div>
-        )}
-        <div className="space-y-2">
-          {(faq.customQA || []).map((qa, idx) => (
-            <div key={idx} className="grid grid-cols-1 md:grid-cols-[1fr_2fr_auto] gap-2 items-start">
-              <input
-                type="text"
-                value={qa.question || ''}
-                onChange={e => updateCustomQA(idx, 'question', e.target.value)}
-                placeholder="Question"
-                className={inputCls}
-              />
-              <input
-                type="text"
-                value={qa.answer || ''}
-                onChange={e => updateCustomQA(idx, 'answer', e.target.value)}
-                placeholder="Answer (the AI will use this verbatim)"
-                className={inputCls}
-              />
-              <button
-                type="button"
-                onClick={() => removeCustomQA(idx)}
-                className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                title="Remove"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+      {/* Custom Q&A — unified collapsible section with FaqRow per pair,
+          matching the Custom service FAQ tab and the pricing tables. */}
+      <CollapsibleSection
+        title="Custom Q&A"
+        icon={<MessageSquare size={14} color="var(--lb-ink-5, #64748b)" />}
+        rightBadge={
+          (faq.customQA || []).length > 0 && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--lb-ink-5, #64748b)',
+                background: 'var(--lb-ink-10, #f3f5fa)',
+                padding: '3px 8px',
+                borderRadius: 999,
+                letterSpacing: '0.02em',
+              }}
+            >
+              {(faq.customQA || []).length}{' '}
+              {(faq.customQA || []).length === 1 ? 'row' : 'rows'}
+            </span>
+          )
+        }
+      >
+        {(faq.customQA || []).length === 0 ? (
+          <div
+            style={{
+              padding: 18,
+              margin: '0 14px 8px',
+              border: '1px dashed var(--lb-line, #e5e9f2)',
+              borderRadius: 10,
+              background: 'var(--lb-bg, #f4f6fa)',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-5, #64748b)', marginBottom: 10 }}>
+              Add anything the AI should know how to answer. Examples: weekend availability,
+              eco product brands, parking instructions.
             </div>
-          ))}
-        </div>
-      </div>
+            <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
+          </div>
+        ) : (
+          <>
+            {(faq.customQA || []).map((qa, idx) => (
+              <FaqRow
+                key={idx}
+                index={idx}
+                question={qa.question || ''}
+                answer={qa.answer || ''}
+                onChangeQuestion={(v) => updateCustomQA(idx, 'question', v)}
+                onChangeAnswer={(v) => updateCustomQA(idx, 'answer', v)}
+                onRemove={() => removeCustomQA(idx)}
+              />
+            ))}
+            <div style={{ padding: '12px 14px 4px' }}>
+              <UnifiedAddRowButton label="Add row" onClick={addCustomQA} />
+            </div>
+          </>
+        )}
+      </CollapsibleSection>
 
-      {/* Save — unified pill across all playbook pricing + FAQ forms. */}
+      {/* Save — full-width footer pill, same as Save Pricing across the playbook. */}
       <div className="pt-2 border-t border-slate-100">
         <UnifiedSaveButton
           label="Save FAQ"
@@ -564,6 +588,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
           saving={saving}
           savedAt={saved ? Date.now() : null}
           onClick={() => void handleSave()}
+          fullWidth
         />
       </div>
     </div>

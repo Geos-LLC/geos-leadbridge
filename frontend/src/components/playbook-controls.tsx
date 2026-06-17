@@ -180,12 +180,16 @@ export function PriceChip({
 }
 
 /**
- * Collapsible "Price table" / "Add-ons" / "Discounts" section wrapper.
+ * Collapsible section wrapper used by both Pricing (Price table /
+ * Add-ons / Discounts) and FAQ (Custom Q&A / structured answers).
  * The header carries an icon tile, the title, an optional right-side
- * badge (row count, "per hour", etc), and a chevron. Closed by default
+ * badge (row count, currency, etc), and a chevron. Closed by default
  * only when `defaultOpen=false`.
+ *
+ * Aliased as `PriceTableSection` for back-compat with the earlier
+ * Pricing rollout.
  */
-export function PriceTableSection({
+export function CollapsibleSection({
   title,
   icon,
   rightBadge,
@@ -355,6 +359,123 @@ export function PriceRow({
     </div>
   );
 }
+
+/** Back-compat alias — earlier Pricing rollout imported PriceTableSection. */
+export const PriceTableSection = CollapsibleSection;
+
+/**
+ * Compact Q&A row used by every FAQ form. Two-line layout: question
+ * input on top (bold, single line), answer textarea below. Hover-only
+ * borders so the row stays clean by default but is fully inline-
+ * editable. Trash button on the right.
+ */
+export function FaqRow({
+  question,
+  answer,
+  index,
+  onChangeQuestion,
+  onChangeAnswer,
+  onRemove,
+}: {
+  question: string;
+  answer: string;
+  index: number;
+  onChangeQuestion: (next: string) => void;
+  onChangeAnswer: (next: string) => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: '12px 14px',
+        borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          color: 'var(--lb-ink-5, #64748b)',
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          paddingTop: 6,
+          width: 32,
+          flexShrink: 0,
+        }}
+      >
+        Q{index + 1}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => onChangeQuestion(e.target.value)}
+          placeholder="What question would a lead ask?"
+          style={FAQ_INLINE_QUESTION_INPUT}
+        />
+        <textarea
+          value={answer}
+          onChange={(e) => onChangeAnswer(e.target.value)}
+          placeholder="Answer the AI will give verbatim"
+          rows={2}
+          style={FAQ_INLINE_ANSWER_INPUT}
+        />
+      </div>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          title="Remove Q&A"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            border: '1px solid var(--lb-line, #e5e9f2)',
+            background: 'white',
+            color: 'var(--lb-ink-5, #64748b)',
+            cursor: 'pointer',
+            flexShrink: 0,
+            marginTop: 4,
+          }}
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+const FAQ_INLINE_QUESTION_INPUT: CSSProperties = {
+  width: '100%',
+  padding: '4px 6px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  fontSize: 13.5,
+  fontWeight: 600,
+  color: 'var(--lb-ink-1, #0a1530)',
+  boxSizing: 'border-box',
+};
+
+const FAQ_INLINE_ANSWER_INPUT: CSSProperties = {
+  width: '100%',
+  padding: '4px 6px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  fontSize: 13,
+  color: 'var(--lb-ink-2, #1f2a44)',
+  resize: 'vertical',
+  boxSizing: 'border-box',
+};
 
 const INLINE_LABEL_INPUT: CSSProperties = {
   width: '100%',
