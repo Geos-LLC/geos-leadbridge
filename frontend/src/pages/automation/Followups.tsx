@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
   RefreshCw, Clock, UserX, Info, Power,
+  Plus, Trash2, X, RotateCcw,
 } from 'lucide-react';
 import {
   SectionCard, FieldRow, OptionCard,
@@ -506,12 +507,15 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
   const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
   const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
-  // Plan editor handlers (onPlanStepChange / onPlanAddStep / onPlanRemoveStep
-  // / onPlanReset) were removed when the Follow-up plan card became
-  // presentational per spec 2h. The plan state + save plumbing is preserved
-  // upstream so saved cadences keep loading; only the editing UI is gone.
+  // Single plan setter used by the cadence-edit modal. Replaces the whole
+  // array because the modal commits a working draft on Save. Per-step
+  // diffing isn't needed since the wizard payload serializes the entire
+  // plan to `steps` anyway.
+  const onPlan          = (next: PlanStepData[])    => { dirtyRef.current = true; dirtyFieldsRef.current.add('plan');         setPlan(next); };
   // scopeKey kept as void-reference to satisfy noUnusedLocals on the alias.
   void scopeKey;
+
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   // goAiSettings was used by the now-removed Conversation Goal tile. AI
   // Conversation is still reachable via the sidebar; we don't need a
@@ -600,12 +604,19 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         )}
       </SectionCard>
 
-      {/* Follow-up plan — spec 2h. Presentational card describing the
-          managed 11-step schedule. The real cadence is backend-driven,
-          so this card holds no editable state. The accent-tinted node 1
-          and outline-only nodes 2-5 + dashed node 11 illustrate the shape
-          of the schedule without exposing each step. */}
-      <FollowUpPlanCard />
+      {/* Follow-up plan — derives nodes from the live `plan` state so
+          edits made in the cadence modal reflect immediately. The card
+          itself stays presentational; per-step editing happens in
+          FollowUpPlanEditModal launched from the "Edit cadence" button. */}
+      <FollowUpPlanCard plan={plan} onEdit={() => setPlanModalOpen(true)} />
+
+      <FollowUpPlanEditModal
+        open={planModalOpen}
+        plan={plan}
+        onClose={() => setPlanModalOpen(false)}
+        onSave={next => { onPlan(next); setPlanModalOpen(false); }}
+        onResetDefault={() => onPlan(DEFAULT_FOLLOWUP_PLAN)}
+      />
 
       {/* Stacked rule cards */}
       <SectionCard padding="0">
@@ -618,6 +629,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldValue={resumeDelay}
           onFieldChange={onResumeDelay}
           fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
+          allowCustom
           tipIcon={Sparkles}
           tip="How long to wait after your last message before starting follow-ups again."
           mixed={mixedResume.mixed}
@@ -632,6 +644,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldValue={deferralDelay}
           onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
+          allowCustom
           tipIcon={Sparkles}
           tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedDeferral.mixed}
@@ -646,6 +659,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           fieldValue={hiredDelay}
           onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
+          allowCustom
           tipIcon={Sparkles}
           tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedHired.mixed}
@@ -664,32 +678,90 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   );
 }
 
-// ─── Follow-up plan presentational card (spec 2h) ─────────────────────
+// ─── Follow-up plan card ──────────────────────────────────────────────
 //
-// Illustrates the managed 11-step schedule with five labelled nodes
-// (1·"1 hour"·First, 2·"4 hours"·Same day, 3·"1 day"·Next day, 4·"3
-// days"·This week, 5·"1 week"·Week out), a dashed connector to node 11
-// ("1 year"·Final), and a 3-cell stat strip below. No editable state —
-// the real cadence is backend-managed; users adjust pacing in
-// follow-up engine config, not here.
+// Visualizes the live `plan` state as a stepper. When the plan has more
+// than six steps the visualization collapses to the first five plus the
+// final step with a dashed connector marking the gap (matches the
+// original illustrative shape). The "Edit cadence" button opens the
+// per-step editor modal so users can adjust each delay.
 
 type PlanNodeStyle = 'solid-accent' | 'outline-accent' | 'outline-gray' | 'outline-dashed';
 
 interface PlanNode {
   n: number;
   time: string;
-  sub: string;
   style: PlanNodeStyle;
 }
 
-const PLAN_NODES: PlanNode[] = [
-  { n: 1,  time: '1 hour',  sub: 'First',     style: 'solid-accent' },
-  { n: 2,  time: '4 hours', sub: 'Same day',  style: 'outline-accent' },
-  { n: 3,  time: '1 day',   sub: 'Next day',  style: 'outline-gray' },
-  { n: 4,  time: '3 days',  sub: 'This week', style: 'outline-gray' },
-  { n: 5,  time: '1 week',  sub: 'Week out',  style: 'outline-gray' },
-  { n: 11, time: '1 year',  sub: 'Final',     style: 'outline-dashed' },
-];
+// Map an editor unit onto the compact label used in the cadence pill
+// ("min" / "hr" / "day" / "wk" / "mo" / "yr"). Pluralizes where it reads
+// naturally — "2 min" stays singular, "2 days" pluralizes.
+function planUnitLabel(val: number, unit: PlanUnit): string {
+  const plural = val !== 1;
+  switch (unit) {
+    case 'min':   return `${val} min`;
+    case 'hour':  return `${val} ${plural ? 'hours' : 'hour'}`;
+    case 'day':   return `${val} ${plural ? 'days' : 'day'}`;
+    case 'week':  return `${val} ${plural ? 'weeks' : 'week'}`;
+    case 'month': return `${val} ${plural ? 'months' : 'month'}`;
+    case 'year':  return `${val} ${plural ? 'years' : 'year'}`;
+  }
+}
+
+// Approximate-minute conversions used to sum a plan's total schedule
+// length. Months and years use calendar averages (30d, 365d) — the value
+// is rendered as an at-a-glance label, not a scheduling primitive.
+const STEP_MINUTES: Record<PlanUnit, number> = {
+  min: 1,
+  hour: 60,
+  day: 60 * 24,
+  week: 60 * 24 * 7,
+  month: 60 * 24 * 30,
+  year: 60 * 24 * 365,
+};
+
+function totalPlanLabel(plan: PlanStepData[]): string {
+  const totalMin = plan.reduce((acc, s) => acc + s.val * STEP_MINUTES[s.unit], 0);
+  if (totalMin >= STEP_MINUTES.year)  return `${Math.round(totalMin / STEP_MINUTES.year)} yr`;
+  if (totalMin >= STEP_MINUTES.month) return `${Math.round(totalMin / STEP_MINUTES.month)} mo`;
+  if (totalMin >= STEP_MINUTES.week)  return `${Math.round(totalMin / STEP_MINUTES.week)} wk`;
+  if (totalMin >= STEP_MINUTES.day)   return `${Math.round(totalMin / STEP_MINUTES.day)} day`;
+  if (totalMin >= STEP_MINUTES.hour)  return `${Math.round(totalMin / STEP_MINUTES.hour)} hr`;
+  return `${Math.max(1, Math.round(totalMin))} min`;
+}
+
+// Choose up to six nodes to render from the live plan. For plans of >6
+// steps we show steps 1-5 + the final node with a dashed connector to
+// signal the gap. Smaller plans render every step linearly.
+function nodesForPlan(plan: PlanStepData[]): PlanNode[] {
+  if (plan.length === 0) return [];
+  const styleFor = (idx: number, total: number): PlanNodeStyle => {
+    if (idx === 0) return 'solid-accent';
+    if (idx === 1) return 'outline-accent';
+    if (idx === total - 1 && total > 6) return 'outline-dashed';
+    return 'outline-gray';
+  };
+  if (plan.length <= 6) {
+    return plan.map((s, i) => ({
+      n: i + 1,
+      time: planUnitLabel(s.val, s.unit),
+      style: styleFor(i, plan.length),
+    }));
+  }
+  const head = plan.slice(0, 5).map((s, i) => ({
+    n: i + 1,
+    time: planUnitLabel(s.val, s.unit),
+    style: styleFor(i, plan.length),
+  }));
+  const last = plan[plan.length - 1];
+  head.push({
+    n: plan.length,
+    time: planUnitLabel(last.val, last.unit),
+    style: 'outline-dashed',
+  });
+  return head;
+}
 
 function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
   const base = {
@@ -717,36 +789,40 @@ function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
   return <div style={{ ...base, background: '#fff', color: 'var(--lb-ink-3)', border: '2px solid var(--lb-ink-8)' }}>{n}</div>;
 }
 
-function FollowUpPlanCard() {
+function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () => void }) {
+  const nodes = nodesForPlan(plan);
   return (
     <SectionCard padding="20px 24px 22px">
-      {/* Header — violet History tile + title + "Managed" mono pill + description */}
+      {/* Header — violet History tile + title + description + Edit cadence button */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
         <IconTile icon={History} tone="purple" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Follow-up plan
-            </div>
-            <span
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '3px 9px', borderRadius: 999,
-                background: '#ede9fe', color: '#6d28d9',
-                fontSize: 10, fontWeight: 700,
-                letterSpacing: 0.06, textTransform: 'uppercase',
-                fontFamily: 'var(--lb-font-mono)',
-              }}
-            >
-              <Sparkles size={10} /> Managed
-            </span>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
+            Follow-up plan
           </div>
           <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            LeadBridge nudges unresponsive leads on an 11-step schedule
-            spanning up to a year — AI writes every step from the live
-            conversation.
+            LeadBridge nudges unresponsive leads on this cadence — AI
+            writes every step from the live conversation. Edit the timing
+            to match how often you want to follow up.
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onEdit}
+          style={{
+            padding: '8px 14px',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 8,
+            background: 'white',
+            color: 'var(--lb-ink-2)',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Edit cadence
+        </button>
       </div>
 
       {/* Cadence stepper */}
@@ -761,14 +837,14 @@ function FollowUpPlanCard() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, minWidth: 'fit-content' }}>
-          {PLAN_NODES.map((node, i) => {
-            const isLast = i === PLAN_NODES.length - 1;
-            const next = PLAN_NODES[i + 1];
-            // Dashed connector when the gap to the next node skips intermediate
-            // steps (5 -> 11), per spec.
+          {nodes.map((node, i) => {
+            const isLast = i === nodes.length - 1;
+            const next = nodes[i + 1];
+            // Dashed connector when the visualized gap skips intermediate
+            // steps (head-summary mode shows 1-5 then jumps to the last).
             const dashedConnector = next && (next.n - node.n) > 1;
             return (
-              <div key={node.n} style={{ display: 'flex', alignItems: 'flex-start', flexShrink: 0 }}>
+              <div key={`${node.n}-${i}`} style={{ display: 'flex', alignItems: 'flex-start', flexShrink: 0 }}>
                 {/* Node + labels */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 90 }}>
                   <PlanCircle n={node.n} style={node.style} />
@@ -779,7 +855,6 @@ function FollowUpPlanCard() {
                   }}>
                     {node.time}
                   </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)' }}>{node.sub}</div>
                 </div>
                 {/* Connector line */}
                 {!isLast && (
@@ -811,8 +886,8 @@ function FollowUpPlanCard() {
           background: 'var(--lb-surface)',
         }}
       >
-        <StatCell value="11" label="steps total" />
-        <StatCell value="1 yr" label="max duration" divided />
+        <StatCell value={String(plan.length)} label={plan.length === 1 ? 'step total' : 'steps total'} />
+        <StatCell value={totalPlanLabel(plan)} label="total schedule" divided />
         <StatCell
           value={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -848,9 +923,22 @@ function StatCell({ value, label, divided }: { value: ReactNode; label: string; 
   );
 }
 
+const CUSTOM_SENTINEL = '__custom__';
+
+// Unit choices for the custom delay editor. Backend parseDelay() accepts
+// any of these via substring matching, so the labels here just need to
+// contain the unit keyword.
+const CUSTOM_UNIT_OPTIONS: { value: PlanUnit; label: string }[] = [
+  { value: 'min',   label: 'minutes' },
+  { value: 'hour',  label: 'hours' },
+  { value: 'day',   label: 'days' },
+  { value: 'week',  label: 'weeks' },
+  { value: 'month', label: 'months' },
+];
+
 function RuleCardRow({
   icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tipIcon: TipIcon, tip, noBorder,
-  mixed, mixedTooltip,
+  mixed, mixedTooltip, allowCustom,
 }: {
   icon: LucideIcon;
   iconTone: IconTone;
@@ -865,7 +953,35 @@ function RuleCardRow({
   noBorder?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
+  allowCustom?: boolean;
 }) {
+  // A value is "custom" when it doesn't match any preset. Note the
+  // sentinel is never the saved value — selecting it just switches the
+  // row into custom-edit mode (and persists the parsed current step).
+  const isCustom = allowCustom && !fieldOptions.includes(fieldValue);
+  const dropdownOptions = allowCustom
+    ? [...fieldOptions, { value: CUSTOM_SENTINEL, label: 'Custom…' }]
+    : fieldOptions;
+  const dropdownValue = isCustom ? CUSTOM_SENTINEL : fieldValue;
+  const handleDropdownChange = (v: string) => {
+    if (v === CUSTOM_SENTINEL) {
+      // Seed the custom editor with the parsed current step so users
+      // don't lose context — e.g. "12 hours" → step{12, hour} → still
+      // "12 hours" (no-op write, but the row flips to custom mode).
+      const seed = parseDelayToStep(fieldValue);
+      onFieldChange(stepToDelayString(seed));
+      return;
+    }
+    onFieldChange(v);
+  };
+  const customStep = parseDelayToStep(fieldValue);
+  const onCustomVal = (n: number) => {
+    const safe = Math.max(1, Math.floor(Number.isFinite(n) ? n : 1));
+    onFieldChange(stepToDelayString({ val: safe, unit: customStep.unit }));
+  };
+  const onCustomUnit = (u: PlanUnit) => {
+    onFieldChange(stepToDelayString({ val: customStep.val, unit: u }));
+  };
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
@@ -888,11 +1004,43 @@ function RuleCardRow({
           {mixed && <MixedBadge tooltip={mixedTooltip} />}
         </div>
         <Dropdown
-          value={fieldValue}
-          onChange={onFieldChange}
-          options={fieldOptions}
+          value={dropdownValue}
+          onChange={handleDropdownChange}
+          options={dropdownOptions}
           width="100%"
         />
+        {isCustom && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+            <input
+              type="number"
+              min={1}
+              value={customStep.val}
+              onChange={e => onCustomVal(parseInt(e.target.value, 10))}
+              style={{
+                width: 72, padding: '9px 10px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+                background: 'white', color: 'var(--lb-ink-1)',
+                outline: 'none',
+              }}
+            />
+            <select
+              value={customStep.unit}
+              onChange={e => onCustomUnit(e.target.value as PlanUnit)}
+              style={{
+                flex: 1, padding: '9px 32px 9px 12px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+                background: 'white', color: 'var(--lb-ink-1)',
+                appearance: 'none', cursor: 'pointer', outline: 'none',
+              }}
+            >
+              {CUSTOM_UNIT_OPTIONS.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div style={{
         display: 'flex', gap: 10,
@@ -905,6 +1053,257 @@ function RuleCardRow({
       }}>
         <TipIcon size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 1 }} />
         <div>{tip}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Follow-up plan edit modal ────────────────────────────────────────
+//
+// Lets users edit the per-step delays for the follow-up cadence. Holds a
+// working draft so Cancel reliably discards changes; only Save commits
+// back via onSave. Cap at 20 steps to keep both the UI and the wizard
+// payload sane — the default plan is 11, so this leaves room without
+// inviting pathological cadences.
+
+const MAX_PLAN_STEPS = 20;
+
+// Full set of editor units for the plan modal — includes `year` so the
+// default plan's "1 year" final step stays representable. The rule-card
+// custom delays use a smaller `CUSTOM_UNIT_OPTIONS` set (no `year`,
+// since 1-year deferrals don't make sense for those rules).
+const PLAN_UNIT_OPTIONS: { value: PlanUnit; label: string }[] = [
+  { value: 'min',   label: 'minutes' },
+  { value: 'hour',  label: 'hours' },
+  { value: 'day',   label: 'days' },
+  { value: 'week',  label: 'weeks' },
+  { value: 'month', label: 'months' },
+  { value: 'year',  label: 'years' },
+];
+
+function FollowUpPlanEditModal({
+  open, plan, onClose, onSave, onResetDefault,
+}: {
+  open: boolean;
+  plan: PlanStepData[];
+  onClose: () => void;
+  onSave: (next: PlanStepData[]) => void;
+  onResetDefault: () => void;
+}) {
+  const [draft, setDraft] = useState<PlanStepData[]>(plan);
+
+  // Re-seed the draft whenever the modal re-opens so we don't carry over
+  // stale edits from a previous Cancel. Also covers the case where the
+  // user switches accounts mid-edit (the parent rehydrates `plan`).
+  useEffect(() => {
+    if (open) setDraft(plan);
+  }, [open, plan]);
+
+  if (!open) return null;
+
+  const updateVal = (i: number, val: number) => {
+    const safe = Math.max(1, Math.floor(Number.isFinite(val) ? val : 1));
+    setDraft(d => d.map((s, idx) => idx === i ? { ...s, val: safe } : s));
+  };
+  const updateUnit = (i: number, unit: PlanUnit) => {
+    setDraft(d => d.map((s, idx) => idx === i ? { ...s, unit } : s));
+  };
+  const removeStep = (i: number) => {
+    setDraft(d => d.length <= 1 ? d : d.filter((_, idx) => idx !== i));
+  };
+  const addStep = () => {
+    setDraft(d => d.length >= MAX_PLAN_STEPS ? d : [...d, { val: 1, unit: 'day' as PlanUnit }]);
+  };
+  const resetToDefault = () => {
+    setDraft(DEFAULT_FOLLOWUP_PLAN);
+    onResetDefault();
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit follow-up cadence"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 60,
+        background: 'rgba(15, 23, 42, 0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'white',
+          borderRadius: 16,
+          width: '100%', maxWidth: 560,
+          maxHeight: '90vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 24px 48px rgba(15,23,42,0.18)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '20px 24px 16px',
+          borderBottom: '1px solid var(--lb-line-soft)',
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Edit follow-up cadence
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+              Each step waits the chosen delay after the previous one.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              padding: 6, border: 'none', background: 'transparent',
+              color: 'var(--lb-ink-5)', cursor: 'pointer', borderRadius: 6,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Scrollable rows */}
+        <div style={{ padding: '12px 24px', overflowY: 'auto', flex: 1 }}>
+          {draft.map((step, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 0',
+                borderBottom: i === draft.length - 1 ? 'none' : '1px solid var(--lb-line-soft)',
+              }}
+            >
+              <div style={{
+                width: 26, height: 26, borderRadius: 999,
+                background: i === 0 ? 'var(--lb-accent)' : '#fff',
+                color: i === 0 ? '#fff' : 'var(--lb-ink-3)',
+                border: i === 0 ? 'none' : '1px solid var(--lb-line)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--lb-font-mono)',
+                flexShrink: 0,
+              }}>
+                {i + 1}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', flexShrink: 0 }}>
+                {i === 0 ? 'First send after' : 'Then wait'}
+              </div>
+              <input
+                type="number"
+                min={1}
+                value={step.val}
+                onChange={e => updateVal(i, parseInt(e.target.value, 10))}
+                style={{
+                  width: 72, padding: '8px 10px',
+                  border: '1px solid var(--lb-line)', borderRadius: 8,
+                  fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+                  background: 'white', color: 'var(--lb-ink-1)', outline: 'none',
+                }}
+              />
+              <select
+                value={step.unit}
+                onChange={e => updateUnit(i, e.target.value as PlanUnit)}
+                style={{
+                  flex: 1, padding: '8px 28px 8px 10px',
+                  border: '1px solid var(--lb-line)', borderRadius: 8,
+                  fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+                  background: 'white', color: 'var(--lb-ink-1)',
+                  appearance: 'none', cursor: 'pointer', outline: 'none',
+                }}
+              >
+                {PLAN_UNIT_OPTIONS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => removeStep(i)}
+                disabled={draft.length <= 1}
+                aria-label="Remove step"
+                style={{
+                  padding: 8, border: 'none', background: 'transparent',
+                  color: draft.length <= 1 ? 'var(--lb-ink-7)' : 'var(--lb-ink-4)',
+                  cursor: draft.length <= 1 ? 'not-allowed' : 'pointer',
+                  borderRadius: 6, flexShrink: 0,
+                }}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addStep}
+            disabled={draft.length >= MAX_PLAN_STEPS}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 12px', marginTop: 12,
+              border: '1px dashed var(--lb-line)', borderRadius: 8,
+              background: 'transparent',
+              color: draft.length >= MAX_PLAN_STEPS ? 'var(--lb-ink-7)' : 'var(--lb-ink-3)',
+              fontSize: 13, fontWeight: 600,
+              cursor: draft.length >= MAX_PLAN_STEPS ? 'not-allowed' : 'pointer',
+              width: '100%',
+            }}
+          >
+            <Plus size={14} /> Add step
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '14px 24px',
+          borderTop: '1px solid var(--lb-line-soft)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <button
+            type="button"
+            onClick={resetToDefault}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 12px',
+              border: 'none', background: 'transparent',
+              color: 'var(--lb-ink-4)', fontSize: 13, fontWeight: 600,
+              cursor: 'pointer', borderRadius: 6,
+            }}
+          >
+            <RotateCcw size={14} /> Reset to default
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '9px 16px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                background: 'white', color: 'var(--lb-ink-2)',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onSave(draft)}
+              style={{
+                padding: '9px 18px',
+                border: 'none', borderRadius: 8,
+                background: 'var(--lb-accent)', color: 'white',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              Save changes
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
