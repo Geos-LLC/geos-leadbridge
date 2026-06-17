@@ -67,6 +67,11 @@ export function SettingsGeneral() {
     /** Actual key/value pairs the scrape returned. Powers the
      *  expandable "Show what we pulled" disclosure under the card. */
     extractedFields?: Record<string, string | string[]>;
+    /** GPT-generated prose summary of the scraped page. Shown directly
+     *  in the card body for a quick "what does the AI see on this
+     *  page?" read — same surface WebsitePreviewCard uses for the
+     *  website branch. */
+    summary?: string;
     accountsAffected: number;
   } | null>(null);
   // Expand/collapse the "what we pulled" disclosure under the emerald card.
@@ -212,6 +217,7 @@ export function SettingsGeneral() {
         fieldsApplied: res.fieldsApplied ?? 0,
         fieldsExtracted: res.fieldsExtracted ?? 0,
         extractedFields: res.extractedFields,
+        summary: res.summary,
         accountsAffected: res.accountsAffected ?? 0,
       });
       // Default the disclosure to collapsed on each fresh fetch so the
@@ -546,6 +552,28 @@ export function SettingsGeneral() {
                   <div style={{ marginTop: 5, color: '#78350f', fontSize: 11.5 }}>
                     No structured info was extracted from that page. Use the "Paste your business info instead" link above
                     to fill the Playbook by hand.
+                  </div>
+                )}
+                {/* GPT prose summary — same content `WebsitePreviewCard`
+                    surfaces for the website branch. For TT/Yelp scrapes
+                    summarizeWebsite was already producing this (Loki:
+                    "extracted summary=738ch") and it was being discarded.
+                    Plain serif read so the tenant can scan "what does
+                    the AI think this business is about?" without opening
+                    the structured-fields disclosure. */}
+                {lastApply.summary && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: '8px 10px',
+                    background: 'white',
+                    border: '1px solid #d1fae5',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    color: '#1f2937',
+                    fontStyle: 'italic',
+                  }}>
+                    {lastApply.summary}
                   </div>
                 )}
                 {/* Expandable "Show what we pulled" — renders the extractedFields

@@ -1919,6 +1919,10 @@ export const usersApi = {
     /** TT/Yelp only — actual key/value pairs the scrape returned, for
      *  rendering an expandable "what we pulled" panel without a 2nd call. */
     extractedFields?: Record<string, string | string[]>;
+    /** GPT-generated prose summary of the scraped page. Populated for
+     *  all three branches (website, TT, Yelp) when the scrape produced
+     *  HTML the summarizer could process. */
+    summary?: string;
     conflictsRaised: number;
     websiteMetadata?: WebsiteMetadataPayload;
     warning?: string;
