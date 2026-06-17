@@ -170,33 +170,35 @@ describe('FollowUpGateService', () => {
       expect(decision.sideEffect).toBe('stop_and_lost');
     });
 
-    it('agreed → block_terminal + stop_and_booked', async () => {
+    // 2026-06-17 lifecycle rule cleanup (Spec A.2):
+    //   agreed / wants_live_contact / wants_to_schedule no longer map to
+    //   stop_and_booked. The AI is no longer permitted to author `booked`
+    //   on Lead.status. These intents now stop the sequence (stop_only) and
+    //   the handoff alert fires from the inbound classifier path
+    //   (maybeFireHandoffAlert) so the dispatcher takes the conversation.
+    it('agreed → block_terminal + stop_only (AI never authors booked)', async () => {
       const prisma = buildPrisma({ customerMessage: "let's book it" });
       const classifier = buildClassifier({ intent: 'agreed', confidence: 0.9, reason: 'price accepted', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
-      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.sideEffect).toBe('stop_only');
     });
 
-    // Mario Evans 2026-06-10 incident: "Please schedule a walkthrough. So I can
-    // get a quote." classified as wants_live_contact @ 0.9 and was misrouted
-    // into the else branch (stop_and_lost / lostReason=hired_someone). These
-    // are POSITIVE handoff signals — customer is leaning in, not out.
-    it('wants_live_contact → block_terminal + stop_and_booked (positive handoff)', async () => {
+    it('wants_live_contact → block_terminal + stop_only (handoff fires from inbound path)', async () => {
       const prisma = buildPrisma({ customerMessage: 'Please schedule a walkthrough. So I can get a quote.' });
       const classifier = buildClassifier({ intent: 'wants_live_contact', confidence: 0.9, reason: 'wants in-person walkthrough', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
-      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.sideEffect).toBe('stop_only');
       expect(decision.intent).toBe('wants_live_contact');
     });
 
-    it('wants_to_schedule → block_terminal + stop_and_booked (positive handoff)', async () => {
+    it('wants_to_schedule → block_terminal + stop_only (handoff fires from inbound path)', async () => {
       const prisma = buildPrisma({ customerMessage: "Friday at 2pm works" });
       const classifier = buildClassifier({ intent: 'wants_to_schedule', confidence: 0.88, reason: 'naming a slot', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD });
-      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.sideEffect).toBe('stop_only');
       expect(decision.intent).toBe('wants_to_schedule');
     });
 
@@ -256,13 +258,14 @@ describe('FollowUpGateService', () => {
     });
 
     it('BLOCKS agreed on re-engagement (customer converted — handoff, do not keep messaging)', async () => {
+      // 2026-06-17 lifecycle rule cleanup: agreed → stop_only (no booked write).
       const prisma = buildPrisma({ customerMessage: "yes book it" });
       const classifier = buildClassifier({ intent: 'agreed', confidence: 0.95, reason: 'accepted', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
       expect(decision.action).toBe('block_terminal');
       expect(decision.shouldBlock).toBe(true);
-      expect(decision.sideEffect).toBe('stop_and_booked');
+      expect(decision.sideEffect).toBe('stop_only');
     });
 
     it('BLOCKS hired_elsewhere on customer_hired_competitor re-engagement (still no = stronger no)', async () => {

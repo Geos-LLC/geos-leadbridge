@@ -367,7 +367,16 @@ describe('LeadStatusService', () => {
         });
 
         expect(res.applied).toBe(false);
-        expect(res.skipReason).toBe('hard_terminal');
+        // For lb_automation, Guard 2c (AUTOMATION_FORBIDDEN_DESTINATIONS)
+        // fires first and short-circuits before Guard 3 (hard_terminal) can
+        // reach the archived check. manual + backfill still hit Guard 3
+        // because Guard 2c only applies to lb_automation. Either rejection
+        // is correct — the write is blocked.
+        if (source === 'lb_automation') {
+          expect(res.skipReason).toBe('automation_forbidden_destination');
+        } else {
+          expect(res.skipReason).toBe('hard_terminal');
+        }
         expect(prisma._state.lead.status).toBe('archived');
         expect(prisma._state.audits.length).toBe(0);
         expect(metrics.recordSfReactivation).not.toHaveBeenCalled();
@@ -944,12 +953,16 @@ describe('LeadStatusService', () => {
     });
 
     it('allows contacted → booked (skipping quoted is fine)', async () => {
+      // 2026-06-17 lifecycle rule cleanup: lb_automation is no longer the
+      // authority for `booked` writes; manual is. The pipeline-downgrade
+      // guard's "skipping forward through the pipeline" property is
+      // source-agnostic and exercised here via manual.
       const prisma = buildPrismaMock({ status: 'engaged' });
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
       const res = await svc.writeStatus({
         leadId: LEAD_ID,
-        source: 'lb_automation',
+        source: 'manual',
         newStatus: 'booked',
       });
 
@@ -1748,6 +1761,187 @@ describe('LeadStatusService', () => {
       const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
       const r = await svc.writeSfJobOutcomeMirror(LEAD_ID, 'booked', new Date());
       expect(r.written).toBe(false);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // 2026-06-17 lifecycle rule cleanup — Guard 2c spec tests
+  //
+  // Mirrors Scope D of the spec PR. Each `it` cites the spec test it covers.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('Guard 2c — AI lifecycle terminal rule (spec D 2026-06-17)', () => {
+    // Spec D.3: opt_out intent → lost opt_out (allowed).
+    it('lb_automation lost+opt_out on engaged lead → APPLIES', async () => {
+      const prisma = buildPrismaMock({ status: 'engaged' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'lost',
+        lostReason: 'opt_out',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('lost');
+      expect(prisma._state.lead.lostReason).toBe('opt_out');
+    });
+
+    // Spec D.4: hired_elsewhere intent on active lead → lost hired_someone.
+    it('lb_automation lost+hired_someone on engaged lead → APPLIES + sets reengageAt', async () => {
+      const prisma = buildPrismaMock({ status: 'engaged' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+      const reengageAt = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'lost',
+        lostReason: 'hired_someone',
+        reengageAt,
+      });
+
+      expect(res.applied).toBe(true);
+      expect(prisma._state.lead.lostReason).toBe('hired_someone');
+      expect(prisma._state.lead.reengageAt).toEqual(reengageAt);
+    });
+
+    // Spec D.5: hired_elsewhere intent on booked lead → ignored / stays booked.
+    it('lb_automation lost+hired_someone on BOOKED lead → SKIPPED, stays booked', async () => {
+      const prisma = buildPrismaMock({ status: 'booked' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'lost',
+        lostReason: 'hired_someone',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('automation_forbidden_destination');
+      expect(prisma._state.lead.status).toBe('booked');
+    });
+
+    // Spec D.5 (parallel): same protection for in_progress and completed —
+    // any post-acquisition state must be safe from AI downgrade.
+    it.each([['in_progress'], ['completed']] as const)(
+      'lb_automation lost+hired_someone on %s lead → SKIPPED, status preserved',
+      async (oldStatus) => {
+        const prisma = buildPrismaMock({ status: oldStatus });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'lost',
+          lostReason: 'hired_someone',
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('automation_forbidden_destination');
+        expect(prisma._state.lead.status).toBe(oldStatus);
+      },
+    );
+
+    // Spec D.6: classifier wrap-up ("completed" intent / "thanks") does not
+    // map to lost. Verified at the gate-mapping level (intentToTransitionKind
+    // returns 'engaged' now); this is the belt-and-suspenders at the
+    // service layer — any attempted lb_automation lost write without an
+    // allowed lostReason is blocked.
+    it.each([['no_response'], ['manual'], [null]] as const)(
+      'lb_automation lost with lostReason=%p → SKIPPED (only opt_out / hired_someone allowed)',
+      async (reason) => {
+        const prisma = buildPrismaMock({ status: 'engaged' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'lost',
+          lostReason: reason as any,
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('automation_forbidden_destination');
+      },
+    );
+
+    // Spec D.1: booked lead + customer "thanks again" must NOT flip lost.
+    // The transition into `lost` from `booked` would route via
+    // automation.service.applyCustomerReplyStatusTransition; if the
+    // classifier somehow tries to write `lost` here, Guard 2c blocks it.
+    // This test pins the LeadStatusService-side behavior (the gate level
+    // is covered separately in automation.service.spec).
+    it('lb_automation lost on booked lead → SKIPPED, booked preserved', async () => {
+      const prisma = buildPrismaMock({ status: 'booked' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'lost',
+        lostReason: 'hired_someone',
+        reason: 'classifier_completed',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(prisma._state.lead.status).toBe('booked');
+    });
+
+    // Spec D.2 (companion): new lead + customer reply → engaged still flows.
+    // Engaged is not in AUTOMATION_FORBIDDEN_DESTINATIONS, so Guard 2c
+    // passes through and the funnel promotion happens normally.
+    it('lb_automation engaged on new lead → APPLIES (funnel promotion unaffected)', async () => {
+      const prisma = buildPrismaMock({ status: 'new' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+        reason: 'customer_replied',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('engaged');
+    });
+
+    // Spec A.3 carve-out: lost+hired_someone → engaged is allowed for
+    // lb_automation (re-engagement loop). Verifies the Guard 5 carve-out.
+    it('lb_automation engaged on lost+hired_someone → APPLIES (re-engagement carve-out)', async () => {
+      const prisma = buildPrismaMock({ status: 'lost', lostReason: 'hired_someone' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+        reason: 'reengagement_customer_replied',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('engaged');
+      // lostReason clears on lost-exit (existing projection logic).
+      expect(prisma._state.lead.lostReason).toBeNull();
+    });
+
+    // Companion to A.3: lost+opt_out is NEVER recoverable by lb_automation.
+    // Only manual / service_flow may transition out.
+    it('lb_automation engaged on lost+opt_out → SKIPPED (opt_out is final for AI)', async () => {
+      const prisma = buildPrismaMock({ status: 'lost', lostReason: 'opt_out' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+        reason: 'customer_replied',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('automation_terminal');
+      expect(prisma._state.lead.status).toBe('lost');
     });
   });
 });

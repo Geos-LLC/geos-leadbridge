@@ -93,6 +93,18 @@ export type WriteSkipReason =
   // intent is still tracked in conversation runtime + the audit log, but
   // the canonical status stays put because SF owns lifecycle.
   | 'sf_linked_customer'
+  // lb_automation tried to write a lifecycle terminal it is NOT permitted
+  // to author. Per the lifecycle rule (spec 2026-06-17):
+  //   - lb_automation may write `lost` with lostReason='opt_out'.
+  //   - lb_automation may write `lost` with lostReason='hired_someone' ONLY
+  //     when the prior status is not booked / in_progress / completed
+  //     (post-acquisition states the AI must not downgrade).
+  //   - lb_automation may NOT write booked / completed / cancelled /
+  //     no_show / in_progress / archived under any circumstance — those
+  //     are real-world outcomes only SF, platform_sync, or manual can
+  //     report. Gate side-effects (stop sequence, fire handoff) still
+  //     execute; only the canonical Lead.status write is suppressed.
+  | 'automation_forbidden_destination'
   | 'automation_terminal'
   | 'pipeline_downgrade'
   | 'duplicate'
@@ -359,6 +371,57 @@ export class LeadStatusService {
       return this.skipped(lead, 'sf_linked_customer');
     }
 
+    // ── Guard 2c: lb_automation lifecycle-terminal rule (2026-06-17 spec) ──
+    // AI observes intent (opt_out, hired_elsewhere, agreed, wants_to_schedule,
+    // etc.), not real-world outcomes. SF / platform_sync / manual remain the
+    // only authorities for booked / completed / cancelled / no_show /
+    // in_progress / archived writes. Two carve-outs let AI mark `lost`:
+    //
+    //   (a) opt_out — explicit "stop messaging me" / "delete my account".
+    //       Customer asked us to stop; respect it without waiting on an
+    //       external signal. lostReason MUST be 'opt_out'.
+    //
+    //   (b) hired_elsewhere — customer explicitly said they hired somebody
+    //       else. Allowed ONLY when the prior status is not a
+    //       post-acquisition lifecycle state (booked / in_progress /
+    //       completed). A booked customer saying "thanks!" must not be
+    //       downgraded to lost (Feryal Berjawi / Donna-class incident).
+    //
+    // All other lb_automation terminal writes (booked, completed, etc., or
+    // `lost` with any other lostReason) are blocked. The follow-up gate's
+    // stop_only side-effect still fires — sequence is stopped, handoff
+    // alert dispatches — only the canonical Lead.status flip is suppressed.
+    const isTerminalDestination =
+      newStatus === 'booked' ||
+      newStatus === 'in_progress' ||
+      newStatus === 'completed' ||
+      newStatus === 'cancelled' ||
+      newStatus === 'no_show' ||
+      newStatus === 'archived' ||
+      newStatus === 'lost';
+    if (input.source === 'lb_automation' && isTerminalDestination) {
+      const isOptOutLost =
+        newStatus === 'lost' && input.lostReason === 'opt_out';
+      const isHiredElseRecoverable =
+        newStatus === 'lost' &&
+        input.lostReason === 'hired_someone' &&
+        oldStatus !== 'booked' &&
+        oldStatus !== 'in_progress' &&
+        oldStatus !== 'completed';
+      if (!isOptOutLost && !isHiredElseRecoverable) {
+        this.metrics?.recordSkip('automation_forbidden_destination');
+        this.logSkip(
+          input,
+          lead.id,
+          oldStatus,
+          newStatus,
+          'automation_forbidden_destination',
+          lead.platformStatus,
+        );
+        return this.skipped(lead, 'automation_forbidden_destination');
+      }
+    }
+
     // ── Guard 3: hard-terminal blocks all sources, with one carve-out ─────
     // SF (and only SF) may reactivate an archived lead into a fulfillment
     // lifecycle state. Required because SF is the operational lifecycle
@@ -424,9 +487,27 @@ export class LeadStatusService {
     // ── Guard 5: automation-terminal (lb_automation only) ─────────────────
     // Manual + SF can still transition out of these (e.g. operator marks
     // a `lost` lead as `engaged` after a re-engagement reply).
+    //
+    // Carve-out (2026-06-17 spec A.3): lb_automation MAY transition a lead
+    // out of `lost+hired_someone` into `engaged` (or `quoted`). This is the
+    // re-engagement loop — a customer flagged hired_elsewhere who comes back
+    // and replies should be promoted into the active funnel. `opt_out` is
+    // never recoverable by lb_automation (explicit unsubscribe); `lost` with
+    // any other lostReason continues to require manual / service_flow to
+    // reactivate. `completed` / `cancelled` / `no_show` stay strict — these
+    // are real outcomes, not AI guesses.
     if (AUTOMATION_TERMINAL.has(oldStatus) && input.source === 'lb_automation') {
-      this.logSkip(input, lead.id, oldStatus, newStatus, 'automation_terminal', lead.platformStatus);
-      return this.skipped(lead, 'automation_terminal');
+      const isHiredReengage =
+        oldStatus === 'lost' &&
+        lead.lostReason === 'hired_someone' &&
+        (newStatus === 'engaged' || newStatus === 'quoted');
+      if (!isHiredReengage) {
+        this.logSkip(input, lead.id, oldStatus, newStatus, 'automation_terminal', lead.platformStatus);
+        return this.skipped(lead, 'automation_terminal');
+      }
+      this.logger.log(
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=lb_automation result=carve_out_reengage status=${oldStatus} lost_reason=hired_someone attempted=${newStatus}`,
+      );
     }
 
     // ── Guard 6: pipeline-downgrade ───────────────────────────────────────
