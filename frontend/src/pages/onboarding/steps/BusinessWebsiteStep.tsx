@@ -87,6 +87,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     platform: 'thumbtack' | 'yelp' | 'website';
     url: string;
     fieldsApplied: number;
+    // Count of fields the scrape returned BEFORE merge. fieldsApplied
+    // counts only net-new keys; on a re-fetch of an already-populated
+    // bizInfo it's 0 even when the scrape found 7 facts. Use the gap
+    // to differentiate "page yielded nothing" from "already saved."
+    fieldsExtracted: number;
     accountsAffected: number;
   } | null>(null);
 
@@ -288,12 +293,19 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         res.platform === 'thumbtack' ? 'Thumbtack' :
         res.platform === 'yelp' ? 'Yelp' :
         'your website';
+      const extracted = res.fieldsExtracted ?? 0;
       if (res.fieldsApplied > 0) {
         notify.success(
           `Pulled from ${platformWord}`,
           `Filled ${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'}. Review on the next step or in Settings → AI Playbook.`,
           5000,
         );
+        setLowYieldScrape(false);
+      } else if (extracted > 0) {
+        // fieldsApplied=0 but fieldsExtracted>0 — the scrape DID find
+        // structured info, it just all matches what's already in the
+        // Playbook (typical when re-running on the same URL). NOT a
+        // low-yield case; don't trip the amber warning.
         setLowYieldScrape(false);
       } else {
         // Scrape was reachable but extracted no usable fields — the
@@ -309,6 +321,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         platform: res.platform,
         url: res.savedUrl,
         fieldsApplied: res.fieldsApplied ?? 0,
+        fieldsExtracted: extracted,
         accountsAffected: res.accountsAffected ?? 0,
       });
       const outcome: VerifyOutcome = {
@@ -804,7 +817,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
                 {platformLabel(lastApply.platform)} connected
                 {lastApply.fieldsApplied > 0
                   ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your Playbook`
-                  : ''}
+                  : lastApply.fieldsExtracted > 0
+                    ? ` — ${lastApply.fieldsExtracted} field${lastApply.fieldsExtracted === 1 ? '' : 's'} already saved`
+                    : ''}
               </div>
               <div className="text-emerald-800 mt-0.5 leading-snug break-all">
                 {lastApply.url}
@@ -818,6 +833,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               {lastApply.fieldsApplied > 0 && (
                 <div className="text-[11px] text-emerald-700 mt-1.5">
                   Review on the next steps or in Settings → AI Playbook after setup.
+                </div>
+              )}
+              {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
+                <div className="text-[11px] text-emerald-700 mt-1.5">
+                  Your AI Playbook already reflects this page's facts.
                 </div>
               )}
             </div>

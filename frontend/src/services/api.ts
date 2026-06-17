@@ -1912,6 +1912,10 @@ export const usersApi = {
     savedUrl: string | null;
     accountsAffected: number;
     fieldsApplied: number;
+    /** TT/Yelp only — count of fields the scrape returned BEFORE merge.
+     *  Gap between this and fieldsApplied means "scrape worked, data
+     *  already saved." Use it to choose the right confirmation copy. */
+    fieldsExtracted?: number;
     conflictsRaised: number;
     websiteMetadata?: WebsiteMetadataPayload;
     warning?: string;
@@ -1928,6 +1932,8 @@ export const usersApi = {
   ): Promise<{
     success: boolean;
     fieldsApplied: number;
+    /** See applyBusinessProfileUrl — same semantic for the paste flow. */
+    fieldsExtracted?: number;
     conflictsRaised: number;
     warning?: string;
   }> => {

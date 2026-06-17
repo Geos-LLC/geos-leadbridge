@@ -56,6 +56,14 @@ export function SettingsGeneral() {
     platform: 'thumbtack' | 'yelp' | 'website';
     url: string;
     fieldsApplied: number;
+    // Count of fields the scrape returned BEFORE merge. When > 0 but
+    // fieldsApplied === 0, it means the page DID yield structured data
+    // but everything already matches what's saved — that's a very
+    // different message from "page yielded nothing." Without this gap
+    // the emerald card was incorrectly telling Spotless Tampa "No
+    // structured info was extracted" when the scrape was extracting 7
+    // fields every time (just all already saved).
+    fieldsExtracted: number;
     accountsAffected: number;
   } | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone || '');
@@ -197,6 +205,7 @@ export function SettingsGeneral() {
         platform: res.platform,
         url: res.savedUrl,
         fieldsApplied: res.fieldsApplied ?? 0,
+        fieldsExtracted: res.fieldsExtracted ?? 0,
         accountsAffected: res.accountsAffected ?? 0,
       });
       if (res.platform === 'website') {
@@ -217,10 +226,21 @@ export function SettingsGeneral() {
         res.platform === 'thumbtack' ? 'Thumbtack' :
         res.platform === 'yelp' ? 'Yelp' :
         'your website';
+      const extracted = res.fieldsExtracted ?? 0;
       if (res.fieldsApplied > 0) {
         notify.success(
           `Pulled from ${platformWord}`,
           `Filled ${res.fieldsApplied} field${res.fieldsApplied === 1 ? '' : 's'}. Review in Settings → AI Playbook.`,
+          4500,
+        );
+      } else if (extracted > 0) {
+        // Scrape worked and DID return structured facts, but every one
+        // already matches what's in bizInfo (likely a re-run on the same
+        // URL). The card below this confirms the connection — no need to
+        // open the fallback paste modal in this case.
+        notify.success(
+          `${platformWord} profile up to date`,
+          `${extracted} field${extracted === 1 ? ' was' : 's were'} already saved from earlier — nothing new to add.`,
           4500,
         );
       } else {
@@ -494,7 +514,9 @@ export function SettingsGeneral() {
                   {lastApply.platform === 'thumbtack' ? 'Thumbtack profile' : 'Yelp business page'} connected
                   {lastApply.fieldsApplied > 0
                     ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your AI Playbook`
-                    : ''}
+                    : lastApply.fieldsExtracted > 0
+                      ? ` — ${lastApply.fieldsExtracted} field${lastApply.fieldsExtracted === 1 ? '' : 's'} already saved`
+                      : ''}
                 </div>
                 <div style={{ marginTop: 3, wordBreak: 'break-all' }}>
                   {lastApply.url}
@@ -502,7 +524,16 @@ export function SettingsGeneral() {
                     <> · Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}</>
                   )}
                 </div>
-                {lastApply.fieldsApplied === 0 && (
+                {/* Three cases distinguished by (fieldsApplied, fieldsExtracted):
+                    - (>0, *)  : new data merged — primary headline covers it
+                    - (0, >0)  : everything on the page already matches saved — quiet "up to date" note
+                    - (0, 0)   : scrape worked but yielded no structured facts — point to manual paste */}
+                {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
+                  <div style={{ marginTop: 5, color: '#065f46', fontSize: 11.5 }}>
+                    Your AI Playbook already reflects this page's facts. Re-fetch any time you update the listing.
+                  </div>
+                )}
+                {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted === 0 && (
                   <div style={{ marginTop: 5, color: '#78350f', fontSize: 11.5 }}>
                     No structured info was extracted from that page. Use the "Paste your business info instead" link above
                     to fill the Playbook by hand.

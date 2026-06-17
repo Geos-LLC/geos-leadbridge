@@ -1130,6 +1130,12 @@ export class UsersService {
   ): Promise<{
     success: boolean;
     fieldsApplied: number;
+    /** Count of structured fields the scrape/API actually returned, BEFORE
+     *  the merge step decides which ones are net-new. Re-runs against an
+     *  already-populated bizInfo blob produce fieldsApplied=0 even when
+     *  fieldsExtracted>0 — the UI uses the gap to distinguish "page has
+     *  no usable data" from "page's data already matches what we have." */
+    fieldsExtracted: number;
     conflictsRaised: number;
     warning?: string;
   }> {
@@ -1197,9 +1203,10 @@ export class UsersService {
       }
     }
     if (!patch || Object.keys(patch).length === 0) {
-      return { success: false, fieldsApplied: 0, conflictsRaised: 0, warning: 'No data returned from ' + source };
+      return { success: false, fieldsApplied: 0, fieldsExtracted: 0, conflictsRaised: 0, warning: 'No data returned from ' + source };
     }
 
+    const fieldsExtracted = Object.keys(patch).length;
     const state = await this.loadBusinessInfoState(userId);
     const result = mergeBusinessInfo({
       existing: state.bizInfo,
@@ -1222,11 +1229,12 @@ export class UsersService {
     const fieldsApplied = Object.keys(result.merged).length - Object.keys(state.bizInfo).length;
     this.logger.log(
       `[seedBusinessInfoFromAccount] userId=${userId} source=${source} ` +
-      `fieldsApplied=${Math.max(0, fieldsApplied)} conflictsRaised=${newConflicts.length}`,
+      `fieldsExtracted=${fieldsExtracted} fieldsApplied=${Math.max(0, fieldsApplied)} conflictsRaised=${newConflicts.length}`,
     );
     return {
       success: true,
       fieldsApplied: Math.max(0, fieldsApplied),
+      fieldsExtracted,
       conflictsRaised: newConflicts.length,
     };
   }
@@ -1253,6 +1261,10 @@ export class UsersService {
   ): Promise<{
     success: boolean;
     fieldsApplied: number;
+    /** Same semantic as seedBusinessInfoFromAccount: count of fields the
+     *  extractor returned BEFORE the merge — lets the UI tell "extractor
+     *  found nothing" from "everything found already matches." */
+    fieldsExtracted: number;
     conflictsRaised: number;
     warning?: string;
   }> {
@@ -1261,6 +1273,7 @@ export class UsersService {
       return {
         success: false,
         fieldsApplied: 0,
+        fieldsExtracted: 0,
         conflictsRaised: 0,
         warning: 'Paste at least a sentence or two of business info.',
       };
@@ -1280,11 +1293,13 @@ export class UsersService {
       return {
         success: false,
         fieldsApplied: 0,
+        fieldsExtracted: 0,
         conflictsRaised: 0,
         warning: 'Couldn\'t pull structured business info from that text. Try adding service names, hours, pricing, or address.',
       };
     }
 
+    const fieldsExtracted = Object.keys(patch).length;
     const state = await this.loadBusinessInfoState(userId);
     const result = mergeBusinessInfo({
       existing: state.bizInfo,
@@ -1324,12 +1339,13 @@ export class UsersService {
 
     this.logger.log(
       `[seedBusinessInfoFromText] userId=${userId} pastedLen=${cleaned.length} ` +
-      `fieldsApplied=${fieldsApplied} conflictsRaised=${newConflicts.length}`,
+      `fieldsExtracted=${fieldsExtracted} fieldsApplied=${fieldsApplied} conflictsRaised=${newConflicts.length}`,
     );
 
     return {
       success: true,
       fieldsApplied,
+      fieldsExtracted,
       conflictsRaised: newConflicts.length,
     };
   }
@@ -1471,6 +1487,12 @@ export class UsersService {
     savedUrl: string | null;
     accountsAffected: number;
     fieldsApplied: number;
+    /** TT/Yelp only — count of structured fields the scrape returned
+     *  before the merge step. Lets the UI tell "page yielded nothing
+     *  usable" from "page's data already matches your saved Playbook."
+     *  The website branch doesn't populate this (its surface is the
+     *  WebsitePreviewCard, not the emerald confirmation card). */
+    fieldsExtracted?: number;
     conflictsRaised: number;
     websiteMetadata?: VerifyWebsiteResult['metadata'];
     warning?: string;
@@ -1605,10 +1627,18 @@ export class UsersService {
     // bizInfo blob regardless of which account triggered it; running per
     // account would double-merge conflicts.
     let fieldsApplied = 0;
+    let fieldsExtracted = 0;
     let conflictsRaised = 0;
     let seededOk = false;
     try {
       const seed = await this.seedBusinessInfoFromAccount(userId, accounts[0].id, platform);
+      // seed.fieldsExtracted is populated whether or not success is true
+      // (the `no-data-returned` path still returns 0). We capture it
+      // unconditionally so the caller can distinguish "scrape failed
+      // outright" from "scrape returned data that all matched current
+      // bizInfo" — the merge collapses both to fieldsApplied=0 but the
+      // tenant-facing message is very different.
+      fieldsExtracted = seed?.fieldsExtracted ?? 0;
       if (seed?.success) {
         fieldsApplied = seed.fieldsApplied ?? 0;
         conflictsRaised = seed.conflictsRaised ?? 0;
@@ -1642,13 +1672,14 @@ export class UsersService {
       }
     }
 
-    this.logger.log(`[applyBusinessProfileUrl] userId=${userId} platform=${platform} accounts=${accounts.length} fieldsApplied=${fieldsApplied} url=${normalized.slice(0, 60)}…`);
+    this.logger.log(`[applyBusinessProfileUrl] userId=${userId} platform=${platform} accounts=${accounts.length} fieldsExtracted=${fieldsExtracted} fieldsApplied=${fieldsApplied} url=${normalized.slice(0, 60)}…`);
     return {
       success: true,
       platform,
       savedUrl: normalized,
       accountsAffected: accounts.length,
       fieldsApplied,
+      fieldsExtracted,
       conflictsRaised,
     };
   }
