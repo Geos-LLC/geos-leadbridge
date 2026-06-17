@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Save, Loader2, Upload } from 'lucide-react';
-import { usersApi } from '../services/api';
+import { usersApi, serviceProfilesApi } from '../services/api';
 
 export interface AccountFaq {
   insuredAndBonded?: { value?: 'yes' | 'no' | 'unset'; details?: string };
@@ -45,9 +45,15 @@ interface AccountFaqFormProps {
   accountId: string;
   accountName: string;
   saveToAll?: string[];
+  // When set, the form loads/saves against a per-Service FAQ
+  // (ServiceProfile.faqJson) instead of the SavedAccount FAQ. accountId is
+  // still required for the SavedAccount fallback shape but is ignored at
+  // the load/save layer. saveToAll is ignored in this mode — a service's
+  // FAQ is scoped to that one profile, not fanned out across accounts.
+  serviceProfileId?: string;
 }
 
-export default function AccountFaqForm({ accountId, accountName, saveToAll }: AccountFaqFormProps) {
+export default function AccountFaqForm({ accountId, accountName, saveToAll, serviceProfileId }: AccountFaqFormProps) {
   const [faq, setFaq] = useState<AccountFaq | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -59,8 +65,26 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
 
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
-    if (!loadId) return;
     setLoading(true);
+    if (serviceProfileId) {
+      // Per-Service FAQ — load from ServiceProfile.faqJson (string of
+      // serialized AccountFaq shape). Falls back to DEFAULT_FAQ when the
+      // JSON is missing or unparseable so the editor still renders.
+      serviceProfilesApi
+        .get(serviceProfileId)
+        .then(profile => {
+          let parsed: AccountFaq | null = null;
+          if (profile.faqJson) {
+            try { parsed = JSON.parse(profile.faqJson) as AccountFaq; } catch { /* fall through */ }
+          }
+          setFaq({ ...DEFAULT_FAQ, ...(parsed || {}) });
+          setInherited(false);
+        })
+        .catch(() => setFaq(DEFAULT_FAQ))
+        .finally(() => setLoading(false));
+      return;
+    }
+    if (!loadId) { setLoading(false); return; }
     usersApi.getAccountFaq(loadId)
       .then(res => {
         setFaq({ ...DEFAULT_FAQ, ...(res.faq || {}) });
@@ -68,7 +92,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
       })
       .catch(() => setFaq(DEFAULT_FAQ))
       .finally(() => setLoading(false));
-  }, [loadId]);
+  }, [loadId, serviceProfileId]);
 
   const update = <K extends keyof AccountFaq>(key: K, value: AccountFaq[K]) => {
     setFaq(prev => ({ ...(prev || DEFAULT_FAQ), [key]: value }));
@@ -136,7 +160,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
         ...faq,
         customQA: (faq.customQA || []).filter(qa => (qa.question || '').trim() && (qa.answer || '').trim()),
       };
-      if (saveToAll && saveToAll.length > 0) {
+      if (serviceProfileId) {
+        await serviceProfilesApi.update(serviceProfileId, { faqJson: JSON.stringify(cleaned) });
+      } else if (saveToAll && saveToAll.length > 0) {
         await Promise.all(saveToAll.map(id => usersApi.updateAccountFaq(id, cleaned)));
       } else {
         await usersApi.updateAccountFaq(accountId, cleaned);

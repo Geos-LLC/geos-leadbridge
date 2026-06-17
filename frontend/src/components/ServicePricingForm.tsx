@@ -4,7 +4,7 @@ import {
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
   type LucideIcon,
 } from 'lucide-react';
-import { usersApi } from '../services/api';
+import { usersApi, serviceProfilesApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
 import { IconTile, type IconTone } from './automation/ui';
 
@@ -17,6 +17,12 @@ interface ServicePricingFormProps {
   accountId: string;
   accountName: string;
   saveToAll?: string[]; // array of account IDs to save to (shared pricing mode)
+  // When set, the form loads/saves against a per-Service pricing blob
+  // (ServiceProfile.pricingJson) instead of the SavedAccount pricing.
+  // accountId is still required for display fallback but ignored at the
+  // load/save layer. saveToAll is ignored in this mode — service pricing
+  // is scoped to one profile, not fanned out across accounts.
+  serviceProfileId?: string;
 }
 
 const MONO: CSSProperties = { fontFamily: 'var(--lb-font-mono)' };
@@ -99,7 +105,7 @@ function SectionPanel({
   );
 }
 
-export default function ServicePricingForm({ accountId, accountName, saveToAll }: ServicePricingFormProps) {
+export default function ServicePricingForm({ accountId, accountName, saveToAll, serviceProfileId }: ServicePricingFormProps) {
   const [pricing, setPricing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -112,13 +118,30 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   // on every parent render and loop the "Loading pricing..." spinner.
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
-    if (!loadId) return;
     setLoading(true);
+    if (serviceProfileId) {
+      // Per-Service pricing — load from ServiceProfile.pricingJson (string
+      // of serialized pricing blob). Falls back to DEFAULT_CLEANING_PRICING
+      // when missing/unparseable.
+      serviceProfilesApi
+        .get(serviceProfileId)
+        .then(profile => {
+          let parsed: any = null;
+          if (profile.pricingJson) {
+            try { parsed = JSON.parse(profile.pricingJson); } catch { /* fall through */ }
+          }
+          setPricing(hydratePricing(parsed || DEFAULT_CLEANING_PRICING));
+        })
+        .catch(() => setPricing(hydratePricing(DEFAULT_CLEANING_PRICING)))
+        .finally(() => setLoading(false));
+      return;
+    }
+    if (!loadId) { setLoading(false); return; }
     usersApi.getServicePricing(loadId)
       .then(res => setPricing(hydratePricing(res.pricing || DEFAULT_CLEANING_PRICING)))
       .catch(() => setPricing(hydratePricing(DEFAULT_CLEANING_PRICING)))
       .finally(() => setLoading(false));
-  }, [loadId]);
+  }, [loadId, serviceProfileId]);
 
   const toggleSection = (key: string) => setExpandedSections(p => ({ ...p, [key]: !p[key] }));
 
@@ -179,7 +202,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (saveToAll && saveToAll.length > 0) {
+      if (serviceProfileId) {
+        await serviceProfilesApi.update(serviceProfileId, { pricingJson: JSON.stringify(pricing) });
+      } else if (saveToAll && saveToAll.length > 0) {
         // Save to all accounts in parallel
         await Promise.all(saveToAll.map(id => usersApi.updateServicePricing(id, pricing)));
       } else {

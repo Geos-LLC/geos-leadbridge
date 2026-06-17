@@ -641,11 +641,11 @@ function safeParse(value: string): unknown {
 // ─── Pricing + FAQ panes (PR-D.2) ────────────────────────────────────────
 //
 // Both reuse the canonical Wizard forms (ServicePricingForm /
-// AccountFaqForm). Those forms are self-contained — they own their own
-// state, load, and Save button against the user's SavedAccount, and
-// cascade across every connected account when saveToAll is set. We just
-// wrap them in a SectionCard for visual parity with the rest of the
-// Service tab.
+// AccountFaqForm). The Service tab passes serviceProfileId so the forms
+// load + save against ServiceProfile.pricingJson / .faqJson — each
+// service ("House Cleaning", "Upholstery & Furniture Cleaning") has its
+// own data. The Global tab (no serviceProfileId) keeps the original
+// SavedAccount-scoped behaviour with saveToAll cascade.
 
 function useConnectedAccountsForPane() {
   const accounts = useAppStore((s) => s.savedAccounts);
@@ -654,8 +654,9 @@ function useConnectedAccountsForPane() {
   return { primary, allIds };
 }
 
-function ServicePricingPane() {
+function ServicePricingPane({ serviceProfileId, serviceName }: { serviceProfileId?: string; serviceName?: string }) {
   const { primary, allIds } = useConnectedAccountsForPane();
+  const scoped = !!serviceProfileId;
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
     // the user directly to this card after the editor renders.
@@ -666,7 +667,9 @@ function ServicePricingPane() {
             Pricing
           </div>
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-            Edit the table the AI uses to quote leads. Applies to every connected account.
+            {scoped
+              ? `Pricing the AI uses to quote ${serviceName ?? 'this service'} leads. Specific to this service only.`
+              : 'Edit the table the AI uses to quote leads. Applies to every connected account.'}
           </div>
         </div>
         {!primary ? (
@@ -675,9 +678,13 @@ function ServicePricingPane() {
           </div>
         ) : (
           <ServicePricingForm
+            // Re-mount on profile switch so internal state (pricing draft,
+            // expanded sections) resets to the new service's data.
+            key={serviceProfileId ?? 'global'}
             accountId={primary.id}
-            accountName={primary.businessName ?? primary.platform ?? 'Your account'}
-            saveToAll={allIds.length > 1 ? allIds : undefined}
+            accountName={scoped ? (serviceName ?? 'This service') : (primary.businessName ?? primary.platform ?? 'Your account')}
+            saveToAll={scoped ? undefined : (allIds.length > 1 ? allIds : undefined)}
+            serviceProfileId={serviceProfileId}
           />
         )}
       </SectionCard>
@@ -685,8 +692,9 @@ function ServicePricingPane() {
   );
 }
 
-function ServiceFaqPane() {
+function ServiceFaqPane({ serviceProfileId, serviceName }: { serviceProfileId?: string; serviceName?: string }) {
   const { primary, allIds } = useConnectedAccountsForPane();
+  const scoped = !!serviceProfileId;
   return (
     <SectionCard padding="16px 20px">
       <div style={{ marginBottom: 14 }}>
@@ -694,7 +702,9 @@ function ServiceFaqPane() {
           FAQ
         </div>
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-          Answers the AI uses verbatim. Applies to every connected account.
+          {scoped
+            ? `Answers the AI uses verbatim for ${serviceName ?? 'this service'} leads. Specific to this service only.`
+            : 'Answers the AI uses verbatim. Applies to every connected account.'}
         </div>
       </div>
       {!primary ? (
@@ -703,9 +713,11 @@ function ServiceFaqPane() {
         </div>
       ) : (
         <AccountFaqForm
+          key={serviceProfileId ?? 'global'}
           accountId={primary.id}
-          accountName={primary.businessName ?? primary.platform ?? 'Your account'}
-          saveToAll={allIds.length > 1 ? allIds : undefined}
+          accountName={scoped ? (serviceName ?? 'This service') : (primary.businessName ?? primary.platform ?? 'Your account')}
+          saveToAll={scoped ? undefined : (allIds.length > 1 ? allIds : undefined)}
+          serviceProfileId={serviceProfileId}
         />
       )}
     </SectionCard>
@@ -1237,8 +1249,8 @@ function ServicePlaybookEditor({
       {isDraft && <DraftWarningBanner />}
       {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
 
-      <ServicePricingPane />
-      <ServiceFaqPane />
+      <ServicePricingPane serviceProfileId={profile.id} serviceName={getServiceDisplayName(profile)} />
+      <ServiceFaqPane serviceProfileId={profile.id} serviceName={getServiceDisplayName(profile)} />
       <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
 
       {/* Service-scoped HOW labels make clear these are additions, not
