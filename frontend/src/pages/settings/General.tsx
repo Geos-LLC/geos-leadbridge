@@ -45,6 +45,19 @@ export function SettingsGeneral() {
   // failed so the modal can echo it in its header.
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+  // In-memory snapshot of the last successful applyBusinessProfileUrl
+  // call. TT / Yelp paths don't populate User.website + websiteMetadata,
+  // so the existing WebsitePreviewCard never renders for them — leaving
+  // the page looking inert after a successful TT fetch. This snapshot
+  // backs a small TT/Yelp confirmation card and is invalidated the
+  // moment the URL input is edited (so the card never shows stale
+  // results from a different URL).
+  const [lastApply, setLastApply] = useState<{
+    platform: 'thumbtack' | 'yelp' | 'website';
+    url: string;
+    fieldsApplied: number;
+    accountsAffected: number;
+  } | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string>((user as any)?.businessPhone || '');
   const [businessPhoneError, setBusinessPhoneError] = useState<string | null>(null);
   const [savingBusinessPhone, setSavingBusinessPhone] = useState(false);
@@ -176,6 +189,16 @@ export function SettingsGeneral() {
       }
       setDetectedPlatform(res.platform);
       setWebsite(res.savedUrl);
+      // Snapshot for the TT/Yelp confirmation card. Mirrors the wizard
+      // pattern — the WebsitePreviewCard below this only renders for
+      // platform='website', so without this snapshot a TT/Yelp fetch
+      // leaves the page with no visible "we just saved it" evidence.
+      setLastApply({
+        platform: res.platform,
+        url: res.savedUrl,
+        fieldsApplied: res.fieldsApplied ?? 0,
+        accountsAffected: res.accountsAffected ?? 0,
+      });
       if (res.platform === 'website') {
         // Generic site path also updated User.website + metadata.
         setWebsiteMetadata((res.websiteMetadata as any) ?? null);
@@ -355,7 +378,20 @@ export function SettingsGeneral() {
             <div style={{ flex: 1, minWidth: 200 }}>
               <SettingsInput
                 value={website}
-                onChange={setWebsite}
+                onChange={(next) => {
+                  setWebsite(next);
+                  // Edit invalidates the platform badge + the last-apply
+                  // confirmation card. Without this the badge says
+                  // THUMBTACK while the input shows a bookingkoala URL
+                  // (reported 2026-06-17 — stale state from a prior fetch).
+                  if (detectedPlatform && next.trim() !== website.trim()) {
+                    setDetectedPlatform(null);
+                  }
+                  if (lastApply && next.trim() !== lastApply.url) {
+                    setLastApply(null);
+                  }
+                  if (verifyError) setVerifyError(null);
+                }}
                 placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
               />
             </div>
@@ -433,6 +469,47 @@ export function SettingsGeneral() {
               metadata={websiteMetadata}
               tone="settings"
             />
+          </div>
+        )}
+
+        {/* TT / Yelp confirmation card — mirrors the wizard's emerald
+            card. WebsitePreviewCard above is hard-gated on the website
+            path because the underlying data only exists for that path.
+            Without this card a TT/Yelp fetch shows zero visible
+            confirmation (tenant reported 2026-06-17: "no info is showed"
+            after a successful TT fetch). */}
+        {lastApply && lastApply.platform !== 'website' && lastApply.url.trim() === website.trim() && (
+          <div style={{ padding: '0 24px 12px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '12px 14px', borderRadius: 12,
+              border: '1px solid #a7f3d0',
+              background: '#ecfdf5',
+              color: '#065f46',
+              fontSize: 12.5, lineHeight: 1.5,
+            }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1, color: '#059669' }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: '#064e3b' }}>
+                  {lastApply.platform === 'thumbtack' ? 'Thumbtack profile' : 'Yelp business page'} connected
+                  {lastApply.fieldsApplied > 0
+                    ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your AI Playbook`
+                    : ''}
+                </div>
+                <div style={{ marginTop: 3, wordBreak: 'break-all' }}>
+                  {lastApply.url}
+                  {lastApply.accountsAffected > 0 && (
+                    <> · Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}</>
+                  )}
+                </div>
+                {lastApply.fieldsApplied === 0 && (
+                  <div style={{ marginTop: 5, color: '#78350f', fontSize: 11.5 }}>
+                    No structured info was extracted from that page. Use the "Paste your business info instead" link above
+                    to fill the Playbook by hand.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </SettingCard>
