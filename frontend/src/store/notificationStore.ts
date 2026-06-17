@@ -24,6 +24,21 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
 
   addNotification: (notification) => {
+    // Dedupe: if an identical (type+title+message) notification is
+    // already visible, return its id without stacking a duplicate.
+    // Originally written for the page-load "Connection Error" storm,
+    // where the axios interceptor fired one toast per failed request
+    // (10 parallel calls on a cold start = 10 identical toasts that
+    // each stayed for 8s). Same logic protects against any future
+    // fan-out of the same error.
+    const existing = get().notifications.find(
+      (n) =>
+        n.type === notification.type &&
+        n.title === notification.title &&
+        n.message === notification.message,
+    );
+    if (existing) return existing.id;
+
     const id = `notification-${++notificationId}`;
     const newNotification: Notification = {
       id,
