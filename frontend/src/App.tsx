@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-r
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
+import { UpdateAvailableBanner } from './components/UpdateAvailableBanner';
 import { PageSkeleton } from './components/PageSkeleton';
 import { ChunkReloadBoundary } from './components/ChunkReloadBoundary';
 import { useAuthStore } from './store/authStore';
@@ -88,6 +89,10 @@ function App() {
     <BrowserRouter>
       {/* Global toast notifications */}
       <ToastNotifications />
+      {/* Notifies open tabs when a new deploy ships so stale UIs (missing
+          a fresh `tokenDead`, new CTA copy, etc.) can be reloaded
+          explicitly instead of waiting for a chunk-load error. */}
+      <UpdateAvailableBanner />
       <ChunkReloadBoundary>
       <Suspense fallback={<PageSkeleton />}>
         <Routes>
