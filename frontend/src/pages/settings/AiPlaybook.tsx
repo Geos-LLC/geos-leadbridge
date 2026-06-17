@@ -25,7 +25,7 @@ import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe,
   ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, CheckCircle2, MessageSquare, Trash2,
-  Archive,
+  Archive, Plus,
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, StatusPill } from '../../components/automation/ui';
@@ -628,15 +628,6 @@ function CardHeader({
   );
 }
 
-const inlineJsonTextareaStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 12px',
-  border: '1px solid var(--lb-line)',
-  borderRadius: 8, fontSize: 12,
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  resize: 'vertical', minHeight: 120,
-  background: 'white', color: 'var(--lb-ink-1)',
-};
-
 function safeParse(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -691,6 +682,126 @@ function ServicePricingCard({
   );
 }
 
+// ─── FAQ rows editor ─────────────────────────────────────────────────────
+//
+// PR-D shipped a raw JSON textarea ({ customQA: [...] }) inline in the
+// Service playbook tab. Users shouldn't have to read JSON — restore a
+// structured Q&A table editor: each row is one Question + Answer with a
+// delete button, plus an "Add Q&A" button. The on-disk shape is still
+// `{ customQA: [{ question, answer }] }` so the runtime renderer keeps
+// reading the same field; only the editor surface changed.
+
+type FaqPair = { question: string; answer: string };
+
+function parseFaqRows(value: string): FaqPair[] {
+  const parsed = safeParse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  const arr = (parsed as Record<string, unknown>).customQA;
+  if (!Array.isArray(arr)) return [];
+  return arr.map((row: any) => ({
+    question: typeof row?.question === 'string' ? row.question : '',
+    answer: typeof row?.answer === 'string' ? row.answer : '',
+  }));
+}
+
+function serializeFaqRows(rows: FaqPair[]): string {
+  return JSON.stringify({ customQA: rows });
+}
+
+function ServiceFaqRowsEditor({
+  rows,
+  onChange,
+}: {
+  rows: FaqPair[];
+  onChange: (next: FaqPair[]) => void;
+}) {
+  const updateRow = (i: number, field: keyof FaqPair, v: string) => {
+    onChange(rows.map((row, idx) => (idx === i ? { ...row, [field]: v } : row)));
+  };
+  const addRow = () => onChange([...rows, { question: '', answer: '' }]);
+  const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          No Q&amp;A pairs yet. Click <strong>Add Q&amp;A</strong> to add your first.
+        </div>
+      )}
+      {rows.map((row, i) => (
+        <div
+          key={i}
+          style={{
+            border: '1px solid var(--lb-line)',
+            borderRadius: 10,
+            padding: 12,
+            background: 'white',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              Q&amp;A {i + 1}
+            </div>
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              title="Remove this Q&A"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '5px 10px', borderRadius: 7,
+                border: '1px solid var(--lb-line)', background: 'white',
+                color: 'var(--lb-ink-3)', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          </div>
+          <input
+            value={row.question}
+            onChange={(e) => updateRow(i, 'question', e.target.value)}
+            placeholder="Question (e.g. Do you bring your own supplies?)"
+            style={{
+              width: '100%', padding: '9px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+              background: 'white',
+            }}
+          />
+          <textarea
+            value={row.answer}
+            onChange={(e) => updateRow(i, 'answer', e.target.value)}
+            placeholder="Answer the AI should give"
+            rows={3}
+            style={{
+              width: '100%', padding: '9px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+              background: 'white', resize: 'vertical',
+            }}
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={addRow}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '8px 14px', borderRadius: 8,
+          border: '1px dashed var(--lb-line)',
+          background: 'white', color: 'var(--lb-ink-2)',
+          fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        }}
+      >
+        <Plus size={13} /> Add Q&amp;A
+      </button>
+    </div>
+  );
+}
+
 function ServiceFaqCard({
   value,
   onChange,
@@ -702,15 +813,8 @@ function ServiceFaqCard({
   // hide behind a one-line summary. Open by default; users can collapse
   // with the same toggle if they want to focus on AI instructions.
   const [expanded, setExpanded] = useState(true);
-  const summary = useMemo(() => {
-    const parsed = safeParse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return <CountSummary count={0} noun="Q&A pair" />;
-    }
-    const customQA = (parsed as Record<string, unknown>).customQA;
-    const count = Array.isArray(customQA) ? customQA.length : 0;
-    return <CountSummary count={count} noun="Q&A pair" />;
-  }, [value]);
+  const rows = useMemo(() => parseFaqRows(value), [value]);
+  const summary = <CountSummary count={rows.length} noun="Q&A pair" />;
   return (
     <SectionCard padding="16px 20px">
       <CardHeader
@@ -721,19 +825,190 @@ function ServiceFaqCard({
       />
       {expanded && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginBottom: 8 }}>
-            Stored as JSON in the shape <code>{`{ "customQA": [{ "question": "...", "answer": "..." }] }`}</code>.
-          </div>
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={10}
-            style={inlineJsonTextareaStyle}
-            placeholder='{ "customQA": [] }'
+          <ServiceFaqRowsEditor
+            rows={rows}
+            onChange={(next) => onChange(serializeFaqRows(next))}
           />
         </div>
       )}
     </SectionCard>
+  );
+}
+
+// ─── Qualification rows editor ───────────────────────────────────────────
+//
+// Same regression as FAQ — the user shouldn't paste JSON for a question
+// schema. Each row exposes the four meaningful fields (key, label, type,
+// options) inline. Options is a comma-separated string in the UI for the
+// select types; we split/join on the wire. Storage shape unchanged:
+// `{ questions: [{ key, label, type, options? }] }`.
+
+type QualType = 'single_select' | 'multi_select' | 'text' | 'number' | 'date';
+type QualRow = { key: string; label: string; type: QualType; options?: string[] };
+
+const QUAL_TYPES: Array<{ value: QualType; label: string }> = [
+  { value: 'single_select', label: 'Single choice' },
+  { value: 'multi_select', label: 'Multi choice' },
+  { value: 'text', label: 'Free text' },
+  { value: 'number', label: 'Number' },
+  { value: 'date', label: 'Date' },
+];
+
+function parseQualRows(value: string): QualRow[] {
+  const parsed = safeParse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  const arr = (parsed as Record<string, unknown>).questions;
+  if (!Array.isArray(arr)) return [];
+  return arr.map((row: any) => {
+    const type: QualType = (
+      ['single_select', 'multi_select', 'text', 'number', 'date'] as QualType[]
+    ).includes(row?.type) ? row.type : 'text';
+    return {
+      key: typeof row?.key === 'string' ? row.key : '',
+      label: typeof row?.label === 'string' ? row.label : '',
+      type,
+      options: Array.isArray(row?.options)
+        ? row.options.filter((o: unknown) => typeof o === 'string')
+        : undefined,
+    };
+  });
+}
+
+function serializeQualRows(rows: QualRow[]): string {
+  return JSON.stringify({
+    questions: rows.map((r) => {
+      const out: Record<string, unknown> = { key: r.key, label: r.label, type: r.type };
+      if (r.type === 'single_select' || r.type === 'multi_select') {
+        out.options = r.options ?? [];
+      }
+      return out;
+    }),
+  });
+}
+
+function ServiceQualificationRowsEditor({
+  rows,
+  onChange,
+}: {
+  rows: QualRow[];
+  onChange: (next: QualRow[]) => void;
+}) {
+  const updateRow = (i: number, patch: Partial<QualRow>) => {
+    onChange(rows.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  };
+  const addRow = () =>
+    onChange([...rows, { key: '', label: '', type: 'text' }]);
+  const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+  const inputStyle: React.CSSProperties = {
+    padding: '9px 12px',
+    border: '1px solid var(--lb-line)', borderRadius: 8,
+    fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
+    background: 'white',
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          No qualification questions yet. Click <strong>Add question</strong> to add one.
+        </div>
+      )}
+      {rows.map((row, i) => {
+        const isSelect = row.type === 'single_select' || row.type === 'multi_select';
+        return (
+          <div
+            key={i}
+            style={{
+              border: '1px solid var(--lb-line)',
+              borderRadius: 10,
+              padding: 12,
+              background: 'white',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Question {i + 1}
+              </div>
+              <button
+                type="button"
+                onClick={() => removeRow(i)}
+                title="Remove this question"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '5px 10px', borderRadius: 7,
+                  border: '1px solid var(--lb-line)', background: 'white',
+                  color: 'var(--lb-ink-3)', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <Trash2 size={12} /> Delete
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 8 }}>
+              <input
+                value={row.key}
+                onChange={(e) => updateRow(i, { key: e.target.value })}
+                placeholder="Key (e.g. bedrooms)"
+                style={inputStyle}
+              />
+              <input
+                value={row.label}
+                onChange={(e) => updateRow(i, { label: e.target.value })}
+                placeholder="Label shown to the customer"
+                style={inputStyle}
+              />
+              <select
+                value={row.type}
+                onChange={(e) => {
+                  const nextType = e.target.value as QualType;
+                  const isNextSelect = nextType === 'single_select' || nextType === 'multi_select';
+                  updateRow(i, {
+                    type: nextType,
+                    options: isNextSelect ? row.options ?? [] : undefined,
+                  });
+                }}
+                style={{ ...inputStyle, padding: '8px 10px' }}
+              >
+                {QUAL_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            {isSelect && (
+              <input
+                value={(row.options ?? []).join(', ')}
+                onChange={(e) =>
+                  updateRow(i, {
+                    options: e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+                placeholder="Options, comma-separated (e.g. 1, 2, 3, 4+)"
+                style={inputStyle}
+              />
+            )}
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={addRow}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '8px 14px', borderRadius: 8,
+          border: '1px dashed var(--lb-line)',
+          background: 'white', color: 'var(--lb-ink-2)',
+          fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        }}
+      >
+        <Plus size={13} /> Add question
+      </button>
+    </div>
   );
 }
 
@@ -748,15 +1023,8 @@ function ServiceQualificationCard({
   // hide behind a one-line summary. Open by default; users can collapse
   // with the same toggle if they want to focus on AI instructions.
   const [expanded, setExpanded] = useState(true);
-  const summary = useMemo(() => {
-    const parsed = safeParse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return <CountSummary count={0} noun="qualification question" />;
-    }
-    const questions = (parsed as Record<string, unknown>).questions;
-    const count = Array.isArray(questions) ? questions.length : 0;
-    return <CountSummary count={count} noun="qualification question" />;
-  }, [value]);
+  const rows = useMemo(() => parseQualRows(value), [value]);
+  const summary = <CountSummary count={rows.length} noun="qualification question" />;
   return (
     <SectionCard padding="16px 20px">
       <CardHeader
@@ -767,16 +1035,9 @@ function ServiceQualificationCard({
       />
       {expanded && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginBottom: 8 }}>
-            Stored as JSON in the shape{' '}
-            <code>{`{ "questions": [{ "key": "...", "label": "...", "type": "single_select" | "multi_select" | "text" | "number" | "date", "options": [...] }] }`}</code>.
-          </div>
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={10}
-            style={inlineJsonTextareaStyle}
-            placeholder='{ "questions": [] }'
+          <ServiceQualificationRowsEditor
+            rows={rows}
+            onChange={(next) => onChange(serializeQualRows(next))}
           />
         </div>
       )}
