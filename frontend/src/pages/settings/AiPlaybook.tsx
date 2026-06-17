@@ -59,6 +59,8 @@ import { notify } from '../../store/notificationStore';
 import AccountFaqForm from '../../components/AccountFaqForm';
 import ServicePricingForm from '../../components/ServicePricingForm';
 import {
+  CollapsibleSection,
+  FaqRow,
   UnifiedAddRowButton,
   UnifiedSaveButton,
 } from '../../components/playbook-controls';
@@ -839,73 +841,70 @@ function CustomQAForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {rows.length === 0 && (
-        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-          No Q&amp;A pairs yet. Click <strong>Add Q&amp;A</strong> to add your first.
-        </div>
-      )}
-      {rows.map((row, i) => (
-        <div
-          key={i}
-          style={{
-            border: '1px solid var(--lb-line)', borderRadius: 10, padding: 12,
-            background: 'white', display: 'flex', flexDirection: 'column', gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-              Q&amp;A {i + 1}
-            </div>
-            <button
-              type="button"
-              onClick={() => removeRow(i)}
-              title="Remove this Q&A"
+      <CollapsibleSection
+        title="Custom Q&A"
+        icon={<MessageSquare size={14} color="var(--lb-ink-5, #64748b)" />}
+        rightBadge={
+          rows.length > 0 && (
+            <span
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '5px 10px', borderRadius: 7,
-                border: '1px solid var(--lb-line)', background: 'white',
-                color: 'var(--lb-ink-3)', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--lb-ink-5, #64748b)',
+                background: 'var(--lb-ink-10, #f3f5fa)',
+                padding: '3px 8px',
+                borderRadius: 999,
+                letterSpacing: '0.02em',
               }}
             >
-              <Trash2 size={12} /> Delete
-            </button>
+              {rows.length} {rows.length === 1 ? 'row' : 'rows'}
+            </span>
+          )
+        }
+      >
+        {rows.length === 0 ? (
+          <div
+            style={{
+              padding: 18,
+              margin: '0 14px 8px',
+              border: '1px dashed var(--lb-line, #e5e9f2)',
+              borderRadius: 10,
+              background: 'var(--lb-bg, #f4f6fa)',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-5, #64748b)', marginBottom: 10 }}>
+              No Q&amp;A pairs yet. Add the first one below.
+            </div>
+            <UnifiedAddRowButton label="Add Q&A" onClick={addRow} />
           </div>
-          <input
-            value={row.question}
-            onChange={(e) => updateRow(i, 'question', e.target.value)}
-            placeholder="Question"
-            style={{
-              width: '100%', padding: '9px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
-              background: 'white',
-            }}
-          />
-          <textarea
-            value={row.answer}
-            onChange={(e) => updateRow(i, 'answer', e.target.value)}
-            placeholder="Answer the AI should give"
-            rows={3}
-            style={{
-              width: '100%', padding: '9px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
-              background: 'white', resize: 'vertical',
-            }}
-          />
-        </div>
-      ))}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <UnifiedAddRowButton label="Add Q&A" onClick={addRow} />
-        <UnifiedSaveButton
-          label="Save FAQ"
-          dirty={dirty}
-          saving={saving}
-          savedAt={savedAt}
-          onClick={() => void handleSave()}
-        />
-      </div>
+        ) : (
+          <>
+            {rows.map((row, i) => (
+              <FaqRow
+                key={i}
+                index={i}
+                question={row.question}
+                answer={row.answer}
+                onChangeQuestion={(v) => updateRow(i, 'question', v)}
+                onChangeAnswer={(v) => updateRow(i, 'answer', v)}
+                onRemove={() => removeRow(i)}
+              />
+            ))}
+            <div style={{ padding: '12px 14px 4px' }}>
+              <UnifiedAddRowButton label="Add row" onClick={addRow} />
+            </div>
+          </>
+        )}
+      </CollapsibleSection>
+      <UnifiedSaveButton
+        label="Save FAQ"
+        dirty={dirty}
+        saving={saving}
+        savedAt={savedAt}
+        onClick={() => void handleSave()}
+        fullWidth
+      />
     </div>
   );
 }
