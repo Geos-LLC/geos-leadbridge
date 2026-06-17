@@ -83,7 +83,7 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
     // Pricing Guidance card on that page, not in the legacy Settings
     // tab. The Overview setup card keeps prompting until pricing is
     // filled in.
-    navigate('/settings?tab=ai-playbook');
+    navigate('/settings?tab=ai-playbook&section=pricing');
   }
 
   async function handleSaveContinue() {
@@ -151,7 +151,7 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
           subtitle="I'll add my services and prices myself in AI Playbook. We'll mark this step as pending so you can finish later."
         >
           <a
-            href="/settings?tab=ai-playbook"
+            href="/settings?tab=ai-playbook&section=pricing"
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
@@ -273,7 +273,7 @@ export default function PricingSetupStep({ onSaveContinue, onSkipManual, saving,
                 type="button"
                 onClick={() => {
                   setPreviewOpen(false);
-                  navigate('/settings?tab=ai-playbook');
+                  navigate('/settings?tab=ai-playbook&section=pricing');
                 }}
                 disabled={saving}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"

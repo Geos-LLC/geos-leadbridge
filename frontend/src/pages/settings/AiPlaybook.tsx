@@ -130,6 +130,40 @@ export function SettingsAiPlaybook() {
     setSearchParams(sp, { replace: true });
   }, [scope.kind, scope.kind === 'service' ? scope.profileId : null, profiles, activeProfile, searchParams, setSearchParams]);
 
+  // Deep-link target — `?section=pricing` lands the user directly on the
+  // pricing table. Pricing is service-scoped, so if no service is selected
+  // we auto-pick the default (or first non-archived) profile, then the
+  // sibling effect scrolls to the pricing card once it mounts.
+  useEffect(() => {
+    if (searchParams.get('section') !== 'pricing') return;
+    if (!profiles) return;
+    if (scope.kind === 'service') return;
+    const def =
+      profiles.find((p) => p.status !== 'archived' && p.isDefault) ??
+      profiles.find((p) => p.status !== 'archived');
+    if (!def) return;
+    const sp = new URLSearchParams(searchParams);
+    sp.set('scope', def.id);
+    setSearchParams(sp, { replace: true });
+  }, [profiles, scope.kind, searchParams, setSearchParams]);
+
+  // Scroll to the pricing card once the service editor has mounted. The
+  // card carries id="ai-playbook-pricing"; we clear `?section` after the
+  // first scroll so subsequent navigation isn't hijacked.
+  useEffect(() => {
+    if (searchParams.get('section') !== 'pricing') return;
+    if (scope.kind !== 'service' || !activeProfile) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById('ai-playbook-pricing');
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('section');
+      setSearchParams(sp, { replace: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scope.kind, activeProfile, searchParams, setSearchParams]);
+
   const selectScope = (next: Scope) => {
     const sp = new URLSearchParams(searchParams);
     if (next.kind === 'global') sp.delete('scope');
@@ -637,19 +671,23 @@ function ServicePricingCard({
     );
   }, [value]);
   return (
-    <SectionCard padding="16px 20px">
-      <CardHeader
-        title="Pricing"
-        summary={summary}
-        expanded={expanded}
-        onToggle={() => setExpanded((v) => !v)}
-      />
-      {expanded && (
-        <div style={{ marginTop: 8 }}>
-          <PricingEditor value={value} onChange={onChange} />
-        </div>
-      )}
-    </SectionCard>
+    // id used by SettingsAiPlaybook's section=pricing deep link to scroll
+    // the user directly to this card after the editor renders.
+    <div id="ai-playbook-pricing" style={{ scrollMarginTop: 16 }}>
+      <SectionCard padding="16px 20px">
+        <CardHeader
+          title="Pricing"
+          summary={summary}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+        />
+        {expanded && (
+          <div style={{ marginTop: 8 }}>
+            <PricingEditor value={value} onChange={onChange} />
+          </div>
+        )}
+      </SectionCard>
+    </div>
   );
 }
 
