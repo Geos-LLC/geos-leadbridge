@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Save, Loader2, Upload } from 'lucide-react';
+import { Loader2, Trash2, Upload } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
+import {
+  UnifiedAddRowButton,
+  UnifiedSaveButton,
+} from './playbook-controls';
 
 export interface AccountFaq {
   insuredAndBonded?: { value?: 'yes' | 'no' | 'unset'; details?: string };
@@ -516,13 +520,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className={`${labelCls} mb-0`}>Custom Q&amp;A</label>
-          <button
-            type="button"
-            onClick={addCustomQA}
-            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
-          >
-            <Plus className="w-3 h-3" /> Add Q&amp;A
-          </button>
+          <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
         </div>
         <p className="text-[10px] text-slate-400 mb-2">Add anything the AI should know how to answer. Examples: weekend availability, eco product brands, parking instructions.</p>
         {(faq.customQA || []).length === 0 && (
@@ -558,18 +556,15 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         </div>
       </div>
 
-      {/* Save */}
-      <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors"
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          {saving ? 'Saving...' : 'Save FAQ'}
-        </button>
-        {saved && <span className="text-xs text-green-700 font-semibold">Saved.</span>}
+      {/* Save — unified pill across all playbook pricing + FAQ forms. */}
+      <div className="pt-2 border-t border-slate-100">
+        <UnifiedSaveButton
+          label="Save FAQ"
+          dirty
+          saving={saving}
+          savedAt={saved ? Date.now() : null}
+          onClick={() => void handleSave()}
+        />
       </div>
     </div>
   );

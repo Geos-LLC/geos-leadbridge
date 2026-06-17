@@ -1,12 +1,13 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Save, Loader2, ChevronDown, ChevronRight,
+  Plus, Trash2, Loader2, ChevronDown, ChevronRight,
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
   type LucideIcon,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
 import { IconTile, type IconTone } from './automation/ui';
+import { UNIFIED_ADD_ROW_STYLE, UnifiedSaveButton } from './playbook-controls';
 
 // Re-export for downstream imports (Services.tsx, PricingSetupStep.tsx).
 // The canonical definition lives in `../data/defaultPricing` so the wizard
@@ -615,28 +616,17 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         </div>
       </SectionPanel>
 
-      {/* Save Button */}
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={saving}
-        style={{
-          width: '100%',
-          padding: '12px 16px',
-          background: saved ? 'var(--lb-success)' : 'var(--lb-accent)',
-          color: 'var(--lb-accent-fg)',
-          fontSize: 13.5, fontWeight: 600, fontFamily: 'inherit',
-          border: 0, borderRadius: 10,
-          cursor: saving ? 'not-allowed' : 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          opacity: saving ? 0.7 : 1,
-          boxShadow: 'var(--lb-shadow-sm)',
-          transition: 'background 160ms ease',
-        }}
-      >
-        {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-        {saved ? 'Saved!' : 'Save Pricing'}
-      </button>
+      {/* Save Button — unified pill across all playbook forms. The
+          cleaning grid used to ship a full-width hero button; that
+          clashed with the right-aligned pill used by item / hourly /
+          Q&A forms, so the tabs looked like different products. */}
+      <UnifiedSaveButton
+        label="Save pricing"
+        dirty
+        saving={saving}
+        savedAt={saved ? Date.now() : null}
+        onClick={() => void handleSave()}
+      />
     </div>
   );
 }
@@ -705,14 +695,11 @@ const addBtnStyle: CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
 };
 
+// Mirror the shared playbook-controls Add-row style so the cleaning
+// grid's "Add row" buttons (Add cleaning type, Add discount tier, …)
+// match Add Q&A and Add item in the other forms.
 const addBtnInlineStyle: CSSProperties = {
+  ...UNIFIED_ADD_ROW_STYLE,
   width: '100%',
-  padding: '8px 12px',
-  background: 'var(--lb-accent-tint)',
-  border: '1px dashed var(--lb-accent-line)',
-  borderRadius: 8,
-  color: 'var(--lb-accent)',
-  fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-  cursor: 'pointer',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  justifyContent: 'center',
 };

@@ -27,6 +27,7 @@ import {
   type ServiceProfile,
   type ServiceProfileOverrideRow,
 } from '../../services/api';
+import { UnifiedAddRowButton } from '../../components/playbook-controls';
 
 export function SettingsServices() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1148,9 +1149,7 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
               <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>
                 No items yet. Add your first priced item below.
               </div>
-              <button type="button" onClick={addItem} style={primaryBtn}>
-                <Plus size={14} /> Add item
-              </button>
+              <UnifiedAddRowButton label="Add item" onClick={addItem} />
             </div>
           )}
           {items.length > 0 && (
@@ -1245,10 +1244,8 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
                   </div>
                 </div>
               ))}
-              <div>
-                <button type="button" onClick={addItem} style={{ ...secondaryBtn, marginTop: 4 }}>
-                  <Plus size={14} /> Add item
-                </button>
+              <div style={{ marginTop: 4 }}>
+                <UnifiedAddRowButton label="Add item" onClick={addItem} />
               </div>
             </div>
           )}

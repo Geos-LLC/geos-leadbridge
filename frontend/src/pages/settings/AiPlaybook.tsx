@@ -58,6 +58,10 @@ import { notify } from '../../store/notificationStore';
 // ServiceProfile.faqJson via serviceProfilesApi.update.
 import AccountFaqForm from '../../components/AccountFaqForm';
 import ServicePricingForm from '../../components/ServicePricingForm';
+import {
+  UnifiedAddRowButton,
+  UnifiedSaveButton,
+} from '../../components/playbook-controls';
 import { PricingEditor } from './Services';
 import {
   PLAYBOOK_SECTION_UI_LABELS,
@@ -756,23 +760,13 @@ function ItemPricingForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <PricingEditor value={value} onChange={setValue} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
-        {savedAt && <span style={{ fontSize: 12, color: 'var(--lb-success, #16a34a)', fontWeight: 600 }}>Saved.</span>}
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={!dirty || saving}
-          style={{
-            padding: '8px 14px', borderRadius: 8,
-            background: dirty ? 'var(--lb-accent, #2563eb)' : '#cbd5e1',
-            color: 'white', border: 0, fontSize: 13, fontWeight: 600,
-            cursor: dirty && !saving ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? 'Saving…' : dirty ? 'Save pricing' : 'No changes'}
-        </button>
-      </div>
+      <UnifiedSaveButton
+        label="Save pricing"
+        dirty={dirty}
+        saving={saving}
+        savedAt={savedAt}
+        onClick={() => void handleSave()}
+      />
     </div>
   );
 }
@@ -902,36 +896,14 @@ function CustomQAForm({
         </div>
       ))}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <button
-          type="button"
-          onClick={addRow}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', borderRadius: 8,
-            border: '1px dashed var(--lb-line)',
-            background: 'white', color: 'var(--lb-ink-2)',
-            fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          <Plus size={13} /> Add Q&amp;A
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {savedAt && <span style={{ fontSize: 12, color: 'var(--lb-success, #16a34a)', fontWeight: 600 }}>Saved.</span>}
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={!dirty || saving}
-            style={{
-              padding: '8px 14px', borderRadius: 8,
-              background: dirty ? 'var(--lb-accent, #2563eb)' : '#cbd5e1',
-              color: 'white', border: 0, fontSize: 13, fontWeight: 600,
-              cursor: dirty && !saving ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            {saving ? 'Saving…' : dirty ? 'Save FAQ' : 'No changes'}
-          </button>
-        </div>
+        <UnifiedAddRowButton label="Add Q&A" onClick={addRow} />
+        <UnifiedSaveButton
+          label="Save FAQ"
+          dirty={dirty}
+          saving={saving}
+          savedAt={savedAt}
+          onClick={() => void handleSave()}
+        />
       </div>
     </div>
   );
