@@ -194,15 +194,26 @@ export function CollapsibleSection({
   icon,
   rightBadge,
   defaultOpen = true,
+  open: openProp,
+  onToggle,
   children,
 }: {
   title: string;
   icon?: ReactNode;
   rightBadge?: ReactNode;
   defaultOpen?: boolean;
+  /** Optional controlled-mode props. When both are supplied the parent
+   *  owns the open state (used by ServicePricingForm so a re-render
+   *  doesn't collapse the cleaning grid). When unset, the section is
+   *  uncontrolled and defaults to `defaultOpen`. */
+  open?: boolean;
+  onToggle?: () => void;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [innerOpen, setInnerOpen] = useState(defaultOpen);
+  const controlled = openProp !== undefined && onToggle !== undefined;
+  const open = controlled ? !!openProp : innerOpen;
+  const toggle = controlled ? onToggle! : () => setInnerOpen((v) => !v);
   return (
     <div
       style={{
@@ -214,7 +225,7 @@ export function CollapsibleSection({
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         style={{
           width: '100%',
           display: 'flex',

@@ -841,6 +841,15 @@ function CustomQAForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <p
+        style={{
+          fontSize: 12.5,
+          color: 'var(--lb-ink-5, #64748b)',
+          margin: 0,
+        }}
+      >
+        Add answers the AI can use verbatim for this service.
+      </p>
       <CollapsibleSection
         title="Custom Q&A"
         icon={<MessageSquare size={14} color="var(--lb-ink-5, #64748b)" />}
