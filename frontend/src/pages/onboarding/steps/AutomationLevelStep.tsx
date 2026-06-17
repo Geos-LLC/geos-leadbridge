@@ -88,6 +88,11 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // Master business-hours window — read-only label so users see what
   // "during business hours" actually means before flipping the toggles.
   const [businessHoursLabel, setBusinessHoursLabel] = useState<string>('Mon–Fri, 9:00 AM – 6:00 PM');
+  // Overnight quiet-hours window — also read-only here. Lets users see
+  // what "overnight" actually means before flipping the follow-ups
+  // overnight toggle. Defaults to the same 9pm–7am window the backend
+  // applies when the per-user setting is missing.
+  const [quietHoursLabel, setQuietHoursLabel] = useState<string>('9:00 PM – 7:00 AM');
 
   // Granular settings — initialized to DEFAULTS, hydrated from the first
   // connected account so re-visits don't reset things the user already
@@ -100,7 +105,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     let cancelled = false;
     async function load() {
       try {
-        const bh = await usersApi.getBusinessHours().catch(() => null);
+        const [bh, qh] = await Promise.all([
+          usersApi.getBusinessHours().catch(() => null),
+          usersApi.getQuietHours().catch(() => null),
+        ]);
+        if (qh && qh.start && qh.end) {
+          setQuietHoursLabel(`${fmtTime(qh.start)} – ${fmtTime(qh.end)}`);
+        }
         if (bh && bh.schedule) {
           // Compact label — show the typical weekday window if the
           // schedule is the standard Mon-Fri 9-6 pattern; otherwise use
@@ -266,7 +277,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               icon={Clock}
               iconTone="blue"
               title="Timing"
-              subtitle={`Business hours: ${businessHoursLabel}`}
+              subtitle={`Business hours: ${businessHoursLabel} · Overnight: ${quietHoursLabel}`}
               contentPad="8px 24px 16px"
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
