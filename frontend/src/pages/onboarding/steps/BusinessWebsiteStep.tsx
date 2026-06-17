@@ -77,6 +77,18 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   // title was extracted.
   const [lowYieldScrape, setLowYieldScrape] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
+  // The TT / Yelp paths never write to User.website + websiteMetadataJson
+  // (those columns are website-only), so the existing WebsitePreviewCard
+  // path can't confirm their success. We track the most recent
+  // applyBusinessProfileUrl outcome here and render a small platform-aware
+  // confirmation card off it. Without this the wizard looks broken after
+  // a successful TT fetch — toast disappears, no on-page evidence remains.
+  const [lastApply, setLastApply] = useState<{
+    platform: 'thumbtack' | 'yelp' | 'website';
+    url: string;
+    fieldsApplied: number;
+    accountsAffected: number;
+  } | null>(null);
 
   // ── LeadBridge phone state (TenantPhoneNumber) ─────────────────────
   const savedAccounts = useAppStore(s => s.savedAccounts);
@@ -290,6 +302,15 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         // modal (Try a TT URL OR paste business info manually).
         setLowYieldScrape(true);
       }
+      // Snapshot the apply outcome so the in-step confirmation card can
+      // render even for TT / Yelp paths (which don't populate the
+      // User.website-driven WebsitePreviewCard).
+      setLastApply({
+        platform: res.platform,
+        url: res.savedUrl,
+        fieldsApplied: res.fieldsApplied ?? 0,
+        accountsAffected: res.accountsAffected ?? 0,
+      });
       const outcome: VerifyOutcome = {
         reachable: true,
         normalizedUrl: res.savedUrl,
@@ -370,10 +391,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   const canSave = trimmed.length > 0 && !isBusy;
   const savedMetadata = user?.websiteMetadataJson ?? null;
   const savedAndVerified =
-    !!user?.website &&
-    !!savedMetadata &&
-    user.website.trim() === trimmed &&
-    trimmed.length > 0;
+    // Website path — User.website + metadata is the cached source of truth.
+    (!!user?.website && !!savedMetadata && user.website.trim() === trimmed && trimmed.length > 0)
+    // TT / Yelp paths — the apply we just ran for the same URL succeeded.
+    // We can't read it from User.website (those columns are website-only),
+    // so we rely on the in-memory `lastApply` snapshot from runVerifyAndApply.
+    || (
+      !!lastApply &&
+      lastApply.platform !== 'website' &&
+      lastApply.url.trim() === trimmed &&
+      trimmed.length > 0
+    );
 
   return (
     <div className="pt-2">
@@ -698,6 +726,10 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
                   setVerifyState({ kind: 'idle' });
                 }
                 if (lowYieldScrape) setLowYieldScrape(false);
+                // Clear the stale apply card the moment the user edits
+                // the URL — otherwise the card claims "pulled X fields"
+                // from the OLD URL while the input shows the new one.
+                if (lastApply && e.target.value.trim() !== lastApply.url) setLastApply(null);
               }}
               disabled={isChecking}
               className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border-2 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
@@ -755,6 +787,40 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
         {savedAndVerified && savedMetadata && !isBusy && detectedPlatform === 'website' && (
           <div className="mt-3">
             <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
+          </div>
+        )}
+
+        {/* TT / Yelp confirmation card — the website preview card above
+            renders nothing for these platforms because User.website isn't
+            populated. Without this, a successful TT/Yelp fetch leaves the
+            wizard looking inert (no card, no badge change, just a toast
+            that disappears). Tenants reported "I fetched TT but no info
+            showed up". */}
+        {lastApply && lastApply.platform !== 'website' && !isBusy && verifyState.kind === 'valid' && (
+          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="min-w-0 text-xs flex-1">
+              <div className="font-bold text-emerald-900">
+                {platformLabel(lastApply.platform)} connected
+                {lastApply.fieldsApplied > 0
+                  ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your Playbook`
+                  : ''}
+              </div>
+              <div className="text-emerald-800 mt-0.5 leading-snug break-all">
+                {lastApply.url}
+                {lastApply.accountsAffected > 0 && (
+                  <>
+                    {' · '}
+                    Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}
+                  </>
+                )}
+              </div>
+              {lastApply.fieldsApplied > 0 && (
+                <div className="text-[11px] text-emerald-700 mt-1.5">
+                  Review on the next steps or in Settings → AI Playbook after setup.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
