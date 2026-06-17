@@ -1503,14 +1503,40 @@ export class UsersService {
     // account would double-merge conflicts.
     let fieldsApplied = 0;
     let conflictsRaised = 0;
+    let seededOk = false;
     try {
       const seed = await this.seedBusinessInfoFromAccount(userId, accounts[0].id, platform);
       if (seed?.success) {
         fieldsApplied = seed.fieldsApplied ?? 0;
         conflictsRaised = seed.conflictsRaised ?? 0;
+        seededOk = true;
       }
     } catch (err: any) {
       this.logger.warn(`[applyBusinessProfileUrl] seed failed for ${platform} url=${normalized}: ${err?.message || err}`);
+    }
+
+    // Materialize the just-written playbookSeed into the visible AI
+    // Playbook surfaces (Custom Instructions + FAQ). Without this, the
+    // user sees a success toast saying "Filled N fields. Review in
+    // Settings → AI Playbook" but the AI Playbook page stays empty —
+    // because `seedBusinessInfoFromAccount` only writes to
+    // `user.websiteMetadataJson.playbookSeed.businessInformation`, and
+    // it's `applyPlaybookSeedToAccounts` / `applyFaqFromWebsiteSeed`
+    // that translate that seed into per-account fact-lines + FAQ rows.
+    // The website branch (above) already does this; TT/Yelp paths used
+    // to skip it. Best-effort: a failure here doesn't unwind the
+    // already-persisted scrape; the user can re-run from Settings.
+    if (seededOk) {
+      try {
+        await this.applyPlaybookSeedToAccounts(userId, 'fill_empty');
+      } catch (err: any) {
+        this.logger.warn(`[applyBusinessProfileUrl] playbook apply failed for ${platform} url=${normalized}: ${err?.message || err}`);
+      }
+      try {
+        await this.applyFaqFromWebsiteSeed(userId);
+      } catch (err: any) {
+        this.logger.warn(`[applyBusinessProfileUrl] faq apply failed for ${platform} url=${normalized}: ${err?.message || err}`);
+      }
     }
 
     this.logger.log(`[applyBusinessProfileUrl] userId=${userId} platform=${platform} accounts=${accounts.length} fieldsApplied=${fieldsApplied} url=${normalized.slice(0, 60)}…`);
