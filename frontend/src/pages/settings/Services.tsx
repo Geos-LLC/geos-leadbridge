@@ -27,7 +27,12 @@ import {
   type ServiceProfile,
   type ServiceProfileOverrideRow,
 } from '../../services/api';
-import { UnifiedAddRowButton } from '../../components/playbook-controls';
+import {
+  PriceChip,
+  PriceRow,
+  PriceTableSection,
+  UnifiedAddRowButton,
+} from '../../components/playbook-controls';
 
 export function SettingsServices() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1027,13 +1032,6 @@ function decidePricingMode(value: string): { mode: PricingMode; parsed: PricingS
   }
 }
 
-function slugifyKey(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 48);
-}
 
 export function PricingEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   const initial = useMemo(() => decidePricingMode(value), [value]);
@@ -1105,13 +1103,12 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
     writeItems(items.filter((_, i) => i !== idx));
   };
 
-  // Auto-fill key from label when key field is left at its default placeholder.
-  const onLabelBlur = (idx: number, item: PricingItem) => {
-    if (!item.key || item.key === `item_${idx + 1}`) {
-      const slug = slugifyKey(item.label);
-      if (slug.length > 0) updateItem(idx, { key: slug });
-    }
-  };
+  // (Auto-key-from-label was hooked to an onBlur on the old card-style
+  // item editor. The new compact-row PriceRow doesn't expose an onBlur
+  // hook, and the missing slug is harmless — `writeItems` just persists
+  // `item_<N>` as the key when the operator didn't supply one. If we
+  // need slugged keys back, wire `slugifyKey(label)` into writeItems
+  // before persisting.)
 
   return (
     <div>
@@ -1140,185 +1137,222 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
       </div>
 
       {mode === 'item_quantity' && (
-        <div>
-          <div style={hint}>
-            One row per priced item. Inactive items stay saved but are hidden from quotes.
-          </div>
-          {items.length === 0 && (
-            <div style={{ ...emptyState, padding: 18, marginTop: 8, marginBottom: 8 }}>
-              <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>
+        <PriceTableSection
+          title="Price table"
+          icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
+          rightBadge={
+            items.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--lb-ink-5, #64748b)',
+                  background: 'var(--lb-ink-10, #f3f5fa)',
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {items.length} {items.length === 1 ? 'row' : 'rows'}
+              </span>
+            )
+          }
+        >
+          {items.length === 0 ? (
+            <div
+              style={{
+                padding: 18,
+                margin: '0 14px 8px',
+                border: '1px dashed var(--lb-line, #e5e9f2)',
+                borderRadius: 10,
+                background: 'var(--lb-bg, #f4f6fa)',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: 13, color: 'var(--lb-ink-5, #64748b)', marginBottom: 10 }}>
                 No items yet. Add your first priced item below.
               </div>
               <UnifiedAddRowButton label="Add item" onClick={addItem} />
             </div>
-          )}
-          {items.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-              {items.map((it, idx) => (
-                <div
-                  key={`${idx}-${it.key}`}
-                  style={{
-                    border: '1px solid var(--lb-border, #e5e7eb)',
-                    borderRadius: 10,
-                    padding: 12,
-                    background: it.active === false ? 'var(--lb-surface, #fafafa)' : 'white',
-                    opacity: it.active === false ? 0.7 : 1,
-                  }}
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 8 }}>
-                    <div>
-                      <div style={miniLabel}>Item name</div>
-                      <input
-                        type="text"
-                        value={it.label}
-                        onChange={(e) => updateItem(idx, { label: e.target.value })}
-                        onBlur={() => onLabelBlur(idx, it)}
-                        style={textInput}
-                      />
-                    </div>
-                    <div>
-                      <div style={miniLabel}>Unit</div>
-                      <input
-                        type="text"
-                        value={it.unit ?? ''}
-                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
-                        placeholder="e.g. per sofa"
-                        style={textInput}
-                      />
-                    </div>
-                    <div>
-                      <div style={miniLabel}>Price ($)</div>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={Number.isFinite(it.price) ? it.price : 0}
-                        onChange={(e) => updateItem(idx, { price: Number(e.target.value) || 0 })}
-                        style={textInput}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <div style={miniLabel}>Notes (optional)</div>
-                    <input
-                      type="text"
-                      value={it.notes ?? ''}
-                      onChange={(e) => updateItem(idx, { notes: e.target.value })}
-                      placeholder="e.g. excludes pet stains"
-                      style={textInput}
-                    />
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginTop: 10,
-                    }}
-                  >
-                    <label
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: 13,
-                        color: 'var(--lb-text)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={it.active !== false}
-                        onChange={(e) => updateItem(idx, { active: e.target.checked })}
-                      />
-                      Active
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(idx)}
-                      style={{ ...secondaryBtn, padding: '6px 10px' }}
-                      title="Remove item"
-                    >
-                      <Trash2 size={13} /> Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-              <div style={{ marginTop: 4 }}>
-                <UnifiedAddRowButton label="Add item" onClick={addItem} />
+          ) : (
+            <>
+              {/* Header row */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '6px 14px',
+                  borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  color: 'var(--lb-ink-5, #64748b)',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span style={{ flex: 1 }}>Item</span>
+                <span>Price</span>
+                <span style={{ width: 28 }} />
               </div>
-            </div>
+              {items.map((it, idx) => (
+                <PriceRow
+                  key={`${idx}-${it.key}`}
+                  label={it.label}
+                  sub={it.unit ?? ''}
+                  onChangeLabel={(v) => updateItem(idx, { label: v })}
+                  onChangeSub={(v) => updateItem(idx, { unit: v })}
+                  onRemove={() => removeItem(idx)}
+                  chips={
+                    <PriceChip
+                      amount={it.price}
+                      editable
+                      onChange={(v) => updateItem(idx, { price: v })}
+                    />
+                  }
+                />
+              ))}
+              <div style={{ padding: '12px 14px 4px' }}>
+                <UnifiedAddRowButton label="Add row" onClick={addItem} />
+              </div>
+            </>
           )}
-        </div>
+        </PriceTableSection>
       )}
 
       {mode === 'hourly' && (
-        <div>
-          <div style={hint}>
-            Labor rate and minimum charge the AI uses when describing pricing. The AI defers a final
-            quote when <em>Quote required</em> is on.
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 8 }}>
-            <div>
-              <div style={miniLabel}>Currency</div>
-              <input
-                type="text"
-                value={hourly.currency ?? 'USD'}
-                onChange={(e) => writeHourly({ currency: e.target.value.toUpperCase().slice(0, 6) })}
-                style={textInput}
-                placeholder="USD"
-              />
-            </div>
-            <div>
-              <div style={miniLabel}>Labor rate ($ / hour)</div>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={Number.isFinite(hourly.laborRate as number) ? (hourly.laborRate as number) : 0}
-                onChange={(e) => writeHourly({ laborRate: Number(e.target.value) || 0 })}
-                style={textInput}
-              />
-            </div>
-            <div>
-              <div style={miniLabel}>Minimum charge ($)</div>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={Number.isFinite(hourly.minimumCharge as number) ? (hourly.minimumCharge as number) : 0}
-                onChange={(e) => writeHourly({ minimumCharge: Number(e.target.value) || 0 })}
-                style={textInput}
-              />
-            </div>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <label
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <PriceTableSection
+            title="Price table"
+            icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
+            rightBadge={
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--lb-ink-5, #64748b)',
+                  background: 'var(--lb-ink-10, #f3f5fa)',
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {hourly.currency ?? 'USD'}
+              </span>
+            }
+          >
+            <div
               style={{
-                display: 'inline-flex',
+                display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                fontSize: 13,
-                color: 'var(--lb-text)',
-                cursor: 'pointer',
+                gap: 12,
+                padding: '6px 14px',
+                borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: 'var(--lb-ink-5, #64748b)',
+                textTransform: 'uppercase',
               }}
             >
-              <input
-                type="checkbox"
-                checked={hourly.quoteRequired !== false}
-                onChange={(e) => writeHourly({ quoteRequired: e.target.checked })}
-              />
-              Quote required — the AI must defer a final price until the owner confirms scope.
-            </label>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <div style={miniLabel}>Notes (optional)</div>
+              <span style={{ flex: 1 }}>Item</span>
+              <span>Price</span>
+            </div>
+            <PriceRow
+              label="Labor rate"
+              sub="per hour"
+              chips={
+                <PriceChip
+                  amount={Number.isFinite(hourly.laborRate as number) ? (hourly.laborRate as number) : 0}
+                  editable
+                  onChange={(v) => writeHourly({ laborRate: v })}
+                />
+              }
+            />
+            <PriceRow
+              label="Minimum charge"
+              sub="flat"
+              chips={
+                <PriceChip
+                  amount={Number.isFinite(hourly.minimumCharge as number) ? (hourly.minimumCharge as number) : 0}
+                  editable
+                  onChange={(v) => writeHourly({ minimumCharge: v })}
+                />
+              }
+            />
+          </PriceTableSection>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              padding: '12px 14px',
+              border: '1px solid var(--lb-line, #e5e9f2)',
+              borderRadius: 12,
+              background: 'white',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 13,
+                  color: 'var(--lb-ink-2, #1f2a44)',
+                  cursor: 'pointer',
+                }}
+              >
+                Currency
+                <input
+                  type="text"
+                  value={hourly.currency ?? 'USD'}
+                  onChange={(e) => writeHourly({ currency: e.target.value.toUpperCase().slice(0, 6) })}
+                  style={{
+                    width: 70,
+                    padding: '5px 8px',
+                    border: '1px solid var(--lb-line, #e5e9f2)',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                  }}
+                  placeholder="USD"
+                />
+              </label>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 13,
+                  color: 'var(--lb-ink-2, #1f2a44)',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={hourly.quoteRequired !== false}
+                  onChange={(e) => writeHourly({ quoteRequired: e.target.checked })}
+                />
+                Quote required
+              </label>
+            </div>
             <textarea
               value={hourly.notes ?? ''}
               onChange={(e) => writeHourly({ notes: e.target.value })}
-              rows={3}
-              style={{ ...codeArea, marginTop: 4 }}
-              placeholder="e.g. Final pricing depends on the scope, complexity, and location of the job."
+              rows={2}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                border: '1px solid var(--lb-line, #e5e9f2)',
+                borderRadius: 8,
+                fontSize: 13,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+              placeholder="Notes (optional) — e.g. Final pricing depends on the scope, complexity, and location of the job."
             />
           </div>
         </div>
@@ -1503,11 +1537,6 @@ const codeArea: React.CSSProperties = {
 
 const hint: React.CSSProperties = {
   fontSize: 11, color: 'var(--lb-text-muted)', marginTop: 4,
-};
-
-const miniLabel: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, marginBottom: 4,
-  color: 'var(--lb-text-muted)', textTransform: 'uppercase', letterSpacing: 0.04,
 };
 
 const toggleBtn: React.CSSProperties = {

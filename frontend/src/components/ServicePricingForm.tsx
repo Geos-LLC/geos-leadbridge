@@ -621,11 +621,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           clashed with the right-aligned pill used by item / hourly /
           Q&A forms, so the tabs looked like different products. */}
       <UnifiedSaveButton
-        label="Save pricing"
+        label="Save Pricing"
         dirty
         saving={saving}
         savedAt={saved ? Date.now() : null}
         onClick={() => void handleSave()}
+        fullWidth
       />
     </div>
   );
