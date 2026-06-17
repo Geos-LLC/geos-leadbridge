@@ -40,13 +40,15 @@ import {
 } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { notify } from '../../store/notificationStore';
-// AccountFaqForm + ServicePricingForm imports removed in PR-B.1 — both
-// surfaces moved to Settings → Services. ServiceScopedInfoCard replaces
-// them on the Global tab with a pointer to the new location.
-// PR-D reuses the structured PricingEditor from the Services page on the
-// per-Service AI Playbook tab so users can edit pricing without leaving
-// the playbook surface.
-import { PricingEditor } from './Services';
+// PR-D.2 — Service tab reuses the canonical Wizard surfaces (AccountFaqForm
+// and ServicePricingForm) so users see a real form instead of raw JSON.
+// Both forms are self-contained: they own load + save against the user's
+// SavedAccount (FAQ → SavedAccount.faqJson, pricing →
+// SavedAccount.servicePricingJson). With saveToAll they cascade across
+// every connected account in one click. Only qualification questions
+// remain a ServiceProfile-scoped field on this tab.
+import AccountFaqForm from '../../components/AccountFaqForm';
+import ServicePricingForm from '../../components/ServicePricingForm';
 import {
   PLAYBOOK_SECTION_UI_LABELS,
   PLAYBOOK_SECTION_SUBTITLES,
@@ -636,200 +638,75 @@ function safeParse(value: string): unknown {
   }
 }
 
-function ServicePricingCard({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
-  // hide behind a one-line summary. Open by default; users can collapse
-  // with the same toggle if they want to focus on AI instructions.
-  const [expanded, setExpanded] = useState(true);
-  const summary = useMemo(() => {
-    const parsed = safeParse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return <CountSummary count={0} noun="priced item" />;
-    }
-    const obj = parsed as Record<string, unknown>;
-    const items = Array.isArray(obj.items) ? obj.items.length : 0;
-    const model = typeof obj.pricingModel === 'string' ? obj.pricingModel : 'unknown';
-    return (
-      <span style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-        {items > 0 ? `${items} priced items` : 'No priced items yet'} · model: {model}
-      </span>
-    );
-  }, [value]);
+// ─── Pricing + FAQ panes (PR-D.2) ────────────────────────────────────────
+//
+// Both reuse the canonical Wizard forms (ServicePricingForm /
+// AccountFaqForm). Those forms are self-contained — they own their own
+// state, load, and Save button against the user's SavedAccount, and
+// cascade across every connected account when saveToAll is set. We just
+// wrap them in a SectionCard for visual parity with the rest of the
+// Service tab.
+
+function useConnectedAccountsForPane() {
+  const accounts = useAppStore((s) => s.savedAccounts);
+  const primary = accounts[0];
+  const allIds = useMemo(() => accounts.map((a) => a.id), [accounts]);
+  return { primary, allIds };
+}
+
+function ServicePricingPane() {
+  const { primary, allIds } = useConnectedAccountsForPane();
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
     // the user directly to this card after the editor renders.
     <div id="ai-playbook-pricing" style={{ scrollMarginTop: 16 }}>
       <SectionCard padding="16px 20px">
-        <CardHeader
-          title="Pricing"
-          summary={summary}
-          expanded={expanded}
-          onToggle={() => setExpanded((v) => !v)}
-        />
-        {expanded && (
-          <div style={{ marginTop: 8 }}>
-            <PricingEditor value={value} onChange={onChange} />
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
+            Pricing
           </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            Edit the table the AI uses to quote leads. Applies to every connected account.
+          </div>
+        </div>
+        {!primary ? (
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            Connect an account to set pricing.
+          </div>
+        ) : (
+          <ServicePricingForm
+            accountId={primary.id}
+            accountName={primary.businessName ?? primary.platform ?? 'Your account'}
+            saveToAll={allIds.length > 1 ? allIds : undefined}
+          />
         )}
       </SectionCard>
     </div>
   );
 }
 
-// ─── FAQ rows editor ─────────────────────────────────────────────────────
-//
-// PR-D shipped a raw JSON textarea ({ customQA: [...] }) inline in the
-// Service playbook tab. Users shouldn't have to read JSON — restore a
-// structured Q&A table editor: each row is one Question + Answer with a
-// delete button, plus an "Add Q&A" button. The on-disk shape is still
-// `{ customQA: [{ question, answer }] }` so the runtime renderer keeps
-// reading the same field; only the editor surface changed.
-
-type FaqPair = { question: string; answer: string };
-
-function parseFaqRows(value: string): FaqPair[] {
-  const parsed = safeParse(value);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
-  const arr = (parsed as Record<string, unknown>).customQA;
-  if (!Array.isArray(arr)) return [];
-  return arr.map((row: any) => ({
-    question: typeof row?.question === 'string' ? row.question : '',
-    answer: typeof row?.answer === 'string' ? row.answer : '',
-  }));
-}
-
-function serializeFaqRows(rows: FaqPair[]): string {
-  return JSON.stringify({ customQA: rows });
-}
-
-function ServiceFaqRowsEditor({
-  rows,
-  onChange,
-}: {
-  rows: FaqPair[];
-  onChange: (next: FaqPair[]) => void;
-}) {
-  const updateRow = (i: number, field: keyof FaqPair, v: string) => {
-    onChange(rows.map((row, idx) => (idx === i ? { ...row, [field]: v } : row)));
-  };
-  const addRow = () => onChange([...rows, { question: '', answer: '' }]);
-  const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {rows.length === 0 && (
-        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-          No Q&amp;A pairs yet. Click <strong>Add Q&amp;A</strong> to add your first.
-        </div>
-      )}
-      {rows.map((row, i) => (
-        <div
-          key={i}
-          style={{
-            border: '1px solid var(--lb-line)',
-            borderRadius: 10,
-            padding: 12,
-            background: 'white',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--lb-ink-5)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-              Q&amp;A {i + 1}
-            </div>
-            <button
-              type="button"
-              onClick={() => removeRow(i)}
-              title="Remove this Q&A"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '5px 10px', borderRadius: 7,
-                border: '1px solid var(--lb-line)', background: 'white',
-                color: 'var(--lb-ink-3)', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              <Trash2 size={12} /> Delete
-            </button>
-          </div>
-          <input
-            value={row.question}
-            onChange={(e) => updateRow(i, 'question', e.target.value)}
-            placeholder="Question (e.g. Do you bring your own supplies?)"
-            style={{
-              width: '100%', padding: '9px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
-              background: 'white',
-            }}
-          />
-          <textarea
-            value={row.answer}
-            onChange={(e) => updateRow(i, 'answer', e.target.value)}
-            placeholder="Answer the AI should give"
-            rows={3}
-            style={{
-              width: '100%', padding: '9px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13.5, fontFamily: 'inherit', color: 'var(--lb-ink-1)',
-              background: 'white', resize: 'vertical',
-            }}
-          />
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={addRow}
-        style={{
-          alignSelf: 'flex-start',
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '8px 14px', borderRadius: 8,
-          border: '1px dashed var(--lb-line)',
-          background: 'white', color: 'var(--lb-ink-2)',
-          fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-        }}
-      >
-        <Plus size={13} /> Add Q&amp;A
-      </button>
-    </div>
-  );
-}
-
-function ServiceFaqCard({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
-  // hide behind a one-line summary. Open by default; users can collapse
-  // with the same toggle if they want to focus on AI instructions.
-  const [expanded, setExpanded] = useState(true);
-  const rows = useMemo(() => parseFaqRows(value), [value]);
-  const summary = <CountSummary count={rows.length} noun="Q&A pair" />;
+function ServiceFaqPane() {
+  const { primary, allIds } = useConnectedAccountsForPane();
   return (
     <SectionCard padding="16px 20px">
-      <CardHeader
-        title="FAQ"
-        summary={summary}
-        expanded={expanded}
-        onToggle={() => setExpanded((v) => !v)}
-      />
-      {expanded && (
-        <div style={{ marginTop: 8 }}>
-          <ServiceFaqRowsEditor
-            rows={rows}
-            onChange={(next) => onChange(serializeFaqRows(next))}
-          />
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
+          FAQ
         </div>
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          Answers the AI uses verbatim. Applies to every connected account.
+        </div>
+      </div>
+      {!primary ? (
+        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          Connect an account to fill out the FAQ.
+        </div>
+      ) : (
+        <AccountFaqForm
+          accountId={primary.id}
+          accountName={primary.businessName ?? primary.platform ?? 'Your account'}
+          saveToAll={allIds.length > 1 ? allIds : undefined}
+        />
       )}
     </SectionCard>
   );
@@ -1243,20 +1120,18 @@ function ServicePlaybookEditor({
     [profile.aiInstructionsJson],
   );
   const [v2, setV2] = useState<PlaybookV2Storage>(initialWrapper.aiPlaybookV2);
-  // PR-D — pricing/FAQ/qualification drafts now live alongside v2 so the
-  // Service tab is self-contained (no need to bounce out to Settings →
-  // Services for these surfaces). Each draft holds the raw JSON string;
-  // dirtyFields tracks which of the four areas changed so handleSave
-  // sends exactly the fields the user touched.
-  const [pricingDraft, setPricingDraft] = useState<string>(profile.pricingJson ?? '');
-  const [faqDraft, setFaqDraft] = useState<string>(profile.faqJson ?? '');
+  // PR-D.2 — pricing + FAQ moved back to the canonical wizard forms
+  // (AccountFaqForm + ServicePricingForm), which own their own load/save
+  // against the user's SavedAccount(s). Only qualification questions stay
+  // ServiceProfile-scoped on this tab, so it's the only field whose draft
+  // we track here for the page-level Save button.
   const [qualDraft, setQualDraft] = useState<string>(profile.qualificationSchemaJson ?? '');
   const [saving, setSaving] = useState(false);
   const [reactivating, setReactivating] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef<Set<PlaybookSectionKey>>(new Set());
-  const dirtyFieldsRef = useRef<Set<'pricing' | 'faq' | 'qualification'>>(new Set());
+  const dirtyFieldsRef = useRef<Set<'qualification'>>(new Set());
   // Force a re-render when dirty state changes so the Save button enables/
   // disables. Ref-only tracking would otherwise keep the button stale.
   const [, bumpDirty] = useState(0);
@@ -1281,12 +1156,10 @@ function ServicePlaybookEditor({
   // is belt-and-suspenders — the key already forces a remount).
   useEffect(() => {
     setV2(initialWrapper.aiPlaybookV2);
-    setPricingDraft(profile.pricingJson ?? '');
-    setFaqDraft(profile.faqJson ?? '');
     setQualDraft(profile.qualificationSchemaJson ?? '');
     dirtyRef.current = new Set();
     dirtyFieldsRef.current = new Set();
-  }, [initialWrapper, profile.pricingJson, profile.faqJson, profile.qualificationSchemaJson]);
+  }, [initialWrapper, profile.qualificationSchemaJson]);
 
   useEffect(() => {
     if (!savedAt) return;
@@ -1303,16 +1176,6 @@ function ServicePlaybookEditor({
     bumpDirty((n) => n + 1);
   };
 
-  const onPricingChange = (next: string) => {
-    dirtyFieldsRef.current.add('pricing');
-    setPricingDraft(next);
-    bumpDirty((n) => n + 1);
-  };
-  const onFaqChange = (next: string) => {
-    dirtyFieldsRef.current.add('faq');
-    setFaqDraft(next);
-    bumpDirty((n) => n + 1);
-  };
   const onQualChange = (next: string) => {
     dirtyFieldsRef.current.add('qualification');
     setQualDraft(next);
@@ -1337,8 +1200,6 @@ function ServicePlaybookEditor({
         };
         patch.aiInstructionsJson = serializeWrapper(merged);
       }
-      if (fields.has('pricing')) patch.pricingJson = pricingDraft || null;
-      if (fields.has('faq')) patch.faqJson = faqDraft || null;
       if (fields.has('qualification')) patch.qualificationSchemaJson = qualDraft || null;
       await serviceProfilesApi.update(profile.id, patch as any);
       dirtyRef.current = new Set();
@@ -1376,8 +1237,8 @@ function ServicePlaybookEditor({
       {isDraft && <DraftWarningBanner />}
       {serviceRules && <ServiceRulesViewer rules={serviceRules} />}
 
-      <ServicePricingCard value={pricingDraft} onChange={onPricingChange} />
-      <ServiceFaqCard value={faqDraft} onChange={onFaqChange} />
+      <ServicePricingPane />
+      <ServiceFaqPane />
       <ServiceQualificationCard value={qualDraft} onChange={onQualChange} />
 
       {/* Service-scoped HOW labels make clear these are additions, not
