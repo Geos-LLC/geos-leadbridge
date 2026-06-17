@@ -118,13 +118,14 @@ export function SettingsGeneral() {
     }
   }, [user, business]);
 
-  // Re-hydrate website + metadata when the cached auth user updates (e.g. after
-  // an authApi.getProfile() refresh elsewhere). The URL input is user-typed so
-  // we only seed it when empty. websiteMetadata is API-derived (verify writes
-  // it), so we ALWAYS resync — that lets us pick up the newer playbookSeed
-  // shape on cache refresh, which drives the Apply-to-Playbook button enable.
+  // Re-sync websiteMetadata when the cached auth user updates (e.g. after
+  // an authApi.getProfile() refresh elsewhere). NOTE: we deliberately do
+  // NOT seed `website` from `user.website` here — `getBusinessProfileUrl`
+  // (below) is the single source of truth for that field and runs the
+  // canonical TT > Yelp > User.website resolution server-side. Doing both
+  // races the API and produces stale-pairing bugs like "URL says
+  // bookingkoala while the badge says THUMBTACK" (reported 2026-06-17).
   useEffect(() => {
-    if (!website && user?.website) setWebsite(user.website);
     const fresh = (user as any)?.websiteMetadataJson ?? null;
     setWebsiteMetadata(fresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,7 +135,9 @@ export function SettingsGeneral() {
   // value (TT publicProfileUrl > Yelp publicProfileUrl > User.website).
   // Runs on mount + whenever the cached savedAccounts list changes, so
   // a freshly-connected TT account's saved URL fills the field without
-  // a hard reload.
+  // a hard reload. The `!website.trim()` guard prevents this from
+  // clobbering the user's own typing on the re-run (e.g. after
+  // savedAccounts populates from cache).
   useEffect(() => {
     let alive = true;
     usersApi.getBusinessProfileUrl()
