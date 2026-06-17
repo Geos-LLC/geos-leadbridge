@@ -64,6 +64,10 @@ import {
   UnifiedAddRowButton,
   UnifiedSaveButton,
 } from '../../components/playbook-controls';
+import {
+  StructuredFaqGroups,
+  type StructuredFaqValue,
+} from '../../components/StructuredFaqGroups';
 import { PricingEditor } from './Services';
 import {
   PLAYBOOK_SECTION_UI_LABELS,
@@ -797,19 +801,54 @@ function parseCustomQA(value: string | null | undefined): QAPair[] {
   }
 }
 
-// Preserve every faqJson field except customQA on save, so existing
-// structured fields (insuredAndBonded.value, paymentMethods[], legacy
-// admin-set keys, etc.) survive re-saves through the Q&A-only UI.
-// The AI prompt assembler still reads those keys; the operator just
-// can't edit them inline anymore.
+function parseStructuredFaq(value: string | null | undefined): StructuredFaqValue {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const p = parsed as Record<string, unknown>;
+    const out: StructuredFaqValue = {};
+    if (p.insuredAndBonded && typeof p.insuredAndBonded === 'object') {
+      out.insuredAndBonded = p.insuredAndBonded as StructuredFaqValue['insuredAndBonded'];
+    }
+    if (p.bringsSupplies && typeof p.bringsSupplies === 'object') {
+      out.bringsSupplies = p.bringsSupplies as StructuredFaqValue['bringsSupplies'];
+    }
+    if (p.petPolicy && typeof p.petPolicy === 'object') {
+      out.petPolicy = p.petPolicy as StructuredFaqValue['petPolicy'];
+    }
+    if (Array.isArray(p.paymentMethods)) {
+      out.paymentMethods = (p.paymentMethods as unknown[]).filter(
+        (x): x is string => typeof x === 'string',
+      );
+    }
+    if (p.customerMustBeHome && typeof p.customerMustBeHome === 'object') {
+      out.customerMustBeHome = p.customerMustBeHome as StructuredFaqValue['customerMustBeHome'];
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// Preserve any passthrough keys (e.g. legacy fields the operator stored
+// out-of-band) so re-saving the FAQ doesn't silently drop them.
 function parsePassthroughFaq(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== 'object') return {};
+    const known = new Set([
+      'insuredAndBonded',
+      'bringsSupplies',
+      'petPolicy',
+      'paymentMethods',
+      'customerMustBeHome',
+      'customQA',
+    ]);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (k !== 'customQA') out[k] = v;
+      if (!known.has(k)) out[k] = v;
     }
     return out;
   } catch {
@@ -826,12 +865,18 @@ function CustomQAForm({
 }) {
   const [rows, setRows] = useState<QAPair[]>(() => parseCustomQA(initialJson));
   const [savedRows, setSavedRows] = useState<QAPair[]>(rows);
+  const [structured, setStructured] = useState<StructuredFaqValue>(() =>
+    parseStructuredFaq(initialJson),
+  );
+  const [savedStructured, setSavedStructured] = useState<StructuredFaqValue>(structured);
   const [passthrough] = useState<Record<string, unknown>>(() =>
     parsePassthroughFaq(initialJson),
   );
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const dirty = JSON.stringify(rows) !== JSON.stringify(savedRows);
+  const dirty =
+    JSON.stringify(rows) !== JSON.stringify(savedRows) ||
+    JSON.stringify(structured) !== JSON.stringify(savedStructured);
 
   useEffect(() => {
     if (!savedAt) return;
@@ -852,10 +897,12 @@ function CustomQAForm({
       const cleaned = rows.filter((r) => r.question.trim() && r.answer.trim());
       const payload = JSON.stringify({
         ...passthrough,
+        ...structured,
         customQA: cleaned,
       });
       await serviceProfilesApi.update(serviceProfileId, { faqJson: payload });
       setSavedRows(rows);
+      setSavedStructured(structured);
       setSavedAt(Date.now());
     } catch (e) {
       const msg = (e as { message?: string })?.message ?? 'Failed to save FAQ';
@@ -866,7 +913,18 @@ function CustomQAForm({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <StructuredFaqGroups
+        value={structured}
+        onChange={(next) => setStructured(next)}
+      />
+      <div
+        style={{
+          height: 1,
+          background: 'var(--lb-line-soft, #eef1f7)',
+          margin: '4px 0',
+        }}
+      />
       <p
         style={{
           fontSize: 12.5,
@@ -874,7 +932,7 @@ function CustomQAForm({
           margin: 0,
         }}
       >
-        Add question + answer pairs the AI uses verbatim for this service.
+        Add answers the AI can use verbatim for this service.
       </p>
       <CollapsibleSection
         title="Custom Q&A"
