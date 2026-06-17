@@ -36,30 +36,76 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ServiceProfileService } from './service-profile.service';
 import { SERVICE_PRESETS, lookupPresetByKey } from './presets/service-presets';
+import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
 
 @Controller('v1')
 @UseGuards(JwtAuthGuard)
 export class ServiceProfileController {
-  constructor(private readonly service: ServiceProfileService) {}
+  constructor(
+    private readonly service: ServiceProfileService,
+    private readonly adminTemplates: AdminServiceTemplatesService,
+  ) {}
 
   // ─── Preset registry ──────────────────────────────────────────────
 
+  /**
+   * Public preset listing. Merges:
+   *   - curated code-side presets (`SERVICE_PRESETS` in /presets/)
+   *   - admin-authored DB templates with status='published'
+   *
+   * Drafts + archived admin templates are never returned here — only
+   * the admin-only `/v1/admin/service-templates` surface sees them.
+   *
+   * Each entry carries `source: 'code_preset' | 'admin_template'` so the
+   * picker can route the subsequent create call correctly. Code presets
+   * also include `presetKey`; admin templates include `templateId`.
+   */
   @Get('service-profile-presets')
-  list() {
-    return {
-      presets: SERVICE_PRESETS.map((p) => ({
-        key: p.key,
-        provider: p.provider,
-        providerCategoryName: p.providerCategoryName,
-        label: p.label,
-        description: p.description,
-        aliases: p.aliases,
-        qualificationSchemaJson: p.qualificationSchemaJson,
-        pricingJson: p.pricingJson,
-        faqJson: p.faqJson,
-        serviceRules: p.serviceRules ?? null,
-      })),
-    };
+  async list() {
+    const codePresets = SERVICE_PRESETS.map((p) => ({
+      source: 'code_preset' as const,
+      presetKey: p.key,
+      key: p.key,
+      provider: p.provider,
+      providerCategoryName: p.providerCategoryName,
+      providerCategoryId: null,
+      label: p.label,
+      description: p.description,
+      aliases: p.aliases,
+      qualificationSchemaJson: p.qualificationSchemaJson,
+      pricingJson: p.pricingJson,
+      faqJson: p.faqJson,
+      serviceRules: p.serviceRules ?? null,
+      // v2 keys for API symmetry — code presets don't author these in
+      // their registry, so we return nulls. The picker can ignore them.
+      serviceOptionsJson: null,
+      customerAnswersJson: null,
+      additionalInstructions: null,
+    }));
+    const dbTemplates = (await this.adminTemplates.listPublished()).map((t) => ({
+      source: 'admin_template' as const,
+      templateId: t.templateId,
+      key: t.key,
+      provider: t.provider,
+      providerCategoryName: t.providerCategoryName,
+      providerCategoryId: t.providerCategoryId,
+      label: t.label,
+      description: t.description,
+      aliases: [] as string[],
+      // v1 keys for API symmetry — admin templates don't author these,
+      // so we return nulls. The runtime resolver only fires after a
+      // ServiceProfile is created (by createFromAdminTemplate, which
+      // bridges v2 → v1 at copy time).
+      qualificationSchemaJson: null,
+      pricingJson: t.pricingJson,
+      faqJson: null,
+      serviceRules: null,
+      // v2 keys — populated.
+      serviceOptionsJson: t.serviceOptionsJson,
+      customerAnswersJson: t.customerAnswersJson,
+      additionalInstructions: t.additionalInstructions,
+    }));
+    return { presets: [...codePresets, ...dbTemplates] };
   }
 
   /**
@@ -96,24 +142,69 @@ export class ServiceProfileController {
     }
   }
 
+  /**
+   * Create a ServiceProfile from either a curated code preset OR a
+   * published admin template. Exactly one of `presetKey` / `templateId`
+   * must be provided — the request is rejected otherwise.
+   *
+   * Admin-template path always lands as draft (per spec "Never
+   * auto-activate"). Code-preset path retains the old behavior of
+   * honoring the `status` hint.
+   */
   @Post('service-profiles/from-preset')
   async createFromPreset(
     @Req() req: any,
-    @Body() body: { presetKey?: string; status?: 'draft' | 'active' },
+    @Body() body: {
+      presetKey?: string;
+      templateId?: string;
+      status?: 'draft' | 'active';
+    },
   ) {
-    if (!body?.presetKey || typeof body.presetKey !== 'string') {
-      throw new BadRequestException('presetKey is required');
+    const hasPresetKey = typeof body?.presetKey === 'string' && body.presetKey.length > 0;
+    const hasTemplateId = typeof body?.templateId === 'string' && body.templateId.length > 0;
+    if (!hasPresetKey && !hasTemplateId) {
+      throw new BadRequestException('presetKey or templateId is required');
     }
-    const preset = lookupPresetByKey(body.presetKey);
+    if (hasPresetKey && hasTemplateId) {
+      throw new BadRequestException('Provide either presetKey or templateId, not both');
+    }
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+
+    // Admin-template path.
+    if (hasTemplateId) {
+      try {
+        const profile = await this.service.createFromAdminTemplate({
+          userId,
+          templateId: body.templateId!,
+        });
+        return {
+          profileId: profile.id,
+          slug: profile.slug,
+          status: profile.status,
+          name: profile.name,
+        };
+      } catch (err: any) {
+        if (err?.code === 'NOT_FOUND') {
+          throw new NotFoundException(err.message);
+        }
+        if (err?.code === 'P2002') {
+          throw new ConflictException(
+            'A service profile from this template already exists',
+          );
+        }
+        throw err;
+      }
+    }
+
+    // Code-preset path (unchanged behavior).
+    const preset = lookupPresetByKey(body.presetKey!);
     if (!preset) {
       throw new BadRequestException(`Unknown preset key: ${body.presetKey}`);
     }
     if (body.status && body.status !== 'draft' && body.status !== 'active') {
       throw new BadRequestException(`Invalid status: ${body.status}`);
     }
-    const userId: string = req.user?.id;
-    if (!userId) throw new BadRequestException('Authenticated user required');
-
     try {
       const profile = await this.service.createFromPreset({
         userId,

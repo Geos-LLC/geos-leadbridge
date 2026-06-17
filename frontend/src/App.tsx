@@ -40,6 +40,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
 const AdminTenantNumbers = lazy(() => import('./pages/admin/AdminTenantNumbers'));
 const AdminBilling = lazy(() => import('./pages/admin/AdminBilling'));
+const AdminServiceTemplates = lazy(() => import('./pages/admin/AdminServiceTemplates'));
 const SetupWizard = lazy(() => import('./pages/onboarding/SetupWizard'));
 
 // Partner Network Beta — isolated module, lazy-loaded as its own chunk so
@@ -213,6 +214,7 @@ function App() {
               <Route path="/admin/phone-pool" element={<Navigate to="/admin/tenant-numbers" />} />
               <Route path="/admin/tenant-numbers" element={<AdminTenantNumbers />} />
               <Route path="/admin/billing" element={<AdminBilling />} />
+              <Route path="/admin/service-templates" element={<AdminServiceTemplates />} />
 
               {/* Partner Network Beta — admin pages live under /partner-network. */}
               <Route path="/partner-network" element={<Navigate to="/partner-network/dashboard" replace />} />
