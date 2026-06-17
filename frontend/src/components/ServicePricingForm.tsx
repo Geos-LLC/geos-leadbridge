@@ -54,6 +54,126 @@ const textInputStyle: CSSProperties = {
 };
 
 /**
+ * Compact bed/bath price chip rendered per cleaning type in each
+ * cleaning row. Mirrors the PriceChip primitive used by item_quantity
+ * pricing — tinted pill background, uppercase mono tag, inline
+ * editable amount. Kept local because the cleaning grid only stores
+ * the type label without keys (allTypes is hydrated from the parsed
+ * pricing), so the shared PriceChip's onChange signature would force
+ * an awkward double-bind here.
+ */
+function BedBathPriceChip({
+  tag,
+  amount,
+  onChange,
+}: {
+  tag: string;
+  amount: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 8px',
+        borderRadius: 999,
+        background: 'var(--lb-ink-10, #f3f5fa)',
+        color: 'var(--lb-ink-2, #1f2a44)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 12.5,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+        minWidth: 96,
+        justifyContent: 'flex-end',
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.05em',
+          color: 'var(--lb-ink-5, #64748b)',
+          textTransform: 'uppercase',
+        }}
+      >
+        {tag}
+      </span>
+      <span style={{ color: 'var(--lb-ink-3, #334155)' }}>$</span>
+      <input
+        type="number"
+        min={0}
+        step={1}
+        value={Number.isFinite(amount) ? amount : 0}
+        onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+        style={{
+          width: 48,
+          padding: '2px 4px',
+          border: '1px solid transparent',
+          borderRadius: 6,
+          background: 'transparent',
+          fontFamily: 'inherit',
+          fontSize: 12.5,
+          fontWeight: 700,
+          color: 'var(--lb-ink-1, #0a1530)',
+          textAlign: 'right',
+        }}
+        onFocus={(e) => {
+          e.currentTarget.style.background = 'white';
+          e.currentTarget.style.borderColor = 'var(--lb-line, #e5e9f2)';
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.background = 'transparent';
+          e.currentTarget.style.borderColor = 'transparent';
+        }}
+      />
+    </div>
+  );
+}
+
+// Inline editable inputs for the cleaning row label area. Mirror the
+// hover-only borders the line-items PriceRow uses so the row stays
+// tidy but the operator can still click to edit.
+const INLINE_BED_BATH_INPUT: CSSProperties = {
+  width: 32,
+  padding: '2px 4px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  fontSize: 13.5,
+  fontWeight: 700,
+  color: 'var(--lb-ink-1, #0a1530)',
+  textAlign: 'center',
+};
+
+const INLINE_SQFT_INPUT: CSSProperties = {
+  width: 52,
+  padding: '2px 4px',
+  border: '1px solid transparent',
+  borderRadius: 6,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  fontSize: 11.5,
+  color: 'var(--lb-ink-3, #334155)',
+  textAlign: 'right',
+};
+
+const INLINE_UNIT_LABEL: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  color: 'var(--lb-ink-5, #64748b)',
+  textTransform: 'uppercase',
+};
+
+const INLINE_DOT: CSSProperties = {
+  color: 'var(--lb-ink-5, #64748b)',
+  fontWeight: 400,
+};
+
+/**
  * Small right-aligned pill used by ServicePricingForm's CollapsibleSection
  * headers — matches the row-count badge style used by the item_quantity
  * Pricing card so cleaning and line items wear the same chrome.
@@ -291,111 +411,184 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         open={!!expandedSections.priceTable}
         onToggle={() => toggleSection('priceTable')}
       >
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-            <thead>
-              <tr style={{ background: 'var(--lb-ink-10)' }}>
-                <th style={thStyle}>Bed</th>
-                <th style={thStyle}>Bath</th>
-                <th style={thStyle} title="Smallest property size this row's price applies to">Sqft Min</th>
-                <th style={thStyle} title="Largest property size at the row's price — beyond this, AI scales by $/sqft">Sqft Max</th>
-                {allTypes.map((t: any) => (
-                  <th key={t.key} style={thStyle}>{t.label}</th>
-                ))}
-                {allTypes.map((t: any) => (
-                  <th
-                    key={`psf-${t.key}`}
-                    style={{ ...thStyle, color: 'var(--lb-ink-6)' }}
-                    title={`${t.label} price per square foot — derived from price ÷ midpoint of the sqft range`}
-                  >
-                    $/sqft {t.label.split(' ')[0]}
-                  </th>
-                ))}
-                <th style={{ ...thStyle, width: 28 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pricing.priceTable?.map((row: any, i: number) => {
-                // Back-compat: rows saved before the min/max split carried a single `sqft` field.
-                const legacySqft = Number(row.sqft) || 0;
-                const sqftMin = Number(row.sqftMin) || legacySqft;
-                const sqftMax = Number(row.sqftMax) || legacySqft;
-                const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
-                return (
-                  <tr key={i} style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" value={row.bed} min={1} max={10}
-                        onChange={e => updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)}
-                        style={{ ...numInputStyle, width: 44 }}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" value={row.bath} min={1} max={10}
-                        onChange={e => updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)}
-                        style={{ ...numInputStyle, width: 44 }}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" value={row.sqftMin ?? ''} min={0} step={50}
-                        onChange={e => updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)}
-                        style={{ ...numInputStyle, width: 68 }}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" value={row.sqftMax ?? ''} min={0} step={50}
-                        onChange={e => updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)}
-                        style={{ ...numInputStyle, width: 68 }}
-                      />
-                    </td>
-                    {allTypes.map((t: any) => (
-                      <td key={t.key} style={tdStyle}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ fontSize: 10.5, color: 'var(--lb-ink-5)', ...MONO }}>$</span>
-                          <input
-                            type="number" value={row[t.key] || 0} min={0}
-                            onChange={e => updatePriceCell(i, t.key, parseInt(e.target.value) || 0)}
-                            style={{ ...numInputStyle, width: 60 }}
-                          />
-                        </div>
-                      </td>
-                    ))}
-                    {allTypes.map((t: any) => {
-                      const price = Number(row[t.key]) || 0;
-                      const perSqft = midpoint > 0 ? price / midpoint : 0;
-                      return (
-                        <td key={`psf-${t.key}`} style={tdStyle}>
-                          <span style={{ fontSize: 11, color: 'var(--lb-ink-6)', ...MONO }}>
-                            {midpoint > 0 ? `$${perSqft.toFixed(3)}` : '—'}
-                          </span>
-                        </td>
-                      );
-                    })}
-                    <td style={tdStyle}>
-                      <button
-                        type="button"
-                        onClick={() => removePriceRow(i)}
-                        style={iconBtnStyle}
-                        aria-label="Remove row"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <button
-            type="button"
-            onClick={addPriceRow}
-            style={addBtnStyle}
+        <div>
+          {/* Header row — matches the item_quantity Price table header
+              chrome: uppercase grey labels above the row list. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '6px 14px',
+              borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: 'var(--lb-ink-5, #64748b)',
+              textTransform: 'uppercase',
+            }}
           >
-            <Plus size={12} /> Add row
-          </button>
+            <span style={{ flex: 1 }}>Size band</span>
+            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              {allTypes.map((t: any) => (
+                <span key={t.key} style={{ minWidth: 96, textAlign: 'right' }}>
+                  {t.label}
+                </span>
+              ))}
+            </span>
+            <span style={{ width: 28 }} />
+          </div>
+          {pricing.priceTable?.map((row: any, i: number) => {
+            // Back-compat: rows saved before the min/max split carried
+            // a single `sqft` field.
+            const legacySqft = Number(row.sqft) || 0;
+            const sqftMin = Number(row.sqftMin) || legacySqft;
+            const sqftMax = Number(row.sqftMax) || legacySqft;
+            const midpoint =
+              sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : sqftMin || sqftMax;
+            return (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '10px 14px',
+                  borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+                }}
+              >
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: 'var(--lb-ink-1, #0a1530)',
+                    }}
+                  >
+                    <input
+                      type="number"
+                      value={row.bed}
+                      min={1}
+                      max={10}
+                      onChange={(e) =>
+                        updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
+                      }
+                      style={INLINE_BED_BATH_INPUT}
+                    />
+                    <span style={INLINE_UNIT_LABEL}>bed</span>
+                    <span style={INLINE_DOT}>·</span>
+                    <input
+                      type="number"
+                      value={row.bath}
+                      min={1}
+                      max={10}
+                      onChange={(e) =>
+                        updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
+                      }
+                      style={INLINE_BED_BATH_INPUT}
+                    />
+                    <span style={INLINE_UNIT_LABEL}>bath</span>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: 11.5,
+                      color: 'var(--lb-ink-5, #64748b)',
+                    }}
+                  >
+                    <input
+                      type="number"
+                      value={row.sqftMin ?? ''}
+                      min={0}
+                      step={50}
+                      onChange={(e) =>
+                        updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
+                      }
+                      style={INLINE_SQFT_INPUT}
+                    />
+                    <span>–</span>
+                    <input
+                      type="number"
+                      value={row.sqftMax ?? ''}
+                      min={0}
+                      step={50}
+                      onChange={(e) =>
+                        updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
+                      }
+                      style={INLINE_SQFT_INPUT}
+                    />
+                    <span style={{ marginLeft: 2 }}>sqft</span>
+                    {midpoint > 0 && (
+                      <span style={{ marginLeft: 10, opacity: 0.7 }}>
+                        {allTypes
+                          .map((t: any) => {
+                            const p = Number(row[t.key]) || 0;
+                            return p > 0
+                              ? `$${(p / midpoint).toFixed(2)}/sqft ${t.label.split(' ')[0].toLowerCase()}`
+                              : '';
+                          })
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {allTypes.map((t: any) => (
+                    <BedBathPriceChip
+                      key={t.key}
+                      tag={t.label.split(' ')[0]}
+                      amount={Number(row[t.key]) || 0}
+                      onChange={(v) => updatePriceCell(i, t.key, v)}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removePriceRow(i)}
+                  title="Remove row"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    borderRadius: 7,
+                    border: '1px solid var(--lb-line, #e5e9f2)',
+                    background: 'white',
+                    color: 'var(--lb-ink-5, #64748b)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+          <div style={{ padding: '12px 14px 4px' }}>
+            <button
+              type="button"
+              onClick={addPriceRow}
+              style={{ ...UNIFIED_ADD_ROW_STYLE }}
+            >
+              <Plus size={13} /> Add row
+            </button>
+          </div>
         </div>
       </CollapsibleSection>
 
@@ -603,23 +796,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
 
 // ─── Local style helpers ────────────────────────────────────────────────
 
-const thStyle: CSSProperties = {
-  padding: '8px 6px',
-  textAlign: 'left',
-  fontSize: 10.5,
-  fontWeight: 700,
-  color: 'var(--lb-ink-5)',
-  textTransform: 'uppercase',
-  letterSpacing: 0.04,
-  fontFamily: 'var(--lb-font-mono)',
-  whiteSpace: 'nowrap',
-};
-
-const tdStyle: CSSProperties = {
-  padding: '6px 6px',
-  verticalAlign: 'middle',
-};
-
 const rowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -650,20 +826,6 @@ const iconBtnStyle: CSSProperties = {
   flexShrink: 0,
 };
 
-const addBtnStyle: CSSProperties = {
-  width: '100%',
-  padding: '10px 14px',
-  borderTop: '1px solid var(--lb-line-soft)',
-  background: 'var(--lb-surface)',
-  border: 0,
-  borderTopWidth: 1,
-  borderTopStyle: 'solid',
-  borderTopColor: 'var(--lb-line-soft)',
-  color: 'var(--lb-accent)',
-  fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-  cursor: 'pointer',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-};
 
 // Mirror the shared playbook-controls Add-row style so the cleaning
 // grid's "Add row" buttons (Add cleaning type, Add discount tier, …)
