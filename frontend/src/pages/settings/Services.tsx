@@ -1006,6 +1006,12 @@ type PricingItem = {
   active?: boolean;
 };
 
+type HourlyExtraRate = {
+  label: string;
+  sub?: string;
+  amount: number;
+};
+
 type PricingShape = {
   pricingModel?: 'bed_bath_grid' | 'item_quantity' | 'flat_rate' | 'hourly';
   included?: string[];
@@ -1020,6 +1026,11 @@ type PricingShape = {
   minimumCharge?: number;
   quoteRequired?: boolean;
   notes?: string;
+  // Hourly only — operator-defined extra rate rows that render below
+  // the built-in Labor rate / Minimum charge rows. Storage is optional
+  // — undefined means no extras (back-compat with the pre-rollout
+  // shape).
+  extraRates?: HourlyExtraRate[];
   [key: string]: unknown;
 };
 
@@ -1131,6 +1142,30 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
     const base: PricingShape = decidePricingMode(value).parsed ?? { pricingModel: 'hourly' };
     const out: PricingShape = { ...base, pricingModel: 'hourly', ...patch };
     onChange(JSON.stringify(out, null, 2));
+  };
+
+  const hourlyExtras: HourlyExtraRate[] = Array.isArray(hourly.extraRates) ? hourly.extraRates : [];
+
+  // Hourly equivalent of the item_quantity "Add column" / cleaning
+  // "Add column" — adds another rate row below Labor rate + Minimum
+  // charge so operators can capture Weekend rate, Emergency rate, etc.
+  const addHourlyRate = () => {
+    const name = window.prompt('Rate label (e.g. Weekend rate, Emergency rate):');
+    if (!name) return;
+    const label = name.trim().slice(0, 40);
+    if (!label) return;
+    const next: HourlyExtraRate[] = [...hourlyExtras, { label, sub: 'per hour', amount: 0 }];
+    writeHourly({ extraRates: next });
+  };
+
+  const updateHourlyRate = (idx: number, patch: Partial<HourlyExtraRate>) => {
+    const next = hourlyExtras.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    writeHourly({ extraRates: next });
+  };
+
+  const removeHourlyRate = (idx: number) => {
+    const next = hourlyExtras.filter((_, i) => i !== idx);
+    writeHourly({ extraRates: next.length > 0 ? next : undefined });
   };
 
   const switchTo = (next: PricingMode) => {
@@ -1419,6 +1454,26 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
                 />
               }
             />
+            {hourlyExtras.map((rate, idx) => (
+              <PriceRow
+                key={idx}
+                label={rate.label}
+                sub={rate.sub ?? ''}
+                onChangeLabel={(v) => updateHourlyRate(idx, { label: v })}
+                onChangeSub={(v) => updateHourlyRate(idx, { sub: v })}
+                onRemove={() => removeHourlyRate(idx)}
+                chips={
+                  <PriceChip
+                    amount={rate.amount}
+                    editable
+                    onChange={(v) => updateHourlyRate(idx, { amount: v })}
+                  />
+                }
+              />
+            ))}
+            <div style={{ padding: '12px 14px 4px' }}>
+              <UnifiedAddRowButton label="Add row" onClick={addHourlyRate} />
+            </div>
           </PriceTableSection>
 
           <div
