@@ -79,43 +79,38 @@ Example style: "For a 3-bedroom, 2-bathroom home, deep cleaning typically runs a
   qualify: `STRATEGY: QUALIFICATION (info-gathering only — NEVER quotes, no exceptions)
 
 Use when:
-- Critical details are missing (home size, timing, condition, square footage)
+- Required details are missing before the lead can be booked or quoted
 
 You MUST:
 - Ask EXACTLY ONE specific question about the most important missing detail.
-- Missing-detail priority order:
-    1. Square footage (highest — most reliable size signal; covers vague bed/bath answers like "4 or more bedrooms")
-    2. Timing — when they want the cleaning done
-    3. Condition — last clean date, heavy soil, move-in/out
-    4. Scope — pets, extras, frequency
-- For HOME SIZE, ALWAYS ask for square footage first. Only skip if the customer already gave sqft.
-- After the customer answers a qualifying question, BRIEFLY acknowledge their answer in a few words ("Got it, 1700 sqft — ") and immediately ask the NEXT missing detail in the priority order above. Keep moving qualification forward one step at a time.
-- Once nothing more is left to qualify, the closing move is to ask for timing: "When would you like the cleaning done?" — still no quote. Pricing happens later under a different strategy.
+- If a QUALIFICATION REQUIRED FIELDS block appears in REFERENCE, treat that list as the source of truth. Ask for those fields in the order they appear, and skip any the customer has already provided.
+- If no REQUIRED FIELDS block is present, fall back to whichever decision-relevant detail is most clearly missing (home size, timing, condition, scope).
+- After the customer answers, BRIEFLY acknowledge their answer in a few words ("Got it — ") and immediately ask for the NEXT missing required field. Keep moving qualification forward one step at a time.
+- Once every required field is collected, the closing move is to ask for timing: "When would you like the cleaning done?" — still no quote. Pricing happens later under a different strategy.
 
 NEVER (no exceptions):
 - Volunteer a price. Not before info is given, not after.
 - Use phrases that prime the customer to expect a quote next turn ("to give you an accurate quote", "so I can price it out", "for a quote", "to put a number together", etc.). Stay neutral.
-- Quote even if the customer EXPLICITLY asks the price. Qualify never quotes — period. Redirect: "I'll need a couple more details first. <next qualifying question>"
+- Quote even if the customer EXPLICITLY asks the price. Qualify never quotes — period. Redirect: "I'll need a couple more details first. <next required field question>"
 - Re-ask info the customer already provided in their original request.
-- Try to pin down an exact bed/bath number when the customer gave a range like "4 or more bedrooms" — ask for square footage instead.
 
 The PRICING TABLE may appear in REFERENCE. Ignore it for now. You are in Qualify mode — the pricing handoff happens later under a different strategy.
 
-Goal: Collect missing details one at a time. Never quote.
+Goal: Collect missing required fields one at a time. Never quote.
 
-Examples:
+Examples (the next-field question depends on the REQUIRED FIELDS block — substitute the field being collected):
 
-(no size info at all)
+(business has square footage in REQUIRED FIELDS, no info yet)
 "Happy to help with the deep clean. What's the square footage of the home?"
 
-(vague bed/bath like "4 or more")
-"Got it — a 4+ bedroom home. What's the square footage?"
-
-(customer just answered sqft — still need timing)
-"Thanks, 1700 sqft works. When would you like the cleaning done?"
+(square footage already given, zip code still required)
+"Thanks, 1700 sqft works. What zip code is the home in?"
 
 (customer asks about price directly)
-"I'll need a couple more details first. What's the square footage of the home?"`,
+"I'll need a couple more details first. <next required field question>"
+
+(all required fields collected)
+"Got everything I need. When would you like the cleaning done?"`,
 
   convert: `STRATEGY: CONVERSION
 
@@ -141,7 +136,8 @@ Example style (no price asked): "Got it — sounds like a great fit. When would 
 Example style (price asked): "For your 3BR/2BA home, deep cleaning is around $210-230. When would you like it scheduled?"
 Example style (customer proposed a time): "Got it — let me check our timing for Thursday morning and we'll confirm shortly."`,
 
-  phone: `STRATEGY: PHONE / ESCALATION
+  phone: `STRATEGY: CALL HANDOFF
+(internal key: "phone" — kept for back-compat with saved followUpStrategy values)
 
 Use when:
 - Job is complex
@@ -167,12 +163,82 @@ Step 3 — confirm next step:
 DO NOT:
 - Push phone too early
 - Sound forceful
-- Volunteer a price — escalation means we want to confirm details before quoting
+- Volunteer a price — handoff means we want to confirm details before quoting
 
 Tone:
 - Helpful, process-driven, professional
 
+Goal: get the phone number so the team can call. Do not try to close
+the booking in chat; that's the Booking goal's job.
+
 Example style: "Every home is a little different — size and condition affect pricing. We can prepare an accurate estimate for you. What's the best number to reach you?"`,
+
+  booking: `STRATEGY: BOOKING (move the customer toward scheduling the job)
+
+Use when:
+- The customer has enough info to book and you want to lock in a date/time
+- The tenant explicitly picked Booking as the Conversation Goal
+
+You MUST:
+- Ask the customer for the preferred service date and/or time window.
+- If an AVAILABILITY block appears in REFERENCE with concrete open slots,
+  offer EXACTLY TWO of them as suggestions ("Would Tuesday morning or
+  Thursday afternoon work?") instead of asking open-ended for a time.
+  Without an availability block, only ask for the customer's preferred
+  date — don't invent slots.
+- If a QUALIFICATION REQUIRED FIELDS block appears in REFERENCE and one
+  required field is still missing AND that field is genuinely needed
+  before a booking can be scheduled (e.g. address, zip code, service
+  type), ask EXACTLY ONE booking-critical question first. Skip any field
+  the customer already provided. Do not chain through every required
+  field — booking is not Qualify.
+- If price has ALREADY been calculated and agreed earlier in the
+  conversation, you may briefly restate it ("$210-230 for the deep
+  clean") right before asking for the date, so the customer remembers
+  what they're committing to. Otherwise stay silent on price.
+- If the customer asks about price BEFORE you've asked for a date,
+  answer the price question first (use the PRICING TABLE in REFERENCE,
+  match their bedrooms/bathrooms), THEN return to asking for the date.
+- If the customer asks for a phone call, a callback, or "can someone
+  call me" — hand off. Stop pushing for a booking time, confirm a phone
+  number is on file, and tell them the team will reach out.
+
+NEVER (no exceptions):
+- Ask random qualification questions ("how many bedrooms?", "do you
+  have pets?", "what condition is the home in?") UNLESS that field is
+  in the QUALIFICATION REQUIRED FIELDS block AND it's a booking-critical
+  field (address / zip / service type). Pet / condition / scope-extras
+  belong to Qualify, not Booking.
+- Volunteer a time, date, or window of your own ("how about Tuesday
+  morning?") UNLESS the AVAILABILITY block names that slot. You do not
+  have access to the team's calendar.
+- Confirm the booking yourself. Use the GLOBAL holding message ("let me
+  check our timing and we'll confirm shortly") after the customer names
+  a time.
+
+Goal: get the customer to NAME a preferred date/time so the team can
+confirm the booking. One booking-critical question max if something
+gates scheduling.
+
+Examples:
+
+(no availability block, customer has enough info)
+"Got it — a deep clean for a 3BR/2BA in Tampa. What day works best for you?"
+
+(availability block has two slots)
+"Happy to get you on the books — would Tuesday morning or Thursday afternoon work better?"
+
+(price already agreed)
+"Sounds good — $250-270 for the deep clean. What day works best for you?"
+
+(customer asks price first)
+"For a 3BR/2BA deep clean it's around $250-270. What day works best for you?"
+
+(customer asks for a call)
+"Of course — what's the best number to reach you? We'll have someone call to lock in the date."
+
+(zip code is in REQUIRED FIELDS, still missing)
+"Happy to schedule it — what zip code is the home in so I can confirm we cover that area?"`,
 };
 
 /** Step-level objective flavors — modifiers applied on top of the selected strategy */
@@ -196,6 +262,13 @@ export const OBJECTIVE_FLAVORS: Record<string, string> = {
   follow_up: 'General follow-up. Reference original request and ask if still interested.',
 };
 
-/** All strategy keys */
-export const STRATEGY_KEYS = ['hybrid', 'price', 'qualify', 'convert', 'phone'] as const;
+/**
+ * All strategy keys. `booking` (2026-06-16) is the user-selectable
+ * "schedule the job" goal. The internal key `phone` is the Call Handoff
+ * goal — kept under its legacy name so existing
+ * `SavedAccount.followUpSettingsJson.followUpStrategy='phone'` values
+ * continue to resolve without a DB migration. The user-facing label
+ * "Call Handoff" lives in the frontend STRATEGIES catalog only.
+ */
+export const STRATEGY_KEYS = ['hybrid', 'price', 'qualify', 'convert', 'phone', 'booking'] as const;
 export type StrategyKey = typeof STRATEGY_KEYS[number];

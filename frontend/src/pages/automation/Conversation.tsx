@@ -57,7 +57,7 @@ function makeCustomFieldId(): string {
 }
 
 type CachedConvSettings = {
-  strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+  strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
   priceMode: 'range' | 'exact';
   availability: 'always' | 'hours';
   // V2 Review Mode (2026-06-12). 'suggest' parks AI replies as pending
@@ -80,13 +80,20 @@ type CachedConvSettings = {
 };
 const convCache = new Map<string, CachedConvSettings>();
 
-type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
 
-// Qualification required-fields catalog (6 fields). Zip code + Phone number
+// Qualification required-fields catalog (7 fields). Zip code + Phone number
 // are platform-driven defaults (TT usually has zip, Yelp usually needs both).
-// The other 4 (bedrooms, bathrooms, square footage, frequency) are unchecked
-// by default — users opt in per business. Snake_case keys match the backend
-// prompt-injection format. Catalog order = display order in the UI.
+// The other 5 (bedrooms, bathrooms, square footage, frequency, desired
+// service date) are unchecked by default — users opt in per business.
+// Snake_case keys match the backend prompt-injection format. Catalog order
+// = display order in the UI.
+//
+// `service_date` (Desired Service Date, added 2026-06-16) belongs under
+// Qualify, not only Booking — multiple tenants want it collected as part
+// of the regular qualification flow so the AI can flag scheduling
+// concerns before a quote even goes out. The Booking goal's prompt also
+// honours it when present in the REQUIRED FIELDS block.
 //
 // Future fields (not in UI yet, captured here for context): move_in_out,
 // pets, deep_cleaning, extras. They map onto existing legacy backend keys
@@ -97,28 +104,35 @@ type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'
 // UI no longer renders a checkbox for it. See toggleQualificationField
 // for the preserve-unknown-keys logic.
 const QUALIFICATION_FIELDS = [
-  { key: 'bedrooms',       label: 'Bedrooms',       defaultChecked: false },
-  { key: 'bathrooms',      label: 'Bathrooms',      defaultChecked: false },
-  { key: 'square_footage', label: 'Square Footage', defaultChecked: false },
-  { key: 'frequency',      label: 'Frequency',      defaultChecked: false },
-  { key: 'zip_code',       label: 'Zip Code',       defaultChecked: true },
-  { key: 'phone_number',   label: 'Phone Number',   defaultChecked: true },
+  { key: 'bedrooms',       label: 'Bedrooms',             defaultChecked: false },
+  { key: 'bathrooms',      label: 'Bathrooms',            defaultChecked: false },
+  { key: 'square_footage', label: 'Square Footage',       defaultChecked: false },
+  { key: 'frequency',      label: 'Frequency',            defaultChecked: false },
+  { key: 'service_date',   label: 'Desired Service Date', defaultChecked: false },
+  { key: 'zip_code',       label: 'Zip Code',             defaultChecked: true },
+  { key: 'phone_number',   label: 'Phone Number',         defaultChecked: true },
 ] as const;
 const QUALIFICATION_DEFAULT_FIELDS = QUALIFICATION_FIELDS
   .filter(f => f.defaultChecked)
   .map(f => f.key) as string[];
 const QUALIFICATION_CATALOG_KEYS: Set<string> = new Set(QUALIFICATION_FIELDS.map(f => f.key));
 
-// 4 goals only — Hybrid and Convert collapsed into Auto and Qualify
-// respectively (UI only). Saved backend values 'hybrid' and 'convert' are
-// remapped for DISPLAY in parseSettings and the runtime continues to honor
-// them via STRATEGY_PROMPTS.hybrid / .convert. No DB writes — legacy values
-// stay in followUpSettingsJson until the user explicitly picks a new goal.
+// 5 user-selectable goals — Hybrid and Convert collapsed into Auto and
+// Qualify respectively (UI only). Saved backend values 'hybrid' and
+// 'convert' are remapped for DISPLAY in parseSettings and the runtime
+// continues to honor them via STRATEGY_PROMPTS.hybrid / .convert. No DB
+// writes — legacy values stay in followUpSettingsJson until the user
+// explicitly picks a new goal.
+//
+// Phone (2026-06-16) is rendered as "Call Handoff" but the internal key
+// stays `phone` so existing tenants' saved followUpStrategy='phone'
+// values resolve unchanged. Booking is the new "schedule the job" goal.
 const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title: string; body: string; recommended?: boolean }[] = [
-  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',    body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
-  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',   body: 'Provide pricing information as quickly and accurately as possible.' },
-  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify', body: 'Collect the information needed before quoting or booking.' },
-  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Phone',   body: 'Get the customer onto a phone call.' },
+  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',         body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
+  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',        body: 'Provide pricing information as quickly and accurately as possible.' },
+  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify',      body: 'Collect the required information before quoting or booking.' },
+  { k: 'booking', icon: CalendarCheck,    iconTone: 'blue',   title: 'Booking',      body: 'Move the customer toward scheduling the job.' },
+  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Call Handoff', body: "Get the customer's number so your team can call." },
 ];
 
 export function AutomationConversation({ accountId }: { accountId: string }) {
@@ -777,7 +791,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         <div
           className="lb-strategy-grid"
           style={{
-            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
+            display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10,
           }}
         >
           {STRATEGIES.map(s => (
@@ -1142,9 +1156,36 @@ function GoalSetupCard({
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
   removeCustomField: (id: string) => void;
 }) {
-  // Auto + Phone goals have no per-goal setup card per design — Auto routes
-  // to whichever sub-goal applies, Phone behavior is fully driven by the
-  // global rules. Only Price and Qualify render dedicated setup cards.
+  // Auto + Call Handoff goals have no per-goal setup card per design —
+  // Auto routes to whichever sub-goal applies, Call Handoff behavior is
+  // fully driven by the global rules. Booking renders an info-only blurb
+  // (no extra fields today; booking-critical Qualify fields like address
+  // and zip are configured under the Qualify goal). Only Price and
+  // Qualify render dedicated setup cards.
+  if (strategy === 'booking') {
+    return (
+      <SectionCard padding="22px 24px 22px">
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Booking goal setup
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.55 }}>
+            AI asks for the customer's preferred service date and pushes
+            toward scheduling. It will answer a price question first if
+            the customer asks, and hand off to your team if the customer
+            asks for a call.
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 8, lineHeight: 1.5 }}>
+            Booking-critical fields (address, zip, desired service date)
+            are configured under the <strong>Qualify</strong> goal —
+            anything ticked there is also collected before AI tries to
+            book.
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
+
   if (strategy !== 'price' && strategy !== 'qualify') return null;
 
   // ─── Price goal setup ────────────────────────────────────────────────

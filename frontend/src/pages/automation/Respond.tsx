@@ -25,11 +25,13 @@ import { useAppStore } from '../../store/appStore';
 // longer shown in this page's UI per the Automation Simplification:
 // AI-first surfaces (Respond + Followups) don't expose Goal selection.
 // Goals live only on AI Conversation.
-type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
 // Accept legacy 'hybrid' and 'convert' as valid saved values for
-// back-compat. Runtime continues to honour them via STRATEGY_PROMPTS.
+// back-compat. 'booking' (2026-06-16) is the new scheduling goal;
+// 'phone' is the internal key for Call Handoff. Runtime honours all of
+// these via STRATEGY_PROMPTS.
 const isStrategyKey = (v: unknown): v is StrategyKey =>
-  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone';
+  v === 'auto' || v === 'hybrid' || v === 'price' || v === 'qualify' || v === 'convert' || v === 'phone' || v === 'booking';
 
 // Module-level cache: persists across mounts and tab switches so flipping
 // between account tabs feels instant (the new tab's last-known values render
