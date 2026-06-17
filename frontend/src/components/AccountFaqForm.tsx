@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Loader2, Upload } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import {
   CollapsibleSection,
@@ -7,6 +7,11 @@ import {
   UnifiedAddRowButton,
   UnifiedSaveButton,
 } from './playbook-controls';
+import {
+  StructuredFaqGroups,
+  type StructuredFaqValue,
+} from './StructuredFaqGroups';
+import { MessageSquare } from 'lucide-react';
 
 export interface AccountFaq {
   insuredAndBonded?: { value?: 'yes' | 'no' | 'unset'; details?: string };
@@ -55,6 +60,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [inherited, setInherited] = useState(false);
+  const [uploading, setUploading] = useState<'standard' | 'deep' | null>(null);
+  const standardFileRef = useRef<HTMLInputElement | null>(null);
+  const deepFileRef = useRef<HTMLInputElement | null>(null);
 
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
@@ -87,6 +95,10 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
       .finally(() => setLoading(false));
   }, [loadId, serviceProfileId]);
 
+  const update = <K extends keyof AccountFaq>(key: K, value: AccountFaq[K]) => {
+    setFaq(prev => ({ ...(prev || DEFAULT_FAQ), [key]: value }));
+  };
+
   const updateCustomQA = (idx: number, field: 'question' | 'answer', value: string) => {
     setFaq(prev => {
       const list = [...(prev?.customQA || [])];
@@ -102,6 +114,29 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
     }));
   };
 
+  const handleChecklistUpload = async (target: 'standard' | 'deep', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const existing = (target === 'standard' ? faq?.standardScope : faq?.deepScope) || '';
+    if (existing.trim() && !confirm(`This will replace the current ${target} cleaning scope. Continue?`)) return;
+
+    setUploading(target);
+    try {
+      const res = await usersApi.parseChecklistFile(file);
+      const key: keyof AccountFaq = target === 'standard' ? 'standardScope' : 'deepScope';
+      update(key, res.text);
+      if (res.truncated) {
+        alert(`Imported ~${Math.round(res.text.length / 1000)}KB of text. The file was longer than 20KB and was truncated to keep the AI prompt small.`);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to parse file';
+      alert(`Upload failed: ${msg}`);
+    } finally {
+      setUploading(null);
+    }
+  };
 
   const removeCustomQA = (idx: number) => {
     setFaq(prev => ({
@@ -140,6 +175,21 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
   }
   if (!faq) return null;
 
+  const inputCls = 'w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all';
+  // Section label — uppercase grey, matches the structured FAQ language used in the design handoff.
+  const labelCls = 'block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2';
+  // Unified outline-style chip selector. Selected = soft accent tint with
+  // accent border and accent text; unselected = white with grey border.
+  // Same class strings replace the older heavy-blue-fill chips across
+  // every structured FAQ group so the form feels consistent with the
+  // newer custom Q&A and pricing chrome.
+  const chipBaseCls =
+    'py-2 px-3 rounded-lg text-xs font-semibold border transition-colors';
+  const chipActiveCls =
+    'bg-blue-50 text-blue-700 border-blue-300';
+  const chipInactiveCls =
+    'bg-white text-slate-700 border-slate-200 hover:border-slate-300';
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -158,21 +208,183 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         These answers are injected into the AI prompt so it can respond accurately to common customer questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
       </p>
 
-      {/* The five baseline chip groups (insured & bonded, supplies,
-          pet policy, payment, customer must be home) were dropped per
-          the "FAQ should be question + answer" pass — every service
-          now answers through the Custom Q&A list below. Existing
-          structured values on `faq` stay in faqJson and the AI prompt
-          assembler still reads them; operators just edit through Q&A
-          rows. */}
+      {/* Five baseline chip groups — shared with every non-cleaning
+          service so the FAQ chrome is identical across verticals. The
+          remaining cleaning-specific groups (same cleaner, scope text,
+          labor rate, crew sizing) keep rendering inline below. */}
+      <StructuredFaqGroups
+        value={{
+          insuredAndBonded: faq.insuredAndBonded as StructuredFaqValue['insuredAndBonded'],
+          bringsSupplies: faq.bringsSupplies as StructuredFaqValue['bringsSupplies'],
+          petPolicy: faq.petPolicy as StructuredFaqValue['petPolicy'],
+          paymentMethods: faq.paymentMethods,
+          customerMustBeHome: faq.customerMustBeHome as StructuredFaqValue['customerMustBeHome'],
+        }}
+        onChange={(next) => {
+          if (next.insuredAndBonded !== undefined) update('insuredAndBonded', next.insuredAndBonded as AccountFaq['insuredAndBonded']);
+          if (next.bringsSupplies !== undefined) update('bringsSupplies', next.bringsSupplies as AccountFaq['bringsSupplies']);
+          if (next.petPolicy !== undefined) update('petPolicy', next.petPolicy as AccountFaq['petPolicy']);
+          if (next.paymentMethods !== undefined) update('paymentMethods', next.paymentMethods);
+          if (next.customerMustBeHome !== undefined) update('customerMustBeHome', next.customerMustBeHome as AccountFaq['customerMustBeHome']);
+        }}
+      />
 
-      {/* All structured cleaning-specific fields (same-cleaner chips,
-          scope textareas, labor rate, crew sizing) were dropped per
-          the "FAQ should be question + answer" pass — every service
-          (cleaning or otherwise) now answers through the Custom Q&A
-          list below. Existing values stay on faq.* / faqJson and the
-          AI prompt assembler still reads them; operators just edit
-          new entries through Q&A rows. */}
+      {/* Same cleaner */}
+      <div>
+        <label className={labelCls}>Same cleaner for recurring visits?</label>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'unset', label: 'Not set' },
+            { key: 'try', label: 'We try, not guaranteed' },
+            { key: 'guaranteed', label: 'Yes, guaranteed' },
+            { key: 'no', label: 'No, varies each visit' },
+          ].map(o => {
+            const active = (faq.sameCleanerForRecurring?.value || 'unset') === o.key;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => update('sameCleanerForRecurring', { ...faq.sameCleanerForRecurring, value: o.key as any })}
+                className={`${chipBaseCls} text-left ${active ? chipActiveCls : chipInactiveCls}`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Scope — with upload-checklist buttons */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className={`${labelCls} mb-0`}>Standard cleaning includes</label>
+            <button
+              type="button"
+              onClick={() => standardFileRef.current?.click()}
+              disabled={uploading === 'standard'}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
+              title="Upload a checklist file (PDF, Word, Excel, image, TXT, CSV, MD)"
+            >
+              {uploading === 'standard' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              Upload checklist
+            </button>
+            <input
+              ref={standardFileRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.txt,.md,.markdown,.csv,.tsv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/plain,text/markdown,text/csv,text/tab-separated-values,text/rtf,image/*"
+              onChange={e => handleChecklistUpload('standard', e)}
+              className="hidden"
+            />
+          </div>
+          <textarea
+            value={faq.standardScope || ''}
+            onChange={e => update('standardScope', e.target.value)}
+            placeholder="e.g. Kitchen surfaces & appliances exterior, all bathrooms, dusting, vacuuming, mopping. Or upload a checklist file above."
+            rows={5}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className={`${labelCls} mb-0`}>Deep cleaning includes</label>
+            <button
+              type="button"
+              onClick={() => deepFileRef.current?.click()}
+              disabled={uploading === 'deep'}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
+              title="Upload a checklist file (PDF, Word, Excel, image, TXT, CSV, MD)"
+            >
+              {uploading === 'deep' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              Upload checklist
+            </button>
+            <input
+              ref={deepFileRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.txt,.md,.markdown,.csv,.tsv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/plain,text/markdown,text/csv,text/tab-separated-values,text/rtf,image/*"
+              onChange={e => handleChecklistUpload('deep', e)}
+              className="hidden"
+            />
+          </div>
+          <textarea
+            value={faq.deepScope || ''}
+            onChange={e => update('deepScope', e.target.value)}
+            placeholder="e.g. Everything in standard + baseboards, inside cabinets, doors & frames, detailed scrubbing. Or upload a checklist file above."
+            rows={5}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {/* Labor rate + crew sizing */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Labor rate per cleaner-hour ($)</label>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={faq.laborRatePerCleanerHour ?? ''}
+            onChange={e => update('laborRatePerCleanerHour', e.target.value === '' ? undefined : Number(e.target.value))}
+            placeholder="50"
+            className={inputCls}
+          />
+          <p className="text-[10px] text-slate-400 mt-1">Used by the AI for labor-hour math (cleaners × hours × rate). Leave blank to use the global default of $50.</p>
+        </div>
+        <div>
+          <label className={labelCls}>Crew sizing rule</label>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.hoursThreshold ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, hoursThreshold: Number(e.target.value) })}
+                placeholder="4"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Hours threshold (job length)</p>
+            </div>
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.sizeUnder ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeUnder: Number(e.target.value) })}
+                placeholder="1"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Cleaners if job ≤ threshold</p>
+            </div>
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.sizeOver ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeOver: Number(e.target.value) })}
+                placeholder="2"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Cleaners if job &gt; threshold</p>
+            </div>
+          </div>
+          {(() => {
+            const t = faq.crewSizeRule?.hoursThreshold;
+            const u = faq.crewSizeRule?.sizeUnder;
+            const o = faq.crewSizeRule?.sizeOver;
+            const ready = Number(t) > 0 && Number(u) > 0 && Number(o) > 0;
+            return (
+              <p className="text-[11px] text-slate-600 mt-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                {ready ? (
+                  <>Plain English: <span className="font-semibold">send {u} cleaner{u === 1 ? '' : 's'} for jobs up to {t} hour{t === 1 ? '' : 's'}, {o} cleaners for jobs over {t} hour{t === 1 ? '' : 's'}.</span> Same total price either way — 2 cleaners just cut on-site time roughly in half.</>
+                ) : (
+                  <>Default: 1 cleaner for jobs up to 4 hours, 2 cleaners for jobs over 4 hours. Same total price either way.</>
+                )}
+              </p>
+            );
+          })()}
+        </div>
+      </div>
 
       {/* Custom Q&A — unified collapsible section with FaqRow per pair,
           matching the Custom service FAQ tab and the pricing tables. */}
