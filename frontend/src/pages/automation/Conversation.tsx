@@ -77,6 +77,10 @@ type CachedConvSettings = {
   // default false so existing tenants behave identically.
   qualifyStopOnComplete: boolean;
   phoneStopOnComplete: boolean;
+  // Per-account booking-availability (Booking goal). 7 weekdays × 2
+  // periods (morning / afternoon). Missing in older saves → defaulted
+  // to Mon–Fri both on, weekends both off by normalizeBookingAvailability.
+  bookingAvailability: BookingAvailability;
 };
 const convCache = new Map<string, CachedConvSettings>();
 
@@ -103,6 +107,47 @@ type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'
 // and continues to inject into the AI prompt at runtime even though the
 // UI no longer renders a checkbox for it. See toggleQualificationField
 // for the preserve-unknown-keys logic.
+// Booking-availability shape — mirrors src/ai/booking-availability.ts on
+// the backend. The runtime normalizer there is the source of truth; this
+// frontend copy is just for editor state. Keep the keys + default in
+// sync if either side changes.
+type BookingDayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+type BookingDaySettings = { morning: boolean; afternoon: boolean };
+type BookingAvailability = Record<BookingDayKey, BookingDaySettings>;
+const BOOKING_DAY_LABELS: Record<BookingDayKey, string> = {
+  mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
+};
+const BOOKING_DAY_KEYS: readonly BookingDayKey[] =
+  ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+// Default Mon–Fri morning + afternoon ON, weekends OFF. Matches
+// DEFAULT_BOOKING_AVAILABILITY on the backend so accounts that haven't
+// saved anything render the same windows the AI is told about.
+const DEFAULT_BOOKING_AVAILABILITY: BookingAvailability = {
+  mon: { morning: true,  afternoon: true  },
+  tue: { morning: true,  afternoon: true  },
+  wed: { morning: true,  afternoon: true  },
+  thu: { morning: true,  afternoon: true  },
+  fri: { morning: true,  afternoon: true  },
+  sat: { morning: false, afternoon: false },
+  sun: { morning: false, afternoon: false },
+};
+function normalizeBookingAvailability(raw: unknown): BookingAvailability {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_BOOKING_AVAILABILITY };
+  const obj = raw as Record<string, unknown>;
+  const out = {} as BookingAvailability;
+  for (const day of BOOKING_DAY_KEYS) {
+    const node = obj[day];
+    const defaults = DEFAULT_BOOKING_AVAILABILITY[day];
+    if (!node || typeof node !== 'object') { out[day] = { ...defaults }; continue; }
+    const n = node as Record<string, unknown>;
+    out[day] = {
+      morning:   typeof n.morning   === 'boolean' ? n.morning   : defaults.morning,
+      afternoon: typeof n.afternoon === 'boolean' ? n.afternoon : defaults.afternoon,
+    };
+  }
+  return out;
+}
+
 const QUALIFICATION_FIELDS = [
   { key: 'bedrooms',       label: 'Bedrooms',             defaultChecked: false },
   { key: 'bathrooms',      label: 'Bathrooms',            defaultChecked: false },
@@ -196,6 +241,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [qualifyStopOnComplete, setQualifyStopOnComplete] = useState(false);
   const [phoneStopOnComplete, setPhoneStopOnComplete] = useState(false);
 
+  // Booking-goal availability — 7-day × 2-period toggle grid. Stored at
+  // followUpSettingsJson.bookingAvailability. Defaults render Mon–Fri
+  // morning + afternoon on for fresh accounts (matches DEFAULT on the
+  // backend so the AVAILABILITY block injected at runtime stays in
+  // sync with what the user sees).
+  const [bookingAvailability, setBookingAvailability] =
+    useState<BookingAvailability>(() => ({ ...DEFAULT_BOOKING_AVAILABILITY }));
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -216,7 +269,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
     | 'qualificationRequiredFields' | 'qualificationCustomFields'
-    | 'qualifyStopOnComplete' | 'phoneStopOnComplete';
+    | 'qualifyStopOnComplete' | 'phoneStopOnComplete'
+    | 'bookingAvailability';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
   useEffect(() => {
@@ -323,6 +377,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       // so undefined or false both mean "Continue AI + Notify Team".
       qualifyStopOnComplete: !!s?.goalQualifyStopOnComplete,
       phoneStopOnComplete:   !!s?.goalPhoneStopOnComplete,
+      // Defensive parsing — older saves without this key fall through to
+      // the Mon–Fri morning/afternoon default via normalizeBookingAvailability.
+      bookingAvailability: normalizeBookingAvailability(s?.bookingAvailability),
     };
   };
 
@@ -342,6 +399,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setQualificationCustomFields(first.qualificationCustomFields);
         setQualifyStopOnComplete(first.qualifyStopOnComplete);
         setPhoneStopOnComplete(first.phoneStopOnComplete);
+        setBookingAvailability(first.bookingAvailability);
       }
     } else {
       const cached = convCache.get(accountId);
@@ -356,6 +414,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setQualificationCustomFields(cached.qualificationCustomFields);
         setQualifyStopOnComplete(cached.qualifyStopOnComplete);
         setPhoneStopOnComplete(cached.phoneStopOnComplete);
+        setBookingAvailability(cached.bookingAvailability);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -388,6 +447,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setQualificationCustomFields(parsed.qualificationCustomFields);
             setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
             setPhoneStopOnComplete(parsed.phoneStopOnComplete);
+            setBookingAvailability(parsed.bookingAvailability);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
@@ -411,6 +471,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setQualificationCustomFields(parsed.qualificationCustomFields);
               setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
               setPhoneStopOnComplete(parsed.phoneStopOnComplete);
+              setBookingAvailability(parsed.bookingAvailability);
             }
           }
         })
@@ -462,6 +523,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     // Price keeps writing aiStopOnPriceAgreed via stopRules.price_agreed.
     if (fields.has('qualifyStopOnComplete')) payload.goalQualifyStopOnComplete = qualifyStopOnComplete;
     if (fields.has('phoneStopOnComplete'))   payload.goalPhoneStopOnComplete   = phoneStopOnComplete;
+    if (fields.has('bookingAvailability'))   payload.bookingAvailability       = bookingAvailability;
 
     // Optimistic cache update — merge ONLY the changed fields onto each
     // account's existing cached values. Don't replace the whole object, or
@@ -475,6 +537,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           stopRules, takeover,
           qualificationRequiredFields, qualificationCustomFields,
           qualifyStopOnComplete, phoneStopOnComplete,
+          bookingAvailability,
         });
         return;
       }
@@ -504,6 +567,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       }
       if (fields.has('qualifyStopOnComplete')) next.qualifyStopOnComplete = qualifyStopOnComplete;
       if (fields.has('phoneStopOnComplete'))   next.phoneStopOnComplete   = phoneStopOnComplete;
+      if (fields.has('bookingAvailability'))   next.bookingAvailability   = bookingAvailability;
       convCache.set(id, next);
     });
 
@@ -605,7 +669,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete]);
+  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete, bookingAvailability]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -685,6 +749,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     dirtyRef.current = true;
     dirtyFieldsRef.current.add('qualificationCustomFields');
     setQualificationCustomFields(prev => prev.filter(f => f.id !== id));
+  };
+
+  // Booking-availability toggle. Each click flips one (day, period) cell
+  // and marks the whole blob dirty — the backend save handler replaces
+  // bookingAvailability wholesale, so partial-key writes aren't a thing.
+  const toggleBookingDayPeriod = (day: BookingDayKey, period: 'morning' | 'afternoon') => {
+    dirtyRef.current = true;
+    dirtyFieldsRef.current.add('bookingAvailability');
+    setBookingAvailability(prev => ({
+      ...prev,
+      [day]: { ...prev[day], [period]: !prev[day][period] },
+    }));
   };
 
   // V2.1 (2026-06-13): Goal completion behavior is now an account-level
@@ -823,6 +899,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         addCustomField={addCustomField}
         updateCustomField={updateCustomField}
         removeCustomField={removeCustomField}
+        bookingAvailability={bookingAvailability}
+        toggleBookingDayPeriod={toggleBookingDayPeriod}
       />
 
       {/* ───── 2.5 Goal Completion Behavior — account-level (V2.1 2026-06-13) ─
@@ -1144,6 +1222,7 @@ function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
   qualificationRequiredFields, toggleQualificationField,
   qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
+  bookingAvailability, toggleBookingDayPeriod,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
@@ -1155,17 +1234,19 @@ function GoalSetupCard({
   addCustomField: () => void;
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
   removeCustomField: (id: string) => void;
+  bookingAvailability: BookingAvailability;
+  toggleBookingDayPeriod: (day: BookingDayKey, period: 'morning' | 'afternoon') => void;
 }) {
   // Auto + Call Handoff goals have no per-goal setup card per design —
   // Auto routes to whichever sub-goal applies, Call Handoff behavior is
-  // fully driven by the global rules. Booking renders an info-only blurb
-  // (no extra fields today; booking-critical Qualify fields like address
-  // and zip are configured under the Qualify goal). Only Price and
-  // Qualify render dedicated setup cards.
+  // fully driven by the global rules. Booking renders an availability
+  // editor (the AI uses the enabled day/period windows when offering two
+  // slots to the customer). Only Price and Qualify render dedicated
+  // setup cards beyond that.
   if (strategy === 'booking') {
     return (
       <SectionCard padding="22px 24px 22px">
-        <div style={{ marginBottom: 10 }}>
+        <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             Booking goal setup
           </div>
@@ -1176,10 +1257,34 @@ function GoalSetupCard({
             asks for a call.
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 8, lineHeight: 1.5 }}>
-            Booking-critical fields (address, zip, desired service date)
-            are configured under the <strong>Qualify</strong> goal —
+            Booking-critical Qualify fields (address, zip, desired service
+            date) are configured under the <strong>Qualify</strong> goal —
             anything ticked there is also collected before AI tries to
             book.
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Available booking windows
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>
+            Pick the day/time windows the team can take bookings. AI
+            offers two of these when asking the customer for a date.
+            Turn a row off to skip that day entirely.
+          </div>
+
+          <div style={{ marginTop: 12, display: 'grid', rowGap: 6 }}>
+            {BOOKING_DAY_KEYS.map(day => (
+              <BookingDayRow
+                key={day}
+                label={BOOKING_DAY_LABELS[day]}
+                morningOn={bookingAvailability[day].morning}
+                afternoonOn={bookingAvailability[day].afternoon}
+                onMorningToggle={() => toggleBookingDayPeriod(day, 'morning')}
+                onAfternoonToggle={() => toggleBookingDayPeriod(day, 'afternoon')}
+              />
+            ))}
           </div>
         </div>
       </SectionCard>
@@ -1329,6 +1434,73 @@ function RequiredInfoCheckbox({
         )}
       </span>
       <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</span>
+    </button>
+  );
+}
+
+// ─── Booking-availability day row ─────────────────────────────────────────
+// One weekday row with two pill toggles (Morning / Afternoon). Used in
+// the Booking goal setup card. Visually mirrors the Required-info
+// checkbox tile but with two side-by-side period toggles to the right
+// of the day label.
+function BookingDayRow({
+  label, morningOn, afternoonOn, onMorningToggle, onAfternoonToggle,
+}: {
+  label: string;
+  morningOn: boolean;
+  afternoonOn: boolean;
+  onMorningToggle: () => void;
+  onAfternoonToggle: () => void;
+}) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '64px 1fr 1fr',
+      gap: 10, alignItems: 'center',
+      padding: '8px 12px',
+      background: 'var(--lb-surface)',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-2)', letterSpacing: '0.02em', textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)' }}>
+        {label}
+      </div>
+      <BookingPeriodPill on={morningOn}   label="Morning"   onClick={onMorningToggle}   />
+      <BookingPeriodPill on={afternoonOn} label="Afternoon" onClick={onAfternoonToggle} />
+    </div>
+  );
+}
+
+function BookingPeriodPill({
+  on, label, onClick,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '8px 12px',
+        background: on ? '#eff6ff' : 'white',
+        border: '1.5px solid ' + (on ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        borderRadius: 999,
+        cursor: 'pointer', fontFamily: 'inherit',
+        fontSize: 12.5, fontWeight: 600,
+        color: on ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
+        transition: 'border-color 120ms, background 120ms, color 120ms',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      }}
+    >
+      <span
+        style={{
+          width: 8, height: 8, borderRadius: 999,
+          background: on ? 'var(--lb-accent)' : '#cbd5e1',
+        }}
+      />
+      {label}
     </button>
   );
 }

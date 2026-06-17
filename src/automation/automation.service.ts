@@ -2308,19 +2308,31 @@ export class AutomationService implements OnModuleInit {
         // (the qualify-strategy prompt's hardcoded priority continues to drive
         // the conversation). See src/ai/qualification-context.ts.
         const { buildQualificationBlockForStrategy } = require('../ai/qualification-context');
+        const { buildAvailabilityBlockForStrategy } = require('../ai/booking-availability');
         let qualificationRequiredFields: unknown = undefined;
         let qualificationCustomFields: unknown = undefined;
+        let bookingAvailabilityRaw: unknown = undefined;
         if (account?.followUpSettingsJson) {
           try {
             const s = JSON.parse(account.followUpSettingsJson);
             qualificationRequiredFields = s?.qualificationV2?.requiredFields;
             qualificationCustomFields = s?.qualificationV2?.customFields;
+            bookingAvailabilityRaw = s?.bookingAvailability;
           } catch { /* invalid JSON */ }
         }
         const qualificationBlock: string = buildQualificationBlockForStrategy(
           effectiveStrategyKey,
           qualificationRequiredFields,
           qualificationCustomFields,
+        );
+        // AVAILABILITY block — only injected when goal is 'booking'. When
+        // the tenant has nothing saved, the normalizer falls back to
+        // DEFAULT_BOOKING_AVAILABILITY (Mon–Fri morning + afternoon) so
+        // the AI always sees a sensible windows list. See
+        // src/ai/booking-availability.ts.
+        const availabilityBlock: string = buildAvailabilityBlockForStrategy(
+          effectiveStrategyKey,
+          bookingAvailabilityRaw,
         );
 
         // Generate reply via OpenAI. Pass current time + timezone so the model
