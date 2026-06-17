@@ -992,7 +992,14 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
 type PricingItem = {
   key: string;
   label: string;
+  // Default-column price. Preserved across the rollout so old shapes
+  // without `prices` keep working — the table treats this value as the
+  // amount under the "Price" column.
   price: number;
+  // Per-extra-column overrides — `{ premium: 199, vip: 249 }`. The
+  // default column stays in `price`, so the editor only reads/writes
+  // this map for columns the operator explicitly added.
+  prices?: Record<string, number>;
   source?: string;
   unit?: string;
   notes?: string;
@@ -1003,6 +1010,10 @@ type PricingShape = {
   pricingModel?: 'bed_bath_grid' | 'item_quantity' | 'flat_rate' | 'hourly';
   included?: string[];
   items?: PricingItem[];
+  // Additional price columns beyond the default "Price". Each name is
+  // BOTH the display label and the key into `item.prices`. Storage is
+  // optional — undefined means single-column (back-compat).
+  columns?: string[];
   addOns?: unknown[];
   currency?: string;
   laborRate?: number;
@@ -1011,6 +1022,10 @@ type PricingShape = {
   notes?: string;
   [key: string]: unknown;
 };
+
+// Per the spec the default column is unlabeled ("Price"). All other
+// columns get the operator-chosen label in uppercase as a chip tag.
+const DEFAULT_PRICE_COLUMN = 'Price';
 
 type PricingMode = 'item_quantity' | 'hourly' | 'json';
 
@@ -1043,10 +1058,68 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
     return parsed?.items ?? [];
   }, [value, mode]);
 
+  const extraColumns: string[] = useMemo(() => {
+    if (mode !== 'item_quantity') return [];
+    const parsed = decidePricingMode(value).parsed;
+    const cols = parsed?.columns;
+    return Array.isArray(cols) ? cols.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
+  }, [value, mode]);
+
   const writeItems = (next: PricingItem[]) => {
     const base: PricingShape = decidePricingMode(value).parsed ?? { pricingModel: 'item_quantity' };
     const out: PricingShape = { ...base, pricingModel: 'item_quantity', items: next };
     onChange(JSON.stringify(out, null, 2));
+  };
+
+  const writeColumns = (nextCols: string[], nextItems?: PricingItem[]) => {
+    const base: PricingShape = decidePricingMode(value).parsed ?? { pricingModel: 'item_quantity' };
+    const out: PricingShape = {
+      ...base,
+      pricingModel: 'item_quantity',
+      columns: nextCols.length > 0 ? nextCols : undefined,
+      items: nextItems ?? base.items ?? [],
+    };
+    onChange(JSON.stringify(out, null, 2));
+  };
+
+  // Operator types the column name in an inline prompt — kept simple
+  // so we don't have to build a modal for what's effectively a label
+  // input. Duplicates collapse to the existing column; empty names are
+  // rejected. New columns default to 0 across every existing row.
+  const addColumn = () => {
+    const name = window.prompt('Column name (e.g. Premium, VIP, Bulk discount):');
+    if (!name) return;
+    const trimmed = name.trim().slice(0, 32);
+    if (!trimmed) return;
+    if (trimmed.toLowerCase() === DEFAULT_PRICE_COLUMN.toLowerCase()) return;
+    if (extraColumns.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return;
+    const nextCols = [...extraColumns, trimmed];
+    const nextItems = items.map((it) => ({
+      ...it,
+      prices: { ...(it.prices ?? {}), [trimmed]: 0 },
+    }));
+    writeColumns(nextCols, nextItems);
+  };
+
+  const removeColumn = (col: string) => {
+    if (!window.confirm(`Remove the "${col}" column? Any prices in that column will be discarded.`)) return;
+    const nextCols = extraColumns.filter((c) => c !== col);
+    const nextItems = items.map((it) => {
+      if (!it.prices) return it;
+      const { [col]: _drop, ...rest } = it.prices;
+      void _drop;
+      return { ...it, prices: Object.keys(rest).length > 0 ? rest : undefined };
+    });
+    writeColumns(nextCols, nextItems);
+  };
+
+  const updateItemColumnPrice = (idx: number, col: string, amount: number) => {
+    const nextItems = items.map((it, i) => {
+      if (i !== idx) return it;
+      const prices = { ...(it.prices ?? {}), [col]: amount };
+      return { ...it, prices };
+    });
+    writeItems(nextItems);
   };
 
   const hourly: PricingShape = useMemo(() => {
@@ -1093,9 +1166,22 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
 
   const addItem = () => {
     const idx = items.length + 1;
+    const seededPrices =
+      extraColumns.length > 0
+        ? Object.fromEntries(extraColumns.map((c) => [c, 0]))
+        : undefined;
     writeItems([
       ...items,
-      { key: `item_${idx}`, label: 'New item', price: 0, unit: '', notes: '', active: true, source: 'manual' },
+      {
+        key: `item_${idx}`,
+        label: 'New item',
+        price: 0,
+        prices: seededPrices,
+        unit: '',
+        notes: '',
+        active: true,
+        source: 'manual',
+      },
     ]);
   };
 
@@ -1176,7 +1262,7 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
             </div>
           ) : (
             <>
-              {/* Header row */}
+              {/* Header row — Item | <default Price> | <extra cols...> */}
               <div
                 style={{
                   display: 'flex',
@@ -1192,7 +1278,41 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
                 }}
               >
                 <span style={{ flex: 1 }}>Item</span>
-                <span>Price</span>
+                <span style={{ minWidth: 80, textAlign: 'right' }}>Price</span>
+                {extraColumns.map((col) => (
+                  <span
+                    key={col}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      minWidth: 90,
+                      justifyContent: 'flex-end',
+                    }}
+                  >
+                    {col}
+                    <button
+                      type="button"
+                      onClick={() => removeColumn(col)}
+                      title={`Remove ${col} column`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 16,
+                        height: 16,
+                        borderRadius: 999,
+                        border: 0,
+                        background: 'transparent',
+                        color: 'var(--lb-ink-5, #64748b)',
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
                 <span style={{ width: 28 }} />
               </div>
               {items.map((it, idx) => (
@@ -1204,16 +1324,35 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
                   onChangeSub={(v) => updateItem(idx, { unit: v })}
                   onRemove={() => removeItem(idx)}
                   chips={
-                    <PriceChip
-                      amount={it.price}
-                      editable
-                      onChange={(v) => updateItem(idx, { price: v })}
-                    />
+                    <>
+                      <PriceChip
+                        amount={it.price}
+                        editable
+                        onChange={(v) => updateItem(idx, { price: v })}
+                      />
+                      {extraColumns.map((col) => (
+                        <PriceChip
+                          key={col}
+                          amount={it.prices?.[col] ?? 0}
+                          tag={col}
+                          editable
+                          onChange={(v) => updateItemColumnPrice(idx, col, v)}
+                        />
+                      ))}
+                    </>
                   }
                 />
               ))}
-              <div style={{ padding: '12px 14px 4px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  padding: '12px 14px 4px',
+                }}
+              >
                 <UnifiedAddRowButton label="Add row" onClick={addItem} />
+                <UnifiedAddRowButton label="Add column" onClick={addColumn} />
               </div>
             </>
           )}
