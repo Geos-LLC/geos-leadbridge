@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Layers, Plus, Loader2, X, Check, ArrowLeft, Edit3, Archive,
   CheckCircle2, Copy, Sparkles, MapPin, Trash2, Save,
-  Code2, Table2, ShieldAlert, ListChecks, AlertTriangle,
+  Code2, Table2, Clock, ShieldAlert, ListChecks, AlertTriangle,
 } from 'lucide-react';
 import { SettingCard } from '../../components/automation/ui';
 import { notify } from '../../store/notificationStore';
@@ -994,14 +994,19 @@ type PricingItem = {
 };
 
 type PricingShape = {
-  pricingModel?: 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
+  pricingModel?: 'bed_bath_grid' | 'item_quantity' | 'flat_rate' | 'hourly';
   included?: string[];
   items?: PricingItem[];
   addOns?: unknown[];
+  currency?: string;
+  laborRate?: number;
+  minimumCharge?: number;
+  quoteRequired?: boolean;
+  notes?: string;
   [key: string]: unknown;
 };
 
-type PricingMode = 'item_quantity' | 'json';
+type PricingMode = 'item_quantity' | 'hourly' | 'json';
 
 function decidePricingMode(value: string): { mode: PricingMode; parsed: PricingShape | null } {
   if (!value || value.trim().length === 0) {
@@ -1012,6 +1017,7 @@ function decidePricingMode(value: string): { mode: PricingMode; parsed: PricingS
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const p = parsed as PricingShape;
       if (p.pricingModel === 'item_quantity') return { mode: 'item_quantity', parsed: p };
+      if (p.pricingModel === 'hourly') return { mode: 'hourly', parsed: p };
       return { mode: 'json', parsed: p };
     }
     return { mode: 'json', parsed: null };
@@ -1044,6 +1050,43 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
     onChange(JSON.stringify(out, null, 2));
   };
 
+  const hourly: PricingShape = useMemo(() => {
+    if (mode !== 'hourly') return {};
+    return decidePricingMode(value).parsed ?? { pricingModel: 'hourly' };
+  }, [value, mode]);
+
+  const writeHourly = (patch: Partial<PricingShape>) => {
+    const base: PricingShape = decidePricingMode(value).parsed ?? { pricingModel: 'hourly' };
+    const out: PricingShape = { ...base, pricingModel: 'hourly', ...patch };
+    onChange(JSON.stringify(out, null, 2));
+  };
+
+  const switchTo = (next: PricingMode) => {
+    if (next === mode) return;
+    if (next === 'hourly') {
+      const base: PricingShape = decidePricingMode(value).parsed ?? {};
+      const out: PricingShape = {
+        ...base,
+        pricingModel: 'hourly',
+        currency: base.currency ?? 'USD',
+        laborRate: typeof base.laborRate === 'number' ? base.laborRate : 100,
+        minimumCharge: typeof base.minimumCharge === 'number' ? base.minimumCharge : 100,
+        quoteRequired: typeof base.quoteRequired === 'boolean' ? base.quoteRequired : true,
+        notes: typeof base.notes === 'string' ? base.notes : '',
+      };
+      onChange(JSON.stringify(out, null, 2));
+    } else if (next === 'item_quantity') {
+      const base: PricingShape = decidePricingMode(value).parsed ?? {};
+      const out: PricingShape = {
+        ...base,
+        pricingModel: 'item_quantity',
+        items: Array.isArray(base.items) ? base.items : [],
+      };
+      onChange(JSON.stringify(out, null, 2));
+    }
+    setMode(next);
+  };
+
   const updateItem = (idx: number, patch: Partial<PricingItem>) => {
     const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     writeItems(next);
@@ -1074,10 +1117,17 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
         <button
           type="button"
-          onClick={() => setMode('item_quantity')}
+          onClick={() => switchTo('item_quantity')}
           style={mode === 'item_quantity' ? toggleBtnActive : toggleBtn}
         >
           <Table2 size={13} /> Item table
+        </button>
+        <button
+          type="button"
+          onClick={() => switchTo('hourly')}
+          style={mode === 'hourly' ? toggleBtnActive : toggleBtn}
+        >
+          <Clock size={13} /> Hourly
         </button>
         <button
           type="button"
@@ -1202,6 +1252,78 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {mode === 'hourly' && (
+        <div>
+          <div style={hint}>
+            Labor rate and minimum charge the AI uses when describing pricing. The AI defers a final
+            quote when <em>Quote required</em> is on.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 8 }}>
+            <div>
+              <div style={miniLabel}>Currency</div>
+              <input
+                type="text"
+                value={hourly.currency ?? 'USD'}
+                onChange={(e) => writeHourly({ currency: e.target.value.toUpperCase().slice(0, 6) })}
+                style={textInput}
+                placeholder="USD"
+              />
+            </div>
+            <div>
+              <div style={miniLabel}>Labor rate ($ / hour)</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={Number.isFinite(hourly.laborRate as number) ? (hourly.laborRate as number) : 0}
+                onChange={(e) => writeHourly({ laborRate: Number(e.target.value) || 0 })}
+                style={textInput}
+              />
+            </div>
+            <div>
+              <div style={miniLabel}>Minimum charge ($)</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={Number.isFinite(hourly.minimumCharge as number) ? (hourly.minimumCharge as number) : 0}
+                onChange={(e) => writeHourly({ minimumCharge: Number(e.target.value) || 0 })}
+                style={textInput}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                color: 'var(--lb-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={hourly.quoteRequired !== false}
+                onChange={(e) => writeHourly({ quoteRequired: e.target.checked })}
+              />
+              Quote required — the AI must defer a final price until the owner confirms scope.
+            </label>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <div style={miniLabel}>Notes (optional)</div>
+            <textarea
+              value={hourly.notes ?? ''}
+              onChange={(e) => writeHourly({ notes: e.target.value })}
+              rows={3}
+              style={{ ...codeArea, marginTop: 4 }}
+              placeholder="e.g. Final pricing depends on the scope, complexity, and location of the job."
+            />
+          </div>
         </div>
       )}
 
