@@ -621,7 +621,11 @@ export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void;
   const handleCreate = async (preset: ServiceProfilePreset) => {
     setCreatingKey(preset.key);
     try {
-      await serviceProfilePresetsApi.createFromPreset(preset.key);
+      await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'admin_template'
+          ? { templateId: preset.templateId! }
+          : { presetKey: preset.presetKey ?? preset.key },
+      );
       notify.success('Service profile created', `${preset.label} is in draft. Click Activate when ready.`);
       onCreated();
     } catch (err: any) {
@@ -671,12 +675,25 @@ export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void;
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
                   <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
                   <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
-                    <span>{p.pricingJson.items?.length ?? 0} items</span>
-                    <span>{p.qualificationSchemaJson.questions.length} questions</span>
-                    <span>{p.faqJson.customQA.length} FAQs</span>
+                    <span>{p.pricingJson?.items?.length ?? p.pricingJson?.basePrices?.length ?? 0} items</span>
+                    <span>
+                      {(p.qualificationSchemaJson?.questions.length
+                        ?? p.serviceOptionsJson?.groups.length
+                        ?? 0)} questions
+                    </span>
+                    <span>
+                      {(p.faqJson?.customQA.length
+                        ?? p.customerAnswersJson?.entries.length
+                        ?? 0)} answers
+                    </span>
                     {p.serviceRules && (
                       <span style={{ color: '#b45309', fontWeight: 600 }}>
                         + service rules
+                      </span>
+                    )}
+                    {p.source === 'admin_template' && (
+                      <span style={{ color: '#2563eb', fontWeight: 600 }}>
+                        via admin
                       </span>
                     )}
                     <span>via {p.provider}</span>
@@ -769,7 +786,11 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
   const handleCreatePreset = async (preset: ServiceProfilePreset) => {
     setCreatingKey(preset.key);
     try {
-      await serviceProfilePresetsApi.createFromPreset(preset.key);
+      await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'admin_template'
+          ? { templateId: preset.templateId! }
+          : { presetKey: preset.presetKey ?? preset.key },
+      );
       notify.success('Service created', `${preset.label} is in draft. Click Activate when ready.`);
       onCreated();
     } catch (err: any) {
@@ -958,11 +979,22 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
                       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
                       <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
                       <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
-                        <span>{p.pricingJson.items?.length ?? 0} items</span>
-                        <span>{p.qualificationSchemaJson.questions.length} questions</span>
-                        <span>{p.faqJson.customQA.length} FAQs</span>
+                        <span>{p.pricingJson?.items?.length ?? p.pricingJson?.basePrices?.length ?? 0} items</span>
+                        <span>
+                          {(p.qualificationSchemaJson?.questions.length
+                            ?? p.serviceOptionsJson?.groups.length
+                            ?? 0)} questions
+                        </span>
+                        <span>
+                          {(p.faqJson?.customQA.length
+                            ?? p.customerAnswersJson?.entries.length
+                            ?? 0)} answers
+                        </span>
                         {p.serviceRules && (
                           <span style={{ color: '#b45309', fontWeight: 600 }}>+ service rules</span>
+                        )}
+                        {p.source === 'admin_template' && (
+                          <span style={{ color: '#2563eb', fontWeight: 600 }}>via admin</span>
                         )}
                         <span>via {p.provider}</span>
                       </div>

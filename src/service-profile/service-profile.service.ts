@@ -42,6 +42,7 @@ import {
 } from './service-profile.types';
 import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
+import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
 
 /**
  * Per-field source tracking for telemetry. The top-level `source` field
@@ -62,7 +63,10 @@ type FieldSources = {
 export class ServiceProfileService {
   private readonly logger = new Logger(ServiceProfileService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly adminTemplates: AdminServiceTemplatesService,
+  ) {}
 
   /**
    * Main entry point. Picks a ServiceProfile for the lead, merges
@@ -353,6 +357,103 @@ export class ServiceProfileService {
         faqJson: payload.faqJson,
         qualificationSchemaJson: payload.qualificationSchemaJson,
         aiInstructionsJson: payload.aiInstructionsJson,
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+      },
+    });
+  }
+
+  /**
+   * Create a new ServiceProfile row from a published admin template.
+   *
+   * The admin Service Template Builder stores rows in the v2 shape
+   * (serviceOptionsJson with grouped options, customerAnswersJson with
+   * entries[], single-string additionalInstructions). The existing
+   * ServiceProfile reader expects the v1 shapes (qualificationSchemaJson
+   * with `questions[]`, faqJson with `customQA[]`, aiInstructionsJson
+   * with the `{ version: 1, ... }` wrapper).
+   *
+   * We bridge at copy time so the runtime keeps working unchanged:
+   *   serviceOptions.groups[].options[{key,label}]  →  qualification.questions[].options[label]
+   *   customerAnswers.entries[]                     →  faq.customQA[]
+   *   additionalInstructions (string)               →  aiInstructionsJson { version: 1, additionalInstructions }
+   *
+   * pricingJson is stored verbatim — the v2 shape (basePrices/addOns)
+   * differs from any pricing model the existing engine recognises, so
+   * hydratePricing() returns an empty reference and the AI defers to
+   * the owner. Profile defaults to draft regardless so the AI auto-reply
+   * path is gated until the operator promotes it to active anyway.
+   *
+   * Status forced to 'draft' per spec — never auto-activate.
+   */
+  async createFromAdminTemplate(args: {
+    userId: string;
+    templateId: string;
+  }) {
+    const template = await this.adminTemplates.getPublishedById(args.templateId);
+    if (!template) {
+      const err: any = new Error('Published service template not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    // Derive a slug from the template label, deduped per user (same
+    // suffix dance as createBlank).
+    const baseSlug =
+      template.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48) || 'new-service';
+    let slug = baseSlug;
+    let suffix = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const existing = await this.prisma.serviceProfile.findUnique({
+        where: { userId_slug: { userId: args.userId, slug } },
+        select: { id: true },
+      });
+      if (!existing) break;
+      suffix += 1;
+      slug = `${baseSlug}-${suffix}`;
+      if (suffix > 999) break;
+    }
+
+    // Bridge v2 → v1 shapes.
+    const qualificationSchemaJson = bridgeServiceOptionsToQualification(
+      template.serviceOptionsJson,
+    );
+    const faqJson = bridgeCustomerAnswersToFaq(template.customerAnswersJson);
+    const aiInstructionsJson = bridgeAdditionalInstructions(template.additionalInstructions);
+
+    this.logger.log(
+      `[service-profile] createFromAdminTemplate userId=${args.userId} ` +
+      `templateId=${template.id} slug=${slug}`,
+    );
+
+    return this.prisma.serviceProfile.create({
+      data: {
+        userId: args.userId,
+        name: template.label,
+        slug,
+        status: 'draft',
+        isDefault: false,
+        providerCategoryMappingsJson: [
+          {
+            provider: template.provider,
+            providerCategoryId: template.providerCategoryId ?? undefined,
+            categoryName: template.providerCategoryName,
+          },
+        ] as any,
+        // pricingJson stored verbatim — see comment above.
+        pricingJson: template.pricingJson,
+        faqJson,
+        qualificationSchemaJson,
+        aiInstructionsJson,
       },
       select: {
         id: true,
@@ -974,4 +1075,102 @@ export class ServiceProfileService {
       defaultServiceProfileId: defaultId,
     };
   }
+}
+
+// ─── Admin template v2 → ServiceProfile v1 shape bridges ──────────────
+//
+// These helpers live outside the class because they're pure functions
+// with no DI / Prisma access. They translate the admin Service Template
+// Builder's v2 JSON blobs into the v1 shapes the runtime resolver +
+// prompt assembler already understand. Bridging at copy time keeps the
+// runtime untouched (no new shape branches in faq-context / pricing
+// engine / playbook renderer).
+//
+// Defensive on every input: malformed JSON returns a benign default,
+// never throws. The new profile is always created as draft, so even a
+// silently-broken bridge can be cleaned up by the operator before
+// activation.
+
+/**
+ * Admin serviceOptionsJson:
+ *   { groups: [{ key, label, type, options: [{ key, label }] }] }
+ * → ServiceProfile.qualificationSchemaJson (stored as stringified JSON):
+ *   { questions: [{ key, label, type, options: string[] }] }
+ *
+ * The runtime qualification reader walks `questions[]` with `options`
+ * as a flat string[] — we drop the per-option keys (the option labels
+ * are stable enough for the AI's purposes) and forward everything else.
+ */
+function bridgeServiceOptionsToQualification(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const groups = Array.isArray(parsed?.groups) ? parsed.groups : [];
+  const questions = groups
+    .map((g: any) => {
+      if (!g || typeof g !== 'object') return null;
+      const key = typeof g.key === 'string' ? g.key : '';
+      const label = typeof g.label === 'string' ? g.label : '';
+      const type =
+        g.type === 'single_select' || g.type === 'multi_select' ? g.type : 'multi_select';
+      const options = Array.isArray(g.options)
+        ? g.options
+            .map((o: any) => (typeof o?.label === 'string' ? o.label : null))
+            .filter((s: string | null): s is string => s !== null && s.length > 0)
+        : [];
+      if (!key || !label) return null;
+      return { key, label, type, options };
+    })
+    .filter((q: any): q is { key: string; label: string; type: string; options: string[] } => q !== null);
+  return JSON.stringify({ questions });
+}
+
+/**
+ * Admin customerAnswersJson:
+ *   { entries: [{ question, answer }] }
+ * → ServiceProfile.faqJson (stored as stringified JSON):
+ *   { customQA: [{ question, answer }] }
+ *
+ * The runtime FAQ reader walks `customQA[]`; renaming the wrapper key
+ * is all the bridge needs to do.
+ */
+function bridgeCustomerAnswersToFaq(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+  const customQA = entries
+    .map((e: any) => {
+      if (!e || typeof e !== 'object') return null;
+      const q = typeof e.question === 'string' ? e.question : '';
+      const a = typeof e.answer === 'string' ? e.answer : '';
+      if (!q || !a) return null;
+      return { question: q, answer: a };
+    })
+    .filter((e: any): e is { question: string; answer: string } => e !== null);
+  return JSON.stringify({ customQA });
+}
+
+/**
+ * Admin additionalInstructions (free-text) → ServiceProfile.aiInstructionsJson
+ * wrapper:
+ *   { version: 1, additionalInstructions: "..." }
+ *
+ * The existing wrapper already supports `serviceRules` under
+ * `{ version: 1, ... }`; we add an `additionalInstructions` key alongside
+ * (the playbook renderer ignores unknown keys today, which is exactly
+ * the read-side we want for now). A future PR can teach the renderer
+ * to inject this string into the AI prompt; until then it sits inert.
+ */
+function bridgeAdditionalInstructions(text: string | null | undefined): string | null {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) return null;
+  return JSON.stringify({ version: 1, additionalInstructions: text.trim() });
 }

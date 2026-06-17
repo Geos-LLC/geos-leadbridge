@@ -846,13 +846,27 @@ export const aiSettingsAssistantApi = {
   },
 };
 
+/**
+ * Merged preset shape — backend returns both curated code presets and
+ * admin-authored published templates from a single endpoint. Discriminate
+ * on `source`. Each variant exposes the legacy v1 keys it natively
+ * carries (code presets) or the v2 keys (admin templates); the picker
+ * reads whatever's populated and ignores the rest.
+ */
 export type ServiceProfilePreset = {
+  source: 'code_preset' | 'admin_template';
+  /** Curated code presets only — used when calling createFromPreset. */
+  presetKey?: string;
+  /** Admin DB templates only — used when calling createFromPreset. */
+  templateId?: string;
   key: string;
-  provider: 'thumbtack' | 'yelp' | 'manual';
+  provider: 'thumbtack' | 'yelp' | 'manual' | string;
   providerCategoryName: string;
+  providerCategoryId: string | null;
   label: string;
-  description: string;
+  description: string | null;
   aliases: string[];
+  // Curated code presets (v1). Admin templates return nulls here.
   qualificationSchemaJson: {
     questions: Array<{
       key: string;
@@ -860,27 +874,38 @@ export type ServiceProfilePreset = {
       type: 'multi_select' | 'single_select' | 'text' | 'number' | 'date';
       options?: string[];
     }>;
-  };
-  pricingJson: {
-    pricingModel: 'bed_bath_grid' | 'item_quantity' | 'flat_rate';
-    included?: string[];
-    items?: Array<{
-      key: string;
-      label: string;
-      price: number;
-      source: string;
-      unit?: string;
-      notes?: string;
-      active?: boolean;
-    }>;
-    addOns?: Array<{ key: string; label: string; price: number; source: string; quoteManually?: boolean }>;
-  };
-  faqJson: { customQA: Array<{ question: string; answer: string }> };
-  serviceRules?: {
+  } | null;
+  pricingJson:
+    | {
+        pricingModel: string;
+        included?: string[];
+        items?: Array<{ key: string; label: string; price: number; source: string; unit?: string; notes?: string; active?: boolean }>;
+        addOns?: Array<{ key: string; label: string; price: number; source: string; quoteManually?: boolean }>;
+        basePrices?: Array<{ quantity: number | null; label: string; price: number; source: string }>;
+        currency?: string;
+        laborRate?: number;
+        minimumCharge?: number;
+        quoteRequired?: boolean;
+        notes?: string;
+      }
+    | null;
+  faqJson: { customQA: Array<{ question: string; answer: string }> } | null;
+  serviceRules: {
     requiredDetails: string[];
     unsupportedServices: string[];
     workflowSteps: string[];
   } | null;
+  // Admin DB templates (v2). Code presets return nulls here.
+  serviceOptionsJson: {
+    groups: Array<{
+      key: string;
+      label: string;
+      type: 'single_select' | 'multi_select';
+      options: Array<{ key: string; label: string }>;
+    }>;
+  } | null;
+  customerAnswersJson: { entries: Array<{ question: string; answer: string }> } | null;
+  additionalInstructions: string | null;
 };
 
 export const serviceProfilePresetsApi = {
@@ -888,11 +913,116 @@ export const serviceProfilePresetsApi = {
     const { data } = await api.get('/v1/service-profile-presets');
     return data;
   },
+  /**
+   * Create a ServiceProfile from either a code preset or a published
+   * admin template. Pass `presetKey` for code presets, `templateId` for
+   * admin templates — backend rejects passing both.
+   */
   createFromPreset: async (
-    presetKey: string,
-    status?: 'draft' | 'active',
+    opts: { presetKey?: string; templateId?: string; status?: 'draft' | 'active' },
   ): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
-    const { data } = await api.post('/v1/service-profiles/from-preset', { presetKey, status });
+    const { data } = await api.post('/v1/service-profiles/from-preset', opts);
+    return data;
+  },
+};
+
+// ─── Admin Service Template Builder (admin only) ──────────────────────
+
+export type AdminServiceTemplate = {
+  id: string;
+  key: string;
+  label: string;
+  provider: string;
+  providerCategoryName: string;
+  providerCategoryId: string | null;
+  description: string | null;
+  serviceOptionsJson: string;
+  pricingJson: string;
+  customerAnswersJson: string;
+  additionalInstructions: string | null;
+  sourceJson: string | null;
+  status: 'draft' | 'published' | 'archived';
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminGeneratedTemplate = {
+  key: string;
+  label: string;
+  provider: string;
+  providerCategoryName: string;
+  providerCategoryId: string | null;
+  description: string | null;
+  serviceOptionsJson: unknown;
+  pricingJson: unknown;
+  customerAnswersJson: unknown;
+  additionalInstructions: string | null;
+  sourceJson: {
+    kind: 'admin_generated';
+    provider: string;
+    rawOptionsText: string;
+    rawPricingText: string;
+    notes?: string;
+    generatorVersion: number;
+    generatedAt: string;
+  };
+};
+
+export const adminServiceTemplatesApi = {
+  list: async (): Promise<{ templates: AdminServiceTemplate[] }> => {
+    const { data } = await api.get('/v1/admin/service-templates');
+    return data;
+  },
+  getOne: async (id: string): Promise<AdminServiceTemplate> => {
+    const { data } = await api.get(`/v1/admin/service-templates/${id}`);
+    return data;
+  },
+  generate: async (input: {
+    serviceName: string;
+    provider: string;
+    providerCategoryName: string;
+    providerCategoryId?: string | null;
+    notes?: string | null;
+    rawOptionsText: string;
+    rawPricingText: string;
+  }): Promise<{ generated: AdminGeneratedTemplate }> => {
+    const { data } = await api.post('/v1/admin/service-templates/generate', input);
+    return data;
+  },
+  create: async (
+    input: AdminGeneratedTemplate & { keyOverride?: string | null },
+  ): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post('/v1/admin/service-templates', input);
+    return data;
+  },
+  patch: async (
+    id: string,
+    patch: Partial<{
+      label: string;
+      provider: string;
+      providerCategoryName: string;
+      providerCategoryId: string | null;
+      description: string | null;
+      serviceOptionsJson: unknown;
+      pricingJson: unknown;
+      customerAnswersJson: unknown;
+      additionalInstructions: string | null;
+    }>,
+  ): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.patch(`/v1/admin/service-templates/${id}`, patch);
+    return data;
+  },
+  publish: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/publish`);
+    return data;
+  },
+  archive: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/archive`);
+    return data;
+  },
+  demoteToDraft: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/draft`);
     return data;
   },
 };

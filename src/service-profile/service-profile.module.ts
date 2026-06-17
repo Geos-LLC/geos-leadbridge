@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ServiceProfileService } from './service-profile.service';
 import { ServiceProfileController } from './service-profile.controller';
+import { AdminServiceTemplatesModule } from '../admin/service-templates/admin-service-templates.module';
 
 /**
  * ServiceProfileService is a read-side helper consumed by the AI
@@ -15,6 +16,7 @@ import { ServiceProfileController } from './service-profile.controller';
  * dependency-light.
  */
 @Module({
+  imports: [AdminServiceTemplatesModule],
   controllers: [ServiceProfileController],
   providers: [ServiceProfileService],
   exports: [ServiceProfileService],

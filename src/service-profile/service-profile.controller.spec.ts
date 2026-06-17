@@ -14,6 +14,14 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ServiceProfileController } from './service-profile.controller';
 import { ServiceProfileService } from './service-profile.service';
 
+/** Stub for the AdminServiceTemplatesService dep — these tests don't
+ *  exercise the admin-template path. listPublished returns an empty
+ *  array so the merged listing still works. */
+const ADMIN_TEMPLATES_STUB: any = {
+  listPublished: jest.fn(async () => []),
+  getPublishedById: jest.fn(async () => null),
+};
+
 function buildSvcMock(opts: {
   createReturn?: any;
   createThrows?: any;
@@ -49,26 +57,61 @@ function buildSvcMock(opts: {
 const USER_REQ = { user: { id: 'user-1' } } as any;
 
 describe('ServiceProfileController.list', () => {
-  it('returns the curated registry with full preset shape', () => {
-    const c = new ServiceProfileController(buildSvcMock());
-    const out = c.list();
+  it('returns the curated registry with full preset shape', async () => {
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
+    const out = await c.list();
     expect(Array.isArray(out.presets)).toBe(true);
     expect(out.presets.length).toBeGreaterThan(0);
-    const upholstery = out.presets.find((p: any) => p.key === 'upholstery_furniture_cleaning');
+    const upholstery = out.presets.find((p: any) => p.key === 'upholstery_furniture_cleaning') as any;
     expect(upholstery).toBeDefined();
-    expect(upholstery!.label).toBe('Upholstery and Furniture Cleaning');
-    expect(upholstery!.providerCategoryName).toBe('Upholstery and Furniture Cleaning');
-    expect(upholstery!.aliases).toContain('furniture cleaning');
-    expect(upholstery!.pricingJson.pricingModel).toBe('item_quantity');
-    expect(upholstery!.qualificationSchemaJson.questions).toHaveLength(4);
-    expect(upholstery!.faqJson.customQA).toHaveLength(4);
+    expect(upholstery.source).toBe('code_preset');
+    expect(upholstery.presetKey).toBe('upholstery_furniture_cleaning');
+    expect(upholstery.label).toBe('Upholstery and Furniture Cleaning');
+    expect(upholstery.providerCategoryName).toBe('Upholstery and Furniture Cleaning');
+    expect(upholstery.aliases).toContain('furniture cleaning');
+    expect(upholstery.pricingJson.pricingModel).toBe('item_quantity');
+    expect(upholstery.qualificationSchemaJson.questions).toHaveLength(4);
+    expect(upholstery.faqJson.customQA).toHaveLength(4);
+  });
+
+  it('merges published admin templates into the listing', async () => {
+    const adminStub: any = {
+      listPublished: jest.fn(async () => [
+        {
+          source: 'admin_template' as const,
+          templateId: 't-1',
+          key: 'admin_template_key',
+          label: 'Admin Template',
+          provider: 'thumbtack',
+          providerCategoryName: 'House Cleaning',
+          providerCategoryId: null,
+          description: null,
+          serviceOptionsJson: { groups: [] },
+          pricingJson: {
+            pricingModel: 'custom',
+            currency: 'USD',
+            basePrices: [],
+            addOns: [],
+          },
+          customerAnswersJson: { entries: [] },
+          additionalInstructions: null,
+        },
+      ]),
+      getPublishedById: jest.fn(),
+    };
+    const c = new ServiceProfileController(buildSvcMock(), adminStub);
+    const out = await c.list();
+    const admin = out.presets.find((p: any) => p.source === 'admin_template') as any;
+    expect(admin).toBeDefined();
+    expect(admin.templateId).toBe('t-1');
+    expect(admin.label).toBe('Admin Template');
   });
 });
 
 describe('ServiceProfileController.createFromPreset', () => {
   it('creates a draft profile by default and returns the slim record', async () => {
     const svc = buildSvcMock();
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     const out = await c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' });
     expect(out).toEqual({
       profileId: 'profile-1',
@@ -87,7 +130,7 @@ describe('ServiceProfileController.createFromPreset', () => {
     const svc = buildSvcMock({
       createReturn: { id: 'p', name: 'X', slug: 'x', status: 'active' },
     });
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     const out = await c.createFromPreset(USER_REQ, {
       presetKey: 'upholstery_furniture_cleaning',
       status: 'active',
@@ -97,19 +140,19 @@ describe('ServiceProfileController.createFromPreset', () => {
   });
 
   it('throws 400 when presetKey is missing', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(c.createFromPreset(USER_REQ, {} as any)).rejects.toThrow(BadRequestException);
   });
 
   it('throws 400 when presetKey is unknown', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(
       c.createFromPreset(USER_REQ, { presetKey: 'does_not_exist' }),
     ).rejects.toThrow(/Unknown preset key/);
   });
 
   it('throws 400 when status is invalid', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(
       c.createFromPreset(USER_REQ, {
         presetKey: 'upholstery_furniture_cleaning',
@@ -119,7 +162,7 @@ describe('ServiceProfileController.createFromPreset', () => {
   });
 
   it('throws 400 when no authenticated user', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(
       c.createFromPreset({ user: null } as any, {
         presetKey: 'upholstery_furniture_cleaning',
@@ -129,7 +172,7 @@ describe('ServiceProfileController.createFromPreset', () => {
 
   it('converts Prisma P2002 into a 409 ConflictException', async () => {
     const svc = buildSvcMock({ createThrows: Object.assign(new Error('unique'), { code: 'P2002' }) });
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
       c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' }),
     ).rejects.toThrow(ConflictException);
@@ -137,7 +180,7 @@ describe('ServiceProfileController.createFromPreset', () => {
 
   it('propagates non-P2002 errors unchanged', async () => {
     const svc = buildSvcMock({ createThrows: new Error('db down') });
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
       c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' }),
     ).rejects.toThrow(/db down/);
@@ -147,7 +190,7 @@ describe('ServiceProfileController.createFromPreset', () => {
 describe('ServiceProfileController.createBlankService', () => {
   it('creates a draft custom service and returns the slim record', async () => {
     const svc = buildSvcMock();
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     const out = await c.createBlankService(USER_REQ, { name: 'Roof inspection' });
     expect(out).toEqual({
       profileId: 'profile-blank-1',
@@ -163,33 +206,33 @@ describe('ServiceProfileController.createBlankService', () => {
 
   it('trims surrounding whitespace before passing to the service', async () => {
     const svc = buildSvcMock();
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await c.createBlankService(USER_REQ, { name: '   Mobile mechanic   ' });
     const call = (svc.createBlank as jest.Mock).mock.calls[0][0];
     expect(call.name).toBe('Mobile mechanic');
   });
 
   it('throws 400 when name is missing or empty', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(c.createBlankService(USER_REQ, {})).rejects.toThrow(BadRequestException);
     await expect(c.createBlankService(USER_REQ, { name: '' })).rejects.toThrow(BadRequestException);
     await expect(c.createBlankService(USER_REQ, { name: '   ' })).rejects.toThrow(BadRequestException);
   });
 
   it('throws 400 when name is longer than 80 characters', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     const longName = 'x'.repeat(81);
     await expect(c.createBlankService(USER_REQ, { name: longName })).rejects.toThrow(/80/);
   });
 
   it('accepts exactly 80 characters', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     const exactName = 'x'.repeat(80);
     await expect(c.createBlankService(USER_REQ, { name: exactName })).resolves.toBeDefined();
   });
 
   it('throws 400 when no authenticated user', async () => {
-    const c = new ServiceProfileController(buildSvcMock());
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(
       c.createBlankService({ user: null } as any, { name: 'Roof inspection' }),
     ).rejects.toThrow(BadRequestException);
@@ -199,7 +242,7 @@ describe('ServiceProfileController.createBlankService', () => {
     const svc = buildSvcMock({
       createBlankThrows: Object.assign(new Error('unique'), { code: 'P2002' }),
     });
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
       c.createBlankService(USER_REQ, { name: 'Roof inspection' }),
     ).rejects.toThrow(ConflictException);
@@ -207,7 +250,7 @@ describe('ServiceProfileController.createBlankService', () => {
 
   it('propagates non-P2002 errors unchanged', async () => {
     const svc = buildSvcMock({ createBlankThrows: new Error('db down') });
-    const c = new ServiceProfileController(svc);
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
       c.createBlankService(USER_REQ, { name: 'Roof inspection' }),
     ).rejects.toThrow(/db down/);
@@ -233,7 +276,7 @@ describe('ServiceProfileService.createFromPreset — integration with build help
         }),
       },
     };
-    const svc = new ServiceProfileService(prisma);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
     const out = await svc.createFromPreset({
       userId: 'user-1',
       preset: UPHOLSTERY_FURNITURE_CLEANING_PRESET,
@@ -402,7 +445,7 @@ describe('ServiceProfileController — management endpoints', () => {
         mkProfile({ id: 'p-draft', status: 'draft', name: 'Gamma' }),
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const out = await ctrl.listProfiles(REQ);
     expect(out.profiles.map((p: any) => p.id)).toEqual(['p-draft', 'p-active', 'p-arch']);
   });
@@ -411,7 +454,7 @@ describe('ServiceProfileController — management endpoints', () => {
     const prisma = buildMgmtPrismaMock({
       profiles: [mkProfile({ id: 'p-1', status: 'draft', pricingJson: '{"x":1}' })],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const updated = await ctrl.transitionStatus(REQ, 'p-1', { status: 'active' });
     expect((updated as any).status).toBe('active');
   });
@@ -422,7 +465,7 @@ describe('ServiceProfileController — management endpoints', () => {
         mkProfile({ id: 'p-1', status: 'draft', pricingJson: null, faqJson: null, qualificationSchemaJson: null }),
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(
       ctrl.transitionStatus(REQ, 'p-1', { status: 'active' }),
     ).rejects.toThrow(/Cannot activate/);
@@ -432,7 +475,7 @@ describe('ServiceProfileController — management endpoints', () => {
     const prisma = buildMgmtPrismaMock({
       profiles: [mkProfile({ id: 'p-1', status: 'active', isDefault: false })],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const updated = await ctrl.transitionStatus(REQ, 'p-1', { status: 'archived' });
     expect((updated as any).status).toBe('archived');
     expect((updated as any).archivedAt).toBeInstanceOf(Date);
@@ -449,7 +492,7 @@ describe('ServiceProfileController — management endpoints', () => {
       ],
       user: { defaultServiceProfileId: null },
     });
-    const svc = new ServiceProfileService(prisma);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
     await svc.resolveForLead(
       { id: 'l', userId: 'user-1', category: 'Cleaning', categoryId: null },
       null,
@@ -468,7 +511,7 @@ describe('ServiceProfileController — management endpoints', () => {
       profiles: [mkProfile({ id: 'p-default', status: 'active', isDefault: true })],
       user: { defaultServiceProfileId: 'p-default' },
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(
       ctrl.transitionStatus(REQ, 'p-default', { status: 'archived' }),
     ).rejects.toThrow(/Cannot archive default/);
@@ -482,7 +525,7 @@ describe('ServiceProfileController — management endpoints', () => {
       ],
       user: { defaultServiceProfileId: 'p-old' },
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const updated = await ctrl.transitionStatus(REQ, 'p-old', { status: 'archived' });
     expect((updated as any).status).toBe('archived');
   });
@@ -494,7 +537,7 @@ describe('ServiceProfileController — management endpoints', () => {
         { id: 'acct-tampa', userId: 'user-1', businessName: 'Tampa', platform: 'thumbtack', serviceOverridesJson: null },
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await ctrl.setOverride(REQ, 'p-1', 'acct-tampa', {
       pricingDeltasJson: '{"sofa":99}',
     });
@@ -510,7 +553,7 @@ describe('ServiceProfileController — management endpoints', () => {
         { id: 'acct-tampa', userId: 'user-1', businessName: 'Tampa', platform: 'thumbtack', serviceOverridesJson: seed },
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await ctrl.clearOverride(REQ, 'p-1', 'acct-tampa');
     expect(prisma._state.accounts[0].serviceOverridesJson).toBeNull();
   });
@@ -524,7 +567,7 @@ describe('ServiceProfileController — management endpoints', () => {
         { id: 'acct-jax',   userId: 'user-1', businessName: 'JAX',   platform: 'thumbtack', serviceOverridesJson: null },
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const out = await ctrl.listOverrides(REQ, 'p-1');
     expect(out.overrides.find((o: any) => o.savedAccountId === 'acct-tampa')!.hasOverride).toBe(true);
     expect(out.overrides.find((o: any) => o.savedAccountId === 'acct-jax')!.hasOverride).toBe(false);
@@ -534,7 +577,7 @@ describe('ServiceProfileController — management endpoints', () => {
     const prisma = buildMgmtPrismaMock({
       profiles: [mkProfile({ id: 'p-1', name: 'Upholstery', slug: 'upholstery', status: 'active' })],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const dup = await ctrl.duplicateProfile(REQ, 'p-1');
     expect((dup as any).slug).toBe('upholstery-copy');
     expect((dup as any).status).toBe('draft');
@@ -548,7 +591,7 @@ describe('ServiceProfileController — management endpoints', () => {
         mkProfile({ id: 'p-2', slug: 'upholstery-copy', status: 'draft' }),
       ],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const dup = await ctrl.duplicateProfile(REQ, 'p-1');
     expect((dup as any).slug).toBe('upholstery-copy-2');
   });
@@ -557,13 +600,13 @@ describe('ServiceProfileController — management endpoints', () => {
     const prisma = buildMgmtPrismaMock({
       profiles: [mkProfile({ id: 'p-other', userId: 'user-other' })],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.getProfile(REQ, 'p-other')).rejects.toThrow(/not found/);
   });
 
   it('updateProfile rejects empty name', async () => {
     const prisma = buildMgmtPrismaMock({ profiles: [mkProfile()] });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(
       ctrl.updateProfile(REQ, 'p-1', { name: '   ' }),
     ).rejects.toThrow(/Name cannot be empty/);
@@ -571,7 +614,7 @@ describe('ServiceProfileController — management endpoints', () => {
 
   it('updateProfile rejects mappings that are not an array', async () => {
     const prisma = buildMgmtPrismaMock({ profiles: [mkProfile()] });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(
       ctrl.updateProfile(REQ, 'p-1', { providerCategoryMappingsJson: { not: 'an array' } as any }),
     ).rejects.toThrow(/must be an array/);
@@ -582,7 +625,7 @@ describe('ServiceProfileController — management endpoints', () => {
       profiles: [mkProfile({ id: 'p-1', status: 'draft', isDefault: false })],
       user: { defaultServiceProfileId: null },
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     const out = await ctrl.deleteProfile(REQ, 'p-1');
     expect(out).toEqual({ id: 'p-1', deleted: true });
     expect(prisma._state.profiles).toHaveLength(0);
@@ -590,7 +633,7 @@ describe('ServiceProfileController — management endpoints', () => {
 
   it('deleteProfile: throws NotFoundException for unknown id', async () => {
     const prisma = buildMgmtPrismaMock({ profiles: [] });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.deleteProfile(REQ, 'missing')).rejects.toThrow(/not found/i);
   });
 
@@ -598,7 +641,7 @@ describe('ServiceProfileController — management endpoints', () => {
     const prisma = buildMgmtPrismaMock({
       profiles: [mkProfile({ id: 'p-other', userId: 'user-other' })],
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.deleteProfile(REQ, 'p-other')).rejects.toThrow(/not found/i);
     expect(prisma._state.profiles).toHaveLength(1);
   });
@@ -608,7 +651,7 @@ describe('ServiceProfileController — management endpoints', () => {
       profiles: [mkProfile({ id: 'p-def', isDefault: true })],
       user: { defaultServiceProfileId: null },
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.deleteProfile(REQ, 'p-def')).rejects.toThrow(BadRequestException);
     expect(prisma._state.profiles).toHaveLength(1);
   });
@@ -618,14 +661,14 @@ describe('ServiceProfileController — management endpoints', () => {
       profiles: [mkProfile({ id: 'p-pointed', isDefault: false })],
       user: { defaultServiceProfileId: 'p-pointed' },
     });
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.deleteProfile(REQ, 'p-pointed')).rejects.toThrow(BadRequestException);
     expect(prisma._state.profiles).toHaveLength(1);
   });
 
   it('deleteProfile: 400 when no authenticated user', async () => {
     const prisma = buildMgmtPrismaMock();
-    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB), ADMIN_TEMPLATES_STUB);
     await expect(ctrl.deleteProfile({ user: null } as any, 'p-1')).rejects.toThrow(/Authenticated user required/);
   });
 });

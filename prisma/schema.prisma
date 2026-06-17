@@ -236,7 +236,7 @@ model User {
   accountHealthStatuses       AccountHealthStatus[]
   onboardingProfile           OnboardingProfile?
   settingsChangeAuditLogs     SettingsChangeAuditLog[]
-  serviceProfiles             ServiceProfile[] @relation("UserOwnsServiceProfile")
+  serviceProfiles             ServiceProfile[]             @relation("UserOwnsServiceProfile")
 
   @@map("users")
 }
@@ -316,13 +316,13 @@ model Platform {
 // ==========================================
 
 model Lead {
-  id                     String    @id @default(uuid())
-  userId                 String
-  platform               String // "thumbtack" | "yelp" | etc.
-  businessId             String? // Platform's business ID (for multi-account filtering)
-  externalRequestId      String // Platform's unique lead/request ID
-  customerName           String
-  customerPhone          String?
+  id                      String    @id @default(uuid())
+  userId                  String
+  platform                String // "thumbtack" | "yelp" | etc.
+  businessId              String? // Platform's business ID (for multi-account filtering)
+  externalRequestId       String // Platform's unique lead/request ID
+  customerName            String
+  customerPhone           String?
   // Separate column for the Thumbtack-API "request_user_phone" digit string
   // that the customer typed into the body of a lead. Populated by
   // backfill-thumbtack-real-phone.ts and the live GET /negotiations adapter
@@ -637,40 +637,40 @@ model MessageTemplate {
 // ==========================================
 
 model SavedAccount {
-  id                          String   @id @default(uuid())
-  userId                      String
-  platform                    String // "thumbtack"
-  businessId                  String // Platform's business ID
-  businessName                String // Display name
-  emailHint                   String? // Email used for this account (optional hint)
-  imageUrl                    String? // Business logo URL
-  webhookId                   String? // Webhook subscription ID for this business
-  credentialsJson             String? // Encrypted: access_token, refresh_token for THIS account
-  agentPhoneOverride          String? // Per-business agent phone; when null, inherits User.businessPhone
+  id                            String   @id @default(uuid())
+  userId                        String
+  platform                      String // "thumbtack"
+  businessId                    String // Platform's business ID
+  businessName                  String // Display name
+  emailHint                     String? // Email used for this account (optional hint)
+  imageUrl                      String? // Business logo URL
+  webhookId                     String? // Webhook subscription ID for this business
+  credentialsJson               String? // Encrypted: access_token, refresh_token for THIS account
+  agentPhoneOverride            String? // Per-business agent phone; when null, inherits User.businessPhone
   // Follow-up settings (per-account)
-  followUpMode                String? // 'off' | 'suggest' | 'auto_send'
+  followUpMode                  String? // 'off' | 'suggest' | 'auto_send'
   // Removed from schema 2026-05-23 — `ai_conversation_enabled` column was
   // promoted to User-scope on 2026-05-23 (see User.aiConversationEnabled).
   // Kept as a schema-level read fallback for one release; that release has
   // shipped (PR #169 + downstream), so the column drop lives in the same
   // migration as `follow_ups_use_business_hours`. No code references the
   // SavedAccount.aiConversationEnabled column anymore.
-  followUpPreset              String? // 'conservative' | 'standard' | 'persistent'
-  followUpReplyType           String? // 'template' | 'ai'
-  followUpActiveHoursStart    String? // e.g. "09:00"
-  followUpActiveHoursEnd      String? // e.g. "21:00"
+  followUpPreset                String? // 'conservative' | 'standard' | 'persistent'
+  followUpReplyType             String? // 'template' | 'ai'
+  followUpActiveHoursStart      String? // e.g. "09:00"
+  followUpActiveHoursEnd        String? // e.g. "21:00"
   /// DEPRECATED — read via resolveTimezone(account, user); writes go to
   /// `timezoneOverride` below. Kept for one deploy cycle as a read fallback.
-  followUpTimezone            String? // e.g. "America/New_York"
+  followUpTimezone              String? // e.g. "America/New_York"
   // Single per-account override of the user's master timezone. Null = inherit
   // User.timezone. New code MUST resolve via resolveTimezone() (account-timezone.ts)
   // rather than reading any of the legacy *Timezone columns directly.
-  timezoneOverride            String?  @map("timezone_override")
-  followUpSettingsJson        String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
+  timezoneOverride              String?  @map("timezone_override")
+  followUpSettingsJson          String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Business-hours wiring (User.businessHours* is the master)
-  businessHoursOverride       Json?    @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
-  callDuringBusinessHours     Boolean  @default(true) @map("call_during_business_hours") // Instant Call gate
-  firstMsgDuringBusinessHours Boolean  @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
+  businessHoursOverride         Json?    @map("business_hours_override") // null = inherit User. { start, end, timezone, days }
+  callDuringBusinessHours       Boolean  @default(true) @map("call_during_business_hours") // Instant Call gate
+  firstMsgDuringBusinessHours   Boolean  @default(true) @map("first_msg_during_business_hours") // Instant Text first-msg gate
   // Removed from schema 2026-05-23 — `follow_ups_use_business_hours` column
   // had zero readers and zero writers in `src/` and `frontend/src/`. The
   // feature it described (follow-ups restricted to the master business-hours
@@ -680,15 +680,15 @@ model SavedAccount {
   // prod stays green.
   // When true, follow-ups skip during the User's master quiet-hours window.
   // Default true matches the "don't text at night" politeness convention.
-  followUpsApplyQuietHours    Boolean  @default(true) @map("follow_ups_apply_quiet_hours")
+  followUpsApplyQuietHours      Boolean  @default(true) @map("follow_ups_apply_quiet_hours")
   // AI Conversation mode — two states:
   //   "always"                      — AI replies 24/7
   //   "when_dispatcher_unavailable" — AI replies ONLY outside business hours (human takes over during)
-  aiConversationMode          String?  @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
+  aiConversationMode            String?  @default("when_dispatcher_unavailable") @map("ai_conversation_mode")
   // Service pricing configuration (JSON — per-account pricing table)
-  servicePricingJson          String?  @db.Text
+  servicePricingJson            String?  @db.Text
   // FAQ — per-account answers to common customer questions, injected as REFERENCE in AI prompts
-  faqJson                     String?  @db.Text
+  faqJson                       String?  @db.Text
   // Per-location/account deltas over the ServiceProfile base config.
   // Shape: { [serviceProfileId]: { pricingDeltasJson?, faqAdditionsJson?, ... } }
   // Backfill leaves this null — current readers fall through to the
@@ -696,7 +696,7 @@ model SavedAccount {
   // explicitly when a tenant wants Tampa rates to differ from JAX
   // rates etc. ServiceProfileService merges base + override at read
   // time; see src/service-profile/service-profile.service.ts.
-  serviceOverridesJson        String?  @db.Text
+  serviceOverridesJson          String?  @db.Text
   // PR-E — account ↔ service assignment layer. Lets operators declare
   // which ServiceProfiles a given account offers (since Thumbtack /
   // Yelp don't expose category lists at OAuth time).
@@ -715,9 +715,9 @@ model SavedAccount {
   //          returns ai_paused with reason 'setup_mismatch'.
   serviceProfileAssignmentsJson String?  @db.Text
   // Team — when set, org members can access this account
-  organizationId              String?
-  lastUsedAt                  DateTime @default(now())
-  createdAt                   DateTime @default(now())
+  organizationId                String?
+  lastUsedAt                    DateTime @default(now())
+  createdAt                     DateTime @default(now())
 
   // Relationships
   user                 User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -2220,16 +2220,16 @@ model PartnerLeadEvent {
 // are the raw string values pre/post-write (truncated to a few KB by
 // the writer, never logged for protected fields).
 model SettingsChangeAuditLog {
-  id             String   @id @default(uuid())
-  userId         String
-  savedAccountId String?
-  area           String   // 'business_information' | 'faq' | 'pricing_guidance' | 'brand_voice' | 'global_custom_instructions'
-  target         String   // storage key — section key for playbook writes, field name for User writes
-  operation      String   // 'append' | 'replace' | 'set' | 'add_faq'
-  userMessage    String   @db.Text // original natural-language request
-  proposalSummary String  @db.Text // one-line summary the assistant returned
-  beforeValue    String?  @db.Text
-  afterValue     String?  @db.Text
+  id               String   @id @default(uuid())
+  userId           String
+  savedAccountId   String?
+  area             String // 'business_information' | 'faq' | 'pricing_guidance' | 'brand_voice' | 'global_custom_instructions'
+  target           String // storage key — section key for playbook writes, field name for User writes
+  operation        String // 'append' | 'replace' | 'set' | 'add_faq'
+  userMessage      String   @db.Text // original natural-language request
+  proposalSummary  String   @db.Text // one-line summary the assistant returned
+  beforeValue      String?  @db.Text
+  afterValue       String?  @db.Text
   /**
    * True when the user applied this change despite the conflict detector
    * flagging it as conflicting with an existing rule (the "Add anyway"
@@ -2238,7 +2238,7 @@ model SettingsChangeAuditLog {
    * column powers conflict-override metrics + post-hoc rollback prompts.
    */
   conflictOverride Boolean? @map("conflict_override")
-  createdAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -2326,12 +2326,77 @@ model ServiceProfile {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  user             User  @relation("UserOwnsServiceProfile", fields: [userId], references: [id], onDelete: Cascade)
-  defaultForUsers  User[] @relation("UserDefaultServiceProfile")
+  user            User   @relation("UserOwnsServiceProfile", fields: [userId], references: [id], onDelete: Cascade)
+  defaultForUsers User[] @relation("UserDefaultServiceProfile")
 
   @@unique([userId, slug])
   // Exactly one default per tenant. Partial unique allows multiple
   // rows with isDefault=false but only one with isDefault=true per user.
   @@index([userId, status])
   @@map("service_profiles")
+}
+
+// ==========================================
+// Admin Service Template Builder
+// ==========================================
+
+// Admin-authored ServicePreset templates. Generated from two pasted text
+// blocks (Service Options + Pricing) by deterministic parsers in
+// src/admin/service-templates/. Stored as draft → reviewed → published.
+// Published rows merge into the public preset picker alongside the
+// curated code-side presets in src/service-profile/presets/.
+//
+// Drafts and archived rows are admin-only — never surfaced to tenants.
+// Customers reach a row only after it's been published.
+//
+// `key` is a stable identifier the public preset endpoint returns to
+// the picker; the unique index prevents two templates sharing one key.
+// Suggested format: `tt_house_cleaning_v1` — admin chooses it explicitly
+// (no auto-key generation in v1, since duplicate detection is the
+// admin's call, not a runtime decision).
+model ServiceTemplatePreset {
+  id    String @id @default(uuid())
+  key   String @unique
+  label String
+
+  // 'thumbtack' | 'yelp' | 'manual' — same enum the code-side
+  // ServicePreset.provider uses. Stored as string so admins can add new
+  // providers without a schema change.
+  provider             String
+  providerCategoryName String
+  providerCategoryId   String?
+  description          String? @db.Text
+
+  // Three JSON blobs from the deterministic generator. Admins can edit
+  // each blob freely in the preview panel before publishing.
+  serviceOptionsJson  String @db.Text
+  pricingJson         String @db.Text
+  customerAnswersJson String @db.Text
+
+  // Single free-text "Additional Service Instructions" — admin's
+  // service-scoped guidance for the AI. Nullable since the generator
+  // does NOT produce instructions on its own; admin writes them.
+  additionalInstructions String? @db.Text
+
+  // Raw audit trail — { rawOptionsText, rawPricingText, generatedAt,
+  // generatorVersion } so we can re-run the parser if the algorithm
+  // ever changes. Nullable for hand-authored rows.
+  sourceJson String? @db.Text
+
+  // 'draft' — admin-only, hidden from the public preset picker.
+  // 'published' — merged into public preset picker.
+  // 'archived' — soft-deleted, hidden from public + admin defaults.
+  status String @default("draft")
+
+  // Optional — null when seeded by a script, set when an admin used
+  // the UI to create the row. Not a FK relation so removing an admin
+  // user later doesn't require a cascade decision.
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([provider, status])
+  @@map("service_template_presets")
 }
