@@ -68,7 +68,7 @@ export function ApplyToPlaybookButton({ hasSeed, tone = 'wizard' }: Props) {
       );
       // Route to the Playbook so the "Suggested from website" badges are
       // immediately visible.
-      navigate('/settings/ai-playbook');
+      navigate('/settings?tab=ai-playbook');
     } catch (e: any) {
       notify.error(
         'Apply failed',
