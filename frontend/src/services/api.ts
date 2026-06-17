@@ -1702,6 +1702,21 @@ export const usersApi = {
     const { data } = await api.post('/v1/users/me/business-url/apply', { url });
     return data;
   },
+  /** Manual-paste fallback for tenants whose URL doesn't scrape (Yelp /
+   *  BookingKoala / meta-less sites). Pasted text runs through the same
+   *  GPT-4o-mini extractor as the URL path; output lands in the same
+   *  playbookSeed and applies into Custom Instructions + FAQ. */
+  seedBusinessInfoFromText: async (
+    text: string,
+  ): Promise<{
+    success: boolean;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    warning?: string;
+  }> => {
+    const { data } = await api.post('/v1/users/me/business-info/seed-from-text', { text });
+    return data;
+  },
   /** Resolve whichever profile URL is currently saved — TT, Yelp, or
    *  website — for hydrating the unified input on mount. */
   getBusinessProfileUrl: async (): Promise<{

@@ -1232,6 +1232,109 @@ export class UsersService {
   }
 
   /**
+   * Fallback path when the URL-based scrape can't extract structured data
+   * (Cloudflare-blocked Yelp, SPA-only BookingKoala, generic site with no
+   * meta description, etc.). The tenant pastes a freeform text blob — a
+   * Google Knowledge Panel excerpt, their About page text, an emailed
+   * service list — and we route it through the same GPT-4o-mini extractor
+   * the website-verify path uses. Output merges into the same
+   * `playbookSeed.businessInformation` blob, then runs the
+   * apply-to-Custom-Instructions + apply-FAQ pipeline so the fields
+   * actually surface in the AI Playbook UI.
+   *
+   * Classified as source='website' for merge-conflict accounting — pasted
+   * text is morally equivalent to a manual scrape of a generic site, and
+   * adding a new source type would require schema/UI changes for zero
+   * additional value (conflict resolution is per-field, not per-source).
+   */
+  async seedBusinessInfoFromText(
+    userId: string,
+    text: string,
+  ): Promise<{
+    success: boolean;
+    fieldsApplied: number;
+    conflictsRaised: number;
+    warning?: string;
+  }> {
+    const cleaned = (text || '').trim();
+    if (cleaned.length < 30) {
+      return {
+        success: false,
+        fieldsApplied: 0,
+        conflictsRaised: 0,
+        warning: 'Paste at least a sentence or two of business info.',
+      };
+    }
+
+    // Reuse the existing extractor. It expects HTML-ish input but
+    // `stripToVisibleText` is identity-shaped for plain text (no tags to
+    // strip), so a pasted blob flows through unchanged. Pass an empty
+    // metadata object — the prompt's title/description hints are
+    // optional, just nudges when present.
+    const ai = await this.summarizeWebsite(cleaned, {}).catch((err: any) => {
+      this.logger.warn(`[seedBusinessInfoFromText] extract failed: ${err?.message || err}`);
+      return undefined;
+    });
+    const patch = (ai?.playbookSeed?.businessInformation || {}) as any;
+    if (!patch || Object.keys(patch).length === 0) {
+      return {
+        success: false,
+        fieldsApplied: 0,
+        conflictsRaised: 0,
+        warning: 'Couldn\'t pull structured business info from that text. Try adding service names, hours, pricing, or address.',
+      };
+    }
+
+    const state = await this.loadBusinessInfoState(userId);
+    const result = mergeBusinessInfo({
+      existing: state.bizInfo,
+      existingSources: state.sources,
+      newPatch: patch,
+      newSource: 'website',
+    });
+    const existingByField = new Set(state.pendingConflicts.map((c) => c.field));
+    const newConflicts = result.conflicts.filter((c) => !existingByField.has(c.field));
+
+    await this.persistBusinessInfoState(userId, {
+      bizInfo: result.merged,
+      sources: result.sources,
+      pendingConflicts: [...state.pendingConflicts, ...newConflicts],
+    });
+
+    const fieldsApplied = Math.max(
+      0,
+      Object.keys(result.merged).length - Object.keys(state.bizInfo).length,
+    );
+
+    // Materialize the freshly-merged seed into per-account Custom
+    // Instructions + FAQ — same step the TT/Yelp/website paths now run
+    // after their respective scrapes (cascade-prevention fix 2026-06-16).
+    // Best-effort: a failed apply doesn't unwind the persisted seed; the
+    // tenant can re-trigger from Settings if anything goes sideways.
+    try {
+      await this.applyPlaybookSeedToAccounts(userId, 'fill_empty');
+    } catch (err: any) {
+      this.logger.warn(`[seedBusinessInfoFromText] playbook apply failed: ${err?.message || err}`);
+    }
+    try {
+      await this.applyFaqFromWebsiteSeed(userId);
+    } catch (err: any) {
+      this.logger.warn(`[seedBusinessInfoFromText] faq apply failed: ${err?.message || err}`);
+    }
+
+    this.logger.log(
+      `[seedBusinessInfoFromText] userId=${userId} pastedLen=${cleaned.length} ` +
+      `fieldsApplied=${fieldsApplied} conflictsRaised=${newConflicts.length}`,
+    );
+
+    return {
+      success: true,
+      fieldsApplied,
+      conflictsRaised: newConflicts.length,
+    };
+  }
+
+  /**
    * Read the tenant's pasted public Thumbtack profile URL (stored on
    * `SavedAccount.followUpSettingsJson.publicProfileUrl`). Falls back to
    * undefined when not set; the caller then drops to the Partner API path.
