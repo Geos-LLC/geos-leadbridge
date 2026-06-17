@@ -1618,7 +1618,15 @@ export class PlatformService {
   }
 
   /**
-   * Update credentials for an existing saved account (e.g., after token refresh)
+   * Update credentials for an existing saved account (e.g., after token refresh).
+   *
+   * Uses `updateMany` instead of `update` on the persist path. `updateMany`
+   * emits no RETURNING clause, so the write succeeds even if Prisma's model
+   * has columns the DB hasn't received yet (schema/code drift after a deploy
+   * where the migration step ran but the new column wasn't applied to prod).
+   * The token-refresh path MUST stay write-clean because TT rotates refresh
+   * tokens on use — a failed persist after a successful API refresh
+   * permanently kills the account. See 2026-06-16 PR-E cascade incident.
    */
   async updateAccountCredentials(
     accountId: string,
@@ -1626,13 +1634,25 @@ export class PlatformService {
   ): Promise<void> {
     const encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
 
-    const account = await this.prisma.savedAccount.update({
+    const persisted = await this.prisma.savedAccount.updateMany({
       where: { id: accountId },
       data: {
         credentialsJson: encryptedCredentials,
         lastUsedAt: new Date(),
       },
     });
+    if (persisted.count === 0) {
+      throw new Error(`updateAccountCredentials: no SavedAccount with id ${accountId}`);
+    }
+
+    // Fetch the minimum fields we need for downstream branches via an
+    // explicit `select`, which (unlike default `findUnique`) bounds the
+    // SELECT projection — also schema-drift safe.
+    const account = await this.prisma.savedAccount.findUnique({
+      where: { id: accountId },
+      select: { id: true, userId: true, platform: true },
+    });
+    if (!account) return;
 
     // For Yelp: one user has one OAuth token shared across all businesses.
     // When one account's token is refreshed, update ALL sibling Yelp accounts

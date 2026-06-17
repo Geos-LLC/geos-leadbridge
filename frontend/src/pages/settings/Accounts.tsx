@@ -440,18 +440,23 @@ export function SettingsAccounts() {
                 </div>
               </div>
               {a.tokenDead ? (
+                // Solid amber CTA — the previous low-contrast pill read as a
+                // status tag, not as a button, and dead-token tenants didn't
+                // realize it was actionable (incident 2026-06-16).
                 <button
                   type="button"
                   onClick={() => setModal({ open: true, reconnect: a })}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '4px 10px', borderRadius: 999,
-                    background: '#fef3c7', color: '#92400e',
-                    fontSize: 11, fontWeight: 600,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '6px 14px', borderRadius: 8,
+                    background: '#f59e0b', color: '#ffffff',
+                    fontSize: 12, fontWeight: 700,
                     border: 0, cursor: 'pointer', fontFamily: 'inherit',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
                   }}
+                  title="Your Thumbtack token expired — click to reconnect"
                 >
-                  <AlertTriangle size={11} /> Reconnect required
+                  <RefreshCw size={12} /> Reconnect now
                 </button>
               ) : (
                 <span style={{
