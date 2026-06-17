@@ -652,6 +652,62 @@ export class ServiceProfileService {
   }
 
   /**
+   * Hard-delete a service profile. Used by the AI Playbook → Danger
+   * zone affordance for owner-initiated removal of a service the
+   * operator no longer wants. Soft-archive (status='archived') is the
+   * normal flow and stays the recommended path; this exists for the
+   * rare case where the operator wants the row gone (e.g. a test
+   * service created by accident, or a misconfigured draft that's
+   * cluttering the tab strip).
+   *
+   * Guards:
+   *   - 404 when the profile doesn't exist or belongs to another user.
+   *   - DEFAULT_BLOCKED when isDefault=true. The tenant always needs
+   *     a fallback profile for non-matching leads; the operator must
+   *     promote another profile as default before this one can be
+   *     deleted (same constraint as archive).
+   *   - DEFAULT_BLOCKED when User.defaultServiceProfileId still points
+   *     at this row. The FK is onDelete: SetNull so the DB would
+   *     accept the delete, but the resolver loses its safety net the
+   *     moment that pointer flips to null — guard at the service
+   *     layer so the UI can surface a clear error.
+   *
+   * Side-effects: orphan keys in any SavedAccount.serviceProfileOverridesJson
+   * (a JSON map keyed by profileId) are NOT cleaned up here — they're
+   * inert (the resolver only walks active profiles) and a follow-up
+   * sweep cron can reap them. The cost of an extra prisma roundtrip
+   * per delete isn't worth the cleanup.
+   */
+  async deleteProfile(userId: string, profileId: string) {
+    const profile = await this.getOneForUser(userId, profileId);
+    if (!profile) {
+      const err: any = new Error('Service profile not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    if (profile.isDefault) {
+      const err: any = new Error(
+        'Cannot delete default profile: promote another profile as default first',
+      );
+      err.code = 'DEFAULT_BLOCKED';
+      throw err;
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { defaultServiceProfileId: true },
+    });
+    if (user?.defaultServiceProfileId === profileId) {
+      const err: any = new Error(
+        'Cannot delete: this profile is set as the account default. Promote another profile first.',
+      );
+      err.code = 'DEFAULT_BLOCKED';
+      throw err;
+    }
+    await this.prisma.serviceProfile.delete({ where: { id: profileId } });
+    return { id: profileId, deleted: true as const };
+  }
+
+  /**
    * Duplicate an existing profile under a new slug. New copy lands as
    * 'draft' regardless of source status — duplicating an active
    * profile should not silently double the AI surface.

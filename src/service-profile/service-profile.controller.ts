@@ -237,6 +237,19 @@ export class ServiceProfileController {
     }
   }
 
+  @Delete('service-profiles/:id')
+  async deleteProfile(@Req() req: any, @Param('id') id: string) {
+    const userId: string = req.user?.id;
+    if (!userId) throw new BadRequestException('Authenticated user required');
+    try {
+      return await this.service.deleteProfile(userId, id);
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      if (err?.code === 'DEFAULT_BLOCKED') throw new BadRequestException(err.message);
+      throw err;
+    }
+  }
+
   // ─── Location overrides ───────────────────────────────────────────
 
   @Get('service-profiles/:id/overrides')

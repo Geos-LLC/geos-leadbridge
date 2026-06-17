@@ -968,6 +968,10 @@ export const serviceProfilesApi = {
     const { data } = await api.post(`/v1/service-profiles/${id}/duplicate`, {});
     return data;
   },
+  delete: async (id: string): Promise<{ id: string; deleted: true }> => {
+    const { data } = await api.delete(`/v1/service-profiles/${id}`);
+    return data;
+  },
   listOverrides: async (id: string): Promise<{ overrides: ServiceProfileOverrideRow[] }> => {
     const { data } = await api.get(`/v1/service-profiles/${id}/overrides`);
     return data;

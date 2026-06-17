@@ -361,6 +361,16 @@ function buildMgmtPrismaMock(
         state.profiles.push(row);
         return row;
       }),
+      delete: jest.fn().mockImplementation(async ({ where }: any) => {
+        const idx = state.profiles.findIndex((p) => p.id === where.id);
+        if (idx === -1) {
+          const e: any = new Error('Record not found');
+          e.code = 'P2025';
+          throw e;
+        }
+        const [removed] = state.profiles.splice(idx, 1);
+        return removed;
+      }),
     },
     user: { findUnique: jest.fn().mockResolvedValue(state.user) },
     savedAccount: {
@@ -565,5 +575,57 @@ describe('ServiceProfileController — management endpoints', () => {
     await expect(
       ctrl.updateProfile(REQ, 'p-1', { providerCategoryMappingsJson: { not: 'an array' } as any }),
     ).rejects.toThrow(/must be an array/);
+  });
+
+  it('deleteProfile: removes a non-default profile and returns { deleted: true }', async () => {
+    const prisma = buildMgmtPrismaMock({
+      profiles: [mkProfile({ id: 'p-1', status: 'draft', isDefault: false })],
+      user: { defaultServiceProfileId: null },
+    });
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    const out = await ctrl.deleteProfile(REQ, 'p-1');
+    expect(out).toEqual({ id: 'p-1', deleted: true });
+    expect(prisma._state.profiles).toHaveLength(0);
+  });
+
+  it('deleteProfile: throws NotFoundException for unknown id', async () => {
+    const prisma = buildMgmtPrismaMock({ profiles: [] });
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    await expect(ctrl.deleteProfile(REQ, 'missing')).rejects.toThrow(/not found/i);
+  });
+
+  it('deleteProfile: throws NotFoundException for cross-user id', async () => {
+    const prisma = buildMgmtPrismaMock({
+      profiles: [mkProfile({ id: 'p-other', userId: 'user-other' })],
+    });
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    await expect(ctrl.deleteProfile(REQ, 'p-other')).rejects.toThrow(/not found/i);
+    expect(prisma._state.profiles).toHaveLength(1);
+  });
+
+  it('deleteProfile: throws BadRequestException when isDefault=true', async () => {
+    const prisma = buildMgmtPrismaMock({
+      profiles: [mkProfile({ id: 'p-def', isDefault: true })],
+      user: { defaultServiceProfileId: null },
+    });
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    await expect(ctrl.deleteProfile(REQ, 'p-def')).rejects.toThrow(BadRequestException);
+    expect(prisma._state.profiles).toHaveLength(1);
+  });
+
+  it('deleteProfile: throws BadRequestException when User.defaultServiceProfileId still points at it', async () => {
+    const prisma = buildMgmtPrismaMock({
+      profiles: [mkProfile({ id: 'p-pointed', isDefault: false })],
+      user: { defaultServiceProfileId: 'p-pointed' },
+    });
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    await expect(ctrl.deleteProfile(REQ, 'p-pointed')).rejects.toThrow(BadRequestException);
+    expect(prisma._state.profiles).toHaveLength(1);
+  });
+
+  it('deleteProfile: 400 when no authenticated user', async () => {
+    const prisma = buildMgmtPrismaMock();
+    const ctrl = new ServiceProfileController(new ServiceProfileService(prisma));
+    await expect(ctrl.deleteProfile({ user: null } as any, 'p-1')).rejects.toThrow(/Authenticated user required/);
   });
 });
