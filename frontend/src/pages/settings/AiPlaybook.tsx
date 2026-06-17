@@ -23,12 +23,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
-  Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe,
+  Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
   ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, CheckCircle2, MessageSquare, Trash2,
   Archive, Plus,
   type LucideIcon,
 } from 'lucide-react';
-import { SectionCard, StatusPill } from '../../components/automation/ui';
+import { SectionCard, SettingCard, StatusPill } from '../../components/automation/ui';
 import { AI_SETTINGS_ASSISTANT_APPLIED_EVENT, type AiSettingsAssistantAppliedDetail } from '../../components/Layout';
 import {
   followUpApi,
@@ -937,6 +937,42 @@ function CustomQAForm({
   );
 }
 
+// Read-only label for the pricing model badge in the unified Pricing
+// card header. Returns null when the shape is empty / unrecognized so
+// the badge isn't rendered.
+function pricingModelLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const p = parsed as Record<string, unknown>;
+    if (p.pricingModel === 'item_quantity') return 'Item table';
+    if (p.pricingModel === 'hourly') return 'Hourly';
+    if (p.pricingModel === 'flat_rate') return 'Flat rate';
+    if (Array.isArray(p.priceTable) || Array.isArray(p.cleaningTypes)) return 'Bed-bath grid';
+    return 'Custom';
+  } catch {
+    return null;
+  }
+}
+
+function ModelBadge({ label }: { label: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '4px 10px', borderRadius: 999,
+        background: 'var(--lb-ink-10, #f3f5fa)',
+        color: 'var(--lb-ink-3, #475569)',
+        fontSize: 11.5, fontWeight: 600, letterSpacing: '0.02em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   const { primary, allIds } = useConnectedAccountsForPane();
   const scoped = !!profile;
@@ -944,22 +980,24 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   // Global tab: always use the cleaning form (the SavedAccount pricing
   // shape is cleaning-grid). Service tab: branch by the stored shape.
   const cleaning = profile ? isCleaningPricing(profile.pricingJson) : true;
+  const badge = profile ? pricingModelLabel(profile.pricingJson) : null;
 
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
     // the user directly to this card after the editor renders.
     <div id="ai-playbook-pricing" style={{ scrollMarginTop: 16 }}>
-      <SectionCard padding="16px 20px">
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
-            Pricing
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-            {scoped
-              ? `Pricing the AI uses to quote ${serviceName ?? 'this service'} leads. Specific to this service only.`
-              : 'Edit the table the AI uses to quote leads. Applies to every connected account.'}
-          </div>
-        </div>
+      <SettingCard
+        icon={CircleDollarSign}
+        iconTone="green"
+        title="Pricing"
+        subtitle={
+          scoped
+            ? `Pricing the AI uses to quote ${serviceName ?? 'this service'} leads. Specific to this service only.`
+            : 'Edit the table the AI uses to quote leads. Applies to every connected account.'
+        }
+        headerRight={badge ? <ModelBadge label={badge} /> : undefined}
+        contentPad="16px 24px 24px"
+      >
         {!primary ? (
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
             Connect an account to set pricing.
@@ -981,7 +1019,7 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
             serviceProfileId={profile?.id}
           />
         )}
-      </SectionCard>
+      </SettingCard>
     </div>
   );
 }
@@ -993,17 +1031,17 @@ function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
   const cleaning = profile ? isCleaningFaq(profile.faqJson) : true;
 
   return (
-    <SectionCard padding="16px 20px">
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 4 }}>
-          FAQ
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
-          {scoped
-            ? `Answers the AI uses verbatim for ${serviceName ?? 'this service'} leads. Specific to this service only.`
-            : 'Answers the AI uses verbatim. Applies to every connected account.'}
-        </div>
-      </div>
+    <SettingCard
+      icon={BookOpen}
+      iconTone="blue"
+      title="FAQ"
+      subtitle={
+        scoped
+          ? `Answers the AI uses verbatim for ${serviceName ?? 'this service'} leads. Specific to this service only.`
+          : 'Answers the AI uses verbatim. Applies to every connected account.'
+      }
+      contentPad="16px 24px 24px"
+    >
       {!primary ? (
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
           Connect an account to fill out the FAQ.
@@ -1023,7 +1061,7 @@ function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
           serviceProfileId={profile?.id}
         />
       )}
-    </SectionCard>
+    </SettingCard>
   );
 }
 
