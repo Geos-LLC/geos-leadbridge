@@ -770,6 +770,15 @@ export class ThumbtackAdapter implements IPlatformAdapter {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
         },
       );
+      // DIAG: log raw success shape so we can pick the right key — current
+      // chain (data.data → data → []) returns the wrapper object when TT
+      // wraps under a non-`data` key, which then crashes caller's .find().
+      const topKeys = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+        ? Object.keys(response.data).join(',')
+        : Array.isArray(response.data) ? '[array]' : typeof response.data;
+      this.logger.log(
+        `[tt.associate-phone] list ok businessId=${businessId} status=${response.status} topKeys=${topKeys} bodyHead=${JSON.stringify(response.data ?? null).slice(0, 500)}`,
+      );
       return response.data.data || response.data || [];
     } catch (error) {
       const status = error.response?.status;
