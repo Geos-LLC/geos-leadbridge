@@ -41,6 +41,15 @@ export class YelpAdapter implements IPlatformAdapter {
   private readonly apiBaseUrl: string;
   private readonly authBaseUrl = 'https://biz.yelp.com/oauth2';
   private readonly tokenUrl = 'https://api.yelp.com/oauth2/token';
+  // OAuth code-exchange dedup. Same defense as TT (see
+  // thumbtack.adapter.ts) — RFC 6749 §4.1.2 mandates that any compliant
+  // OAuth provider MUST deny code reuse and SHOULD revoke the
+  // originally issued token. Yelp's multi-redirect chain
+  // (logout → login → authorize → callback) gives proxy/browser retries
+  // more chances to fire duplicate callbacks than a single-hop flow, so
+  // applying the dedup defensively here even before we observe it.
+  private readonly inFlightCodeExchanges = new Map<string, Promise<PlatformCredentials>>();
+  private static readonly CODE_DEDUP_TTL_MS = 60_000;
 
   constructor(private configService: ConfigService) {
     this.apiKey = this.configService.get<string>('yelp.apiKey') || '';
@@ -96,6 +105,24 @@ export class YelpAdapter implements IPlatformAdapter {
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
+    const existing = this.inFlightCodeExchanges.get(code);
+    if (existing) {
+      this.logger.warn(
+        `[oauth-dedup] duplicate Yelp exchange suppressed for code (head=${code.slice(0, 8)}); returning in-flight/cached result`,
+      );
+      return existing;
+    }
+    const exchange = this.exchangeCodeForTokens(code).finally(() => {
+      setTimeout(
+        () => this.inFlightCodeExchanges.delete(code),
+        YelpAdapter.CODE_DEDUP_TTL_MS,
+      ).unref();
+    });
+    this.inFlightCodeExchanges.set(code, exchange);
+    return exchange;
+  }
+
+  private async exchangeCodeForTokens(code: string): Promise<PlatformCredentials> {
     try {
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
