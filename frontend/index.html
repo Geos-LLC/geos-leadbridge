@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Google Translate (and other browser translators) mutate text nodes
+         inside React-controlled DOM, which detaches React's fibers from
+         the rendered text and causes setState updates to stop painting —
+         loaders spin forever, modals don't close, etc. Disable auto-
+         translation app-wide. Users who really want translation can
+         still trigger the browser's native page translator. -->
+    <meta name="google" content="notranslate" />
     <title>LeadBridge - Lead Management</title>
 
     <!-- Plus Jakarta Sans + Geist Mono (Leadbridge App Shell) -->
