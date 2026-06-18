@@ -102,6 +102,37 @@ export default function ServicesOfferedStep({
 
   const hasAnyActive = availableServices.some(s => s.status === 'active');
 
+  // Split the preset list into three buckets so the picker can group
+  // them with optgroups. Generic ("Custom Service") is pinned to the
+  // top because it's the always-works starter — relevant for any
+  // service business regardless of platform category.
+  const groupedPresets = useMemo(() => {
+    const generic: typeof presets = [];
+    const curated: typeof presets = [];
+    const admin: typeof presets = [];
+    for (const p of presets) {
+      if (p.source === 'admin_template') admin.push(p);
+      else if (p.key === 'generic_custom_service' || p.presetKey === 'generic_custom_service') generic.push(p);
+      else curated.push(p);
+    }
+    // Sort each group by label so the dropdown order is stable.
+    const byLabel = (a: typeof presets[number], b: typeof presets[number]) => a.label.localeCompare(b.label);
+    return {
+      generic,
+      curated: curated.sort(byLabel),
+      admin: admin.sort(byLabel),
+    };
+  }, [presets]);
+
+  // Pre-select the Generic preset when the add panel opens, so the user
+  // who just clicks "Add" without picking gets the always-works starter
+  // instead of a "Please pick a template" error.
+  useEffect(() => {
+    if (!showAddPanel || selectedPresetKey || groupedPresets.generic.length === 0) return;
+    const g = groupedPresets.generic[0];
+    setSelectedPresetKey(g.source === 'code_preset' ? g.presetKey! : g.templateId!);
+  }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
+
   // Toggle one service for one account — write-through to backend so
   // the user doesn't need a per-row Save button. Optimistic UI: update
   // local state immediately, roll back on failure.
@@ -406,15 +437,39 @@ export default function ServicesOfferedStep({
                       className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
                     >
                       <option value="">Pick a template…</option>
-                      {presets.map(p => {
-                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
-                        return (
-                          <option key={`${p.source}-${key}`} value={key}>
-                            {p.label}
-                            {p.source === 'admin_template' ? ' (custom template)' : ''}
-                          </option>
-                        );
-                      })}
+                      {groupedPresets.generic.length > 0 && (
+                        <optgroup label="Recommended starter">
+                          {groupedPresets.generic.map(p => {
+                            const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                            return (
+                              <option key={`${p.source}-${key}`} value={key}>
+                                {p.label} — works for any service
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {groupedPresets.curated.length > 0 && (
+                        <optgroup label="Curated templates">
+                          {groupedPresets.curated.map(p => {
+                            const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                            return (
+                              <option key={`${p.source}-${key}`} value={key}>
+                                {p.label}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {groupedPresets.admin.length > 0 && (
+                        <optgroup label="Published custom templates">
+                          {groupedPresets.admin.map(p => (
+                            <option key={`admin-${p.templateId}`} value={p.templateId!}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                     <button
                       type="button"
@@ -426,6 +481,11 @@ export default function ServicesOfferedStep({
                       Add
                     </button>
                   </div>
+                  {groupedPresets.admin.length === 0 && (
+                    <p className="mt-1.5 text-[11px] text-slate-400">
+                      More templates will appear here when admins publish them.
+                    </p>
+                  )}
                 </div>
 
                 <div>
