@@ -24,6 +24,13 @@ interface AuthState {
 
   // Admin impersonation
   impersonatingUser: { id: string; name: string | null; email: string } | null;
+  // Snapshot of the admin's own user object taken at startImpersonation.
+  // Restored verbatim on stopImpersonation so Exit lands the admin back
+  // in THEIR account — without this, any setAuth call during impersonation
+  // (e.g. Services.tsx and settings/General.tsx refresh /auth/profile on
+  // mount and the interceptor adds X-Impersonate-User, so the response is
+  // the TENANT'S profile) would corrupt the persisted admin user.
+  adminUserSnapshot: User | null;
   startImpersonation: (target: { id: string; name: string | null; email: string }) => void;
   stopImpersonation: () => void;
 
@@ -38,14 +45,39 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       isAuthenticated: false,
       impersonatingUser: null,
+      adminUserSnapshot: null,
 
       startImpersonation: (target) => {
         console.log('[AuthStore] Impersonating:', target.email);
-        set({ impersonatingUser: target });
+        // Capture the current (admin) user so we can restore it on Exit.
+        // Without this, mid-impersonation refreshes of /auth/profile
+        // (Services, General Settings, etc.) overwrite `user` with the
+        // tenant's profile because the request interceptor stamps
+        // X-Impersonate-User on those calls — and the admin lands in
+        // the tenant's account after reload. Idempotent: nested
+        // impersonations (unlikely but defensible) reuse the earliest
+        // snapshot rather than overwriting it with a tenant user.
+        set((state) => ({
+          impersonatingUser: target,
+          adminUserSnapshot: state.adminUserSnapshot ?? state.user,
+        }));
       },
       stopImpersonation: () => {
         console.log('[AuthStore] Stopped impersonation');
-        set({ impersonatingUser: null });
+        set((state) => {
+          const restored = state.adminUserSnapshot;
+          if (restored) {
+            // Restore analytics identity to the admin too — otherwise
+            // analytics events after exit still attribute to the tenant.
+            setAnalyticsUserId(restored.id);
+            setAnalyticsUserProperties(userPropsFrom(restored));
+          }
+          return {
+            impersonatingUser: null,
+            adminUserSnapshot: null,
+            user: restored ?? state.user,
+          };
+        });
       },
 
       setAuth: (user, token) => {
@@ -58,13 +90,22 @@ export const useAuthStore = create<AuthState>()(
       },
       logout: () => {
         localStorage.removeItem('token');
-        set({ user: null, token: null, isAuthenticated: false, impersonatingUser: null });
+        set({
+          user: null, token: null, isAuthenticated: false,
+          impersonatingUser: null, adminUserSnapshot: null,
+        });
         resetAnalyticsSession();
       },
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ user: state.user, token: state.token, isAuthenticated: state.isAuthenticated, impersonatingUser: state.impersonatingUser }),
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
+        impersonatingUser: state.impersonatingUser,
+        adminUserSnapshot: state.adminUserSnapshot,
+      }),
     }
   )
 );
