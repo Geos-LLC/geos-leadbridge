@@ -13,7 +13,7 @@ import type { AutomationRule, NotificationRule } from '../../../types';
 import { notify } from '../../../store/notificationStore';
 import { WizardStepActions } from '../WizardStepActions';
 import {
-  FieldRow, FooterBanner, MessageGenerationRow, OptionCard, SettingCard, TimingRow, ToggleRow,
+  FieldRow, FooterBanner, MessageGenerationRow, OptionCard, SettingCard, ToggleRow,
 } from '../../../components/automation/ui';
 
 interface Props {
@@ -122,7 +122,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   const [replyType, setReplyType] = useState<ReplyMode>('ai');
   const [instantTextOn, setInstantTextOn] = useState(true);
   const [instantTextMode, setInstantTextMode] = useState<ReplyMode>('ai');
-  const [textBizHours, setTextBizHours] = useState(false);
   const [instantCallOn, setInstantCallOn] = useState(true);
   const [connMode, setConnMode] = useState<ConnMode>('agent-first');
   const navigate = useNavigate();
@@ -189,7 +188,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         }
         const rawInstantTextMode = (s as any)?.instantTextMode;
         setInstantTextMode(rawInstantTextMode === 'template' ? 'template' : 'ai');
-        setTextBizHours((hours as any)?.firstMsgDuringBusinessHours ?? false);
         setOpts(prev => ({
           ...prev,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
@@ -277,13 +275,15 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   async function saveFirstReplyToAccount(accountId: string): Promise<void> {
     const ops: Promise<unknown>[] = [];
 
-    // Account-hours fan-out — extend the existing call also writes
-    // firstMsgDuringBusinessHours now that the wizard surfaces it.
+    // Account-hours fan-out. firstMsgDuringBusinessHours intentionally
+    // omitted — the wizard's "Only send during business hours" toggle
+    // for Instant Text is not surfaced (timing knobs live in the
+    // Timing & follow-ups section), so we don't want to overwrite
+    // whatever the account already has saved for it.
     ops.push(
       usersApi.updateAccountHours(accountId, {
         callDuringBusinessHours: opts.callDuringBusinessHours,
         followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
-        firstMsgDuringBusinessHours: textBizHours,
       }).catch(() => undefined),
     );
 
@@ -471,13 +471,9 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             onToggle={setInstantTextOn}
             contentPad="8px 24px 16px"
           >
-            <TimingRow
-              icon={Clock}
-              checked={textBizHours}
-              onChangeChecked={setTextBizHours}
-              checkboxLabel="Only send during business hours"
-              onEditHours={() => navigate('/settings?tab=hours')}
-            />
+            {/* Business-hours gating lives in the Timing & follow-ups
+                section below — first-reply cards only carry the
+                master toggle + message-generation choice. */}
             <MessageGenerationRow
               useAi={instantTextMode === 'ai'}
               onChangeUseAi={next => setInstantTextMode(next ? 'ai' : 'template')}
@@ -495,13 +491,9 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             onToggle={setInstantCallOn}
             contentPad="8px 24px 16px"
           >
-            <TimingRow
-              icon={Clock}
-              checked={opts.callDuringBusinessHours}
-              onChangeChecked={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
-              checkboxLabel="Only call during business hours"
-              onEditHours={() => navigate('/settings?tab=hours')}
-            />
+            {/* Connection Mode stays here — it's a routing choice, not
+                timing. The "only call during business hours" toggle
+                lives in the Timing & follow-ups section below. */}
             <FieldRow
               icon={ArrowRightLeft}
               iconTone="gray"
