@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
-  ArrowRight, ArrowRightLeft, CalendarCheck, CircleDollarSign, Clock, ExternalLink, Info,
+  ArrowRight, CalendarCheck, CircleDollarSign, Clock, ExternalLink, Info,
   MessageCircle, MessageSquare, MessageSquareText, Moon, Phone, PhoneCall, RotateCcw,
   Sparkles, UserCheck, Workflow, Loader2,
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import type { AutomationRule, NotificationRule } from '../../../types';
 import { notify } from '../../../store/notificationStore';
 import { WizardStepActions } from '../WizardStepActions';
 import {
-  FieldRow, FooterBanner, MessageGenerationRow, OptionCard, SettingCard, ToggleRow,
+  FieldRow, FooterBanner, SettingCard, ToggleRow,
 } from '../../../components/automation/ui';
 
 interface Props {
@@ -29,9 +29,6 @@ interface Props {
 // values, not a wizard-only ghost set.
 type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
 type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
-// First-reply controls — mirror Settings → Automation → Respond.
-type ReplyMode = 'ai' | 'template';
-type ConnMode = 'agent-first' | 'parallel';
 
 const DEFAULTS = {
   callDuringBusinessHours: true,
@@ -112,16 +109,15 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // tweaked on Automation pages.
   const [opts, setOpts] = useState({ ...DEFAULTS });
 
-  // First-reply state — mirrors Settings → Automation → Respond. The
-  // three master toggles, AI/template mode for the message-generation
-  // blocks, the per-account business-hours flags, and the connection
-  // mode for Instant Call. Hydrated from the primary SavedAccount.
+  // First-reply state — the wizard exposes only the three master
+  // toggles (Instant Reply / Instant Text / Instant Call). AI vs
+  // Template message generation, Connection Mode, and per-account
+  // business-hours flags live on Settings → Automation. Hydrated
+  // from the primary SavedAccount; save() never touches the
+  // companion fields so existing values are preserved.
   const [instantReplyOn, setInstantReplyOn] = useState(true);
-  const [replyType, setReplyType] = useState<ReplyMode>('ai');
   const [instantTextOn, setInstantTextOn] = useState(true);
-  const [instantTextMode, setInstantTextMode] = useState<ReplyMode>('ai');
   const [instantCallOn, setInstantCallOn] = useState(true);
-  const [connMode, setConnMode] = useState<ConnMode>('agent-first');
   const navigate = useNavigate();
 
   const cascadeNote = savedAccounts.length > 1;
@@ -165,7 +161,8 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         if (cancelled) return;
         const s = (settings as any)?.settings ?? {};
 
-        // First-reply hydration — same shape lookups Respond.tsx uses.
+        // First-reply hydration — only the three master switches. AI
+        // mode + Connection Mode + textMode live on Settings.
         const newLeadRule = (autoRes.rules || []).find(
           r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0),
         );
@@ -173,19 +170,9 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           r => r.triggerType === 'new_lead' && r.sendToCustomer,
         );
         const callSettings: any = (callRes as any)?.settings ?? null;
-        if (newLeadRule) {
-          setInstantReplyOn(!!newLeadRule.enabled);
-          setReplyType(newLeadRule.useAi ? 'ai' : 'template');
-        }
-        if (customerTextRule) {
-          setInstantTextOn(!!customerTextRule.enabled);
-        }
-        if (callSettings) {
-          setInstantCallOn(callSettings.enabled !== false);
-          setConnMode(callSettings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
-        }
-        const rawInstantTextMode = (s as any)?.instantTextMode;
-        setInstantTextMode(rawInstantTextMode === 'template' ? 'template' : 'ai');
+        if (newLeadRule) setInstantReplyOn(!!newLeadRule.enabled);
+        if (customerTextRule) setInstantTextOn(!!customerTextRule.enabled);
+        if (callSettings) setInstantCallOn(callSettings.enabled !== false);
         setOpts(prev => ({
           ...prev,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
@@ -281,25 +268,26 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       }).catch(() => undefined),
     );
 
-    // Instant Reply — automation rule. Look up the new_lead rule;
-    // patch or seed.
+    // Instant Reply — automation rule. Patch only `enabled`; the
+    // useAi / replyType decision lives on Settings → Automation and
+    // must not be clobbered when the wizard isn't surfacing it.
     ops.push((async () => {
       const r = await automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] }));
       const nl = (r.rules || []).find(
         x => x.triggerType === 'new_lead' && (!x.delayMinutes || x.delayMinutes === 0),
       );
       if (nl) {
-        await automationApi.updateRule(nl.id, {
-          enabled: instantReplyOn,
-          useAi: replyType === 'ai',
-        });
+        await automationApi.updateRule(nl.id, { enabled: instantReplyOn });
       } else {
+        // No new-lead rule yet — seed one with sane defaults
+        // (useAi=true matches Respond.tsx's defaults so a fresh
+        // account behaves the same after wizard vs after Settings).
         await automationApi.createRule({
           savedAccountId: accountId,
           name: 'Instant Reply',
           triggerType: 'new_lead',
           enabled: instantReplyOn,
-          useAi: replyType === 'ai',
+          useAi: true,
           delayMinutes: 0,
         } as any);
       }
@@ -313,11 +301,11 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       if (ct) await notificationsApi.updateRule(accountId, ct.id, { enabled: instantTextOn });
     })().catch(() => undefined));
 
-    // Instant Call — call-connect settings.
+    // Instant Call — only the enabled flag. Connection Mode stays
+    // whatever the account has from Settings.
     ops.push(
       callConnectApi.saveSettings(accountId, {
         enabled: instantCallOn,
-        mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as any,
       } as any).catch(() => undefined),
     );
 
@@ -335,12 +323,10 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       let firstError: any = null;
       for (const acct of savedAccounts) {
         try {
-          // Compose the followUp payload with instantTextMode merged in
-          // so the AI/template choice for Instant Text persists too.
-          await followUpApi.saveWizardSettings(acct.id, {
-            ...wizardPayload,
-            instantTextMode,
-          });
+          // Wizard payload only — instantTextMode (AI vs Template for
+          // Instant Text) is a Settings → Automation concern; not
+          // touched here so existing values are preserved.
+          await followUpApi.saveWizardSettings(acct.id, wizardPayload);
           await saveFirstReplyToAccount(acct.id);
         } catch (err) {
           if (!firstError) firstError = err;
@@ -438,6 +424,10 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           </p>
         </div>
 
+        {/* First-reply cards carry ONLY the master toggle in the wizard.
+            Message generation (AI vs Template), Connection Mode, and
+            timing all live on Settings → Automation. The footer banner
+            below deep-links there. */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <SettingCard
             icon={MessageSquareText}
@@ -447,14 +437,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             enabled={instantReplyOn}
             onToggle={setInstantReplyOn}
             contentPad="8px 24px 16px"
-          >
-            <MessageGenerationRow
-              useAi={replyType === 'ai'}
-              onChangeUseAi={next => setReplyType(next ? 'ai' : 'template')}
-              onOpenPlaybook={() => navigate('/settings?tab=ai-playbook')}
-              onOpenTemplates={() => navigate('/templates?filter=auto-reply')}
-            />
-          </SettingCard>
+          />
 
           <SettingCard
             icon={MessageCircle}
@@ -464,17 +447,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             enabled={instantTextOn}
             onToggle={setInstantTextOn}
             contentPad="8px 24px 16px"
-          >
-            {/* Business-hours gating lives in the Timing & follow-ups
-                section below — first-reply cards only carry the
-                master toggle + message-generation choice. */}
-            <MessageGenerationRow
-              useAi={instantTextMode === 'ai'}
-              onChangeUseAi={next => setInstantTextMode(next ? 'ai' : 'template')}
-              onOpenPlaybook={() => navigate('/settings?tab=ai-playbook')}
-              onOpenTemplates={() => navigate('/templates?filter=auto-reply')}
-            />
-          </SettingCard>
+          />
 
           <SettingCard
             icon={Phone}
@@ -484,33 +457,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             enabled={instantCallOn}
             onToggle={setInstantCallOn}
             contentPad="8px 24px 16px"
-          >
-            {/* Connection Mode stays here — it's a routing choice, not
-                timing. The "only call during business hours" toggle
-                lives in the Timing & follow-ups section below. */}
-            <FieldRow
-              icon={ArrowRightLeft}
-              iconTone="gray"
-              label="Connection Mode"
-              align="top"
-              noBorder
-            >
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <OptionCard
-                  selected={connMode === 'agent-first'}
-                  onClick={() => setConnMode('agent-first')}
-                  title="Agent First"
-                  body="We call you first, then bridge the lead."
-                />
-                <OptionCard
-                  selected={connMode === 'parallel'}
-                  onClick={() => setConnMode('parallel')}
-                  title="Parallel"
-                  body="We call you and the lead at the same time."
-                />
-              </div>
-            </FieldRow>
-          </SettingCard>
+          />
         </div>
       </div>
 
