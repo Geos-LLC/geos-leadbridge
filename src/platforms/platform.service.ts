@@ -1989,6 +1989,28 @@ export class PlatformService {
       data: { savedAccountId: null },
     });
 
+    // Sweep orphan SystemErrorLog rows. SystemErrorLog.accountId is a
+    // plain string column (no FK), so deleting the SavedAccount without
+    // this would leave error rows pointing at a now-invalid id — they
+    // accumulate in the dead-token sweep and the tenant-health UI then
+    // surfaces ghosts (a 2026-06-18 audit found 330 such orphans across
+    // 7 deleted accounts). Defensive: never throws — the local delete
+    // is the priority.
+    try {
+      const swept = await this.prisma.systemErrorLog.deleteMany({
+        where: { accountId },
+      });
+      if (swept.count > 0) {
+        this.logger.log(
+          `[removeSavedAccount] swept ${swept.count} SystemErrorLog rows for ${accountId}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[removeSavedAccount] SystemErrorLog sweep failed (non-fatal): ${err.message}`,
+      );
+    }
+
     // Delete the saved account (cascades to NotificationSettings, CallConnectSettings, etc.)
     await this.prisma.savedAccount.delete({
       where: { id: accountId },

@@ -215,9 +215,33 @@ export class YelpController {
     if (!account) throw new BadRequestException('Yelp account not found');
 
     await this.yelpAdapter.unsubscribeFromBusinesses([account.businessId]);
+    await this.sweepOrphanErrorLogs(accountId);
     await this.prisma.savedAccount.delete({ where: { id: accountId } });
 
     return { success: true, message: `Yelp business "${account.businessName}" disconnected` };
+  }
+
+  /**
+   * Sweep SystemErrorLog rows referencing a SavedAccount before it's
+   * deleted. SystemErrorLog.accountId is a plain string column (no FK),
+   * so without this call the rows orphan and pollute the dead-token
+   * sweep + tenant-health UI. Defensive — never throws.
+   */
+  private async sweepOrphanErrorLogs(accountId: string): Promise<void> {
+    try {
+      const swept = await this.prisma.systemErrorLog.deleteMany({
+        where: { accountId },
+      });
+      if (swept.count > 0) {
+        this.logger.log(
+          `[yelp.disconnect] swept ${swept.count} SystemErrorLog rows for ${accountId}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[yelp.disconnect] SystemErrorLog sweep failed (non-fatal): ${err.message}`,
+      );
+    }
   }
 
   // ==========================================
@@ -270,6 +294,7 @@ export class YelpController {
     if (!account) throw new BadRequestException('Business not found');
 
     await this.yelpAdapter.unsubscribeFromBusinesses([account.businessId]);
+    await this.sweepOrphanErrorLogs(id);
     await this.prisma.savedAccount.delete({ where: { id } });
 
     return { success: true, message: 'Business removed and unsubscribed' };
