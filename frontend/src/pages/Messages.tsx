@@ -3368,7 +3368,35 @@ export function Messages() {
                         )}
                       </div>
                     ) : (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-600">Active</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-600">Active</span>
+                        <button
+                          className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
+                          onClick={async () => {
+                            const enrollmentId = leadFollowUpInfo.enrollmentId;
+                            if (!enrollmentId || enrollmentId === 'pending') return;
+                            const prev = leadFollowUpInfo;
+                            setLeadFollowUpInfo({
+                              ...leadFollowUpInfo,
+                              enrollmentId: '',
+                              nextFollowUpAt: null,
+                              followUpStatus: 'stopped',
+                              currentStepIndex: 0,
+                              totalSteps: 0,
+                              nextMessagePreview: null,
+                              pendingSuggestionId: null,
+                              lastStoppedReason: 'manual',
+                            });
+                            try {
+                              await followUpApi.stopEnrollment(enrollmentId, 'manual');
+                            } catch {
+                              setLeadFollowUpInfo(prev);
+                            }
+                          }}
+                        >
+                          Stop
+                        </button>
+                      </div>
                     )}
                   </div>
                   {/* Next follow-up with relative time + step progress */}
