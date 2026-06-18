@@ -1880,7 +1880,11 @@ describe('FollowUpSchedulerService', () => {
       expect(ws.mock.calls[0][0].reengageAt).toBeInstanceOf(Date);
     });
 
-    it('stops + flips to lost with hired_someone reason on completed (Donna case)', async () => {
+    it('stops on completed (Donna case) WITHOUT flipping lead status (2026-06-17 spec A.2)', async () => {
+      // Lifecycle rule cleanup: classifier `completed` no longer maps to
+      // `stop_and_lost`. Wrap-up phrasing is too ambiguous to flip a
+      // customer to lost from a single classifier signal — sequence stops,
+      // status stays in current funnel state.
       const now = setUpHappyPath(
         { intent: 'completed', confidence: 0.88, reason: 'work finished elsewhere', fromLlm: true },
         { lastCustomerMsg: 'The house has already been cleaned' },
@@ -1890,14 +1894,14 @@ describe('FollowUpSchedulerService', () => {
 
       expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_completed');
       const ws = (service as any).leadStatusService.writeStatus;
-      expect(ws.mock.calls[0][0]).toMatchObject({
-        newStatus: 'lost',
-        lostReason: 'hired_someone',
-        reason: 'followup_classifier_completed',
-      });
+      expect(ws).not.toHaveBeenCalled();
     });
 
-    it('stops + flips to booked on agreed (manager handoff)', async () => {
+    it('stops on agreed WITHOUT flipping lead status to booked (2026-06-17 spec A.1)', async () => {
+      // Lifecycle rule cleanup: AI is no longer permitted to author
+      // Lead.status='booked'. The follow-up gate side-effect is stop_only;
+      // the handoff alert on the inbound classifier path pages the
+      // dispatcher, who marks booked manually (or SF/platform reports it).
       const now = setUpHappyPath(
         { intent: 'agreed', confidence: 0.9, reason: 'price accepted', fromLlm: true },
         { lastCustomerMsg: "Sounds good, let's book it" },
@@ -1907,12 +1911,7 @@ describe('FollowUpSchedulerService', () => {
 
       expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_agreed');
       const ws = (service as any).leadStatusService.writeStatus;
-      expect(ws.mock.calls[0][0]).toMatchObject({
-        newStatus: 'booked',
-        reason: 'followup_classifier_agreed',
-      });
-      // No lostReason on booked transition
-      expect(ws.mock.calls[0][0].lostReason).toBeUndefined();
+      expect(ws).not.toHaveBeenCalled();
     });
 
     it('stops on deferring WITHOUT flipping lead status (pause, not lost)', async () => {

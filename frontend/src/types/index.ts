@@ -1,9 +1,17 @@
-// 8-step guided setup wizard. Step slugs match the backend WIZARD_STEPS
+// Guided setup wizard. Step slugs must match the backend WIZARD_STEPS
 // enum in src/onboarding/onboarding.service.ts — keep them in sync.
+//
+// 2026-06-18 — multi-service refactor: `services` + `service_setup` are
+// the new active steps. The legacy `ai` / `pricing` / `ai_rules` /
+// `welcome` slugs remain in the type so existing OnboardingProfile rows
+// continue to round-trip; the frontend wizardConfig no longer renders
+// them.
 export const WIZARD_STEPS = [
   'welcome',
   'connect',
   'business',
+  'services',
+  'service_setup',
   'ai',
   'pricing',
   'automation',
@@ -14,16 +22,46 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 export type WizardStatus = 'done' | 'skipped';
 export type WizardChecklist = Partial<Record<WizardStep, WizardStatus>>;
 
-// Wizard ↔ Settings sync — boolean rollup of "is the data behind each
-// step actually configured on the primary SavedAccount?". Returned by
+// Per-service rollup row inside `serviceSetup.services`. Mirrors the
+// backend OnboardingConfigSummaryService shape.
+export interface OnboardingConfigSummaryService {
+  id: string;
+  name: string;
+  status: 'draft' | 'active' | 'archived';
+  pricingConfigured: boolean;
+  customerAnswersConfigured: boolean;
+  serviceOptionsConfigured: boolean;
+}
+
+// Wizard ↔ Settings sync — per-step rollup returned by
 // GET /v1/onboarding/config-summary. Used by deriveDisplayChecklist to
 // turn the wizard sidebar tick green when the user configured the same
 // thing from Settings, without requiring them to re-walk the wizard.
+//
+// The four legacy booleans (faqConfigured / pricingConfigured /
+// automationConfigured / aiRulesConfigured) are kept for back-compat
+// with the old four "stored-only" steps. The new shape adds structured
+// per-step rollups including per-ServiceProfile completion.
 export interface OnboardingConfigSummary {
+  // Legacy back-compat — primary SavedAccount derivations.
   faqConfigured: boolean;
   pricingConfigured: boolean;
   automationConfigured: boolean;
   aiRulesConfigured: boolean;
+  // New multi-service rollup.
+  connect: { done: boolean; accountCount: number };
+  business: { done: boolean; hasWebsite: boolean };
+  services: {
+    done: boolean;
+    activeServiceCount: number;
+    totalAccounts: number;
+    accountsWithAssignments: number;
+  };
+  serviceSetup: {
+    done: boolean;
+    services: OnboardingConfigSummaryService[];
+  };
+  automation: { done: boolean; mode: string | null };
 }
 
 export interface OnboardingProfile {

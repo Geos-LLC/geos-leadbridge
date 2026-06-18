@@ -180,7 +180,12 @@ describe('LeadStatusService — autonomous mode (no SF link) UNCHANGED', () => {
     expect(prisma._state.lead.lostReason).toBe('opt_out');
   });
 
-  it('lb_automation + non-linked lead → "booked" WRITES as before', async () => {
+  it('lb_automation + non-linked lead → "booked" SKIPPED (Guard 2c: AI never authors booked)', async () => {
+    // 2026-06-17 lifecycle rule cleanup: lb_automation is no longer
+    // authoritative for terminal lifecycle status — `booked` is reserved
+    // for SF / platform_sync / manual. The follow-up gate's stop_only
+    // side-effect still fires (sequence stops, handoff alert dispatches);
+    // only the canonical Lead.status flip is suppressed.
     const prisma = buildPrismaMock({ status: 'quoted' });
     const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
 
@@ -190,8 +195,9 @@ describe('LeadStatusService — autonomous mode (no SF link) UNCHANGED', () => {
       newStatus: 'booked',
     });
 
-    expect(res.applied).toBe(true);
-    expect(res.status).toBe('booked');
+    expect(res.applied).toBe(false);
+    expect(res.skipReason).toBe('automation_forbidden_destination');
+    expect(prisma._state.lead.status).toBe('quoted');
   });
 
   it('manual + non-linked lead → applies, no conflict', async () => {

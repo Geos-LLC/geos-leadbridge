@@ -412,16 +412,16 @@ describe('resolveActiveGoal — Auto routing normalizes legacy goal leaks', () =
   });
 });
 
-describe('SELECTABLE_GOAL_KEYS — UI no longer exposes Hybrid/Convert', () => {
+describe('SELECTABLE_GOAL_KEYS — UI exposes auto/price/qualify/booking/phone', () => {
   // Contract: the UI picker on Conversation.tsx must render exactly these
-  // four goals — Auto, Price, Qualify, Phone. Hybrid and Convert are valid
-  // runtime values for back-compat (see "Legacy saved values" tests above)
-  // but cannot be CHOSEN by the user any more. This list is the canonical
-  // export the frontend should import from; any future picker added in
-  // another surface should also draw from here.
+  // five user-selectable goals — Auto, Price, Qualify, Booking, Call
+  // Handoff (internal key `phone`). Hybrid and Convert are valid runtime
+  // values for back-compat (see "Legacy saved values" tests above) but
+  // cannot be CHOSEN by the user. This list is the canonical export the
+  // frontend should import from.
 
-  it('exposes exactly auto / price / qualify / phone as selectable', () => {
-    expect([...SELECTABLE_GOAL_KEYS]).toEqual(['auto', 'price', 'qualify', 'phone']);
+  it('exposes exactly auto / price / qualify / booking / phone as selectable', () => {
+    expect([...SELECTABLE_GOAL_KEYS]).toEqual(['auto', 'price', 'qualify', 'booking', 'phone']);
   });
 
   it('does not include "hybrid" as a selectable goal', () => {
@@ -432,6 +432,14 @@ describe('SELECTABLE_GOAL_KEYS — UI no longer exposes Hybrid/Convert', () => {
     expect(SELECTABLE_GOAL_KEYS).not.toContain('convert' as never);
   });
 
+  it('includes "booking" as a selectable goal (added 2026-06-16)', () => {
+    expect(SELECTABLE_GOAL_KEYS).toContain('booking');
+  });
+
+  it('still uses the internal key "phone" (Call Handoff label lives in UI only)', () => {
+    expect(SELECTABLE_GOAL_KEYS).toContain('phone');
+  });
+
   it('every selectable non-auto key maps to a STRATEGY_PROMPTS entry', () => {
     for (const key of SELECTABLE_GOAL_KEYS) {
       if (key === 'auto') continue;
@@ -439,7 +447,7 @@ describe('SELECTABLE_GOAL_KEYS — UI no longer exposes Hybrid/Convert', () => {
     }
   });
 
-  it('every SUPPORTED_GOAL_KEY (including legacy hybrid/convert) maps to STRATEGY_PROMPTS', () => {
+  it('every SUPPORTED_GOAL_KEY (including legacy hybrid/convert and new booking) maps to STRATEGY_PROMPTS', () => {
     // Runtime contract — even if UI hides them, prompts MUST still exist
     // for the resolver to honour saved values without crashing.
     for (const key of SUPPORTED_GOAL_KEYS) {
@@ -447,5 +455,7 @@ describe('SELECTABLE_GOAL_KEYS — UI no longer exposes Hybrid/Convert', () => {
     }
     expect(SUPPORTED_GOAL_KEYS).toContain('hybrid');
     expect(SUPPORTED_GOAL_KEYS).toContain('convert');
+    expect(SUPPORTED_GOAL_KEYS).toContain('booking');
+    expect(SUPPORTED_GOAL_KEYS).toContain('phone');
   });
 });

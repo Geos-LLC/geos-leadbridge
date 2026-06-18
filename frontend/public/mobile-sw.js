@@ -8,7 +8,12 @@
 // Static assets get cached at install; everything else is network-first
 // with a navigation-fallback only.
 
-const VERSION = 'lb-mobile-v1';
+// Bumped from v1 → v2 (2026-06-17): excludes /version.json from cache-first
+// to fix a "Update available" banner that never went away. The previous
+// version cached /version.json on first fetch, then served the stale copy
+// forever — the hook's `cache: 'no-store'` only affects the HTTP layer,
+// not this SW. Bumping the constant evicts every v1 cache on next install.
+const VERSION = 'lb-mobile-v2';
 const APP_SHELL = ['/', '/m', '/m/today'];
 
 self.addEventListener('install', (event) => {
@@ -39,6 +44,14 @@ self.addEventListener('fetch', (event) => {
   // Same-origin API calls are always network-first with no cache fallback —
   // we never want to serve stale lead/message data from the SW.
   if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) {
+    return;
+  }
+
+  // /version.json is the deploy-detection beacon — caching it permanently
+  // pins the "Update available" banner because the SW returns the stale
+  // SHA forever even after a hard reload. Pass through to network every
+  // time; the hook itself uses `cache: 'no-store'` for the HTTP layer.
+  if (url.origin === self.location.origin && url.pathname === '/version.json') {
     return;
   }
 

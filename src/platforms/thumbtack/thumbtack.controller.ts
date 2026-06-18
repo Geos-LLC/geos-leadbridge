@@ -64,12 +64,9 @@ export class ThumbtackController {
 
     try {
       // Get all businesses for this user
-      this.logger.log(`[oauth-trace] autoSetupWebhooks calling leadsService.getBusinesses user=${userId}`);
       const businesses = await this.leadsService.getBusinesses(userId, PlatformName.THUMBTACK);
-      this.logger.log(`[oauth-trace] autoSetupWebhooks getBusinesses returned count=${businesses.length} ids=${businesses.map((b: any) => b?.businessID ?? '?').join(',')} user=${userId}`);
 
       if (businesses.length === 0) {
-        this.logger.warn(`[oauth-trace] autoSetupWebhooks NO_BUSINESSES TT returned empty list for user=${userId} — credentials are valid but the token's user identity has no businesses attached`);
         console.log('No businesses found to setup webhooks for');
         return { skippedAlreadyConnected, webhookErrors };
       }
@@ -91,7 +88,6 @@ export class ThumbtackController {
 
       // Setup webhook and save account for each business
       for (const business of businesses) {
-        this.logger.log(`[oauth-trace] autoSetupWebhooks LOOP business=${business?.businessID ?? '?'} name="${business?.name ?? '?'}" user=${userId}`);
         try {
           // Check if current user is an admin (for testing purposes, admins can connect same business to multiple accounts)
           const currentUser = await this.platformService.getUserById(userId);
@@ -105,7 +101,6 @@ export class ThumbtackController {
           );
 
           if (otherUserAccount) {
-            this.logger.warn(`[oauth-trace] autoSetupWebhooks business=${business.businessID} OWNED_BY_OTHER otherUserId=${otherUserAccount.userId} isAdmin=${isAdmin}`);
             if (!isAdmin) {
               console.error(`Business ${business.name} (${business.businessID}) already connected to user ${otherUserAccount.userId}`);
               // Pass structured payload so handleCallback can emit a specific
@@ -131,7 +126,6 @@ export class ThumbtackController {
           );
 
           if (ownAccount && ownAccount.userId === userId) {
-            this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} EXISTING_ACCOUNT accountId=${ownAccount.id} — refreshing creds + webhook`);
             console.log(`Business ${business.name} (${business.businessID}) - same user reconnecting, refreshing webhook`);
             if (credentials) {
               await this.platformService.updateAccountCredentials(
@@ -140,9 +134,7 @@ export class ThumbtackController {
               );
               console.log(`Updated credentials for existing account: ${business.name}`);
             }
-            this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} calling setupThumbtackWebhook (existing path)`);
             await this.platformService.setupThumbtackWebhook(userId, business.businessID);
-            this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} setupThumbtackWebhook OK (existing path)`);
             // Clear stale token errors — fresh OAuth means token is alive
             await this.prisma.systemErrorLog.updateMany({
               where: {
@@ -161,7 +153,6 @@ export class ThumbtackController {
           }
 
           // First save the account WITH credentials (so setupThumbtackWebhook can update it with webhookId)
-          this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} NEW_ACCOUNT calling saveAccount`);
           await this.platformService.saveAccount(
             userId,
             PlatformName.THUMBTACK,
@@ -171,16 +162,12 @@ export class ThumbtackController {
             credentials?.email, // Email from ID token
             credentials, // Store credentials per-account for multi-login support
           );
-          this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} saveAccount OK`);
           console.log(`Account saved for business: ${business.name} (email: ${credentials?.email || 'none'}, with credentials: ${!!credentials})`);
 
           // Then setup webhook (this will update the saved account with webhookId)
-          this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} calling setupThumbtackWebhook (new path)`);
           await this.platformService.setupThumbtackWebhook(userId, business.businessID);
-          this.logger.log(`[oauth-trace] autoSetupWebhooks business=${business.businessID} setupThumbtackWebhook OK (new path)`);
           console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
         } catch (err) {
-          this.logger.error(`[oauth-trace] autoSetupWebhooks business=${business?.businessID ?? '?'} ERROR errName=${err?.constructor?.name ?? 'unknown'} msg=${err?.message ?? 'unknown'}`);
           // Re-throw BadRequestException (account conflict) - these should fail the OAuth flow
           if (err instanceof BadRequestException) {
             throw err;
@@ -192,7 +179,6 @@ export class ThumbtackController {
         }
       }
     } catch (err) {
-      this.logger.error(`[oauth-trace] autoSetupWebhooks FATAL errName=${err?.constructor?.name ?? 'unknown'} msg=${err?.message ?? 'unknown'}`);
       // Re-throw BadRequestException (account conflict) - these should fail the OAuth flow
       if (err instanceof BadRequestException) {
         throw err;
@@ -210,14 +196,19 @@ export class ThumbtackController {
   // ==========================================
 
   @Get('auth/url')
-  async getAuthUrl(@CurrentUser() user: any, @Query('forceLogin') forceLogin?: string) {
-    // [oauth-trace] — diagnostic, enables full-path tracing from
-    // "user clicks Connect" → frontend hits /auth/url → callback fires →
-    // businesses iterate. Logs presence/absence + lengths/IDs only, never
-    // tokens or full URLs.
-    this.logger.log(`[oauth-trace] getAuthUrl ENTRY user=${user?.id ?? 'NULL'} forceLogin=${forceLogin === 'true'}`);
-    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK, forceLogin === 'true');
-    this.logger.log(`[oauth-trace] getAuthUrl returning urlLen=${authUrl?.length ?? 0} user=${user?.id ?? 'NULL'}`);
+  async getAuthUrl(
+    @CurrentUser() user: any,
+    @Query('forceLogin') forceLogin?: string,
+    @Query('loginHint') loginHint?: string,
+  ) {
+    const trimmedHint = loginHint?.trim() || undefined;
+    const authUrl = await this.platformService.getAuthUrl(
+      user.id,
+      PlatformName.THUMBTACK,
+      forceLogin === 'true',
+      undefined,
+      trimmedHint,
+    );
     return { authUrl };
   }
 
@@ -230,17 +221,8 @@ export class ThumbtackController {
     @Query('error_description') errorDescription: string,
     @Res() res: Response,
   ) {
-    // [oauth-trace] callback ENTRY — log every query param's presence
-    // (not the values themselves; the code+state are sensitive).
-    this.logger.log(
-      `[oauth-trace] callback ENTRY code=${code ? 'present' : 'MISSING'} ` +
-      `state=${state ? `present(len=${state.length})` : 'MISSING'} ` +
-      `error=${error || 'none'} errorDescription=${errorDescription || 'none'}`,
-    );
-
     // Handle OAuth errors - redirect to frontend with error
     if (error) {
-      this.logger.warn(`[oauth-trace] callback OAuth provider returned error=${error} description=${errorDescription || 'none'}`);
       const errorParams = new URLSearchParams({
         error,
         error_description: errorDescription || 'OAuth authorization failed',
@@ -249,29 +231,22 @@ export class ThumbtackController {
     }
 
     if (!code) {
-      this.logger.warn(`[oauth-trace] callback MISSING_CODE — redirecting with error`);
       return res.redirect(`${this.frontendUrl}/overview?error=missing_code&error_description=Authorization code is required`);
     }
 
     try {
       // Get userId from state (stored during auth URL generation)
       const userId = await this.platformService.getUserIdFromState(state);
-      this.logger.log(`[oauth-trace] callback state resolved userId=${userId ?? 'NULL'}`);
 
       if (!userId) {
-        this.logger.warn(`[oauth-trace] callback INVALID_STATE — state token expired or unknown`);
         return res.redirect(`${this.frontendUrl}/overview?error=invalid_state&error_description=OAuth state expired or invalid. Please try connecting again.`);
       }
 
       // Exchange code for tokens
-      this.logger.log(`[oauth-trace] callback exchanging code → tokens user=${userId}`);
       await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
-      this.logger.log(`[oauth-trace] callback code exchange COMPLETE user=${userId}`);
 
       // Auto-setup webhooks for all businesses
-      this.logger.log(`[oauth-trace] callback calling autoSetupWebhooks user=${userId}`);
       const { skippedAlreadyConnected, webhookErrors } = await this.autoSetupWebhooks(userId);
-      this.logger.log(`[oauth-trace] callback autoSetupWebhooks returned skipped=${skippedAlreadyConnected.length} errors=${webhookErrors.length} user=${userId}`);
 
       // Build redirect URL with appropriate message
       const params = new URLSearchParams({ connected: 'thumbtack' });
@@ -291,10 +266,8 @@ export class ThumbtackController {
 
       const redirectUrl = `${this.frontendUrl}/overview?${params.toString()}`;
       console.log('[ThumbtackController] Redirecting to:', redirectUrl);
-      this.logger.log(`[oauth-trace] callback SUCCESS redirecting paramKeys=${Array.from(params.keys()).join(',')}`);
       return res.redirect(redirectUrl);
     } catch (err) {
-      this.logger.error(`[oauth-trace] callback CAUGHT_ERROR message=${err?.message ?? 'unknown'} name=${err?.constructor?.name ?? 'unknown'}`);
       // If the error carries a structured payload (e.g. BadRequestException
       // thrown by autoSetupWebhooks for the duplicate-business case), surface
       // its `code` so the frontend can render a blocking modal instead of an
@@ -337,9 +310,8 @@ export class ThumbtackController {
 
   @Post('auth/disconnect')
   async disconnect(@CurrentUser() user: any) {
-    this.logger.log(`[oauth-trace] /auth/disconnect ENTRY user=${user?.id ?? 'NULL'}`);
     await this.platformService.disconnect(user.id, PlatformName.THUMBTACK);
-    this.logger.log(`[oauth-trace] /auth/disconnect COMPLETE user=${user?.id ?? 'NULL'}`);
+
     return {
       success: true,
       message: 'Thumbtack account disconnected',
@@ -1044,9 +1016,8 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    this.logger.log(`[oauth-trace] /saved-accounts/:id/disconnect ENTRY accountId=${id} user=${user?.id ?? 'NULL'}`);
     const result = await this.platformService.disconnectAccountWebhook(user.id, id);
-    this.logger.log(`[oauth-trace] /saved-accounts/:id/disconnect COMPLETE accountId=${id} success=${result.success} webhookDeleted=${result.webhookDeleted} errorCode=${result.errorCode ?? 'none'}`);
+
     return {
       success: result.success,
       webhookDeleted: result.webhookDeleted,

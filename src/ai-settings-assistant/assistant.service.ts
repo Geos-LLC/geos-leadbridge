@@ -33,6 +33,17 @@ const AREA_LABELS: Record<AssistantArea, string> = {
   global_custom_instructions: 'Global Custom Instructions',
 };
 
+/**
+ * Map an assistant area to the v2 storage key under `aiPlaybookV2`. Only
+ * the three per-section playbook areas have a section key; FAQ + global
+ * live on their own columns and are handled separately by callers.
+ */
+const PLAYBOOK_AREA_TO_SECTION_KEY: Record<string, string | undefined> = {
+  business_information: 'business_information',
+  pricing_guidance: 'pricing_guidance',
+  brand_voice: 'personality_brand_voice',
+};
+
 const LOW_CONFIDENCE_THRESHOLD = 0.55;
 
 @Injectable()
@@ -258,6 +269,110 @@ export class AiSettingsAssistantService {
     };
   }
 
+  /**
+   * Read the chat-added instructions list for the given area + scope.
+   * Returns `{ entries: ChatInstruction[] }`. Unknown areas resolve to
+   * an empty list. Caller scope is enforced via the savedAccountId
+   * lookup (userId match required) and the user.id select.
+   */
+  async listChatInstructions(
+    userId: string,
+    area: string,
+    savedAccountId: string | undefined,
+  ) {
+    const list = await this.readChatList(userId, area, savedAccountId);
+    return { entries: list };
+  }
+
+  /**
+   * Remove one chat-added instruction by id. The typed `customInstructions`
+   * / `globalAiPrompt` blob is never touched — only the structured list
+   * shrinks. Returns the remaining entries so the UI can re-render
+   * without re-fetching.
+   */
+  async deleteChatInstruction(
+    userId: string,
+    area: string,
+    entryId: string,
+    savedAccountId: string | undefined,
+  ) {
+    const remaining = await this.writeChatListFiltered(
+      userId, area, savedAccountId, e => e.id !== entryId,
+    );
+    return { entries: remaining };
+  }
+
+  private async readChatList(
+    userId: string,
+    area: string,
+    savedAccountId: string | undefined,
+  ): Promise<Array<{ id: string; text: string; userMessage?: string; createdAt: string }>> {
+    if (area === 'global_custom_instructions') {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { globalAiChatInstructionsJson: true },
+      });
+      return safeChatListShape(user?.globalAiChatInstructionsJson);
+    }
+    const sectionKey = PLAYBOOK_AREA_TO_SECTION_KEY[area];
+    if (!sectionKey) return [];
+    if (!savedAccountId) throw new BadRequestException('savedAccountId is required for this area');
+    const acct = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: { followUpSettingsJson: true },
+    });
+    if (!acct?.followUpSettingsJson) return [];
+    try {
+      const settings = JSON.parse(acct.followUpSettingsJson);
+      return safeChatListShape(settings?.aiPlaybookV2?.[sectionKey]?.chatInstructions);
+    } catch { return []; }
+  }
+
+  private async writeChatListFiltered(
+    userId: string,
+    area: string,
+    savedAccountId: string | undefined,
+    keep: (e: { id: string; text: string; userMessage?: string; createdAt: string }) => boolean,
+  ): Promise<Array<{ id: string; text: string; userMessage?: string; createdAt: string }>> {
+    if (area === 'global_custom_instructions') {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { globalAiChatInstructionsJson: true },
+      });
+      const next = safeChatListShape(user?.globalAiChatInstructionsJson).filter(keep);
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { globalAiChatInstructionsJson: next.length > 0 ? (next as any) : null },
+      });
+      return next;
+    }
+    const sectionKey = PLAYBOOK_AREA_TO_SECTION_KEY[area];
+    if (!sectionKey) throw new BadRequestException(`unsupported area: ${area}`);
+    if (!savedAccountId) throw new BadRequestException('savedAccountId is required for this area');
+    const acct = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: { id: true, followUpSettingsJson: true },
+    });
+    if (!acct) throw new NotFoundException('Account not found');
+    let settings: Record<string, any> = {};
+    if (acct.followUpSettingsJson) {
+      try { settings = JSON.parse(acct.followUpSettingsJson) || {}; } catch { settings = {}; }
+    }
+    const v2 = settings.aiPlaybookV2 && typeof settings.aiPlaybookV2 === 'object'
+      ? { ...settings.aiPlaybookV2 }
+      : {};
+    const section = v2[sectionKey] && typeof v2[sectionKey] === 'object' ? { ...v2[sectionKey] } : {};
+    const next = safeChatListShape(section.chatInstructions).filter(keep);
+    section.chatInstructions = next;
+    v2[sectionKey] = section;
+    settings.aiPlaybookV2 = v2;
+    await this.prisma.savedAccount.update({
+      where: { id: acct.id },
+      data: { followUpSettingsJson: JSON.stringify(settings) },
+    });
+    return next;
+  }
+
   async apply(userId: string, req: ApplyRequest): Promise<ApplyResponse> {
     if (!req?.proposal) throw new BadRequestException('proposal is required');
     const verify = verifyProposal(req.proposal, userId);
@@ -384,6 +499,12 @@ export class AiSettingsAssistantService {
     };
   }
 
+  /**
+   * Effective text the conflict detector and noop check should compare
+   * against: typed `customInstructions` (or `globalAiPrompt`) followed
+   * by every chat entry, joined by paragraph breaks. That mirrors what
+   * the runtime AI prompt sees.
+   */
   private async readCurrentValue(
     userId: string,
     savedAccountId: string | null,
@@ -392,9 +513,9 @@ export class AiSettingsAssistantService {
     if (area === 'global_custom_instructions') {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { globalAiPrompt: true },
+        select: { globalAiPrompt: true, globalAiChatInstructionsJson: true },
       });
-      return user?.globalAiPrompt ?? null;
+      return combineForArea(user?.globalAiPrompt, user?.globalAiChatInstructionsJson);
     }
     if (!savedAccountId) return null;
     if (area === 'faq') {
@@ -416,17 +537,18 @@ export class AiSettingsAssistantService {
         area === 'pricing_guidance' ? 'pricing_guidance' :
         area === 'brand_voice' ? 'personality_brand_voice' : null;
       if (!sectionKey) return null;
-      return settings?.aiPlaybookV2?.[sectionKey]?.customInstructions ?? null;
+      const section = settings?.aiPlaybookV2?.[sectionKey];
+      return combineForArea(section?.customInstructions, section?.chatInstructions);
     } catch { return null; }
   }
 
   private storageKeyFor(area: AssistantArea): string {
     switch (area) {
-      case 'global_custom_instructions': return 'globalAiPrompt';
+      case 'global_custom_instructions': return 'globalAiChatInstructionsJson';
       case 'faq': return 'faqJson';
-      case 'business_information': return 'aiPlaybookV2.business_information.customInstructions';
-      case 'pricing_guidance': return 'aiPlaybookV2.pricing_guidance.customInstructions';
-      case 'brand_voice': return 'aiPlaybookV2.personality_brand_voice.customInstructions';
+      case 'business_information': return 'aiPlaybookV2.business_information.chatInstructions';
+      case 'pricing_guidance': return 'aiPlaybookV2.pricing_guidance.chatInstructions';
+      case 'brand_voice': return 'aiPlaybookV2.personality_brand_voice.chatInstructions';
     }
   }
 
@@ -448,4 +570,50 @@ export class AiSettingsAssistantService {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1).trimEnd() + '…';
+}
+
+/**
+ * Defensive read of a chat-instructions list — drops malformed entries.
+ * Mirrors the renderer's tolerance so corrupt JSON never crashes a
+ * controller response.
+ */
+function safeChatListShape(
+  raw: unknown,
+): Array<{ id: string; text: string; userMessage?: string; createdAt: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (e: any) =>
+        !!e && typeof e === 'object' &&
+        typeof e.id === 'string' &&
+        typeof e.text === 'string' &&
+        e.text.trim().length > 0,
+    )
+    .map((e: any) => ({
+      id: e.id,
+      text: e.text,
+      userMessage: typeof e.userMessage === 'string' ? e.userMessage : undefined,
+      createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date(0).toISOString(),
+    }));
+}
+
+/**
+ * Combined effective text for an area = typed blob (`globalAiPrompt` or
+ * `customInstructions`) followed by every chat entry, joined by blank
+ * lines. Returns null when the result is empty so callers can short-
+ * circuit conflict detection.
+ */
+function combineForArea(
+  typed: string | null | undefined,
+  chatList: unknown,
+): string | null {
+  const t = (typed ?? '').trim();
+  const chat = Array.isArray(chatList)
+    ? chatList
+        .filter((e: any) => e && typeof e.text === 'string')
+        .map((e: any) => (e.text as string).trim())
+        .filter(Boolean)
+    : [];
+  const combined = [t, ...chat].filter(s => s.length > 0).join('\n\n');
+  return combined.length > 0 ? combined : null;
 }

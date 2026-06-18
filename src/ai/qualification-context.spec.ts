@@ -164,6 +164,14 @@ describe('buildQualificationBlockForStrategy', () => {
     expect(out).toContain('Phone Number');
   });
 
+  // Booking (added 2026-06-16) also receives the REQUIRED FIELDS block —
+  // the Booking prompt explicitly references it to decide whether to ask
+  // one booking-critical question before asking for a date.
+  it('emits block when strategy is booking', () => {
+    const out = buildQualificationBlockForStrategy('booking', ['zip_code']);
+    expect(out).toContain('Zip Code');
+  });
+
   // Price was previously gated for injection alongside Qualify; tightened
   // to qualify-only when Price moved to Pricing-Table-driven behavior.
   // See qualification-context.ts header for the rationale.
@@ -183,7 +191,7 @@ describe('buildQualificationBlockForStrategy', () => {
     expect(buildQualificationBlockForStrategy('convert', ['square_footage'])).toBe('');
   });
 
-  it('returns empty string for phone strategy', () => {
+  it('returns empty string for phone (Call Handoff) strategy', () => {
     expect(buildQualificationBlockForStrategy('phone', ['square_footage'])).toBe('');
   });
 
@@ -194,5 +202,10 @@ describe('buildQualificationBlockForStrategy', () => {
   it('returns empty string when required fields is missing even for qualify', () => {
     expect(buildQualificationBlockForStrategy('qualify', undefined)).toBe('');
     expect(buildQualificationBlockForStrategy('qualify', null)).toBe('');
+  });
+
+  it('returns empty string when required fields is missing even for booking', () => {
+    expect(buildQualificationBlockForStrategy('booking', undefined)).toBe('');
+    expect(buildQualificationBlockForStrategy('booking', null)).toBe('');
   });
 });

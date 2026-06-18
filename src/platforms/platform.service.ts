@@ -174,7 +174,13 @@ export class PlatformService {
       'ProactiveRefresh',
       async tx => {
     const accounts = await tx.savedAccount.findMany({
-      where: { credentialsJson: { not: null } },
+      where: {
+        credentialsJson: { not: null },
+        // Skip auto-archived accounts — by definition they've had
+        // refresh failures for >= 30 days, so further refresh attempts
+        // just keep failing and generating noise in SystemErrorLog.
+        archivedAt: null,
+      },
       select: { id: true, platform: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
     });
 
@@ -289,7 +295,7 @@ export class PlatformService {
    * Get OAuth authorization URL
    * State is an encrypted token containing userId + expiry — survives server restarts.
    */
-  async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string): Promise<string> {
+  async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string, loginHint?: string): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
 
     // Encode userId + expiry into the state param itself (no in-memory Map needed).
@@ -299,7 +305,7 @@ export class PlatformService {
     const encrypted = EncryptionUtil.encrypt(statePayload, this.encryptionKey);
     const state = encrypted.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl);
+    return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl, loginHint);
   }
 
   /**
@@ -333,22 +339,13 @@ export class PlatformService {
    * Handle OAuth callback and store credentials
    */
   async handleCallback(userId: string, platformName: string, code: string, callbackUrl?: string): Promise<void> {
-    this.logger.log(`[oauth-trace] platformService.handleCallback ENTRY platform=${platformName} user=${userId} codeLen=${code?.length ?? 0}`);
     const adapter = this.platformFactory.getAdapter(platformName);
 
     // Exchange code for tokens
-    let credentials: any;
-    try {
-      credentials = await adapter.handleCallback(code, userId, callbackUrl);
-      this.logger.log(`[oauth-trace] platformService.handleCallback adapter.handleCallback OK platform=${platformName} user=${userId} accessTokenLen=${credentials?.accessToken?.length ?? 0} refreshTokenLen=${credentials?.refreshToken?.length ?? 0} email=${credentials?.email ? 'present' : 'absent'}`);
-    } catch (err: any) {
-      this.logger.error(`[oauth-trace] platformService.handleCallback adapter.handleCallback FAILED platform=${platformName} user=${userId} errName=${err?.constructor?.name ?? 'unknown'} msg=${err?.message ?? 'unknown'}`);
-      throw err;
-    }
+    const credentials = await adapter.handleCallback(code, userId, callbackUrl);
 
     // Encrypt and store credentials
     await this.storeCredentials(userId, platformName, credentials);
-    this.logger.log(`[oauth-trace] platformService.handleCallback storeCredentials OK platform=${platformName} user=${userId}`);
   }
 
   /**
@@ -823,26 +820,62 @@ export class PlatformService {
     credentials?: { accessToken: string } | null,
     adapter?: any,
   ): Promise<void> {
+    const errors: string[] = [];
     try {
       await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`owner: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
       await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`lb: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
       await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`additional-batch: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
+    }
+
+    // Surface sync outcomes through the existing monitoring stack so the
+    // hourly health-check cron + SendGrid alert pipeline + frontend
+    // "Reconnect" UI all light up automatically. See
+    // MonitoringService.checkAccountHealth #5 for the read side.
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true, businessName: true },
+    });
+    if (!account) return;
+    if (errors.length > 0) {
+      await this.monitoring.captureError({
+        category: 'associate_phones',
+        code: 'sync_failed',
+        message: `Associate-phone sync failed — ${errors.join(' | ').slice(0, 400)}`,
+        userId,
+        accountId: account.id,
+        accountName: account.businessName ?? null,
+        platform: 'thumbtack',
+        context: { businessId },
+      });
+    } else {
+      // Full success — auto-resolve any previously unresolved sync errors
+      // for this account so the hourly check stops surfacing the issue.
+      await this.prisma.systemErrorLog.updateMany({
+        where: { accountId: account.id, category: 'associate_phones', resolved: false },
+        data: { resolved: true },
+      }).catch(() => { /* monitoring writes never block the caller */ });
     }
   }
 
@@ -1182,8 +1215,30 @@ export class PlatformService {
         // Only update credentials if provided (don't overwrite existing with undefined)
         ...(encryptedCredentials && { credentialsJson: encryptedCredentials }),
         lastUsedAt: new Date(),
+        // Resurrect path — if the proactive sweep had archived this
+        // row, clearing archivedAt brings it back into the user-facing
+        // list with all its config intact.
+        archivedAt: null,
       },
     });
+
+    // Resolve-side of resurrect: mark any previously-recorded
+    // token_refresh errors as resolved. OAuth callback is a stronger
+    // "token works now" signal than the next proactive cron run.
+    if (savedAccount) {
+      this.prisma.systemErrorLog.updateMany({
+        where: {
+          accountId: savedAccount.id,
+          category: 'token_refresh',
+          resolved: false,
+        },
+        data: { resolved: true, updatedAt: new Date() },
+      }).catch((err) => {
+        this.logger.warn(
+          `[saveAccount] Failed to auto-resolve token_refresh errors for ${savedAccount.id}: ${err.message}`,
+        );
+      });
+    }
 
     // Phones are bound to their owning savedAccount at purchase time
     // (notifications.service.ts purchaseTenantPhoneNumber). An UNASSIGNED
@@ -1756,6 +1811,12 @@ export class PlatformService {
       where: {
         userId,
         ...(platform && { platform }),
+        // Auto-archive sweep (ArchiveOrphanedAccounts cron) sets
+        // archivedAt when an account has had unresolved token_refresh
+        // failures for >= 30 days. Filter them out of the user-facing
+        // list — the row stays in the DB so a fresh OAuth reconnect
+        // resurrects it with its config intact.
+        archivedAt: null,
       },
       orderBy: { lastUsedAt: 'desc' },
     });
@@ -1997,6 +2058,28 @@ export class PlatformService {
       where: { savedAccountId: accountId },
       data: { savedAccountId: null },
     });
+
+    // Sweep orphan SystemErrorLog rows. SystemErrorLog.accountId is a
+    // plain string column (no FK), so deleting the SavedAccount without
+    // this would leave error rows pointing at a now-invalid id — they
+    // accumulate in the dead-token sweep and the tenant-health UI then
+    // surfaces ghosts (a 2026-06-18 audit found 330 such orphans across
+    // 7 deleted accounts). Defensive: never throws — the local delete
+    // is the priority.
+    try {
+      const swept = await this.prisma.systemErrorLog.deleteMany({
+        where: { accountId },
+      });
+      if (swept.count > 0) {
+        this.logger.log(
+          `[removeSavedAccount] swept ${swept.count} SystemErrorLog rows for ${accountId}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[removeSavedAccount] SystemErrorLog sweep failed (non-fatal): ${err.message}`,
+      );
+    }
 
     // Delete the saved account (cascades to NotificationSettings, CallConnectSettings, etc.)
     await this.prisma.savedAccount.delete({

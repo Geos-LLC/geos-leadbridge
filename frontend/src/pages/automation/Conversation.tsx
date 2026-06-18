@@ -57,7 +57,7 @@ function makeCustomFieldId(): string {
 }
 
 type CachedConvSettings = {
-  strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+  strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
   priceMode: 'range' | 'exact';
   availability: 'always' | 'hours';
   // V2 Review Mode (2026-06-12). 'suggest' parks AI replies as pending
@@ -77,16 +77,27 @@ type CachedConvSettings = {
   // default false so existing tenants behave identically.
   qualifyStopOnComplete: boolean;
   phoneStopOnComplete: boolean;
+  // Per-account booking-availability (Booking goal). 7 weekdays × 2
+  // periods (morning / afternoon). Missing in older saves → defaulted
+  // to Mon–Fri both on, weekends both off by normalizeBookingAvailability.
+  bookingAvailability: BookingAvailability;
 };
 const convCache = new Map<string, CachedConvSettings>();
 
-type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone';
+type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
 
-// Qualification required-fields catalog (6 fields). Zip code + Phone number
+// Qualification required-fields catalog (7 fields). Zip code + Phone number
 // are platform-driven defaults (TT usually has zip, Yelp usually needs both).
-// The other 4 (bedrooms, bathrooms, square footage, frequency) are unchecked
-// by default — users opt in per business. Snake_case keys match the backend
-// prompt-injection format. Catalog order = display order in the UI.
+// The other 5 (bedrooms, bathrooms, square footage, frequency, desired
+// service date) are unchecked by default — users opt in per business.
+// Snake_case keys match the backend prompt-injection format. Catalog order
+// = display order in the UI.
+//
+// `service_date` (Desired Service Date, added 2026-06-16) belongs under
+// Qualify, not only Booking — multiple tenants want it collected as part
+// of the regular qualification flow so the AI can flag scheduling
+// concerns before a quote even goes out. The Booking goal's prompt also
+// honours it when present in the REQUIRED FIELDS block.
 //
 // Future fields (not in UI yet, captured here for context): move_in_out,
 // pets, deep_cleaning, extras. They map onto existing legacy backend keys
@@ -96,29 +107,77 @@ type StrategyKey = 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'
 // and continues to inject into the AI prompt at runtime even though the
 // UI no longer renders a checkbox for it. See toggleQualificationField
 // for the preserve-unknown-keys logic.
+// Booking-availability shape — mirrors src/ai/booking-availability.ts on
+// the backend. The runtime normalizer there is the source of truth; this
+// frontend copy is just for editor state. Keep the keys + default in
+// sync if either side changes.
+type BookingDayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+type BookingDaySettings = { morning: boolean; afternoon: boolean };
+type BookingAvailability = Record<BookingDayKey, BookingDaySettings>;
+const BOOKING_DAY_LABELS: Record<BookingDayKey, string> = {
+  mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
+};
+const BOOKING_DAY_KEYS: readonly BookingDayKey[] =
+  ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+// Default Mon–Fri morning + afternoon ON, weekends OFF. Matches
+// DEFAULT_BOOKING_AVAILABILITY on the backend so accounts that haven't
+// saved anything render the same windows the AI is told about.
+const DEFAULT_BOOKING_AVAILABILITY: BookingAvailability = {
+  mon: { morning: true,  afternoon: true  },
+  tue: { morning: true,  afternoon: true  },
+  wed: { morning: true,  afternoon: true  },
+  thu: { morning: true,  afternoon: true  },
+  fri: { morning: true,  afternoon: true  },
+  sat: { morning: false, afternoon: false },
+  sun: { morning: false, afternoon: false },
+};
+function normalizeBookingAvailability(raw: unknown): BookingAvailability {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_BOOKING_AVAILABILITY };
+  const obj = raw as Record<string, unknown>;
+  const out = {} as BookingAvailability;
+  for (const day of BOOKING_DAY_KEYS) {
+    const node = obj[day];
+    const defaults = DEFAULT_BOOKING_AVAILABILITY[day];
+    if (!node || typeof node !== 'object') { out[day] = { ...defaults }; continue; }
+    const n = node as Record<string, unknown>;
+    out[day] = {
+      morning:   typeof n.morning   === 'boolean' ? n.morning   : defaults.morning,
+      afternoon: typeof n.afternoon === 'boolean' ? n.afternoon : defaults.afternoon,
+    };
+  }
+  return out;
+}
+
 const QUALIFICATION_FIELDS = [
-  { key: 'bedrooms',       label: 'Bedrooms',       defaultChecked: false },
-  { key: 'bathrooms',      label: 'Bathrooms',      defaultChecked: false },
-  { key: 'square_footage', label: 'Square Footage', defaultChecked: false },
-  { key: 'frequency',      label: 'Frequency',      defaultChecked: false },
-  { key: 'zip_code',       label: 'Zip Code',       defaultChecked: true },
-  { key: 'phone_number',   label: 'Phone Number',   defaultChecked: true },
+  { key: 'bedrooms',       label: 'Bedrooms',             defaultChecked: false },
+  { key: 'bathrooms',      label: 'Bathrooms',            defaultChecked: false },
+  { key: 'square_footage', label: 'Square Footage',       defaultChecked: false },
+  { key: 'frequency',      label: 'Frequency',            defaultChecked: false },
+  { key: 'service_date',   label: 'Desired Service Date', defaultChecked: false },
+  { key: 'zip_code',       label: 'Zip Code',             defaultChecked: true },
+  { key: 'phone_number',   label: 'Phone Number',         defaultChecked: true },
 ] as const;
 const QUALIFICATION_DEFAULT_FIELDS = QUALIFICATION_FIELDS
   .filter(f => f.defaultChecked)
   .map(f => f.key) as string[];
 const QUALIFICATION_CATALOG_KEYS: Set<string> = new Set(QUALIFICATION_FIELDS.map(f => f.key));
 
-// 4 goals only — Hybrid and Convert collapsed into Auto and Qualify
-// respectively (UI only). Saved backend values 'hybrid' and 'convert' are
-// remapped for DISPLAY in parseSettings and the runtime continues to honor
-// them via STRATEGY_PROMPTS.hybrid / .convert. No DB writes — legacy values
-// stay in followUpSettingsJson until the user explicitly picks a new goal.
+// 5 user-selectable goals — Hybrid and Convert collapsed into Auto and
+// Qualify respectively (UI only). Saved backend values 'hybrid' and
+// 'convert' are remapped for DISPLAY in parseSettings and the runtime
+// continues to honor them via STRATEGY_PROMPTS.hybrid / .convert. No DB
+// writes — legacy values stay in followUpSettingsJson until the user
+// explicitly picks a new goal.
+//
+// Phone (2026-06-16) is rendered as "Call Handoff" but the internal key
+// stays `phone` so existing tenants' saved followUpStrategy='phone'
+// values resolve unchanged. Booking is the new "schedule the job" goal.
 const STRATEGIES: { k: StrategyKey; icon: LucideIcon; iconTone: IconTone; title: string; body: string; recommended?: boolean }[] = [
-  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',    body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
-  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',   body: 'Provide pricing information as quickly and accurately as possible.' },
-  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify', body: 'Collect the information needed before quoting or booking.' },
-  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Phone',   body: 'Get the customer onto a phone call.' },
+  { k: 'auto',    icon: Sparkles,         iconTone: 'violet', title: 'Auto',         body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
+  { k: 'price',   icon: CircleDollarSign, iconTone: 'green',  title: 'Price',        body: 'Provide pricing information as quickly and accurately as possible.' },
+  { k: 'qualify', icon: UserCheck,        iconTone: 'orange', title: 'Qualify',      body: 'Collect the required information before quoting or booking.' },
+  { k: 'booking', icon: CalendarCheck,    iconTone: 'blue',   title: 'Booking',      body: 'Move the customer toward scheduling the job.' },
+  { k: 'phone',   icon: Phone,            iconTone: 'rose',   title: 'Call Handoff', body: "Get the customer's number so your team can call." },
 ];
 
 export function AutomationConversation({ accountId }: { accountId: string }) {
@@ -182,6 +241,14 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [qualifyStopOnComplete, setQualifyStopOnComplete] = useState(false);
   const [phoneStopOnComplete, setPhoneStopOnComplete] = useState(false);
 
+  // Booking-goal availability — 7-day × 2-period toggle grid. Stored at
+  // followUpSettingsJson.bookingAvailability. Defaults render Mon–Fri
+  // morning + afternoon on for fresh accounts (matches DEFAULT on the
+  // backend so the AVAILABILITY block injected at runtime stays in
+  // sync with what the user sees).
+  const [bookingAvailability, setBookingAvailability] =
+    useState<BookingAvailability>(() => ({ ...DEFAULT_BOOKING_AVAILABILITY }));
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -202,7 +269,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
     | 'qualificationRequiredFields' | 'qualificationCustomFields'
-    | 'qualifyStopOnComplete' | 'phoneStopOnComplete';
+    | 'qualifyStopOnComplete' | 'phoneStopOnComplete'
+    | 'bookingAvailability';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
   useEffect(() => {
@@ -309,6 +377,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       // so undefined or false both mean "Continue AI + Notify Team".
       qualifyStopOnComplete: !!s?.goalQualifyStopOnComplete,
       phoneStopOnComplete:   !!s?.goalPhoneStopOnComplete,
+      // Defensive parsing — older saves without this key fall through to
+      // the Mon–Fri morning/afternoon default via normalizeBookingAvailability.
+      bookingAvailability: normalizeBookingAvailability(s?.bookingAvailability),
     };
   };
 
@@ -328,6 +399,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setQualificationCustomFields(first.qualificationCustomFields);
         setQualifyStopOnComplete(first.qualifyStopOnComplete);
         setPhoneStopOnComplete(first.phoneStopOnComplete);
+        setBookingAvailability(first.bookingAvailability);
       }
     } else {
       const cached = convCache.get(accountId);
@@ -342,6 +414,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setQualificationCustomFields(cached.qualificationCustomFields);
         setQualifyStopOnComplete(cached.qualifyStopOnComplete);
         setPhoneStopOnComplete(cached.phoneStopOnComplete);
+        setBookingAvailability(cached.bookingAvailability);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -374,6 +447,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setQualificationCustomFields(parsed.qualificationCustomFields);
             setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
             setPhoneStopOnComplete(parsed.phoneStopOnComplete);
+            setBookingAvailability(parsed.bookingAvailability);
           }
         }
       }).finally(() => { if (alive) setLoading(false); });
@@ -397,6 +471,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setQualificationCustomFields(parsed.qualificationCustomFields);
               setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
               setPhoneStopOnComplete(parsed.phoneStopOnComplete);
+              setBookingAvailability(parsed.bookingAvailability);
             }
           }
         })
@@ -448,6 +523,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     // Price keeps writing aiStopOnPriceAgreed via stopRules.price_agreed.
     if (fields.has('qualifyStopOnComplete')) payload.goalQualifyStopOnComplete = qualifyStopOnComplete;
     if (fields.has('phoneStopOnComplete'))   payload.goalPhoneStopOnComplete   = phoneStopOnComplete;
+    if (fields.has('bookingAvailability'))   payload.bookingAvailability       = bookingAvailability;
 
     // Optimistic cache update — merge ONLY the changed fields onto each
     // account's existing cached values. Don't replace the whole object, or
@@ -461,6 +537,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           stopRules, takeover,
           qualificationRequiredFields, qualificationCustomFields,
           qualifyStopOnComplete, phoneStopOnComplete,
+          bookingAvailability,
         });
         return;
       }
@@ -490,6 +567,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       }
       if (fields.has('qualifyStopOnComplete')) next.qualifyStopOnComplete = qualifyStopOnComplete;
       if (fields.has('phoneStopOnComplete'))   next.phoneStopOnComplete   = phoneStopOnComplete;
+      if (fields.has('bookingAvailability'))   next.bookingAvailability   = bookingAvailability;
       convCache.set(id, next);
     });
 
@@ -534,13 +612,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
   const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
-  // V2 per-goal completion-stop mixed detection across accounts.
-  // The account-level Goal Completion Behavior radio aggregates these
-  // (mixed if ANY of the three underlying booleans diverges across
-  // accounts), so the user sees a single "mixed" indicator instead of
-  // three separate per-goal warnings.
-  const mxQualifyStopOnComplete = getMixed('qualifyStopOnComplete', v => v ? 'Stop AI' : 'Continue AI');
-  const mxPhoneStopOnComplete   = getMixed('phoneStopOnComplete',   v => v ? 'Stop AI' : 'Continue AI');
+  // Goal Completion Behavior mixed-state detection removed 2026-06-18 —
+  // the underlying per-goal Continue/Stop choice no longer exists.
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -591,7 +664,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete]);
+  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete, bookingAvailability]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -673,32 +746,20 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setQualificationCustomFields(prev => prev.filter(f => f.id !== id));
   };
 
-  // V2.1 (2026-06-13): Goal completion behavior is now an account-level
-  // setting, not per-goal. One radio writes all three underlying fields
-  // consistently so a tenant can't accidentally end up with Price=Stop
-  // but Qualify=Continue. Backend writes are unchanged — the save handler
-  // still serializes each field independently (aiStopOnPriceAgreed via
-  // stopRules.price_agreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete);
-  // we just mark all three dirty in one click.
-  //
-  // Derived display: 'stop' only when all three are true. Mixed saved
-  // values (e.g. legacy tenant with price=true but qualify=false) display
-  // as 'continue' and the user's next click normalizes them.
-  const goalCompletionMode: 'continue' | 'stop' =
-    stopRules.price_agreed && qualifyStopOnComplete && phoneStopOnComplete
-      ? 'stop'
-      : 'continue';
-
-  const onGoalCompletionBehavior = (mode: 'continue' | 'stop') => {
-    const v = mode === 'stop';
+  // Booking-availability toggle. Each click flips one (day, period) cell
+  // and marks the whole blob dirty — the backend save handler replaces
+  // bookingAvailability wholesale, so partial-key writes aren't a thing.
+  const toggleBookingDayPeriod = (day: BookingDayKey, period: 'morning' | 'afternoon') => {
     dirtyRef.current = true;
-    dirtyFieldsRef.current.add('stopRules.price_agreed');
-    dirtyFieldsRef.current.add('qualifyStopOnComplete');
-    dirtyFieldsRef.current.add('phoneStopOnComplete');
-    setStopRules({ ...stopRules, price_agreed: v });
-    setQualifyStopOnComplete(v);
-    setPhoneStopOnComplete(v);
+    dirtyFieldsRef.current.add('bookingAvailability');
+    setBookingAvailability(prev => ({
+      ...prev,
+      [day]: { ...prev[day], [period]: !prev[day][period] },
+    }));
   };
+
+  // Goal Completion Behavior derived state + handler removed
+  // 2026-06-18. AI always stops on goal complete; no user choice.
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
@@ -777,7 +838,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         <div
           className="lb-strategy-grid"
           style={{
-            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
+            display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10,
           }}
         >
           {STRATEGIES.map(s => (
@@ -809,29 +870,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         addCustomField={addCustomField}
         updateCustomField={updateCustomField}
         removeCustomField={removeCustomField}
+        bookingAvailability={bookingAvailability}
+        toggleBookingDayPeriod={toggleBookingDayPeriod}
       />
 
-      {/* ───── 2.5 Goal Completion Behavior — account-level (V2.1 2026-06-13) ─
-            Replaces the per-goal "When Goal Is Reached" radios that
-            previously lived inside each GoalSetupCard. The product
-            decision (continue replying vs hand off to the team) is the
-            same regardless of which goal AI reaches, so we surface it
-            once at the account level. One click writes all three
-            underlying fields consistently — see onGoalCompletionBehavior. */}
-      <GoalCompletionBehaviorCard
-        mode={goalCompletionMode}
-        onChange={onGoalCompletionBehavior}
-        mixed={
-          mxStopPriceAgreed.mixed ||
-          mxQualifyStopOnComplete.mixed ||
-          mxPhoneStopOnComplete.mixed
-        }
-        mixedTooltip={[
-          mxStopPriceAgreed.tooltip,
-          mxQualifyStopOnComplete.tooltip,
-          mxPhoneStopOnComplete.tooltip,
-        ].filter(Boolean).join('\n\n')}
-      />
+      {/* Goal Completion Behavior removed 2026-06-18 — AI always stops
+          on goal complete. Other stop signals (lead status → done/lost,
+          SF outcome → scheduled/completed) are unchanged. */}
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
             Normal users manage AI behavior via Conversation Goals + the
@@ -1130,6 +1175,7 @@ function GoalSetupCard({
   strategy, priceMode, onPriceMode, mixedPriceMode,
   qualificationRequiredFields, toggleQualificationField,
   qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
+  bookingAvailability, toggleBookingDayPeriod,
 }: {
   strategy: StrategyKey;
   priceMode: 'range' | 'exact';
@@ -1141,10 +1187,63 @@ function GoalSetupCard({
   addCustomField: () => void;
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
   removeCustomField: (id: string) => void;
+  bookingAvailability: BookingAvailability;
+  toggleBookingDayPeriod: (day: BookingDayKey, period: 'morning' | 'afternoon') => void;
 }) {
-  // Auto + Phone goals have no per-goal setup card per design — Auto routes
-  // to whichever sub-goal applies, Phone behavior is fully driven by the
-  // global rules. Only Price and Qualify render dedicated setup cards.
+  // Auto + Call Handoff goals have no per-goal setup card per design —
+  // Auto routes to whichever sub-goal applies, Call Handoff behavior is
+  // fully driven by the global rules. Booking renders an availability
+  // editor (the AI uses the enabled day/period windows when offering two
+  // slots to the customer). Only Price and Qualify render dedicated
+  // setup cards beyond that.
+  if (strategy === 'booking') {
+    return (
+      <SectionCard padding="22px 24px 22px">
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Booking goal setup
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.55 }}>
+            AI asks for the customer's preferred service date and pushes
+            toward scheduling. It will answer a price question first if
+            the customer asks, and hand off to your team if the customer
+            asks for a call.
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 8, lineHeight: 1.5 }}>
+            Booking-critical Qualify fields (address, zip, desired service
+            date) are configured under the <strong>Qualify</strong> goal —
+            anything ticked there is also collected before AI tries to
+            book.
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Available booking windows
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>
+            Pick the day/time windows the team can take bookings. AI
+            offers two of these when asking the customer for a date.
+            Turn a row off to skip that day entirely.
+          </div>
+
+          <div style={{ marginTop: 12, display: 'grid', rowGap: 6 }}>
+            {BOOKING_DAY_KEYS.map(day => (
+              <BookingDayRow
+                key={day}
+                label={BOOKING_DAY_LABELS[day]}
+                morningOn={bookingAvailability[day].morning}
+                afternoonOn={bookingAvailability[day].afternoon}
+                onMorningToggle={() => toggleBookingDayPeriod(day, 'morning')}
+                onAfternoonToggle={() => toggleBookingDayPeriod(day, 'afternoon')}
+              />
+            ))}
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
+
   if (strategy !== 'price' && strategy !== 'qualify') return null;
 
   // ─── Price goal setup ────────────────────────────────────────────────
@@ -1292,75 +1391,76 @@ function RequiredInfoCheckbox({
   );
 }
 
-// ─── Account-level Goal Completion Behavior card ──────────────────────────
-// V2.1 (2026-06-13). Replaces the three per-goal "When Goal Is Reached"
-// radios that previously lived inside <GoalSetupCard>. The product
-// decision is: "after AI reaches any goal, should it continue replying
-// and notify the team, or stop and let the team take over?" That answer
-// is the same regardless of which goal completed, so we surface it once.
-//
-// Selecting one option fans out to all three underlying booleans
-// (aiStopOnPriceAgreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete)
-// via the parent's onGoalCompletionBehavior handler. Backend save logic
-// is unchanged — the save handler still writes each field independently
-// to its existing JSON key.
-//
-// The card explicitly lists the goal completion criteria it applies to
-// (Price agreed / Qualified lead / Phone provided) and notes that Auto
-// goal mode falls through to whichever sub-goal AI picks each turn —
-// this setting still applies when that sub-goal completes.
-function GoalCompletionBehaviorCard({
-  mode, onChange, mixed, mixedTooltip,
+// ─── Booking-availability day row ─────────────────────────────────────────
+// One weekday row with two pill toggles (Morning / Afternoon). Used in
+// the Booking goal setup card. Visually mirrors the Required-info
+// checkbox tile but with two side-by-side period toggles to the right
+// of the day label.
+function BookingDayRow({
+  label, morningOn, afternoonOn, onMorningToggle, onAfternoonToggle,
 }: {
-  mode: 'continue' | 'stop';
-  onChange: (mode: 'continue' | 'stop') => void;
-  mixed: boolean;
-  mixedTooltip: string;
+  label: string;
+  morningOn: boolean;
+  afternoonOn: boolean;
+  onMorningToggle: () => void;
+  onAfternoonToggle: () => void;
 }) {
   return (
-    <SectionCard padding="22px 24px 22px">
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            When the goal is reached
-          </div>
-          {mixed && (
-            <span
-              title={mixedTooltip || 'Differs across accounts'}
-              style={{
-                fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                background: '#fef3c7', color: '#92400e',
-                letterSpacing: 0.05, textTransform: 'uppercase',
-                fontFamily: 'var(--lb-font-mono)',
-                whiteSpace: 'pre-line',
-              }}
-            >
-              Mixed
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
-          What AI does once it achieves the conversation goal.
-        </div>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '64px 1fr 1fr',
+      gap: 10, alignItems: 'center',
+      padding: '8px 12px',
+      background: 'var(--lb-surface)',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-2)', letterSpacing: '0.02em', textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)' }}>
+        {label}
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <OptionCard
-          selected={mode === 'continue'}
-          onClick={() => onChange('continue')}
-          title="Continue AI + notify team"
-          body="AI keeps replying after the goal is reached; your team is notified."
-        />
-        <OptionCard
-          selected={mode === 'stop'}
-          onClick={() => onChange('stop')}
-          title="Stop AI + notify team"
-          body="AI pauses once the goal is reached and hands off to your team."
-        />
-      </div>
-    </SectionCard>
+      <BookingPeriodPill on={morningOn}   label="Morning"   onClick={onMorningToggle}   />
+      <BookingPeriodPill on={afternoonOn} label="Afternoon" onClick={onAfternoonToggle} />
+    </div>
   );
 }
+
+function BookingPeriodPill({
+  on, label, onClick,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '8px 12px',
+        background: on ? '#eff6ff' : 'white',
+        border: '1.5px solid ' + (on ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        borderRadius: 999,
+        cursor: 'pointer', fontFamily: 'inherit',
+        fontSize: 12.5, fontWeight: 600,
+        color: on ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
+        transition: 'border-color 120ms, background 120ms, color 120ms',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      }}
+    >
+      <span
+        style={{
+          width: 8, height: 8, borderRadius: 999,
+          background: on ? 'var(--lb-accent)' : '#cbd5e1',
+        }}
+      />
+      {label}
+    </button>
+  );
+}
+
+// GoalCompletionBehaviorCard removed 2026-06-18. AI always stops on
+// goal complete; no user choice exposed. See automation.service.ts
+// Price/Qualify/Phone gate blocks for the unconditional stop logic.
 
 /**
  * One editable row inside the Custom Required Fields list. Label is

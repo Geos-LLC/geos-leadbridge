@@ -372,10 +372,22 @@ export class UsersController {
   }
 
   /**
-   * Parse an uploaded checklist file (PDF, DOCX, TXT, MD) and return its
-   * extracted text so the frontend can drop it into a scope textarea.
-   * Storage is intentionally NOT persisted — the user reviews the parsed
-   * text and saves it as part of the FAQ JSON.
+   * Parse an uploaded checklist file and return its extracted text so the
+   * frontend can drop it into a scope textarea. Storage is intentionally
+   * NOT persisted — the user reviews the parsed text and saves it as part
+   * of the FAQ JSON.
+   *
+   * Supported formats:
+   *   - PDF                       (pdf-parse)
+   *   - Word DOCX                 (mammoth)
+   *   - Excel XLSX/XLS            (xlsx / sheetjs)
+   *   - Plain text / Markdown     (utf-8 read)
+   *   - CSV / TSV                 (utf-8 read)
+   *   - Images: JPG/PNG/WEBP/GIF  (OpenAI vision OCR)
+   *
+   * Legacy .doc is rejected (mammoth only handles .docx) — the user is
+   * asked to re-save as .docx or PDF.
+   *
    * POST /v1/users/me/faq/parse-checklist
    */
   @Post('me/faq/parse-checklist')
@@ -385,6 +397,10 @@ export class UsersController {
     const name = (file.originalname || '').toLowerCase();
     const mime = file.mimetype || '';
     const buf: Buffer = file.buffer;
+
+    const isImage =
+      mime.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
 
     let text = '';
     try {
@@ -396,10 +412,54 @@ export class UsersController {
         const mammoth = require('mammoth');
         const out = await mammoth.extractRawText({ buffer: buf });
         text = (out?.value || '').trim();
-      } else if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') || mime.startsWith('text/')) {
+      } else if (name.endsWith('.doc') || mime === 'application/msword') {
+        throw new BadRequestException('Legacy .doc files are not supported. Open the file in Word and "Save As" .docx, or export as PDF.');
+      } else if (
+        name.endsWith('.xlsx') ||
+        name.endsWith('.xls') ||
+        name.endsWith('.xlsm') ||
+        name.endsWith('.ods') ||
+        mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        mime === 'application/vnd.ms-excel' ||
+        mime === 'application/vnd.oasis.opendocument.spreadsheet'
+      ) {
+        const XLSX = require('xlsx');
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        const sheets: string[] = [];
+        for (const sheetName of wb.SheetNames) {
+          const sheet = wb.Sheets[sheetName];
+          // CSV-style output keeps rows on their own lines and skips empty cells,
+          // which is what we want for a checklist (each row = one bullet).
+          const csv = (XLSX.utils.sheet_to_csv(sheet, { blankrows: false }) || '').trim();
+          if (csv) {
+            sheets.push(wb.SheetNames.length > 1 ? `# ${sheetName}\n${csv}` : csv);
+          }
+        }
+        text = sheets.join('\n\n').trim();
+      } else if (isImage) {
+        text = (await this.ocrImageWithOpenAI(buf, mime || 'image/jpeg')).trim();
+      } else if (
+        name.endsWith('.txt') ||
+        name.endsWith('.md') ||
+        name.endsWith('.markdown') ||
+        name.endsWith('.csv') ||
+        name.endsWith('.tsv') ||
+        name.endsWith('.rtf') ||
+        mime.startsWith('text/')
+      ) {
         text = buf.toString('utf8').trim();
+        // Strip RTF control words so the user gets readable text, not raw markup.
+        if (name.endsWith('.rtf')) {
+          text = text
+            .replace(/\\par[d]?/g, '\n')
+            .replace(/\{\\[^}]+\}/g, '')
+            .replace(/\\[a-zA-Z]+-?\d* ?/g, '')
+            .replace(/[{}]/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        }
       } else {
-        throw new BadRequestException('Unsupported file type. Use PDF, DOCX, TXT, or MD.');
+        throw new BadRequestException('Unsupported file type. Use PDF, DOCX, XLSX, CSV, TXT, MD, or an image (JPG/PNG).');
       }
     } catch (err: any) {
       if (err instanceof BadRequestException) throw err;
@@ -410,10 +470,44 @@ export class UsersController {
 
     // Cap at ~20KB of plaintext so a giant manual doesn't blow up the prompt
     const MAX = 20_000;
+    const originalLength = text.length;
     const truncated = text.length > MAX;
     if (truncated) text = text.slice(0, MAX);
 
-    return { success: true, text, truncated, originalLength: text.length };
+    return { success: true, text, truncated, originalLength };
+  }
+
+  /**
+   * Extract checklist text from an image via OpenAI vision. Pulled out so the
+   * main handler stays readable.
+   */
+  private async ocrImageWithOpenAI(buf: Buffer, mime: string): Promise<string> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException('Image checklists need OPENAI_API_KEY configured on the server.');
+    }
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey });
+    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+    const resp = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 2000,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You extract cleaning checklist items from an image (photo or screenshot). Return only the list items as plain text, one per line, no commentary, no markdown bullets. Preserve room or section headings on their own lines if present.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Extract the checklist text from this image.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ] as any,
+        },
+      ],
+    });
+    return resp.choices?.[0]?.message?.content || '';
   }
 
   /**

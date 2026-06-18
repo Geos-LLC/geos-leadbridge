@@ -323,8 +323,13 @@ export const platformsApi = {
     const { data } = await api.get('/v1/platforms/health');
     return data;
   },
-  getAuthUrl: async (forceLogin = false): Promise<{ authUrl: string }> => {
-    const { data } = await api.get('/v1/thumbtack/auth/url', { params: forceLogin ? { forceLogin: 'true' } : undefined });
+  getAuthUrl: async (forceLogin = false, loginHint?: string): Promise<{ authUrl: string }> => {
+    const params: Record<string, string> = {};
+    if (forceLogin) params.forceLogin = 'true';
+    if (loginHint) params.loginHint = loginHint;
+    const { data } = await api.get('/v1/thumbtack/auth/url', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
     return data;
   },
   disconnect: async (): Promise<void> => {
@@ -786,6 +791,18 @@ export interface InterpretResponse {
   newRule?: string;
 }
 
+/**
+ * One chat-added Custom Instruction entry — mirror of the backend
+ * ChatInstruction shape. Each entry has its own id so the AI Playbook
+ * UI can delete one at a time.
+ */
+export interface ChatInstructionEntry {
+  id: string;
+  text: string;
+  userMessage?: string;
+  createdAt: string;
+}
+
 export const aiSettingsAssistantApi = {
   interpret: async (
     message: string,
@@ -798,6 +815,348 @@ export const aiSettingsAssistantApi = {
     proposal: SignedProposal,
   ): Promise<{ success: boolean; appliedAt: string; auditLogId: string }> => {
     const { data } = await api.post('/v1/ai-settings-assistant/apply', { proposal });
+    return data;
+  },
+  /**
+   * List chat-added entries for an area. `savedAccountId` is required
+   * for per-section playbook areas and omitted for global.
+   */
+  listChatInstructions: async (
+    area: string,
+    savedAccountId?: string,
+  ): Promise<{ entries: ChatInstructionEntry[] }> => {
+    const params: Record<string, string> = { area };
+    if (savedAccountId) params.savedAccountId = savedAccountId;
+    const { data } = await api.get('/v1/ai-settings-assistant/chat-instructions', { params });
+    return data;
+  },
+  /**
+   * Delete one chat-added entry by id. Returns the remaining list so
+   * the caller can render without a second fetch.
+   */
+  deleteChatInstruction: async (
+    area: string,
+    entryId: string,
+    savedAccountId?: string,
+  ): Promise<{ entries: ChatInstructionEntry[] }> => {
+    const { data } = await api.post('/v1/ai-settings-assistant/chat-instructions/delete', {
+      area, entryId, savedAccountId,
+    });
+    return data;
+  },
+};
+
+/**
+ * Merged preset shape — backend returns both curated code presets and
+ * admin-authored published templates from a single endpoint. Discriminate
+ * on `source`. Each variant exposes the legacy v1 keys it natively
+ * carries (code presets) or the v2 keys (admin templates); the picker
+ * reads whatever's populated and ignores the rest.
+ */
+export type ServiceProfilePreset = {
+  source: 'code_preset' | 'admin_template';
+  /** Curated code presets only — used when calling createFromPreset. */
+  presetKey?: string;
+  /** Admin DB templates only — used when calling createFromPreset. */
+  templateId?: string;
+  key: string;
+  provider: 'thumbtack' | 'yelp' | 'manual' | string;
+  providerCategoryName: string;
+  providerCategoryId: string | null;
+  label: string;
+  description: string | null;
+  aliases: string[];
+  // Curated code presets (v1). Admin templates return nulls here.
+  qualificationSchemaJson: {
+    questions: Array<{
+      key: string;
+      label: string;
+      type: 'multi_select' | 'single_select' | 'text' | 'number' | 'date';
+      options?: string[];
+    }>;
+  } | null;
+  pricingJson:
+    | {
+        pricingModel: string;
+        included?: string[];
+        items?: Array<{ key: string; label: string; price: number; source: string; unit?: string; notes?: string; active?: boolean }>;
+        addOns?: Array<{ key: string; label: string; price: number; source: string; quoteManually?: boolean }>;
+        basePrices?: Array<{ quantity: number | null; label: string; price: number; source: string }>;
+        currency?: string;
+        laborRate?: number;
+        minimumCharge?: number;
+        quoteRequired?: boolean;
+        notes?: string;
+      }
+    | null;
+  faqJson: { customQA: Array<{ question: string; answer: string }> } | null;
+  serviceRules: {
+    requiredDetails: string[];
+    unsupportedServices: string[];
+    workflowSteps: string[];
+  } | null;
+  // Admin DB templates (v2). Code presets return nulls here.
+  serviceOptionsJson: {
+    groups: Array<{
+      key: string;
+      label: string;
+      type: 'single_select' | 'multi_select';
+      options: Array<{ key: string; label: string }>;
+    }>;
+  } | null;
+  customerAnswersJson: { entries: Array<{ question: string; answer: string }> } | null;
+  additionalInstructions: string | null;
+};
+
+export const serviceProfilePresetsApi = {
+  list: async (): Promise<{ presets: ServiceProfilePreset[] }> => {
+    const { data } = await api.get('/v1/service-profile-presets');
+    return data;
+  },
+  /**
+   * Create a ServiceProfile from either a code preset or a published
+   * admin template. Pass `presetKey` for code presets, `templateId` for
+   * admin templates — backend rejects passing both.
+   */
+  createFromPreset: async (
+    opts: { presetKey?: string; templateId?: string; status?: 'draft' | 'active' },
+  ): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
+    const { data } = await api.post('/v1/service-profiles/from-preset', opts);
+    return data;
+  },
+};
+
+// ─── Admin Service Template Builder (admin only) ──────────────────────
+
+export type AdminServiceTemplate = {
+  id: string;
+  key: string;
+  label: string;
+  provider: string;
+  providerCategoryName: string;
+  providerCategoryId: string | null;
+  description: string | null;
+  serviceOptionsJson: string;
+  pricingJson: string;
+  customerAnswersJson: string;
+  additionalInstructions: string | null;
+  sourceJson: string | null;
+  status: 'draft' | 'published' | 'archived';
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminGeneratedTemplate = {
+  key: string;
+  label: string;
+  provider: string;
+  providerCategoryName: string;
+  providerCategoryId: string | null;
+  description: string | null;
+  serviceOptionsJson: unknown;
+  pricingJson: unknown;
+  customerAnswersJson: unknown;
+  additionalInstructions: string | null;
+  sourceJson: {
+    kind: 'admin_generated';
+    provider: string;
+    rawOptionsText: string;
+    rawPricingText: string;
+    notes?: string;
+    generatorVersion: number;
+    generatedAt: string;
+  };
+};
+
+export const adminServiceTemplatesApi = {
+  list: async (): Promise<{ templates: AdminServiceTemplate[] }> => {
+    const { data } = await api.get('/v1/admin/service-templates');
+    return data;
+  },
+  getOne: async (id: string): Promise<AdminServiceTemplate> => {
+    const { data } = await api.get(`/v1/admin/service-templates/${id}`);
+    return data;
+  },
+  generate: async (input: {
+    serviceName: string;
+    provider: string;
+    providerCategoryName: string;
+    providerCategoryId?: string | null;
+    notes?: string | null;
+    rawOptionsText: string;
+    rawPricingText: string;
+  }): Promise<{ generated: AdminGeneratedTemplate }> => {
+    const { data } = await api.post('/v1/admin/service-templates/generate', input);
+    return data;
+  },
+  create: async (
+    input: AdminGeneratedTemplate & { keyOverride?: string | null },
+  ): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post('/v1/admin/service-templates', input);
+    return data;
+  },
+  patch: async (
+    id: string,
+    patch: Partial<{
+      label: string;
+      provider: string;
+      providerCategoryName: string;
+      providerCategoryId: string | null;
+      description: string | null;
+      serviceOptionsJson: unknown;
+      pricingJson: unknown;
+      customerAnswersJson: unknown;
+      additionalInstructions: string | null;
+    }>,
+  ): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.patch(`/v1/admin/service-templates/${id}`, patch);
+    return data;
+  },
+  publish: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/publish`);
+    return data;
+  },
+  archive: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/archive`);
+    return data;
+  },
+  demoteToDraft: async (id: string): Promise<{ template: AdminServiceTemplate }> => {
+    const { data } = await api.post(`/v1/admin/service-templates/${id}/draft`);
+    return data;
+  },
+  remove: async (id: string): Promise<{ id: string; deleted: true }> => {
+    const { data } = await api.delete(`/v1/admin/service-templates/${id}`);
+    return data;
+  },
+};
+
+export type ServiceProfile = {
+  id: string;
+  userId: string;
+  name: string;
+  slug: string;
+  status: 'draft' | 'active' | 'archived';
+  isDefault: boolean;
+  providerCategoryMappingsJson: Array<{
+    provider: 'thumbtack' | 'yelp' | 'manual';
+    providerCategoryId?: string;
+    categoryName?: string;
+  }>;
+  pricingJson: string | null;
+  faqJson: string | null;
+  qualificationSchemaJson: string | null;
+  aiInstructionsJson: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ServiceProfileOverrideRow = {
+  savedAccountId: string;
+  businessName: string;
+  platform: string;
+  hasOverride: boolean;
+  override: { pricingDeltasJson?: string; faqAdditionsJson?: string } | null;
+};
+
+export const serviceProfilesApi = {
+  list: async (): Promise<{ profiles: ServiceProfile[] }> => {
+    const { data } = await api.get('/v1/service-profiles');
+    return data;
+  },
+  get: async (id: string): Promise<ServiceProfile> => {
+    const { data } = await api.get(`/v1/service-profiles/${id}`);
+    return data;
+  },
+  createBlank: async (name: string): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
+    const { data } = await api.post('/v1/service-profiles', { name });
+    return data;
+  },
+  update: async (
+    id: string,
+    patch: Partial<{
+      name: string;
+      providerCategoryMappingsJson: ServiceProfile['providerCategoryMappingsJson'];
+      pricingJson: string | null;
+      faqJson: string | null;
+      qualificationSchemaJson: string | null;
+      aiInstructionsJson: string | null;
+    }>,
+  ): Promise<ServiceProfile> => {
+    const { data } = await api.patch(`/v1/service-profiles/${id}`, patch);
+    return data;
+  },
+  transitionStatus: async (
+    id: string,
+    nextStatus: 'draft' | 'active' | 'archived',
+    allowReactivate = false,
+  ): Promise<ServiceProfile> => {
+    const { data } = await api.patch(`/v1/service-profiles/${id}/status`, {
+      status: nextStatus,
+      allowReactivate,
+    });
+    return data;
+  },
+  duplicate: async (id: string): Promise<ServiceProfile> => {
+    const { data } = await api.post(`/v1/service-profiles/${id}/duplicate`, {});
+    return data;
+  },
+  delete: async (id: string): Promise<{ id: string; deleted: true }> => {
+    const { data } = await api.delete(`/v1/service-profiles/${id}`);
+    return data;
+  },
+  listOverrides: async (id: string): Promise<{ overrides: ServiceProfileOverrideRow[] }> => {
+    const { data } = await api.get(`/v1/service-profiles/${id}/overrides`);
+    return data;
+  },
+  setOverride: async (
+    profileId: string,
+    savedAccountId: string,
+    body: { pricingDeltasJson?: string | null; faqAdditionsJson?: string | null },
+  ) => {
+    const { data } = await api.put(
+      `/v1/service-profiles/${profileId}/overrides/${savedAccountId}`,
+      body,
+    );
+    return data;
+  },
+  clearOverride: async (profileId: string, savedAccountId: string) => {
+    const { data } = await api.delete(
+      `/v1/service-profiles/${profileId}/overrides/${savedAccountId}`,
+    );
+    return data;
+  },
+  // PR-E — account ↔ service assignments
+  listSavedAccountAssignments: async (): Promise<{
+    accounts: Array<{
+      savedAccountId: string;
+      businessName: string;
+      platform: string;
+      configured: boolean;
+      enabledServiceProfileIds: string[];
+      defaultServiceProfileId: string | null;
+    }>;
+  }> => {
+    const { data } = await api.get('/v1/saved-accounts/service-assignments');
+    return data;
+  },
+  setSavedAccountAssignments: async (
+    savedAccountId: string,
+    body: {
+      enabledServiceProfileIds: string[] | null;
+      defaultServiceProfileId?: string | null;
+    },
+  ): Promise<{
+    savedAccountId: string;
+    configured: boolean;
+    enabledServiceProfileIds: string[];
+    defaultServiceProfileId: string | null;
+  }> => {
+    const { data } = await api.put(
+      `/v1/saved-accounts/${savedAccountId}/service-assignments`,
+      body,
+    );
     return data;
   },
 };
@@ -1695,6 +2054,17 @@ export const usersApi = {
     savedUrl: string | null;
     accountsAffected: number;
     fieldsApplied: number;
+    /** TT/Yelp only — count of fields the scrape returned BEFORE merge.
+     *  Gap between this and fieldsApplied means "scrape worked, data
+     *  already saved." Use it to choose the right confirmation copy. */
+    fieldsExtracted?: number;
+    /** TT/Yelp only — actual key/value pairs the scrape returned, for
+     *  rendering an expandable "what we pulled" panel without a 2nd call. */
+    extractedFields?: Record<string, string | string[]>;
+    /** GPT-generated prose summary of the scraped page. Populated for
+     *  all three branches (website, TT, Yelp) when the scrape produced
+     *  HTML the summarizer could process. */
+    summary?: string;
     conflictsRaised: number;
     websiteMetadata?: WebsiteMetadataPayload;
     warning?: string;
@@ -1711,6 +2081,8 @@ export const usersApi = {
   ): Promise<{
     success: boolean;
     fieldsApplied: number;
+    /** See applyBusinessProfileUrl — same semantic for the paste flow. */
+    fieldsExtracted?: number;
     conflictsRaised: number;
     warning?: string;
   }> => {

@@ -26,8 +26,9 @@ import {
   MessageCircle,
   Sparkles,
   AlertTriangle,
+  Layers,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, conversationRuntimeApi, followUpApi, serviceProfilesApi, type MessageAttachment, type StatusConflict, type RuntimeStateResponse, type PendingAiSuggestion, type ServiceProfile } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -306,19 +307,21 @@ export function Messages() {
   const [threadContextData, setThreadContextData] = useState<{
     systemContext: string; threadState: Record<string, any>;
   } | null>(null);
-  // Per-thread strategy preview row. Narrowed from 5 → 3 to match the new
-  // 4-goal model (Auto / Price / Qualify / Phone). Auto isn't a manual
-  // override target — it means "no override, use suggestStrategy()" — so
-  // it doesn't appear here. Hybrid + Convert removed from the UI; the
-  // backend STRATEGY_PROMPTS still defines them, so any legacy
-  // followUpStrategy='hybrid' / 'convert' value continues to work at
-  // runtime. suggestStrategy() may still return 'hybrid' / 'convert' for
-  // legacy-tuned threads; those just won't get a visible isSuggested
-  // highlight on any button — soft graceful degradation.
+  // Per-thread strategy preview row. Matches the user-selectable
+  // Conversation Goals (Auto / Price / Qualify / Booking / Call Handoff).
+  // Auto isn't a manual override target — it means "no override, use
+  // suggestStrategy()" — so it doesn't appear here. Hybrid + Convert are
+  // not exposed; the backend STRATEGY_PROMPTS still defines them, so any
+  // legacy followUpStrategy='hybrid' / 'convert' value continues to work
+  // at runtime. suggestStrategy() may still return 'hybrid' / 'convert'
+  // for legacy-tuned threads; those just won't get a visible isSuggested
+  // highlight on any button — soft graceful degradation. The internal
+  // key `phone` renders as "Call Handoff" to match the goal cards.
   const AI_STRATEGIES = [
     { key: 'price', label: 'Price', emoji: '💰', prompt: 'STRATEGY: PRICE ANCHOR\n\nUse when:\n- Customer asks about price directly\n- Or pricing is the main concern\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant\n\nTone:\n- Confident and clear\n\nGoal: Give the customer a number to react to.\nExample style: "For a 1-bedroom home, pricing typically runs around $120-150 depending on condition. This includes kitchen, bathroom, and full surface cleaning."' },
     { key: 'qualify', label: 'Qualify', emoji: '🧠', prompt: 'STRATEGY: QUALIFICATION\n\nUse when:\n- Critical details are missing (home size, timing, condition)\n\nYou MUST:\n- Ask 2-3 specific questions\n- Briefly explain why you need the info\n\nDO NOT:\n- Give pricing\n- Use if enough info is already provided\n\nGoal: Collect only the minimum info needed to move to pricing or booking.\nExample style: "To give you an accurate quote, I just need a couple quick details — how many bedrooms and bathrooms, and what condition is the home in?"' },
-    { key: 'phone', label: 'Phone', emoji: '📱', prompt: 'STRATEGY: PHONE / ESCALATION\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n- High-intent lead\n\nFlow:\nStep 1 — explain why call is needed:\n- "Every home is a bit different..."\n- "We\'ll prepare an accurate estimate..."\n\nStep 2 — ask for phone naturally:\n- "What\'s the best number to reach you?"\n\nIf hesitation:\n- Offer texting option\n\nStep 3 — confirm next step:\n- "We\'ll call you shortly"\n- OR send booking link if requested\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nTone:\n- Helpful, process-driven, professional\n\nExample style: "Every home is a little different — size and condition affect pricing. We can prepare an accurate estimate for you. What\'s the best number to reach you?"\n\nIf they resist: "No problem, we can text — just need your number to send the estimate and coordinate everything."\n\nIf they want booking: "Absolutely — you can book online here: [link]. We\'ll follow up to confirm details."' },
+    { key: 'phone', label: 'Call Handoff', emoji: '📱', prompt: 'STRATEGY: CALL HANDOFF\n(internal key: "phone" — kept for back-compat with saved followUpStrategy values)\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n- High-intent lead\n\nFlow:\nStep 1 — explain why call is needed:\n- "Every home is a bit different..."\n- "We\'ll prepare an accurate estimate..."\n\nStep 2 — ask for phone naturally:\n- "What\'s the best number to reach you?"\n\nIf hesitation:\n- Offer texting option\n\nStep 3 — confirm next step:\n- "We\'ll call you shortly"\n- OR send booking link if requested\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nTone:\n- Helpful, process-driven, professional\n\nExample style: "Every home is a little different — size and condition affect pricing. We can prepare an accurate estimate for you. What\'s the best number to reach you?"\n\nIf they resist: "No problem, we can text — just need your number to send the estimate and coordinate everything."\n\nIf they want booking: "Absolutely — you can book online here: [link]. We\'ll follow up to confirm details."' },
+    { key: 'booking', label: 'Booking', emoji: '📅', prompt: 'STRATEGY: BOOKING (move the customer toward scheduling the job)\n\nUse when:\n- The customer has enough info to book and you want to lock in a date/time\n- The tenant explicitly picked Booking as the Conversation Goal\n\nYou MUST:\n- Ask the customer for the preferred service date and/or time window.\n- If an AVAILABILITY block is present with concrete open slots, offer exactly two of them. Without one, only ask for the customer\'s preferred date — don\'t invent slots.\n- If one required field is genuinely needed before scheduling (address / zip / service type / desired date) and the customer hasn\'t given it, ask one booking-critical question first. Don\'t chain through every Qualify field.\n- If price has already been agreed, briefly restate it ("$210-230 for the deep clean") before asking for the date.\n- If the customer asks about price first, answer the price question first using the pricing table, then return to asking for the date.\n- If the customer asks for a phone call or callback, hand off — confirm a number is on file and tell them the team will reach out.\n\nNEVER:\n- Ask random qualification questions (bedrooms / pets / condition) unless that field is booking-critical.\n- Invent times, dates, or windows the team didn\'t confirm.\n- Confirm the booking yourself — use the holding message ("let me check our timing and we\'ll confirm shortly").\n\nGoal: get the customer to NAME a preferred date/time so the team can confirm.\nExample style: "Got it — a deep clean for a 3BR/2BA. What day works best for you?"' },
   ];
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
@@ -334,6 +337,36 @@ export function Messages() {
   const dateFilter = searchParams.get('date') || 'all';
   // Status group filter — keys match StatusGroupId in lib/leadStatus.ts.
   const statusFilter = (searchParams.get('status') || 'all') as 'all' | StatusGroupId;
+  // Service filter — matches Lead.category against
+  // ServiceProfile.providerCategoryMappingsJson[].categoryName.
+  // 'all' means no filter; otherwise the value is the profile id.
+  const serviceFilter = searchParams.get('service') || 'all';
+  const [serviceProfiles, setServiceProfiles] = useState<ServiceProfile[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    serviceProfilesApi
+      .list()
+      .then((r) => { if (!cancelled) setServiceProfiles(r.profiles); })
+      .catch(() => { /* silent — filter just doesn't appear if it can't load */ });
+    return () => { cancelled = true; };
+  }, []);
+  const setServiceFilter = (value: string) => {
+    const sp = new URLSearchParams(searchParams);
+    if (value === 'all') sp.delete('service'); else sp.set('service', value);
+    setSearchParams(sp, { replace: true });
+  };
+  // Build the set of categoryNames that match the selected service.
+  // Case-insensitive comparison against Lead.category.
+  const serviceCategoryNamesLower = (() => {
+    if (serviceFilter === 'all') return null;
+    const profile = serviceProfiles.find((p) => p.id === serviceFilter);
+    if (!profile) return null;
+    return new Set(
+      (profile.providerCategoryMappingsJson ?? [])
+        .map((m) => m.categoryName?.trim().toLowerCase())
+        .filter((s): s is string => !!s),
+    );
+  })();
   // Activity sub-bucket filter — only meaningful when statusFilter='active'.
   // Mirrors Lead.activityBucket (derived from ThreadContext.conversationState).
   type ActivityFilter = 'all' | 'engagement' | 'ai_conversation' | 'follow_up' | 'human_handoff';
@@ -1579,7 +1612,14 @@ export function Messages() {
     // sets isAutoHandled when an AI message exists but no human send and no
     // customer reply do — see leads.service.ts::computeAutoHandledFlags.
     const matchesAutoHandled = !hideAutoHandled || !lead.isAutoHandled;
-    return matchesAccount && matchesDate && matchesStatus && matchesActivity && matchesSearch && matchesAutoHandled;
+    // Service profile filter — leads whose Lead.category matches one of
+    // the selected profile's mapped categoryNames (case-insensitive).
+    // When set to 'all' or the profile can't be found, this is a no-op.
+    const matchesService =
+      !serviceCategoryNamesLower ||
+      (lead.category != null &&
+        serviceCategoryNamesLower.has(lead.category.trim().toLowerCase()));
+    return matchesAccount && matchesDate && matchesStatus && matchesActivity && matchesSearch && matchesAutoHandled && matchesService;
   });
   const autoHandledHiddenCount = hideAutoHandled
     ? leadsFromSavedAccounts.filter((l) => l.isAutoHandled).length
@@ -1817,6 +1857,33 @@ export function Messages() {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
           </div>
         </div>
+
+        {/* Service Filter — shown only when the user has at least one
+            non-archived ServiceProfile. Matches Lead.category against
+            the selected profile's providerCategoryMappingsJson. */}
+        {serviceProfiles.filter((p) => p.status !== 'archived').length > 0 && (
+          <div className="px-4 py-2 border-b border-slate-100">
+            <div className="relative">
+              <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <select
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Services</option>
+                {serviceProfiles
+                  .filter((p) => p.status !== 'archived')
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.status === 'draft' ? ' (draft)' : ''}
+                    </option>
+                  ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
+          </div>
+        )}
 
         {/* Activity sub-bucket filter — shown only when the primary status
             is 'active'. Mirrors Lead.activityBucket which the backend derives

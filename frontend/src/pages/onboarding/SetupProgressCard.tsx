@@ -5,16 +5,23 @@ import { authApi, onboardingApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import type { OnboardingConfigSummary, OnboardingProfile, WizardChecklist, WizardStep } from '../../types';
-import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, WIZARD_STEP_META } from './wizardConfig';
+import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, RETIRED_WIZARD_STEPS, WIZARD_STEP_META } from './wizardConfig';
 
-// Steps that go stale when their underlying data disappears. These
-// each write their configuration into per-account JSON on
-// SavedAccount (faqJson.quickFacts / servicePricingJson /
-// followUpSettingsJson), so a SavedAccount cascade-delete also wipes
-// what the step represented. Connect + Business are handled
-// separately because their completion signal IS the data itself
-// (SavedAccount existence / User.website).
-const ACCOUNT_DATA_STEPS: WizardStep[] = ['ai', 'pricing', 'automation', 'ai_rules'];
+// Steps whose completion depends on at least one connected
+// SavedAccount being present. When the user disconnects every account,
+// these go stale — the wizard sidebar tick drops back to "not done".
+// `connect` itself is handled separately because its completion signal
+// IS the data (SavedAccount existence).
+//
+// Post 2026-06-18 consolidation: `services` + `automation` are the
+// live steps that gate on account presence. Retired slugs
+// (`service_setup`, `ai`, `pricing`, `ai_rules`) are kept in the list
+// so returning users with old wizardChecklistStatus rows still see
+// their pre-refactor ticks drop on account disconnect (consistent UX).
+const ACCOUNT_DATA_STEPS: WizardStep[] = [
+  'services', 'automation',
+  'service_setup', 'ai', 'pricing', 'ai_rules',
+];
 
 export interface DisplayChecklistContext {
   /** Count of SavedAccount rows owned by the current user. */
@@ -98,19 +105,31 @@ export function deriveDisplayChecklist(
     delete copy.business;
   }
 
-  // ai / pricing / automation / ai_rules — derive from the backend
-  // config summary when available. Skipped survives (explicit user
-  // choice); otherwise data presence flips the tick green and data
-  // absence drops a stale stored 'done'.
+  // services / service_setup / automation — derive from the backend
+  // config summary's structured per-step rollups when available.
+  // Skipped survives (explicit user choice); otherwise data presence
+  // flips the tick green and data absence drops a stale stored 'done'.
+  //
+  // The legacy four-boolean fields (ai/pricing/ai_rules/faqConfigured)
+  // are still honored for the retired slugs so users mid-flow during
+  // the rollout don't see ticks unexpectedly clear.
   //
   // When summary is missing (haven't fetched yet, or pre-update
   // caller), leave the stored checklist alone so we don't flicker
   // the tick off on mount.
   const summary = context.configSummary;
   if (summary) {
+    // Active step rollups.
+    applyDataDerivation(copy, 'services', summary.services?.done ?? false);
+    applyDataDerivation(copy, 'automation', summary.automation?.done ?? summary.automationConfigured);
+
+    // Retired-slug back-compat — only relevant for users who already
+    // have stored 'done' on these from before the consolidation.
+    // `serviceSetup.done` mirrors `services.done` on the backend, so
+    // this derivation keeps old client-side checklists in sync.
+    applyDataDerivation(copy, 'service_setup', summary.serviceSetup?.done ?? false);
     applyDataDerivation(copy, 'ai', summary.faqConfigured);
     applyDataDerivation(copy, 'pricing', summary.pricingConfigured);
-    applyDataDerivation(copy, 'automation', summary.automationConfigured);
     applyDataDerivation(copy, 'ai_rules', summary.aiRulesConfigured);
   }
 
@@ -207,11 +226,15 @@ export default function SetupProgressCard() {
     const complete = !!profile?.wizardCompletedAt;
     // Best step to resume at: the user's last-known current step if it
     // still maps onto something actionable; otherwise the first
-    // actionable step that isn't done/skipped. 'welcome' is legacy and
-    // no longer a real step — treat it as "not started yet".
+    // actionable step that isn't done/skipped. Retired slugs (welcome
+    // / ai / pricing / ai_rules from pre-multi-service refactor) are
+    // treated as "not actionable" so returning users land on the new
+    // flow gracefully.
     const current = profile?.wizardCurrentStep as WizardStep | undefined;
     const fallbackNext = ACTIONABLE_STEPS.find(s => checklist[s] !== 'done' && checklist[s] !== 'skipped');
-    const next = current && current !== 'welcome' && current !== 'done' ? current : (fallbackNext ?? FIRST_ACTIONABLE_STEP);
+    const next = current && current !== 'done' && !RETIRED_WIZARD_STEPS.has(current)
+      ? current
+      : (fallbackNext ?? FIRST_ACTIONABLE_STEP);
     return {
       completedCount: completed,
       totalCount: total,

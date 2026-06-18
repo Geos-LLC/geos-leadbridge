@@ -16,13 +16,23 @@ export interface Step2Input {
   userGoal?: string;
 }
 
-// 8-step guided setup wizard. The wizard writes most of its data to the
-// real settings tables (SavedAccount, User, etc.); only the progress
-// bookkeeping lives on OnboardingProfile so the user can resume.
+// Guided setup wizard. The wizard writes most of its data to the
+// real settings tables (SavedAccount, User, ServiceProfile, etc.); only
+// the progress bookkeeping lives on OnboardingProfile so the user can
+// resume.
+//
+// 2026-06-18 — multi-service refactor: `services` + `service_setup` are
+// the new step slugs. `welcome` / `ai` / `pricing` / `ai_rules` are
+// retained in this enum so existing OnboardingProfile rows that still
+// carry those slugs in `wizardCurrentStep` / `wizardChecklistStatus`
+// continue to round-trip through patchWizard without 400-ing. The
+// frontend wizardConfig no longer renders them.
 export const WIZARD_STEPS = [
   'welcome',
   'connect',
   'business',
+  'services',
+  'service_setup',
   'ai',
   'pricing',
   'automation',
@@ -221,53 +231,171 @@ export class OnboardingService {
   }
 
   // --- Wizard ↔ Settings sync ------------------------------------------
-  // Lightweight config summary used by the wizard sidebar + Overview
-  // progress card to derive the green tick on the four "stored-only"
-  // steps (ai / pricing / automation / ai_rules) from actual data
-  // instead of trusting the user clicked Continue inside the wizard.
+  // Per-step rollup used by the wizard sidebar + Overview progress card
+  // to derive the green tick on each step from actual data, instead of
+  // trusting the user clicked Continue inside the wizard.
   //
-  // Existing users who configured FAQ / pricing / automation via Settings
-  // should see the wizard tick green automatically; users who deleted
-  // that data should see the tick disappear. Same principle the existing
-  // connect / business derivations follow — data is the source of truth.
+  // Existing users who configured services / FAQ / pricing / automation
+  // via Settings see the wizard tick green automatically; users who
+  // deleted that data see the tick disappear. Same principle the
+  // existing connect / business derivations follow — data is the source
+  // of truth, the stored checklist is just a UX cache.
   //
-  // "Configured" is read off the user's first SavedAccount (createdAt asc)
-  // to match the wizard step components which all operate on
-  // savedAccounts[0]. We deliberately only inspect the primary account
-  // because the wizard's "save to all" cascade means once it's set there
-  // it's set everywhere, and we want a single, stable signal.
-  async getConfigSummary(userId: string): Promise<{
-    faqConfigured: boolean;
-    pricingConfigured: boolean;
-    automationConfigured: boolean;
-    aiRulesConfigured: boolean;
-  }> {
-    const primary = await this.prisma.savedAccount.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'asc' },
-      select: {
-        faqJson: true,
-        servicePricingJson: true,
-        followUpSettingsJson: true,
-      },
-    });
+  // Backward compatibility: the four legacy booleans (faqConfigured /
+  // pricingConfigured / automationConfigured / aiRulesConfigured) are
+  // kept in the response shape so older frontends keep working. They are
+  // still computed off the primary SavedAccount (createdAt asc) to match
+  // the legacy AccountFaqForm / PricingSetupStep behaviour. The new
+  // multi-service step rollups (`services`, `serviceSetup`) live in the
+  // structured fields below.
+  async getConfigSummary(userId: string): Promise<OnboardingConfigSummary> {
+    const [accounts, profiles, primary] = await Promise.all([
+      this.prisma.savedAccount.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          serviceProfileAssignmentsJson: true,
+        },
+      }),
+      this.prisma.serviceProfile.findMany({
+        where: { userId, status: { in: ['active', 'draft'] } },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          pricingJson: true,
+          faqJson: true,
+          qualificationSchemaJson: true,
+        },
+        orderBy: [
+          // Default profile first, then active before draft, then by name.
+          { isDefault: 'desc' },
+          { status: 'asc' },
+          { name: 'asc' },
+        ],
+      }),
+      this.prisma.savedAccount.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          faqJson: true,
+          servicePricingJson: true,
+          followUpSettingsJson: true,
+        },
+      }),
+    ]);
 
-    if (!primary) {
-      return {
-        faqConfigured: false,
-        pricingConfigured: false,
-        automationConfigured: false,
-        aiRulesConfigured: false,
-      };
-    }
+    const totalAccounts = accounts.length;
+    const accountsWithAssignments = accounts.filter(
+      a => a.serviceProfileAssignmentsJson !== null && a.serviceProfileAssignmentsJson !== '',
+    ).length;
+    const activeServices = profiles.filter(p => p.status === 'active');
+    const activeServiceCount = activeServices.length;
+
+    // Per-service completion rollup. Drafts are reported but do NOT gate
+    // serviceSetup.done — they show "AI paused" badges in the UI but the
+    // user can still finish the wizard with drafts in flight.
+    const services = profiles.map(p => ({
+      id: p.id,
+      name: p.name,
+      status: p.status as 'draft' | 'active' | 'archived',
+      pricingConfigured: isServicePricingConfigured(p.pricingJson),
+      customerAnswersConfigured: isServiceCustomerAnswersConfigured(p.faqJson),
+      serviceOptionsConfigured: isServiceOptionsConfigured(p.qualificationSchemaJson),
+    }));
+
+    // Services step (2026-06-18 consolidation): the wizard no longer
+    // gates on per-account assignments — the runtime resolver handles
+    // category → ServiceProfile → tenant default fallback on its own,
+    // so onboarding shouldn't force the user to wire up account ↔
+    // service links. "Services done" now means: at least one ACTIVE
+    // ServiceProfile exists AND every active profile has minimum
+    // setup (pricing + customer answers). Drafts don't gate.
+    //
+    // `serviceSetup.done` is kept in the response shape for back-compat
+    // with older client builds; it carries the same value as
+    // `services.done` so legacy callers stay green/red consistently.
+    const everyActiveConfigured = services
+      .filter(s => s.status === 'active')
+      .every(s => s.pricingConfigured && s.customerAnswersConfigured);
+    const servicesDone = activeServiceCount > 0 && everyActiveConfigured;
+    const serviceSetupDone = servicesDone;
+
+    // Automation reads off the primary SavedAccount's followUpSettingsJson
+    // as before; the qualify-field picker (per-service required fields)
+    // is a deferred follow-up.
+    const followUp = primary?.followUpSettingsJson;
+    const automationConfigured = isAutomationConfigured(followUp);
+    const automationMode = extractAutomationMode(followUp);
 
     return {
-      faqConfigured: isFaqConfigured(primary.faqJson),
-      pricingConfigured: isPricingConfigured(primary.servicePricingJson),
-      automationConfigured: isAutomationConfigured(primary.followUpSettingsJson),
-      aiRulesConfigured: isAiRulesConfigured(primary.followUpSettingsJson),
+      // Legacy back-compat fields. Same semantics as before — read off
+      // the primary SavedAccount so older deriveDisplayChecklist code
+      // paths keep working unchanged.
+      faqConfigured: primary ? isFaqConfigured(primary.faqJson) : false,
+      pricingConfigured: primary ? isPricingConfigured(primary.servicePricingJson) : false,
+      automationConfigured,
+      aiRulesConfigured: primary ? isAiRulesConfigured(primary.followUpSettingsJson) : false,
+
+      // New multi-service rollup.
+      connect: {
+        done: totalAccounts > 0,
+        accountCount: totalAccounts,
+      },
+      business: {
+        // Business completion is fully driven by User.website on the
+        // frontend (the OnboardingProfile doesn't store it); we leave
+        // this as a stub so the response shape stays uniform.
+        done: false,
+        hasWebsite: false,
+      },
+      services: {
+        done: servicesDone,
+        activeServiceCount,
+        totalAccounts,
+        accountsWithAssignments,
+      },
+      serviceSetup: {
+        done: serviceSetupDone,
+        services,
+      },
+      automation: {
+        done: automationConfigured,
+        mode: automationMode,
+      },
     };
   }
+}
+
+export interface OnboardingConfigSummaryService {
+  id: string;
+  name: string;
+  status: 'draft' | 'active' | 'archived';
+  pricingConfigured: boolean;
+  customerAnswersConfigured: boolean;
+  serviceOptionsConfigured: boolean;
+}
+
+export interface OnboardingConfigSummary {
+  // Legacy back-compat (kept so older frontends keep type-checking).
+  faqConfigured: boolean;
+  pricingConfigured: boolean;
+  automationConfigured: boolean;
+  aiRulesConfigured: boolean;
+  // New per-step rollup. The frontend prefers these when present.
+  connect: { done: boolean; accountCount: number };
+  business: { done: boolean; hasWebsite: boolean };
+  services: {
+    done: boolean;
+    activeServiceCount: number;
+    totalAccounts: number;
+    accountsWithAssignments: number;
+  };
+  serviceSetup: {
+    done: boolean;
+    services: OnboardingConfigSummaryService[];
+  };
+  automation: { done: boolean; mode: string | null };
 }
 
 // ─── Config "configured?" predicates ──────────────────────────────────
@@ -340,4 +468,81 @@ function isAiRulesConfigured(json: string | null | undefined): boolean {
   const s = safeParse(json);
   if (!s || typeof s !== 'object') return false;
   return typeof s.followUpStrategy === 'string' && s.followUpStrategy.length > 0;
+}
+
+// Return the user's chosen automation mode (e.g. 'auto_send' /
+// 'suggest' / 'manual') when set, else null. Used by the new
+// per-step config summary.
+function extractAutomationMode(json: string | null | undefined): string | null {
+  const s = safeParse(json);
+  if (!s || typeof s !== 'object') return null;
+  return typeof s.mode === 'string' && s.mode.length > 0 ? s.mode : null;
+}
+
+// ─── ServiceProfile predicates (multi-service refactor) ───────────────
+// Each ServiceProfile carries its own pricing/FAQ/qualification JSON.
+// These mirror the SavedAccount predicates above but accept the shapes
+// produced by the v1 code presets, the v2 admin templates (bridged), and
+// the structured forms on Settings → Services.
+
+// Pricing is configured when the table has at least one row OR the
+// pricing is explicitly marked as quote-required (in which case the
+// AI gathers info and quotes manually instead of using rate cards).
+// Bridged v2 shapes from admin templates land here too — they expose
+// `items` / `basePrices` / `addOns` arrays alongside the legacy
+// `priceTable` shape, so we accept any of them.
+function isServicePricingConfigured(json: string | null | undefined): boolean {
+  const p = safeParse(json);
+  if (!p || typeof p !== 'object') return false;
+  if (p.quoteRequired === true) return true;
+  if (Array.isArray(p.priceTable) && p.priceTable.length > 0) return true;
+  if (Array.isArray(p.items) && p.items.length > 0) return true;
+  if (Array.isArray(p.basePrices) && p.basePrices.length > 0) return true;
+  if (Array.isArray(p.addOns) && p.addOns.length > 0) return true;
+  // Hourly + minimum-charge fallback — used by trade services like
+  // handyman / electrical that don't ship per-room tables.
+  if (typeof p.laborRate === 'number' && p.laborRate > 0) return true;
+  return false;
+}
+
+// Customer answers / FAQ. Code-preset and bridged admin-template
+// payloads both land as `{ customQA: [{ question, answer }, ...] }`. A
+// non-empty entry counts. We also accept the legacy SavedAccount FAQ
+// shape (insuredAndBonded.value, paymentMethods, etc.) for tenants
+// whose ServiceProfile was hydrated from the old per-account FAQ.
+function isServiceCustomerAnswersConfigured(json: string | null | undefined): boolean {
+  const f = safeParse(json);
+  if (!f || typeof f !== 'object') return false;
+  if (Array.isArray(f.customQA) && f.customQA.some((q: any) => (q?.question || q?.answer || '').toString().trim())) {
+    return true;
+  }
+  // v2 admin-template shape post-bridge — sometimes lands as `entries`.
+  if (Array.isArray(f.entries) && f.entries.some((q: any) => (q?.question || q?.answer || '').toString().trim())) {
+    return true;
+  }
+  // Legacy SavedAccount-style fields, in case the profile was seeded
+  // from the old per-account FAQ JSON.
+  const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
+  for (const k of valueKeys) {
+    const v = f[k]?.value;
+    if (typeof v === 'string' && v && v !== 'unset') return true;
+  }
+  if (Array.isArray(f.paymentMethods) && f.paymentMethods.length > 0) return true;
+  return false;
+}
+
+// Service options / qualification schema. Optional per spec — wizard
+// completion does NOT require this to be configured. We still surface
+// the boolean so the UI can show "options configured" / "options
+// pending" hints next to each service in the accordion.
+function isServiceOptionsConfigured(json: string | null | undefined): boolean {
+  const q = safeParse(json);
+  if (!q || typeof q !== 'object') return false;
+  // v1 shape: { questions: [...] }
+  if (Array.isArray(q.questions) && q.questions.length > 0) return true;
+  // v2 shape (bridged from admin templates): { groups: [{ options: [...] }, ...] }
+  if (Array.isArray(q.groups) && q.groups.some((g: any) => Array.isArray(g?.options) && g.options.length > 0)) {
+    return true;
+  }
+  return false;
 }

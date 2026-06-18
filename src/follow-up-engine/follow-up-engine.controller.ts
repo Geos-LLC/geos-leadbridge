@@ -690,6 +690,43 @@ export class FollowUpEngineController {
     // hardcoded-priority behavior — no migration required.
     if (body.qualificationV2 !== undefined) extendedSettings.qualificationV2 = body.qualificationV2;
 
+    // Booking availability — 7-day × 2-period (morning / afternoon)
+    // toggle grid for the Booking conversation goal. Shape:
+    //   bookingAvailability: {
+    //     mon: { morning: true,  afternoon: true  },
+    //     tue: { morning: true,  afternoon: true  },
+    //     ...
+    //     sun: { morning: false, afternoon: false },
+    //   }
+    //
+    // The runtime (automation.service.ts + follow-up-generator.service.ts)
+    // reads `s.bookingAvailability` and injects an AVAILABILITY REFERENCE
+    // block ONLY when the active strategy is 'booking'. Existing accounts
+    // without this key fall back to DEFAULT_BOOKING_AVAILABILITY (Mon–Fri
+    // morning + afternoon on, weekends off) so behavior is sensible
+    // without a save. See src/ai/booking-availability.ts.
+    if (body.bookingAvailability !== undefined) extendedSettings.bookingAvailability = body.bookingAvailability;
+
+    // AI Playbook V2 — per-section custom instructions edited from
+    // Settings → AI Playbook. The UI sends `aiPlaybookV2` as a partial
+    // sub-tree (only the sections the user touched); we merge it onto
+    // the existing aiPlaybookV2 so we never clobber `chatInstructions[]`
+    // entries that the AI Settings Assistant has pushed alongside.
+    // Each section's `chatInstructions` is preserved verbatim when the
+    // UI omits it; the UI can also send a shrunk array (after a delete)
+    // and that value wins.
+    if (body.aiPlaybookV2 && typeof body.aiPlaybookV2 === 'object') {
+      const existingV2: Record<string, any> =
+        extendedSettings.aiPlaybookV2 && typeof extendedSettings.aiPlaybookV2 === 'object'
+          ? { ...extendedSettings.aiPlaybookV2 }
+          : {};
+      for (const [sectionKey, raw] of Object.entries(body.aiPlaybookV2 as Record<string, any>)) {
+        const incoming = raw && typeof raw === 'object' ? raw : {};
+        existingV2[sectionKey] = { ...(existingV2[sectionKey] ?? {}), ...incoming };
+      }
+      extendedSettings.aiPlaybookV2 = existingV2;
+    }
+
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset
     // unrelated columns to defaults.

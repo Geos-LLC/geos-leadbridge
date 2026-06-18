@@ -17,7 +17,7 @@ import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
-  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other';
+  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'associate_phones' | 'other';
   code?: string; // Structured: 'token_expired', 'webhook_missing', 'automation_failure'
   platform?: string; // 'thumbtack' | 'yelp'
   severity?: 'error' | 'warning';
@@ -26,6 +26,89 @@ export interface CaptureErrorOptions {
   accountId?: string;
   accountName?: string;
   context?: Record<string, any>;
+}
+
+/**
+ * Reclassifier — keeps the `token_refresh` bucket clean of unrelated
+ * failures that surface inside our refresh code paths.
+ *
+ * Background: the proactive-refresh cron wraps `serializedAccountRefresh`
+ * in a try/catch and unconditionally tags any throw as
+ * `category: 'token_refresh', code: 'token_expired'`. That swallowed
+ * real OAuth rejections perfectly — but it also let DB schema
+ * mismatches (e.g. the 2026-06-16 Wesley Chapel incident, where the
+ * SavedAccount.update call hit a missing serviceProfileAssignmentsJson
+ * column because the migration hadn't been applied yet) and crypto
+ * errors land in the same bucket. The token-health UI and our health
+ * sweep both treat any unresolved `token_refresh` row as "this tenant
+ * needs to reconnect Thumbtack" — wrong action when the root cause is
+ * actually our own bug.
+ *
+ * Strategy: inspect the message + code for non-OAuth signatures and
+ * redirect them to `category: 'other'` with a structured `code` that
+ * names the real cause. The redirect is intentionally conservative —
+ * a real TT 400 with the standard `invalid_grant` wording never
+ * matches any of these patterns.
+ *
+ * Exported so it can be unit-tested without instantiating the service.
+ */
+export function reclassifyCapture(
+  options: Pick<CaptureErrorOptions, 'category' | 'code' | 'message'>,
+): { category: CaptureErrorOptions['category']; code: string | undefined } {
+  const { category, code, message } = options;
+  // Only reclassify rows that COULD have been mislabeled. We never
+  // re-bucket non-token_refresh inputs — those callers know their domain.
+  if (category !== 'token_refresh') return { category, code };
+  const text = (message ?? '').toLowerCase();
+
+  // Prisma surfaces these phrases in its error.message. Any one of them
+  // means we hit a query-layer failure before TT was ever called, so
+  // it's an LB-side bug, not a tenant reconnect signal.
+  const prismaSignatures = [
+    'prisma',
+    'invalid `prisma.',
+    'does not exist in the current database',
+    'unknown argument',
+    'unknown field',
+    'foreign key constraint',
+    'unique constraint',
+    'pls migrate', // shows up when prisma generate skipped
+  ];
+  if (prismaSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'db_error' };
+  }
+
+  // Local crypto failures (decryption key mismatch, malformed
+  // ciphertext after a manual DB edit, etc.). The token text isn't
+  // even loaded yet — calling this a token_refresh failure tells the
+  // tenant to reconnect when really our key/state is broken.
+  const cryptoSignatures = [
+    'encryptionutil',
+    'bad decrypt',
+    'failed to decrypt',
+    'unable to authenticate data',
+    'wrong final block length',
+    'invalid initialization vector',
+  ];
+  if (cryptoSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'crypto_error' };
+  }
+
+  // Outbound network errors from OUR side — DNS or socket-level
+  // failures that didn't reach Thumbtack's OAuth server. These are
+  // transient and don't mean the refresh token is dead.
+  const networkSignatures = [
+    'econnrefused',
+    'enotfound',
+    'etimedout',
+    'socket hang up',
+    'network error',
+  ];
+  if (networkSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'network_error' };
+  }
+
+  return { category, code };
 }
 
 export interface SystemHealthIssue {
@@ -81,6 +164,21 @@ export class MonitoringService implements OnModuleInit {
    */
   async captureError(options: CaptureErrorOptions, db: Db = this.prisma): Promise<void> {
     try {
+      // Defensive: redirect non-OAuth failures out of the token_refresh
+      // bucket so the dead-token UI + sweeps don't ask tenants to
+      // reconnect when the actual cause is an LB-side bug (DB schema,
+      // crypto, transient network). See reclassifyCapture for the rules
+      // and the Wesley Chapel incident motivation.
+      const reclassified = reclassifyCapture(options);
+      if (reclassified.category !== options.category) {
+        this.logger.warn(
+          `[captureError] reclassified ${options.category}→${reclassified.category} ` +
+          `(code=${reclassified.code}) accountId=${options.accountId ?? '-'} ` +
+          `msg="${(options.message ?? '').slice(0, 120)}"`,
+        );
+      }
+      options = { ...options, category: reclassified.category, code: reclassified.code };
+
       const severity = options.severity ?? 'error';
 
       // Dedup: collapse a recurring unresolved error into a single row.
@@ -600,6 +698,122 @@ export class MonitoringService implements OnModuleInit {
     }
   }
 
+  // ==========================================
+  // Daily SavedAccount Auto-Archive Sweep
+  //
+  // Background: when a tenant deletes their LeadBridge integration on
+  // the platform side (e.g. Wesley Chapel — operator deleted the TT
+  // business itself), our refresh tokens go permanently invalid. We
+  // can't probe the platform to confirm "deleted vs transient" since
+  // we have no auth, so we use **time** as the proxy: 30 days of
+  // unresolved token_refresh failures is a strong signal the account
+  // is gone for good (real expiries get reconnected within days).
+  //
+  // What it does:
+  //   - Find SavedAccount rows where archivedAt IS NULL AND there's
+  //     an unresolved SystemErrorLog row of category='token_refresh'
+  //     with createdAt >= 30 days ago.
+  //   - Set archivedAt = now(). The row stays in the DB — user-facing
+  //     reads (loadSavedAccounts) filter archivedAt:null, so it drops
+  //     out of the connected-accounts list and dead-token warning.
+  //   - A fresh OAuth reconnect on the same userId+platform+businessId
+  //     hits the upsert path in saveAccount() which clears archivedAt,
+  //     resurrecting the row with all its config (FAQ, pricing, AI
+  //     playbook, follow-up settings) intact.
+  //
+  // Schedule: '0 4 * * *' = 04:00 UTC daily. Advisory lock 17005
+  // prevents staging+production double-execution on the shared DB.
+  // ==========================================
+
+  /** Threshold for auto-archiving an account with dead refresh tokens. */
+  private static readonly ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+  @Cron('0 4 * * *')
+  async archiveOrphanedAccounts(): Promise<void> {
+    try {
+      await withCronLock(
+        this.prisma,
+        this.logger,
+        17005,
+        'ArchiveOrphanedAccounts',
+        async (tx) => {
+          const result = await this.runArchiveOrphanedAccountsSweep(tx);
+          this.logger.log(
+            `[ArchiveOrphanedAccounts] swept candidates=${result.candidates} archived=${result.archived}`,
+          );
+        },
+      );
+    } catch (err: any) {
+      if (isSkipped(err)) {
+        this.logger.log('[ArchiveOrphanedAccounts] skipped — another instance holds the lock');
+        return;
+      }
+      this.logger.error(
+        `[ArchiveOrphanedAccounts] result=error error=${(err?.message ?? 'unknown').slice(0, 300)}`,
+      );
+    }
+  }
+
+  /**
+   * The sweep itself, factored out so the cron, manual admin trigger,
+   * and unit tests can all share one implementation. Returns counts
+   * for logging — pure side-effect on the DB otherwise.
+   */
+  async runArchiveOrphanedAccountsSweep(db: Db = this.prisma): Promise<{
+    candidates: number;
+    archived: number;
+  }> {
+    const threshold = new Date(Date.now() - MonitoringService.ARCHIVE_AFTER_MS);
+
+    const stale = await db.systemErrorLog.findMany({
+      where: {
+        category: 'token_refresh',
+        resolved: false,
+        createdAt: { lte: threshold },
+        accountId: { not: null },
+      },
+      select: { accountId: true, createdAt: true },
+    });
+
+    const oldestByAccount = new Map<string, Date>();
+    for (const e of stale) {
+      const id = e.accountId!;
+      const prev = oldestByAccount.get(id);
+      if (!prev || e.createdAt < prev) oldestByAccount.set(id, e.createdAt);
+    }
+
+    const accountIds = Array.from(oldestByAccount.keys());
+    if (accountIds.length === 0) {
+      return { candidates: 0, archived: 0 };
+    }
+
+    const candidates = await db.savedAccount.findMany({
+      where: { id: { in: accountIds }, archivedAt: null },
+      select: { id: true, businessName: true, platform: true, userId: true },
+    });
+
+    if (candidates.length === 0) {
+      return { candidates: accountIds.length, archived: 0 };
+    }
+
+    const now = new Date();
+    const result = await db.savedAccount.updateMany({
+      where: { id: { in: candidates.map((c) => c.id) }, archivedAt: null },
+      data: { archivedAt: now },
+    });
+
+    for (const c of candidates) {
+      const sinceWhen = oldestByAccount.get(c.id);
+      this.logger.warn(
+        `[ArchiveOrphanedAccounts] archived ${c.platform}/${c.businessName} ` +
+        `(id=${c.id} user=${c.userId}) — first dead-token error at ` +
+        `${sinceWhen?.toISOString() ?? '?'}`,
+      );
+    }
+
+    return { candidates: accountIds.length, archived: result.count };
+  }
+
   /**
    * Manual trigger for the integrity check — invoked from admin endpoint or
    * scripts. Bypasses the cron's advisory lock so a human can always run it
@@ -723,6 +937,27 @@ export class MonitoringService implements OnModuleInit {
           accountId: account.id, accountName: account.businessName || account.businessId,
           platform: account.platform, issueCode: 'notifications_disabled', status: 'warning',
           message: 'Lead notifications are disabled — new leads will not trigger SMS alerts',
+          firstDetectedAt: now, lastDetectedAt: now,
+        });
+      }
+    }
+
+    // 5. Associate-phone sync failure (Thumbtack only). LB pushes owner phone +
+    // LB dedicated number + custom associates to TT after every OAuth and on
+    // demand. When that fails, proxy calls won't honor LB-side senders — leads
+    // route to a number the customer can't reach. Surfaced today by reading
+    // unresolved category='associate_phones' rows; resolved when a subsequent
+    // successful sync calls `markAssociatePhoneSyncResolved`.
+    if (account.platform === 'thumbtack') {
+      const associatePhonesError = await db.systemErrorLog.findFirst({
+        where: { accountId: account.id, category: 'associate_phones', resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (associatePhonesError) {
+        issues.push({
+          accountId: account.id, accountName: account.businessName || account.businessId,
+          platform: account.platform, issueCode: 'associate_phones_failed', status: 'warning',
+          message: associatePhonesError.message || 'Associate-phone sync failed — proxy calls may not honor LB-side senders',
           firstDetectedAt: now, lastDetectedAt: now,
         });
       }

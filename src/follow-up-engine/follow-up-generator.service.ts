@@ -30,7 +30,9 @@ import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { extractLeadDetails } from '../leads/extract-lead-details';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
+import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
 import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
+import { buildAvailabilityBlockForStrategy } from '../ai/booking-availability';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
 import OpenAI from 'openai';
@@ -226,6 +228,15 @@ export class FollowUpGeneratorService {
       accountSettings?.qualificationV2?.requiredFields,
       accountSettings?.qualificationV2?.customFields,
     );
+    // AVAILABILITY block — only injected when goal is 'booking'. When
+    // the tenant has nothing saved, the normalizer falls back to
+    // DEFAULT_BOOKING_AVAILABILITY (Mon–Fri morning + afternoon) so the
+    // AI always sees a sensible windows list. See
+    // src/ai/booking-availability.ts.
+    const availabilityBlockBody: string = buildAvailabilityBlockForStrategy(
+      strategyKey,
+      accountSettings?.bookingAvailability,
+    );
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
@@ -235,6 +246,7 @@ export class FollowUpGeneratorService {
           servicePricingJson: true,
           faqJson: true,
           serviceOverridesJson: true,
+          serviceProfileAssignmentsJson: true,
           followUpTimezone: true,
           followUpSettingsJson: true,
           followUpActiveHoursStart: true,
@@ -444,11 +456,15 @@ export class FollowUpGeneratorService {
       if (template?.content) customPrompt = template.content;
     }
 
-    // Step 5: Load global AI prompt
+    // Step 5: Load global AI prompt (typed blob + chat-added entries)
     let globalPrompt = '';
     if (lead?.userId) {
-      const user = await this.prisma.user.findUnique({ where: { id: lead.userId }, select: { globalAiPrompt: true } });
-      if (user?.globalAiPrompt) globalPrompt = user.globalAiPrompt;
+      const user = await this.prisma.user.findUnique({
+        where: { id: lead.userId },
+        select: { globalAiPrompt: true, globalAiChatInstructionsJson: true },
+      });
+      const combined = resolveGlobalPrompt(user);
+      if (combined) globalPrompt = combined;
     }
     if (!globalPrompt) {
       const { TemplatesService } = require('../templates/templates.service');
@@ -530,6 +546,14 @@ export class FollowUpGeneratorService {
         '',
         '=== REFERENCE: QUALIFICATION REQUIRED FIELDS (Price / Qualify goals) ===',
         qualificationBlockBody,
+      );
+    }
+
+    if (availabilityBlockBody) {
+      systemParts.push(
+        '',
+        '=== REFERENCE: AVAILABILITY (Booking goal only) ===',
+        availabilityBlockBody,
       );
     }
 

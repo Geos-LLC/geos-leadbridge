@@ -18,6 +18,7 @@ import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.serv
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { parseDuration } from '../common/utils/parse-duration';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { TrialService } from '../trial/trial.service';
 import { LeadsService } from '../leads/leads.service';
@@ -901,18 +902,101 @@ export class WebhooksService {
     }
 
     // Evaluate thread for follow-up enrollment after pro/AI message.
-    // Skip on manual pro messages — a human (manager) or 3rd-party bridge
-    // chiming in mid-thread shouldn't reset / re-arm the follow-up clock.
-    // Their reply isn't an AI handoff signal; treating it as one creates
-    // enrollment churn (every manual reply spawns a new enrollment that
-    // immediately gets stopped by the next customer reply). The customer's
-    // next silence will still arm a follow-up via leads.service.sendMessage
-    // when our own AI / templated reply goes out.
-    if (sender === 'pro' && !isExternalProMessage) {
-      try {
-        await this.followUpEngine.evaluateThread(conversation.id, platform);
-      } catch (err: any) {
-        this.logger.warn(`Failed to evaluate thread for follow-up: ${err.message}`);
+    //
+    // Two pro-message shapes arrive here:
+    //   (a) sender='pro' && !isExternalProMessage : webhook echo of our OWN
+    //       AI / templated send. leads.service.sendMessage already ran the
+    //       proper post-send hooks (handleProReply for user sends, or the
+    //       auto re-enroll block for AI). evaluateThread here is a backup
+    //       safety net for cases where sendMessage didn't run its hooks.
+    //   (b) sender='pro' && isExternalProMessage  : a human manager typed
+    //       directly on the platform's web UI (Thumbtack / Yelp inbox), or
+    //       a 3rd-party bridge posted on our behalf. Nothing in LeadBridge
+    //       has stopped the active enrollment or re-armed the clock.
+    //
+    // (b) used to be skipped on the theory that "our AI's next reply will
+    // re-arm." That premise fails when AI Conversation is off, when the
+    // manager is the final touch on the thread, or when the manager intends
+    // to take over the conversation — the prior enrollment then drips into
+    // a stale customer who has new context the AI doesn't know about. Worse,
+    // we observed the Jeff Connor 2026-06-17 incident: manager typed via TT
+    // web on Jun 7, no AI reply followed, no follow-up ever fired again.
+    //
+    // Fix: stop the active enrollment (so its in-flight step doesn't fire
+    // with stale context) and re-arm a fresh enrollment whose first step
+    // fires after the account's configured re-enroll delay. If the customer
+    // replies inside that window, `handleCustomerReply` stops the new
+    // enrollment — no churn.
+    if (sender === 'pro') {
+      let reEnrollDelayMinutes: number | undefined;
+      if (isExternalProMessage) {
+        // Resolve the account's fuReEnrollDelay BEFORE handleProReply so we
+        // can use it as the first-step delay override for the fresh
+        // enrollment. Without this, the new sequence's first step fires
+        // ~2 min after the manager's message — far too aggressive when the
+        // manager intends to take over the thread.
+        const acct = lead.businessId
+          ? await this.prisma.savedAccount
+              .findFirst({
+                where: { userId, businessId: lead.businessId },
+                select: { followUpSettingsJson: true },
+              })
+              .catch(() => null)
+          : null;
+        if (acct?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(acct.followUpSettingsJson);
+            if (s.fuReEnrollOnSilence === false) {
+              // Account opted out — stop only, don't re-arm.
+              reEnrollDelayMinutes = -1;
+            } else if (s.fuReEnrollDelay) {
+              // Default 360 min (6h) matches the most common setting.
+              reEnrollDelayMinutes = parseDuration(s.fuReEnrollDelay, 360);
+            } else {
+              reEnrollDelayMinutes = 360;
+            }
+          } catch {
+            reEnrollDelayMinutes = 360;
+          }
+        } else {
+          reEnrollDelayMinutes = 360;
+        }
+
+        try {
+          // Idempotency: handleProReply uses externalMessageId for dedup,
+          // so a duplicate webhook delivery won't double-stop.
+          await this.followUpEngine.handleProReply(conversation.id, {
+            sourceEventId: `external-pro:${platform}:${messageId}`,
+            actorType: 'webhook',
+            actorId: `manual-pro:${messageId}`,
+          });
+        } catch (err: any) {
+          this.logger.warn(`[manual-pro] handleProReply failed for ${conversation.id}: ${err.message}`);
+        }
+
+        if (reEnrollDelayMinutes === -1) {
+          this.logger.log(
+            `[manual-pro] Skipping re-enroll for ${conversation.id} — fuReEnrollOnSilence=false`,
+          );
+        }
+      }
+      // Skip evaluateThread entirely when the account opted out of re-enroll
+      // on silence — handleProReply already stopped the active enrollment.
+      if (reEnrollDelayMinutes !== -1) {
+        try {
+          // evaluateThread is idempotent: returns early if an active enrollment
+          // already exists or if the thread isn't eligible. The override is
+          // only honored when there are no prior follow-ups on this thread
+          // (startStepIndex === 0); otherwise the template's normal cadence
+          // wins. Safe for both isExternalProMessage and our own AI sends.
+          await this.followUpEngine.evaluateThread(
+            conversation.id,
+            platform,
+            reEnrollDelayMinutes,
+          );
+        } catch (err: any) {
+          this.logger.warn(`Failed to evaluate thread for follow-up: ${err.message}`);
+        }
       }
     }
 

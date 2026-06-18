@@ -52,20 +52,27 @@ const MATRIX: MatrixRow[] = [
     expectedSideEffect: 'stop_and_lost',
   },
   {
-    name: 'completed (Donna case) → block_terminal + stop_and_lost',
+    // 2026-06-17 lifecycle rule cleanup: `completed` no longer maps to lost.
+    // Wrap-up phrasing is too ambiguous to safely flip a customer to lost
+    // from a classifier signal alone — the sequence stops, but the lead
+    // stays in its current funnel state until SF/platform/manual reports.
+    name: 'completed (Donna case) → block_terminal + stop_only (no longer maps to lost)',
     customerMessage: 'The house has already been cleaned',
     classifier: { intent: 'completed', confidence: 0.88, reason: 'work done', fromLlm: true },
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
-    expectedSideEffect: 'stop_and_lost',
+    expectedSideEffect: 'stop_only',
   },
   {
-    name: 'agreed → block_terminal + stop_and_booked',
+    // 2026-06-17 lifecycle rule cleanup: AI no longer authors `booked`.
+    // The handoff alert path (maybeFireHandoffAlert on the inbound classifier)
+    // pages the dispatcher; the actual booking is recorded by SF/platform/manual.
+    name: 'agreed → block_terminal + stop_only (AI never authors booked)',
     customerMessage: "let's book it",
     classifier: { intent: 'agreed', confidence: 0.9, reason: 'price accepted', fromLlm: true },
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
-    expectedSideEffect: 'stop_and_booked',
+    expectedSideEffect: 'stop_only',
   },
   {
     name: 'deferring (bounded) → block_terminal + stop_only (pause not lost)',
@@ -129,22 +136,24 @@ const MATRIX: MatrixRow[] = [
     // had just confirmed a booking with "Thank you!". The narrow bypass only
     // applies to `deferring` now — `completed` on a re-engagement is treated
     // the same as on a regular sequence: stop, mark lost.
-    name: 're-engagement BLOCKS completed: completed on customer_deferred → block_terminal',
+    // 2026-06-17 lifecycle rule cleanup: `completed` is stop_only everywhere.
+    name: 're-engagement BLOCKS completed: completed on customer_deferred → block_terminal + stop_only',
     customerMessage: "we're done with it",
     classifier: { intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true },
     triggerState: 'customer_deferred',
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
-    expectedSideEffect: 'stop_and_lost',
+    expectedSideEffect: 'stop_only',
   },
   {
-    name: 're-engagement BLOCKS agreed: agreed on customer_hired_competitor → block_terminal',
+    // 2026-06-17 lifecycle rule cleanup: `agreed` is stop_only everywhere.
+    name: 're-engagement BLOCKS agreed: agreed on customer_hired_competitor → block_terminal + stop_only',
     customerMessage: 'yes book it',
     classifier: { intent: 'agreed', confidence: 0.95, reason: 'accepted', fromLlm: true },
     triggerState: 'customer_hired_competitor',
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
-    expectedSideEffect: 'stop_and_booked',
+    expectedSideEffect: 'stop_only',
   },
   {
     name: 're-engagement BLOCKS hired_elsewhere: hired_elsewhere on customer_hired_competitor → block_terminal',

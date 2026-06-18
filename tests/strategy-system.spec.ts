@@ -22,11 +22,11 @@ import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS, STRATEGY_KEYS } from '../src/ai/st
 // ============================================================
 
 describe('STRATEGY_PROMPTS', () => {
-  it('defines all 5 strategies', () => {
+  it('defines all 6 strategies (incl. booking added 2026-06-16)', () => {
     expect(Object.keys(STRATEGY_PROMPTS)).toEqual(
-      expect.arrayContaining(['hybrid', 'price', 'qualify', 'convert', 'phone']),
+      expect.arrayContaining(['hybrid', 'price', 'qualify', 'convert', 'phone', 'booking']),
     );
-    expect(Object.keys(STRATEGY_PROMPTS).length).toBe(5);
+    expect(Object.keys(STRATEGY_PROMPTS).length).toBe(6);
   });
 
   it('each strategy has a non-empty prompt', () => {
@@ -35,10 +35,14 @@ describe('STRATEGY_PROMPTS', () => {
     }
   });
 
-  it('hybrid prompt requires price AND question', () => {
+  it('hybrid prompt asks one question and answers price when asked', () => {
     const p = STRATEGY_PROMPTS.hybrid;
-    expect(p).toContain('price range');
+    // Hybrid acknowledges + moves the lead forward with EXACTLY ONE
+    // question, and answers from the PRICING TABLE only when the
+    // customer explicitly asks about price.
     expect(p).toContain('ONE question');
+    expect(p).toMatch(/explicitly asks about price/i);
+    expect(p).toContain('PRICING TABLE');
   });
 
   it('price prompt forbids questions', () => {
@@ -47,22 +51,56 @@ describe('STRATEGY_PROMPTS', () => {
     expect(p).toContain('Ask questions');
   });
 
-  it('qualify prompt forbids pricing', () => {
+  it('qualify prompt forbids volunteering pricing', () => {
     const p = STRATEGY_PROMPTS.qualify;
-    expect(p).toContain('DO NOT');
-    expect(p).toContain('Give pricing');
+    expect(p).toContain('NEVER');
+    expect(p).toContain('Volunteer a price');
   });
 
-  it('convert prompt requires specific time', () => {
+  it('convert prompt asks customer for their preferred time', () => {
     const p = STRATEGY_PROMPTS.convert;
-    expect(p).toContain('SPECIFIC time');
+    expect(p).toMatch(/when the customer.+want|asking the customer when/i);
   });
 
-  it('phone prompt has multi-step flow', () => {
+  it('phone (Call Handoff) prompt has multi-step flow', () => {
     const p = STRATEGY_PROMPTS.phone;
     expect(p).toContain('Step 1');
     expect(p).toContain('Step 2');
     expect(p).toContain('hesitation');
+  });
+
+  it('phone prompt is labelled Call Handoff while keeping the phone key', () => {
+    const p = STRATEGY_PROMPTS.phone;
+    expect(p).toMatch(/CALL HANDOFF/i);
+  });
+
+  it('booking prompt asks for preferred service date/time', () => {
+    const p = STRATEGY_PROMPTS.booking;
+    expect(p).toMatch(/preferred service date/i);
+  });
+
+  it('booking prompt uses AVAILABILITY block when slots are present', () => {
+    const p = STRATEGY_PROMPTS.booking;
+    expect(p).toContain('AVAILABILITY');
+    expect(p).toMatch(/two of them|two|EXACTLY TWO/i);
+  });
+
+  it('booking prompt answers price first when customer asks price first', () => {
+    const p = STRATEGY_PROMPTS.booking;
+    expect(p).toMatch(/asks about price BEFORE/i);
+    expect(p).toMatch(/answer the price question first/i);
+  });
+
+  it('booking prompt hands off when customer asks for a call', () => {
+    const p = STRATEGY_PROMPTS.booking;
+    expect(p).toMatch(/asks for a phone call/i);
+    expect(p).toMatch(/hand off/i);
+  });
+
+  it('booking prompt does NOT chain through every Qualify field', () => {
+    const p = STRATEGY_PROMPTS.booking;
+    expect(p).toMatch(/booking-critical/i);
+    expect(p).toMatch(/random qualification questions/i);
   });
 });
 

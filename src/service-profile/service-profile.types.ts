@@ -35,8 +35,12 @@ export type ServiceOverrides = {
  * Output of the resolver's main entry point. Either:
  *  - status='resolved' — a profile applies, the caller should use its
  *    pricing/FAQ/AI overlay
- *  - status='ai_paused' — a profile applies but is in draft; the AI
- *    auto-reply path should be gated off (lead still tracked)
+ *  - status='ai_paused' — a profile applies but the AI auto-reply
+ *    path should be gated off (lead still tracked). Two reasons today:
+ *      - 'draft_profile': matched profile is still draft
+ *      - 'setup_mismatch': matched profile is NOT in the SavedAccount's
+ *        enabledServiceProfileIds list (PR-E account ↔ service
+ *        assignment layer)
  *  - status='legacy_fallback' — no profile applies; caller reads the
  *    legacy SavedAccount columns directly
  */
@@ -54,12 +58,65 @@ export type ResolvedProfile =
       status: 'ai_paused';
       profileId: string;
       profileName: string;
-      reason: 'draft_profile';
+      reason: 'draft_profile' | 'setup_mismatch';
     }
   | {
       status: 'legacy_fallback';
       reason: 'no_default_profile' | 'no_profile_matched_and_no_default';
     };
+
+/**
+ * PR-E — Account ↔ service assignment shape. Stored on
+ * SavedAccount.serviceProfileAssignmentsJson.
+ *
+ * Three states:
+ *   null            → not configured. Resolver preserves the
+ *                     pre-PR-E category-only matching behavior. Used
+ *                     for every existing tenant by default so the
+ *                     migration is a runtime no-op.
+ *   { enabled: [] } → configured but empty. The operator has been to
+ *                     the Manage Availability surface and cleared all
+ *                     entries. Resolver still uses the tenant's
+ *                     default profile but the UI shows a "no services
+ *                     selected" warning.
+ *   { enabled: [..] } → enforcement on. Category-matched profile must
+ *                     be in the list or the resolver returns
+ *                     ai_paused with reason='setup_mismatch'.
+ */
+export type ServiceAssignments = {
+  enabledServiceProfileIds: string[];
+  /** Optional account-level default. Used when enabled is non-empty
+   *  but the lead's category matches no enabled profile. Today this is
+   *  reserved for future use — MVP resolver does not consult it. */
+  defaultServiceProfileId?: string | null;
+};
+
+/**
+ * Defensive parse — returns null when the blob is absent / unparseable
+ * / shape-invalid. null is the "not configured" sentinel that
+ * preserves the legacy resolver behavior.
+ */
+export function parseServiceAssignments(
+  raw: string | null | undefined,
+): ServiceAssignments | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const obj = parsed as Record<string, unknown>;
+    const rawIds = obj.enabledServiceProfileIds;
+    if (!Array.isArray(rawIds)) return null;
+    const enabledServiceProfileIds = rawIds.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    const defaultRaw = obj.defaultServiceProfileId;
+    const defaultServiceProfileId =
+      typeof defaultRaw === 'string' && defaultRaw.length > 0 ? defaultRaw : null;
+    return { enabledServiceProfileIds, defaultServiceProfileId };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Slimmed lead inputs for the resolver. Keeping a narrow type avoids
@@ -80,6 +137,9 @@ export type SavedAccountForResolver = {
   servicePricingJson: string | null;
   faqJson: string | null;
   serviceOverridesJson?: string | null;
+  // PR-E — account ↔ service assignment layer. null = not configured,
+  // resolver preserves legacy category-only behavior.
+  serviceProfileAssignmentsJson?: string | null;
   // Legacy carrier of aiPlaybookV2 — the resolver pulls .aiPlaybookV2
   // out via extractAiPlaybookV2 when the matched ServiceProfile has no
   // aiInstructionsJson of its own. Phase 1 backfill does not migrate
@@ -294,24 +354,80 @@ export function buildPlaybookSettingsForRenderer(
   legacyFollowUpSettingsJson: string | null,
 ): string | null {
   if (!profileAiInstructionsJson) return legacyFollowUpSettingsJson;
-  let v2: unknown;
+  let parsed: unknown;
   try {
-    v2 = JSON.parse(profileAiInstructionsJson);
+    parsed = JSON.parse(profileAiInstructionsJson);
   } catch {
     return legacyFollowUpSettingsJson;
+  }
+  // Shape detection.
+  //   wrapper (v1+): { version: 1, serviceRules?: ..., aiPlaybookV2?: ... }
+  //   legacy:        { personality_brand_voice: {...}, pricing_guidance: {...}, ... }
+  // The wrapper carries an explicit `version` key OR known wrapper-only
+  // keys (serviceRules). Anything else falls back to the legacy "raw V2
+  // sections" interpretation so the existing per-account playbook path
+  // keeps working unchanged.
+  const isObject =
+    parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+  let v2Sections: unknown = parsed;
+  if (isObject) {
+    const obj = parsed as Record<string, unknown>;
+    const isWrapper =
+      'version' in obj || 'serviceRules' in obj || 'aiPlaybookV2' in obj;
+    if (isWrapper) {
+      v2Sections =
+        obj.aiPlaybookV2 && typeof obj.aiPlaybookV2 === 'object'
+          ? obj.aiPlaybookV2
+          : null;
+    }
   }
   let legacyParsed: Record<string, unknown> = {};
   if (legacyFollowUpSettingsJson) {
     try {
-      const parsed = JSON.parse(legacyFollowUpSettingsJson);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        legacyParsed = parsed as Record<string, unknown>;
+      const legacy = JSON.parse(legacyFollowUpSettingsJson);
+      if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+        legacyParsed = legacy as Record<string, unknown>;
       }
     } catch {
       // Keep legacyParsed = {} so we still emit a valid blob below.
     }
   }
-  return JSON.stringify({ ...legacyParsed, aiPlaybookV2: v2 });
+  // Wrapper carries no V2 sections (e.g. serviceRules-only payload) →
+  // emit the legacy blob unchanged so the renderer's existing playbook
+  // path doesn't get a null v2 it would have to special-case.
+  if (v2Sections === null) {
+    return legacyFollowUpSettingsJson;
+  }
+  return JSON.stringify({ ...legacyParsed, aiPlaybookV2: v2Sections });
+}
+
+/**
+ * Extract the optional `serviceRules` block from a profile's
+ * aiInstructionsJson wrapper. Returns null when the shape is missing,
+ * legacy, or has no serviceRules key. Read-only consumer for v1 — the
+ * UI uses this to render a service-rules viewer on the detail page.
+ */
+export function extractServiceRules(
+  profileAiInstructionsJson: string | null | undefined,
+): { requiredDetails: string[]; unsupportedServices: string[]; workflowSteps: string[] } | null {
+  if (!profileAiInstructionsJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(profileAiInstructionsJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const rules = (parsed as Record<string, unknown>).serviceRules;
+  if (!rules || typeof rules !== 'object' || Array.isArray(rules)) return null;
+  const r = rules as Record<string, unknown>;
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  return {
+    requiredDetails: arr(r.requiredDetails),
+    unsupportedServices: arr(r.unsupportedServices),
+    workflowSteps: arr(r.workflowSteps),
+  };
 }
 
 /**

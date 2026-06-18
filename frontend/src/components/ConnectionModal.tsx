@@ -18,6 +18,14 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
   const reconnecting = loading;
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<'thumbtack' | 'yelp' | null>(null);
+  // Email-prompt UX for "Connect a different Thumbtack account". Without
+  // this, TT's login page pre-fills the email of whichever account's
+  // session cookie is still in the browser, making it nearly impossible
+  // to connect a second TT account to the same LB tenant. Passing the
+  // email as OIDC `login_hint=` makes TT pre-fill (or override) the
+  // identity to authenticate as, bypassing the broken popup-logout step.
+  const [switchPrompt, setSwitchPrompt] = useState(false);
+  const [switchEmail, setSwitchEmail] = useState('');
 
   useEffect(() => {
     if (isOpen && !accountToReconnect && savedAccounts.length > 0) {
@@ -30,6 +38,8 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       setReconnectSuccess(false);
       setBusinesses([]);
       setSelectedPlatform(null);
+      setSwitchPrompt(false);
+      setSwitchEmail('');
     }
   }, [isOpen, accountToReconnect]);
 
@@ -54,11 +64,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     }
   };
 
-  const handleStartOAuth = async (forceLogin = false) => {
+  const handleStartOAuth = async (forceLogin = false, loginHint?: string) => {
     try {
       setLoading(true);
       setError(null);
-      const { authUrl } = await platformsApi.getAuthUrl(forceLogin);
+      const { authUrl } = await platformsApi.getAuthUrl(forceLogin, loginHint);
       window.location.href = authUrl;
     } catch (err: any) {
       setError(err.message || 'Failed to start connection');
@@ -66,7 +76,20 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     }
   };
 
-  const handleSwitchAccount = async () => {
+  // Open the email prompt when the user already has at least one TT
+  // savedAccount. If they don't (fresh OAuth from the empty state), the
+  // popup-based flow is fine since there's no sticky session to override.
+  const handleSwitchAccount = () => {
+    if (savedAccounts.some(a => a.platform === 'thumbtack')) {
+      setSwitchPrompt(true);
+      setSwitchEmail('');
+      setError(null);
+    } else {
+      handleSwitchAccountLegacy();
+    }
+  };
+
+  const handleSwitchAccountLegacy = async () => {
     try {
       setLoading(true);
       setError(null);
@@ -89,13 +112,47 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     }
   };
 
+  const handleSwitchAccountWithHint = async () => {
+    const email = switchEmail.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Enter a valid email for the Thumbtack account you want to connect.');
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      // Revoke the LB-stored TT token so the callback writes a fresh row.
+      await platformsApi.disconnect().catch(() => {});
+      // Still attempt the popup logout — it occasionally clears the
+      // session cookie. Even if it doesn't, login_hint overrides the
+      // pre-filled email on TT's login page.
+      const logoutWin = window.open(
+        'https://www.thumbtack.com/logout',
+        'tt_logout',
+        'width=500,height=400',
+      );
+      setTimeout(() => {
+        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
+        handleStartOAuth(true, email);
+      }, 1200);
+    } catch (err: any) {
+      setError(err.message || 'Failed to switch account');
+      setLoading(false);
+    }
+  };
+
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
     console.log('[Yelp OAuth] Step 0: handleReconnect called', { id: accountToReconnect.id, name: accountToReconnect.businessName, platform: accountToReconnect.platform });
     if (accountToReconnect.platform === 'yelp') {
       handleStartYelpOAuth();
     } else {
-      handleSwitchAccount();
+      // Reconnecting an EXISTING TT account → go straight to the legacy
+      // popup-logout + OAuth flow. The email-prompt that handleSwitchAccount
+      // would open is intended for ADDING a SECOND, DIFFERENT TT account,
+      // and it never renders when `accountToReconnect` is set — routing
+      // through it caused clicks to silently no-op (incident 2026-06-16).
+      handleSwitchAccountLegacy();
     }
   };
 
@@ -271,8 +328,56 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
           </div>
         )}
 
+        {/* Email-hint prompt — shown after the user picks "Connect a
+            different Thumbtack account". Passing login_hint=<email> to
+            TT's OAuth flow overrides the sticky pre-filled email on TT's
+            login page, which is how the second-TT-account-on-same-LB-tenant
+            case gets unblocked. */}
+        {!accountToReconnect && selectedPlatform === 'thumbtack' && switchPrompt && (
+          <div className="space-y-4">
+            <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-sm text-slate-700">
+              <p className="font-semibold mb-1">Which Thumbtack account?</p>
+              <p>
+                Enter the email of the Thumbtack Pro account you want to connect.
+                We'll pass it to Thumbtack so the login page uses that email instead of
+                the one your browser remembers.
+              </p>
+            </div>
+            <input
+              type="email"
+              autoFocus
+              value={switchEmail}
+              onChange={(e) => setSwitchEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSwitchAccountWithHint(); }}
+              placeholder="you@example.com"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 text-sm"
+              disabled={loading}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setSwitchPrompt(false); setSwitchEmail(''); setError(null); }}
+                disabled={loading}
+                className="flex-1 px-4 py-3 text-sm text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSwitchAccountWithHint}
+                disabled={loading || !switchEmail.trim()}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <><Loader2 size={16} className="animate-spin" /> Connecting…</>
+                ) : (
+                  <><ExternalLink size={16} /> Continue to Thumbtack</>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Connect new Thumbtack account or choose business */}
-        {!accountToReconnect && selectedPlatform === 'thumbtack' && (
+        {!accountToReconnect && selectedPlatform === 'thumbtack' && !switchPrompt && (
           <div className="space-y-4">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-12">
@@ -412,9 +517,10 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
                   <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
                     <CheckCircle size={24} className="text-emerald-600" />
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-2">All businesses connected</h3>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">This Thumbtack account is fully connected</h3>
                   <p className="text-sm text-slate-600 mb-2 max-w-md mx-auto">
-                    All Thumbtack businesses on this account are already connected to LeadBridge.
+                    Every Thumbtack business under the account you're signed in as is already linked.
+                    To add a business owned by a different Thumbtack login, switch accounts below.
                   </p>
                 </div>
 

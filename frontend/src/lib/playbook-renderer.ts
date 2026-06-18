@@ -87,6 +87,19 @@ export const SECTION_DEFAULT_PROMPTS: Record<PlaybookSectionKey, string> = {
     `Friendly, professional, and local. Match the customer's energy — formal if formal, casual if casual. Speak as the small-team business, not as an AI. Use the owner's first name in sign-offs if provided. Keep replies under 3 sentences when possible. Reserve exclamation points for genuine excitement (booking confirmed, etc.).`,
 };
 
+/**
+ * One chat-added instruction (mirror of backend ChatInstruction). The
+ * AI Settings Assistant pushes a new entry here per chat write so the
+ * UI can list / delete each one individually. Runtime concatenates
+ * these onto `customInstructions` at prompt-build time.
+ */
+export interface ChatInstruction {
+  id: string;
+  text: string;
+  userMessage?: string;
+  createdAt: string;
+}
+
 export type PlaybookV2Storage = {
   [K in PlaybookSectionKey]?: {
     customInstructions: string;
@@ -94,6 +107,9 @@ export type PlaybookV2Storage = {
      *  user edits the section's textarea. Drives the "Suggested from
      *  website" pill in the AI Playbook page. */
     suggestedFromWebsite?: boolean;
+    /** Chat-added rules — listed in the Custom Instructions sub-section
+     *  of each card, each with its own delete button. */
+    chatInstructions?: ChatInstruction[];
   };
 };
 

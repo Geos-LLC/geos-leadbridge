@@ -235,8 +235,18 @@ export class FollowUpEngineService {
    * Evaluate a thread for follow-up eligibility.
    * Derives state from ThreadContext, enrolls in appropriate sequence if eligible.
    * Called after recordMessage() when awaitingCustomerReply becomes true.
+   *
+   * @param firstStepDelayMinutesOverride
+   *   Optional override forwarded to enrollInSequence. Used by the webhook
+   *   external-pro path so the first follow-up doesn't fire 2 min after a
+   *   manager-on-platform reply — it waits the account's fuReEnrollDelay
+   *   (e.g. 6h) so the customer has breathing room to respond first.
    */
-  async evaluateThread(conversationId: string, platform: string): Promise<void> {
+  async evaluateThread(
+    conversationId: string,
+    platform: string,
+    firstStepDelayMinutesOverride?: number,
+  ): Promise<void> {
     // Skip leads with terminal/archived status — no follow-up needed
     const statusCheck = await this.prisma.lead.findFirst({
       where: { threadId: conversationId },
@@ -335,7 +345,13 @@ export class FollowUpEngineService {
       where: { threadId: conversationId },
       select: { id: true },
     });
-    await this.enrollInSequence(conversationId, template.id, platform, lead?.id);
+    await this.enrollInSequence(
+      conversationId,
+      template.id,
+      platform,
+      lead?.id,
+      firstStepDelayMinutesOverride,
+    );
   }
 
   /**

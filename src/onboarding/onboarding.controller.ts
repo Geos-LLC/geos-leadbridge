@@ -47,11 +47,10 @@ export class OnboardingController {
   }
 
   // Wizard ↔ Settings sync — used by SetupProgressCard and SetupWizard to
-  // mark the four "stored-only" steps (ai / pricing / automation / ai_rules)
-  // green when the underlying SavedAccount JSON is actually configured,
+  // mark each step green when the underlying data is actually configured,
   // regardless of whether the user clicked Continue inside the wizard.
-  // Returns a flat boolean summary; intentionally never returns the JSON
-  // blobs themselves.
+  // Returns a structured per-step rollup plus four legacy back-compat
+  // booleans. Intentionally never returns the underlying JSON blobs.
   @Get('config-summary')
   async getConfigSummary(@CurrentUser() user: any) {
     const summary = await this.onboardingService.getConfigSummary(user.id);

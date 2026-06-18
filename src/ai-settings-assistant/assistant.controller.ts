@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards, Logger } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards, Logger, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiSettingsAssistantService } from './assistant.service';
@@ -40,5 +40,42 @@ export class AiSettingsAssistantController {
     @Body() body: ApplyRequest,
   ) {
     return this.service.apply(user.id, body);
+  }
+
+  /**
+   * List the chat-added instructions for an area. Used by the AI Playbook
+   * Custom Instructions sub-section to render the list of deletable
+   * entries. For global, `savedAccountId` is omitted; for per-section
+   * playbook areas (business_information / pricing_guidance /
+   * brand_voice), `savedAccountId` is required and scoped to the caller.
+   */
+  @Get('chat-instructions')
+  async listChatInstructions(
+    @CurrentUser() user: any,
+    @Query('area') area: string,
+    @Query('savedAccountId') savedAccountId?: string,
+  ) {
+    this.logger.log(`[list] user=${user?.id} area=${area} acct=${savedAccountId ?? '-'}`);
+    if (!area) throw new BadRequestException('area is required');
+    return this.service.listChatInstructions(user.id, area, savedAccountId);
+  }
+
+  /**
+   * Delete a single chat-added instruction by id. Same area/scope rules
+   * as the list endpoint. Returns the remaining list so the UI can
+   * reconcile without a second round-trip.
+   */
+  @Post('chat-instructions/delete')
+  async deleteChatInstruction(
+    @CurrentUser() user: any,
+    @Body() body: { area?: string; entryId?: string; savedAccountId?: string },
+  ) {
+    this.logger.log(
+      `[delete] user=${user?.id} area=${body?.area ?? '-'} entryId=${body?.entryId ?? '-'} acct=${body?.savedAccountId ?? '-'}`,
+    );
+    if (!body?.area || !body?.entryId) {
+      throw new BadRequestException('area and entryId are required');
+    }
+    return this.service.deleteChatInstruction(user.id, body.area, body.entryId, body.savedAccountId);
   }
 }
