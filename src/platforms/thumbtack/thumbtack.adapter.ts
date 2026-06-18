@@ -793,22 +793,18 @@ export class ThumbtackAdapter implements IPlatformAdapter {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
         },
       );
-      // Diagnostic: capture top-level shape so a follow-up commit can drop
-      // unused branches once TT's actual key is confirmed.
+      // TT returns `{ phoneNumbers: [...] }` (confirmed 2026-06-18 via Loki
+      // diagnostic `topKeys=phoneNumbers`). The topKeys log stays so any
+      // future contract drift is visible before it can break the parser.
       const body = response.data;
       const topKeys = body && typeof body === 'object' && !Array.isArray(body)
         ? Object.keys(body).join(',')
         : Array.isArray(body) ? '[array]' : typeof body;
       this.logger.log(
-        `[tt.associate-phone] list ok businessId=${businessId} status=${response.status} topKeys=${topKeys} bodyHead=${JSON.stringify(body ?? null).slice(0, 500)}`,
+        `[tt.associate-phone] list ok businessId=${businessId} status=${response.status} topKeys=${topKeys}`,
       );
+      if (Array.isArray(body?.phoneNumbers)) return body.phoneNumbers;
       if (Array.isArray(body)) return body;
-      if (body && typeof body === 'object') {
-        if (Array.isArray(body.data)) return body.data;
-        if (Array.isArray(body.phoneNumbers)) return body.phoneNumbers;
-        if (Array.isArray(body.phone_numbers)) return body.phone_numbers;
-        if (Array.isArray(body.items)) return body.items;
-      }
       return [];
     } catch (error) {
       const status = error.response?.status;
