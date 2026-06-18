@@ -44,6 +44,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   private readonly redirectUri: string;
   private readonly authBaseUrl: string;
   private readonly apiBaseUrl: string;
+  // Dedup map for OAuth code → /token exchange. Late duplicate callbacks
+  // (browser retry, proxy retry, frontend StrictMode etc) return the same
+  // in-flight promise instead of re-POSTing the same code, which would trip
+  // Hydra's code-reuse abuse protection and revoke the *original* token.
+  // Observed Georgiy reauth 2026-06-18 16:08 — three handleCallback ENTRY
+  // lines for the same code in <500ms, token then 401'd as "not active".
+  private readonly inFlightCodeExchanges = new Map<string, Promise<PlatformCredentials>>();
+  private static readonly CODE_DEDUP_TTL_MS = 60_000;
 
   constructor(private configService: ConfigService) {
     this.clientId = this.configService.get<string>('thumbtack.clientId') || '';
@@ -112,6 +120,23 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   async handleCallback(code: string, _userId: string, callbackUrl?: string): Promise<PlatformCredentials> {
+    const existing = this.inFlightCodeExchanges.get(code);
+    if (existing) {
+      this.logger.warn(
+        `[oauth-dedup] duplicate exchange suppressed for code (head=${code.slice(0, 8)}); returning in-flight/cached result`,
+      );
+      return existing;
+    }
+    const exchange = this.exchangeCodeForTokens(code, callbackUrl).finally(() => {
+      // Keep the entry for 60s after settling so late stragglers (browser
+      // retry, proxy retransmit) still hit the cache instead of re-POSTing.
+      setTimeout(() => this.inFlightCodeExchanges.delete(code), ThumbtackAdapter.CODE_DEDUP_TTL_MS).unref();
+    });
+    this.inFlightCodeExchanges.set(code, exchange);
+    return exchange;
+  }
+
+  private async exchangeCodeForTokens(code: string, callbackUrl?: string): Promise<PlatformCredentials> {
     try {
       // OAuth2 token endpoint requires form-urlencoded format
       const params = new URLSearchParams();
