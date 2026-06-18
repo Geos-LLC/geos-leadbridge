@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Sparkles, Save, Upload, Archive as ArchiveIcon, FileText, RefreshCw } from 'lucide-react';
+import { Loader2, Sparkles, Save, Upload, Archive as ArchiveIcon, FileText, RefreshCw, Trash2 } from 'lucide-react';
 import { adminServiceTemplatesApi } from '../../services/api';
 import type { AdminGeneratedTemplate, AdminServiceTemplate } from '../../services/api';
 import { notify } from '../../store/notificationStore';
@@ -244,6 +244,21 @@ export default function AdminServiceTemplates() {
       await loadTemplates();
     } catch (err: any) {
       notify.error('Archive failed', err?.response?.data?.message ?? err?.message ?? 'Failed');
+    }
+  };
+
+  const handleDelete = async (template: AdminServiceTemplate) => {
+    const ok = window.confirm(
+      `Delete "${template.label}"? This cannot be undone. Service Profiles already created from this template stay intact.`,
+    );
+    if (!ok) return;
+    try {
+      await adminServiceTemplatesApi.remove(template.id);
+      notify.success('Deleted', `Template "${template.label}" removed.`);
+      if (editingId === template.id) handleReset();
+      await loadTemplates();
+    } catch (err: any) {
+      notify.error('Delete failed', err?.response?.data?.message ?? err?.message ?? 'Failed');
     }
   };
 
@@ -549,6 +564,14 @@ export default function AdminServiceTemplates() {
                         <ArchiveIcon size={11} /> Archive
                       </button>
                     )}
+                    <button
+                      type="button"
+                      style={smallDangerBtn}
+                      onClick={() => handleDelete(t)}
+                      title="Delete forever — existing Service Profiles stay intact"
+                    >
+                      <Trash2 size={11} /> Delete
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -636,6 +659,20 @@ const smallPrimaryBtn: React.CSSProperties = {
   border: 'none',
   borderRadius: 4,
   cursor: 'pointer',
+  marginLeft: 6,
+};
+
+const smallDangerBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '4px 8px',
+  background: 'white',
+  color: '#b91c1c',
+  border: '1px solid #fecaca',
+  borderRadius: 4,
+  cursor: 'pointer',
+  fontSize: 11,
   marginLeft: 6,
 };
 

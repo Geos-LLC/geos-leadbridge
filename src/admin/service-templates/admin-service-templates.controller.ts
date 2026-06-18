@@ -13,6 +13,7 @@
  *   POST   /:id/publish   transition to published
  *   POST   /:id/archive   transition to archived
  *   POST   /:id/draft     transition back to draft (rare)
+ *   DELETE /:id           hard-delete a template row
  *
  * Body shapes accept either parsed JSON objects or already-stringified
  * blobs for the four JSON columns — see toJsonString in the service.
@@ -23,6 +24,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -163,6 +165,22 @@ export class AdminServiceTemplatesController {
     try {
       const row = await this.service.setStatus({ templateId: id, nextStatus: 'draft' });
       return { template: row };
+    } catch (err: any) {
+      if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Hard-delete the template row. ServiceProfile rows already created
+   * from this template stay intact — the template id isn't referenced
+   * after copy time. Prefer `archive` when the template was real but
+   * no longer in rotation; use Delete for test rows / mistakes.
+   */
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    try {
+      return await this.service.delete({ templateId: id });
     } catch (err: any) {
       if (err?.code === 'NOT_FOUND') throw new NotFoundException(err.message);
       throw err;
