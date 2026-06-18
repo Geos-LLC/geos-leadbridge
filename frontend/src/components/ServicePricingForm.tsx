@@ -526,14 +526,23 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                 style={{
                   display: 'flex',
                   alignItems: 'center',
+                  // flexWrap lets the chip group + delete button drop
+                  // to a new line on narrow containers (wizard modal,
+                  // mobile). Without it the chips overlapped the
+                  // per-sqft fallback labels at <= 940px modal width.
+                  flexWrap: 'wrap',
                   gap: 12,
+                  rowGap: 8,
                   padding: '10px 14px',
                   borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
                 }}
               >
                 <div
                   style={{
-                    flex: 1,
+                    // Switch from flex:1 to a min-width-controlled
+                    // flex-basis so the column can shrink AND wrap
+                    // its content rather than push siblings off-row.
+                    flex: '1 1 220px',
                     minWidth: 0,
                     display: 'flex',
                     flexDirection: 'column',
@@ -578,7 +587,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                     style={{
                       display: 'flex',
                       alignItems: 'center',
+                      // flexWrap so the per-sqft fallback labels drop
+                      // below the sqft inputs on narrow widths instead
+                      // of overflowing into the chip column.
+                      flexWrap: 'wrap',
                       gap: 4,
+                      rowGap: 4,
                       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                       fontSize: 11.5,
                       color: 'var(--lb-ink-5, #64748b)',
@@ -607,7 +621,16 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                     />
                     <span style={{ marginLeft: 2 }}>sqft</span>
                     {midpoint > 0 && (
-                      <span style={{ marginLeft: 10, opacity: 0.7 }}>
+                      <span
+                        style={{
+                          marginLeft: 10,
+                          opacity: 0.7,
+                          // Allow this hint to wrap to a new line as a
+                          // unit on narrow widths — keeps the
+                          // dot-separated triplet readable.
+                          flex: '1 1 100%',
+                        }}
+                      >
                         {allTypes
                           .map((t: any) => {
                             const p = Number(row[t.key]) || 0;
@@ -621,7 +644,17 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                     )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    // Wrap chips at narrow widths (mobile + modal) so
+                    // they stack instead of forcing horizontal overflow.
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    rowGap: 6,
+                  }}
+                >
                   {allTypes.map((t: any) => (
                     <BedBathPriceChip
                       key={t.key}
