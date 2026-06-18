@@ -397,7 +397,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           await automationApi.updateRule(nl.id, patch);
         } else {
           // No new-lead rule on this account — seed one with the touched
-          // fields plus sensible defaults for anything not touched.
+          // fields plus sensible defaults for anything not touched. Error
+          // now surfaces (was silently swallowed) so handleSave's
+          // allSettled aggregation can name the failing account.
           await automationApi.createRule({
             savedAccountId: id,
             name: 'Instant Reply',
@@ -405,7 +407,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             enabled: fields.has('instantReplyOn') ? instantReplyOn : (nextCache.instantReplyOn),
             useAi:   fields.has('replyType')      ? (replyType === 'ai') : (nextCache.replyType === 'ai'),
             delayMinutes: 0,
-          }).catch(() => undefined);
+          });
         }
       })());
     }
@@ -452,7 +454,44 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSaving(true); setError(null);
     try {
       const targets = isAll ? accounts.map(a => a.id) : [accountId];
-      await Promise.all(targets.map(id => saveOneAccount(id, fields)));
+      // Guard: in All-Accounts mode the user can toggle BEFORE the
+      // savedAccounts store finishes hydrating (the Layout console
+      // shows "savedAccounts updated: Array(0)" right after login).
+      // Without this guard, Promise.all([]) resolves instantly,
+      // setSavedAt flashes "Saved", and no API call ever fires —
+      // the toggle reverts on reload and the user thinks the UI is
+      // broken. Surface a real error so they retry once accounts load.
+      if (targets.length === 0) {
+        throw new Error(
+          isAll
+            ? 'Your accounts are still loading. Wait a moment, then try again.'
+            : 'No account selected. Pick an account before changing settings.',
+        );
+      }
+      // Save each target and collect failures so a partial success in
+      // All-Accounts mode still surfaces the bad accounts by name
+      // rather than blowing the whole batch on the first error.
+      const results = await Promise.allSettled(
+        targets.map(id => saveOneAccount(id, fields)),
+      );
+      const failed: { id: string; reason: any }[] = [];
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') failed.push({ id: targets[i], reason: r.reason });
+      });
+      if (failed.length > 0) {
+        const names = failed
+          .map(f => accounts.find(a => a.id === f.id)?.businessName || f.id.slice(0, 8))
+          .join(', ');
+        const firstMsg =
+          failed[0].reason?.response?.data?.message ||
+          failed[0].reason?.message ||
+          'Save failed';
+        throw new Error(
+          failed.length === targets.length
+            ? `Failed to save: ${firstMsg}`
+            : `Saved ${targets.length - failed.length}/${targets.length}. Failed: ${names} — ${firstMsg}`,
+        );
+      }
       if (!controller.signal.aborted) setSavedAt(Date.now());
     } catch (e: any) {
       if (!controller.signal.aborted) setError(e?.response?.data?.message || e?.message || 'Failed to save');
