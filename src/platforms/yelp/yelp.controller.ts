@@ -138,7 +138,10 @@ export class YelpController {
           this.logger.log(`[Yelp OAuth] Step 5b: Updating credentials for existing account: ${businessName} (${businessId})`);
           await this.prisma.savedAccount.update({
             where: { id: existing.id },
-            data: { businessName, credentialsJson: encryptedCreds },
+            // Resurrect path — clear archivedAt if the auto-archive
+            // sweep had marked this account as dormant. See
+            // platform.service.ts saveAccount for the rationale.
+            data: { businessName, credentialsJson: encryptedCreds, archivedAt: null },
           });
 
           // Auto-resolve any stale errors — match by accountId, accountName, or businessId in context

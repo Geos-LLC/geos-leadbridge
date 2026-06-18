@@ -174,7 +174,13 @@ export class PlatformService {
       'ProactiveRefresh',
       async tx => {
     const accounts = await tx.savedAccount.findMany({
-      where: { credentialsJson: { not: null } },
+      where: {
+        credentialsJson: { not: null },
+        // Skip auto-archived accounts — by definition they've had
+        // refresh failures for >= 30 days, so further refresh attempts
+        // just keep failing and generating noise in SystemErrorLog.
+        archivedAt: null,
+      },
       select: { id: true, platform: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
     });
 
@@ -1173,8 +1179,30 @@ export class PlatformService {
         // Only update credentials if provided (don't overwrite existing with undefined)
         ...(encryptedCredentials && { credentialsJson: encryptedCredentials }),
         lastUsedAt: new Date(),
+        // Resurrect path — if the proactive sweep had archived this
+        // row, clearing archivedAt brings it back into the user-facing
+        // list with all its config intact.
+        archivedAt: null,
       },
     });
+
+    // Resolve-side of resurrect: mark any previously-recorded
+    // token_refresh errors as resolved. OAuth callback is a stronger
+    // "token works now" signal than the next proactive cron run.
+    if (savedAccount) {
+      this.prisma.systemErrorLog.updateMany({
+        where: {
+          accountId: savedAccount.id,
+          category: 'token_refresh',
+          resolved: false,
+        },
+        data: { resolved: true, updatedAt: new Date() },
+      }).catch((err) => {
+        this.logger.warn(
+          `[saveAccount] Failed to auto-resolve token_refresh errors for ${savedAccount.id}: ${err.message}`,
+        );
+      });
+    }
 
     // Phones are bound to their owning savedAccount at purchase time
     // (notifications.service.ts purchaseTenantPhoneNumber). An UNASSIGNED
@@ -1747,6 +1775,12 @@ export class PlatformService {
       where: {
         userId,
         ...(platform && { platform }),
+        // Auto-archive sweep (ArchiveOrphanedAccounts cron) sets
+        // archivedAt when an account has had unresolved token_refresh
+        // failures for >= 30 days. Filter them out of the user-facing
+        // list — the row stays in the DB so a fresh OAuth reconnect
+        // resurrects it with its config intact.
+        archivedAt: null,
       },
       orderBy: { lastUsedAt: 'desc' },
     });
