@@ -271,7 +271,15 @@ export function SettingCard({
           </div>
         )}
       </div>
-      {children && enabled !== false && (
+      {/* Render children whenever:
+            - the toggle is ON (enabled === true), OR
+            - there is no toggle at all (enabled === undefined), OR
+            - the card is in Mixed state (some accounts on, some off —
+              the user needs to see the inner controls to edit them
+              even though the local boolean may have loaded false).
+          The previous `enabled !== false` gate hid the body in Mixed
+          mode when the last-loaded account happened to be Off. */}
+      {children && (mixed || enabled !== false) && (
         <div style={{
           borderTop: '1px solid var(--lb-line-soft)',
           padding: contentPad ?? '16px 24px 24px',
