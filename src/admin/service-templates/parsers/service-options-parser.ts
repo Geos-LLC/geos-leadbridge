@@ -1,27 +1,36 @@
 /**
  * Deterministic Service Options parser.
  *
- * Input shape (admin paste):
+ * Handles two paste shapes seen in real admin use:
  *
- *   Which types of houses do you clean?
- *   - Houses with pets
- *   - Houses without pets
+ * Shape A — bulleted (clean spec example):
  *
- *   How many rooms?
- *   - 1 room
- *   - 2 rooms
+ *   Which types of stains do you clean?
+ *   - Pet stains
+ *   - Food stains
+ *
+ * Shape B — bullet-less (what you get when you copy/paste straight from
+ * the Thumbtack admin UI):
+ *
+ *   Which types of stains do you clean?
+ *
+ *   Pet stains
+ *
+ *   Food stains
  *
  * Algorithm:
- *  1. Split into blocks separated by blank lines.
- *  2. For each block: first non-bullet line = group label, remaining
- *     bullet-prefixed lines = option items.
- *  3. Generate stable snake_case keys from labels (lowercase, strip
- *     punctuation, replace non-alnum runs with '_').
- *  4. Infer single vs multi select conservatively (see classifyGroupType).
+ *  1. Drop narration lines (Thumbtack helper copy like "Tell customers
+ *     what you charge extra for…").
+ *  2. Detect heading lines: trimmed line ends with `?` or `:` AND is at
+ *     least 5 chars long. Everything from one heading to the next
+ *     belongs to that heading.
+ *  3. Between two headings (or after the last heading), every non-empty
+ *     line is an option. Bullet glyphs are stripped if present but no
+ *     longer required.
+ *  4. Stable snake_case keys generated from labels.
+ *  5. Conservative single/multi select inference.
  *
- * Errors: never throws. Unparseable blocks are dropped silently so the
- * admin can paste partial / messy text without crashing the generator.
- * The preview UI lets the admin add missing groups by hand.
+ * Errors: never throws. Unparseable input returns an empty groups array.
  */
 
 import {
@@ -34,14 +43,66 @@ import {
 /** Strip common bullet glyphs from the start of a line. */
 const BULLET_RE = /^[\s]*([-*•·]|\d+[.)])\s+/;
 
-/** Anything we want to treat as "this line is a bullet, not a heading." */
-function isBulletLine(line: string): boolean {
-  return BULLET_RE.test(line);
-}
-
-/** Strip the leading bullet glyph. */
 function stripBullet(line: string): string {
   return line.replace(BULLET_RE, '').trim();
+}
+
+/**
+ * Heading detection. A heading is a non-empty line that:
+ *   - ends in `?` or `:` after trimming, AND
+ *   - is at least 5 chars long (avoids false positives like "Q:" or "?")
+ *
+ * The Thumbtack UI uses `?` for question prompts. Some admins paste
+ * sections with `:` headings ("Add-ons:", "Pricing:") — same path.
+ */
+function isHeadingLine(line: string): boolean {
+  const t = line.trim();
+  if (t.length < 5) return false;
+  return /[?:]\s*$/.test(t);
+}
+
+/**
+ * Narration lines we want to drop on the floor before parsing — the
+ * Thumbtack admin UI includes helper copy that has no semantic value
+ * (e.g. "Tell customers what you charge extra for. Or check the box to
+ * let customers know it's included at no extra cost."). If we don't
+ * drop these, the parser tries to interpret them as options or
+ * headings and the output looks garbled.
+ *
+ * Each pattern is intentionally specific — generic phrases like "you can"
+ * would over-match real option labels.
+ */
+const NARRATION_PATTERNS: RegExp[] = [
+  /^\s*tell customers/i,
+  /^\s*or check the box/i,
+  /^\s*enter add-?on prices?\s*$/i,
+  /^\s*for prices and\b/i,
+];
+
+function isNarration(line: string): boolean {
+  // If the line ends with `?` (a heading), don't drop it — let the
+  // heading cleaner strip any narration prefix. Otherwise pattern-match.
+  if (/\?\s*$/.test(line.trim())) return false;
+  return NARRATION_PATTERNS.some((re) => re.test(line));
+}
+
+/**
+ * Strip narration prefix from a heading line. The Thumbtack UI
+ * sometimes emits concatenated text like
+ * `Cleaning stains (pet, food or drink)\n for prices and Which types of stains do you clean?`.
+ * When we detect such a heading, we want the cleaned form
+ * `Which types of stains do you clean?` — everything before a known
+ * question starter is just narration noise.
+ */
+function cleanHeading(line: string): string {
+  const t = line.trim();
+  // Find the first occurrence of a known question starter (case-sensitive
+  // — Thumbtack capitalizes them; matching loose would over-trim).
+  const match = t.match(/\b(Which|How|What|Do you|Are you|Can you|When|Where)\b.*$/);
+  if (match && match.index !== undefined && match.index > 0) {
+    return match[0].trim();
+  }
+  return t;
 }
 
 /**
@@ -88,12 +149,16 @@ export function classifyGroupType(label: string): ServiceOptionGroupType {
 }
 
 /**
- * Split raw input into blocks. A block is a heading + its following
- * bullet lines, separated from the next block by a blank line OR by
- * another non-bullet line.
+ * Split raw input into { heading, items } blocks. v2 algorithm:
  *
- * Returns an array of blocks where block[0] is the heading and
- * block[1..] are the bullet item labels (already stripped of bullets).
+ *   - Drop blank lines and narration lines up front.
+ *   - Walk the surviving lines. Heading lines (end in `?` or `:`) open
+ *     a new block. Every other line is appended as an option to the
+ *     currently open block.
+ *   - If the input has no heading at all, fabricate a single "Options"
+ *     heading so the items don't get dropped entirely.
+ *
+ * Bulleted input still works — stripBullet() runs on each option line.
  */
 function splitIntoBlocks(text: string): Array<{ heading: string; items: string[] }> {
   const rawLines = text.split(/\r?\n/);
@@ -101,43 +166,32 @@ function splitIntoBlocks(text: string): Array<{ heading: string; items: string[]
   let current: { heading: string; items: string[] } | null = null;
 
   for (const raw of rawLines) {
-    const line = raw.replace(/\s+$/, '');
-    const trimmed = line.trim();
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    if (isNarration(trimmed)) continue;
 
-    if (trimmed.length === 0) {
-      // Blank line ends the current block.
+    if (isHeadingLine(trimmed)) {
       if (current && current.items.length > 0) blocks.push(current);
-      current = null;
+      current = { heading: cleanHeading(trimmed), items: [] };
       continue;
     }
 
-    if (isBulletLine(line)) {
-      const item = stripBullet(line);
-      if (item.length === 0) continue;
-      if (!current) {
-        // Orphan bullet — no heading yet. Fabricate a generic group so
-        // we don't drop the row entirely.
-        current = { heading: 'Options', items: [] };
-      }
-      current.items.push(item);
-      continue;
-    }
-
-    // Non-bullet, non-empty line → new heading. Push the current block
-    // first if it had items.
-    if (current && current.items.length > 0) blocks.push(current);
-    current = { heading: trimmed, items: [] };
+    // Option line. If we haven't seen a heading yet, drop it on the
+    // floor: the admin pasted unstructured content (or mixed in their
+    // pricing block) and we shouldn't manufacture a phantom group from
+    // pricing rows. Headings end with `?` or `:` — they're cheap to add.
+    if (!current) continue;
+    const cleaned = stripBullet(raw);
+    if (cleaned.length === 0) continue;
+    current.items.push(cleaned);
   }
 
-  // Don't forget the last block.
   if (current && current.items.length > 0) blocks.push(current);
   return blocks;
 }
 
 /**
- * De-duplicate keys within a single parse run. We append `_2`, `_3`,
- * ... when a generated key already exists in the set. This stays
- * idempotent across re-runs because the input order drives suffixing.
+ * De-duplicate keys within a single parse run. Append `_2`, `_3`, ...
  */
 function uniqueKey(base: string, taken: Set<string>): string {
   if (!taken.has(base)) {

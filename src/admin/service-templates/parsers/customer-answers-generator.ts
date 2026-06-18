@@ -29,7 +29,9 @@ import {
 
 type Signal =
   | 'pets'
+  | 'smokers'
   | 'stains'
+  | 'stairs'
   | 'supplies'
   | 'rooms'
   | 'items'
@@ -37,6 +39,7 @@ type Signal =
   | 'method'
   | 'mattress'
   | 'house_apartment'
+  | 'property_types'
   | 'addons_present';
 
 function collectSignals(
@@ -57,7 +60,9 @@ function collectSignals(
   const text = haystackLines.join(' \n ').toLowerCase();
 
   if (/\bpets?\b/.test(text)) signals.add('pets');
+  if (/\bsmokers?\b/.test(text)) signals.add('smokers');
   if (/\bstains?\b/.test(text)) signals.add('stains');
+  if (/\bstairs?\b|\bflights?\b/.test(text)) signals.add('stairs');
   if (/\bsupplies?\b/.test(text)) signals.add('supplies');
   if (/\brooms?\b/.test(text)) signals.add('rooms');
   if (/\bsofa|chair|loveseat|sectional|mattress|curtain|ottoman|item\b/.test(text)) {
@@ -67,6 +72,9 @@ function collectSignals(
   if (/\bsteam|dry|deep\b/.test(text)) signals.add('method');
   if (/\bmattress\b/.test(text)) signals.add('mattress');
   if (/\bhouse|apartment|condo\b/.test(text)) signals.add('house_apartment');
+  if (/\bone-story\b|\btwo-story\b|\bmulti-unit\b|\bapartment\b|\bcondo\b/.test(text)) {
+    signals.add('property_types');
+  }
   if (pricing.addOns.length > 0) signals.add('addons_present');
 
   return signals;
@@ -88,11 +96,35 @@ const DICT: Array<{ signal: Signal; entry: CustomerAnswerEntry }> = [
     },
   },
   {
+    signal: 'smokers',
+    entry: {
+      question: 'Do you clean homes with smokers?',
+      answer:
+        'Yes, we can service homes with smokers. Additional pricing or steps may apply based on the situation.',
+    },
+  },
+  {
     signal: 'stains',
     entry: {
       question: 'Can you clean stains?',
       answer:
         'We can usually help with common stains, but some may require inspection before we confirm what is possible.',
+    },
+  },
+  {
+    signal: 'stairs',
+    entry: {
+      question: 'Do you clean homes with stairs?',
+      answer:
+        'Yes, we can clean homes with stairs. Pricing may depend on how many flights are involved.',
+    },
+  },
+  {
+    signal: 'property_types',
+    entry: {
+      question: 'What types of properties do you service?',
+      answer:
+        'We service a range of residential properties including apartments, condos, single-story and multi-story houses. Final scope is confirmed when scheduling.',
     },
   },
   {
