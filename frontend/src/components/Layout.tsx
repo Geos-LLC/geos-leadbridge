@@ -117,6 +117,77 @@ export function Layout() {
   // for first-run / direct deep-links; this flag overlays the wizard on
   // top of any current route via the top-nav Setup button.
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Resizable wizard modal — corner drag-to-resize handle in the
+  // bottom-right. Defaults match the legacy 940x640 dialog; persists to
+  // localStorage so the user's preferred size sticks across sessions.
+  // Reads happen lazily so SSR / no-window environments don't crash.
+  const WIZARD_SIZE_KEY = 'lb_wizard_size';
+  const WIZARD_DEFAULT_SIZE = { width: 940, height: 640 };
+  const WIZARD_MIN_SIZE = { width: 640, height: 480 };
+  const [wizardSize, setWizardSize] = useState<{ width: number; height: number }>(() => {
+    if (typeof window === 'undefined') return WIZARD_DEFAULT_SIZE;
+    try {
+      const raw = localStorage.getItem(WIZARD_SIZE_KEY);
+      if (!raw) return WIZARD_DEFAULT_SIZE;
+      const parsed = JSON.parse(raw);
+      const w = Number(parsed?.width);
+      const h = Number(parsed?.height);
+      if (Number.isFinite(w) && Number.isFinite(h)
+          && w >= WIZARD_MIN_SIZE.width && h >= WIZARD_MIN_SIZE.height) {
+        return { width: w, height: h };
+      }
+    } catch { /* fall through to default */ }
+    return WIZARD_DEFAULT_SIZE;
+  });
+  // Live-resize gesture state. Pointer events + setPointerCapture means
+  // we don't need global window listeners or worry about the cursor
+  // leaving the window mid-drag.
+  const wizardResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+  function onWizardResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    wizardResizeRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: wizardSize.width,
+      startHeight: wizardSize.height,
+    };
+  }
+  function onWizardResizePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = wizardResizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    // Centered modal (translate(-50%, -50%)): the bottom-right corner
+    // moves at half the rate of size change, so to make the corner
+    // track the cursor we apply 2× the pointer delta to width/height.
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    const rawW = drag.startWidth + 2 * dx;
+    const rawH = drag.startHeight + 2 * dy;
+    const maxW = Math.max(WIZARD_MIN_SIZE.width, window.innerWidth - 32);
+    const maxH = Math.max(WIZARD_MIN_SIZE.height, window.innerHeight - 32);
+    const width = Math.min(maxW, Math.max(WIZARD_MIN_SIZE.width, rawW));
+    const height = Math.min(maxH, Math.max(WIZARD_MIN_SIZE.height, rawH));
+    setWizardSize({ width, height });
+  }
+  function onWizardResizePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = wizardResizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    wizardResizeRef.current = null;
+    // Persist on gesture end. We avoid writing on every move tick to
+    // keep localStorage chatter down on slow drags.
+    try {
+      localStorage.setItem(WIZARD_SIZE_KEY, JSON.stringify(wizardSize));
+    } catch { /* quota / privacy mode — non-fatal */ }
+  }
   // Auto-close on route change so step deep-links (e.g. Pricing setup
   // jumping into AI Playbook) dismiss the modal cleanly. Snapshot the
   // path at open time and compare on later renders.
@@ -859,8 +930,11 @@ export function Layout() {
                   top: '50%',
                   left: '50%',
                   transform: 'translate(-50%, -50%)',
-                  width: 'min(940px, calc(100vw - 32px))',
-                  height: 'min(640px, calc(100dvh - 32px))',
+                  // Clamp persisted size against the current viewport so
+                  // a user who shrank their window doesn't get an offscreen
+                  // modal. Min size baked into the clamp keeps it usable.
+                  width: `min(${wizardSize.width}px, calc(100vw - 32px))`,
+                  height: `min(${wizardSize.height}px, calc(100dvh - 32px))`,
                   background: 'var(--lb-surface)',
                   borderRadius: 18,
                   boxShadow: '0 24px 60px rgba(10,21,48,0.35)',
@@ -868,6 +942,38 @@ export function Layout() {
                 }}
               >
                 <SetupWizard onExit={() => setWizardOpen(false)} />
+                {/* Bottom-right corner resize handle. Pointer events +
+                    setPointerCapture handle cursor-leaves-window
+                    gracefully. Hidden on touch-only screens where corner
+                    drag is awkward — those users can use the full-screen
+                    /onboarding/setup route instead. */}
+                <div
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Resize wizard"
+                  title="Drag to resize"
+                  onPointerDown={onWizardResizePointerDown}
+                  onPointerMove={onWizardResizePointerMove}
+                  onPointerUp={onWizardResizePointerUp}
+                  onPointerCancel={onWizardResizePointerUp}
+                  className="lb-wizard-resize-handle"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: 0,
+                    width: 18,
+                    height: 18,
+                    cursor: 'nwse-resize',
+                    touchAction: 'none',
+                    // Visual grip — two diagonal lines tucked into the
+                    // bottom-right corner. Subtle by default so it doesn't
+                    // compete with wizard content.
+                    background: 'linear-gradient(135deg, transparent 0%, transparent 55%, rgba(100,116,139,0.45) 55%, rgba(100,116,139,0.45) 65%, transparent 65%, transparent 75%, rgba(100,116,139,0.45) 75%, rgba(100,116,139,0.45) 85%, transparent 85%)',
+                    borderBottomRightRadius: 18,
+                    zIndex: 90,
+                    userSelect: 'none',
+                  }}
+                />
               </div>
             </>
           )}
