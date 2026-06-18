@@ -59,6 +59,11 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         'Content-Type': 'application/json',
       },
     });
+
+    // Deploy fingerprint — proves the running container picked up this source
+    // build. If this line is absent from Loki after a push, Railway is
+    // serving a stale image and the deploy pipeline needs investigating.
+    this.logger.log('[ttadapter-boot] fp=2026-06-18T15:10Z');
   }
 
   getPlatformName(): string {
@@ -763,16 +768,23 @@ export class ThumbtackAdapter implements IPlatformAdapter {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
         },
       );
-      // DIAG: log raw success shape so we can pick the right key — current
-      // chain (data.data → data → []) returns the wrapper object when TT
-      // wraps under a non-`data` key, which then crashes caller's .find().
-      const topKeys = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
-        ? Object.keys(response.data).join(',')
-        : Array.isArray(response.data) ? '[array]' : typeof response.data;
+      // Diagnostic: capture top-level shape so a follow-up commit can drop
+      // unused branches once TT's actual key is confirmed.
+      const body = response.data;
+      const topKeys = body && typeof body === 'object' && !Array.isArray(body)
+        ? Object.keys(body).join(',')
+        : Array.isArray(body) ? '[array]' : typeof body;
       this.logger.log(
-        `[tt.associate-phone] list ok businessId=${businessId} status=${response.status} topKeys=${topKeys} bodyHead=${JSON.stringify(response.data ?? null).slice(0, 500)}`,
+        `[tt.associate-phone] list ok businessId=${businessId} status=${response.status} topKeys=${topKeys} bodyHead=${JSON.stringify(body ?? null).slice(0, 500)}`,
       );
-      return response.data.data || response.data || [];
+      if (Array.isArray(body)) return body;
+      if (body && typeof body === 'object') {
+        if (Array.isArray(body.data)) return body.data;
+        if (Array.isArray(body.phoneNumbers)) return body.phoneNumbers;
+        if (Array.isArray(body.phone_numbers)) return body.phone_numbers;
+        if (Array.isArray(body.items)) return body.items;
+      }
+      return [];
     } catch (error) {
       const status = error.response?.status;
       const data = error.response?.data;
