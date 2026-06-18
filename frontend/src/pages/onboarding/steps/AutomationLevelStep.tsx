@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowRight, Clock, MessageSquare, Moon, PhoneCall, RotateCcw, Workflow, Loader2,
+  ArrowRight, Clock, Info, MessageSquare, Moon, PhoneCall, RotateCcw,
+  Sparkles, Workflow, Loader2,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
 import { followUpApi, usersApi } from '../../../services/api';
@@ -29,20 +30,12 @@ const DEFAULTS = {
   aiHiredCompetitorReengage: true,
   aiHiredCompetitorDelay: '3 weeks',
   followUpAvailability: 'always' as 'always' | 'active_hours',
-};
-
-const RESUME_DELAY_OPTIONS = ['6 hours', '12 hours', '24 hours', '2 days', '3 days', '1 week'];
-const DEFERRAL_DELAY_OPTIONS = ['1 day', '2 days', '3 days', '5 days', '1 week', '2 weeks'];
-const HIRED_DELAY_OPTIONS = ['1 week', '2 weeks', '3 weeks', '1 month', '2 months', '3 months'];
-
-// "Everything on" trial bundle. Users start on a trial where the full
-// product is available, so we don't make them pick a Basic/Recommended/
-// Advanced tier — the wizard just enables the lot and lets users dial it
-// back on the Automation page later if they want to. This mirrors what
-// the old "advanced" bundle wrote, minus the user-chosen followUpStrategy
-// (set on the next wizard step — AI Rules — so we don't pin it here).
-const TRIAL_BUNDLE: Record<string, unknown> = {
-  mode: 'auto_send',
+  // AI Conversation defaults — same as the old TRIAL_BUNDLE pinned
+  // values, now user-editable. Pre-multi-service wizard hardcoded
+  // these to `true`; the wizard's "AI Conversation" card now exposes
+  // them as toggles so the user can opt out of individual handoff
+  // triggers / re-engagement alerts during onboarding instead of
+  // hunting for them in Settings → Automation.
   aiConversationEnabled: true,
   reEngagementAlertEnabled: true,
   handoffTriggerAgreed: true,
@@ -50,6 +43,20 @@ const TRIAL_BUNDLE: Record<string, unknown> = {
   handoffTriggerProvidedPhone: true,
   handoffTriggerProvidedSquareFootage: true,
   handoffTriggerQualificationComplete: true,
+};
+
+const RESUME_DELAY_OPTIONS = ['6 hours', '12 hours', '24 hours', '2 days', '3 days', '1 week'];
+const DEFERRAL_DELAY_OPTIONS = ['1 day', '2 days', '3 days', '5 days', '1 week', '2 weeks'];
+const HIRED_DELAY_OPTIONS = ['1 week', '2 weeks', '3 weeks', '1 month', '2 months', '3 months'];
+
+// "Everything on" trial bundle baseline. Only `mode` is pinned — the
+// rest of the AI Conversation flags are now user-editable via the AI
+// Conversation card below, so wizardPayload composes opts on top of
+// this. Pre-multi-service refactor (2026-06-18), the handoff triggers
+// were hardcoded here; the wizard exposes them so users can opt out
+// during onboarding instead of hunting for them later.
+const TRIAL_BUNDLE: Record<string, unknown> = {
+  mode: 'auto_send',
 };
 
 /**
@@ -147,6 +154,15 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           aiHiredCompetitorReengage: s.aiHiredCompetitorReengage ?? prev.aiHiredCompetitorReengage,
           aiHiredCompetitorDelay: s.aiHiredCompetitorDelay || prev.aiHiredCompetitorDelay,
           followUpAvailability: (s.followUpAvailability as any) || prev.followUpAvailability,
+          // AI Conversation flags — hydrated so re-visits don't reset
+          // anything the user already turned off.
+          aiConversationEnabled: s.aiConversationEnabled ?? prev.aiConversationEnabled,
+          reEngagementAlertEnabled: s.reEngagementAlertEnabled ?? prev.reEngagementAlertEnabled,
+          handoffTriggerAgreed: s.handoffTriggerAgreed ?? prev.handoffTriggerAgreed,
+          handoffTriggerWantsLiveContact: s.handoffTriggerWantsLiveContact ?? prev.handoffTriggerWantsLiveContact,
+          handoffTriggerProvidedPhone: s.handoffTriggerProvidedPhone ?? prev.handoffTriggerProvidedPhone,
+          handoffTriggerProvidedSquareFootage: s.handoffTriggerProvidedSquareFootage ?? prev.handoffTriggerProvidedSquareFootage,
+          handoffTriggerQualificationComplete: s.handoffTriggerQualificationComplete ?? prev.handoffTriggerQualificationComplete,
         }));
       } catch {
         /* non-fatal */
@@ -159,9 +175,10 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Combine the trial bundle + granular toggles into the payload for
-  // followUpApi.saveWizardSettings. Granular fields take precedence — a
-  // user who flipped one before saving expects that exact value to land.
+  // Combine the trial bundle + granular toggles + AI Conversation
+  // toggles into the payload for followUpApi.saveWizardSettings.
+  // Granular fields take precedence — a user who flipped one before
+  // saving expects that exact value to land.
   const wizardPayload = useMemo(() => ({
     ...TRIAL_BUNDLE,
     fuReEnrollOnSilence: opts.fuReEnrollOnSilence,
@@ -171,6 +188,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     aiHiredCompetitorReengage: opts.aiHiredCompetitorReengage,
     aiHiredCompetitorDelay: opts.aiHiredCompetitorDelay,
     followUpAvailability: opts.followUpAvailability,
+    aiConversationEnabled: opts.aiConversationEnabled,
+    reEngagementAlertEnabled: opts.reEngagementAlertEnabled,
+    handoffTriggerAgreed: opts.handoffTriggerAgreed,
+    handoffTriggerWantsLiveContact: opts.handoffTriggerWantsLiveContact,
+    handoffTriggerProvidedPhone: opts.handoffTriggerProvidedPhone,
+    handoffTriggerProvidedSquareFootage: opts.handoffTriggerProvidedSquareFootage,
+    handoffTriggerQualificationComplete: opts.handoffTriggerQualificationComplete,
   }), [opts]);
 
   async function apply() {
@@ -242,6 +266,32 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       </WizardStepActions>
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
+
+      {/* Global-scope banner — these settings cascade to every connected
+          account. Per-account behavior tweaks live on
+          Settings → Automation after onboarding. */}
+      <div
+        style={{
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 8,
+          padding: '10px 12px',
+          background: 'rgba(37,99,235,0.06)',
+          border: '1px solid rgba(37,99,235,0.18)',
+          borderRadius: 12,
+          fontSize: 12.5,
+          color: 'var(--lb-ink-2, #1f2a44)',
+          lineHeight: 1.45,
+        }}
+      >
+        <Info size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 2 }} />
+        <span>
+          <strong>These settings apply to all your services and accounts.</strong>{' '}
+          You can fine-tune behavior for each connected account later in{' '}
+          <strong>Settings → Automation</strong>.
+        </span>
+      </div>
 
       {/* ─── Fine-tune section ──────────────────────────────────────────── */}
       <div>
@@ -376,6 +426,78 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                 here still keeps `followUpAvailability` flowing through so
                 a user revisiting the wizard's Automation step doesn't
                 wipe what they set on AI Rules. */}
+
+            {/* AI Conversation — master switch + handoff triggers +
+                re-engagement alerts. Pre 2026-06-18 these were hardcoded
+                ON inside TRIAL_BUNDLE; now exposed as toggles so users
+                can dial in their handoff sensitivity during onboarding
+                rather than after the first surprise SMS lands. */}
+            <SettingCard
+              icon={Sparkles}
+              iconTone="purple"
+              title="AI Conversation"
+              subtitle="When AI auto-replies to customers and which signals page you to take over."
+              enabled={opts.aiConversationEnabled}
+              onToggle={v => setOpts(o => ({ ...o, aiConversationEnabled: v }))}
+              contentPad="0 24px 16px"
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <ToggleRow
+                  icon={MessageSquare}
+                  iconTone="gray"
+                  label="Send me an SMS when a customer replies"
+                  on={opts.reEngagementAlertEnabled}
+                  onChange={v => setOpts(o => ({ ...o, reEngagementAlertEnabled: v }))}
+                />
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--lb-line, #e2e8f0)' }}>
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: 'var(--lb-ink-5, #64748b)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    marginBottom: 6,
+                  }}>
+                    Hand off to me when the customer…
+                  </div>
+                  <ToggleRow
+                    icon={PhoneCall}
+                    iconTone="gray"
+                    label="Agrees on price / is ready to book"
+                    on={opts.handoffTriggerAgreed}
+                    onChange={v => setOpts(o => ({ ...o, handoffTriggerAgreed: v }))}
+                  />
+                  <ToggleRow
+                    icon={PhoneCall}
+                    iconTone="gray"
+                    label="Asks for a call or wants live contact"
+                    on={opts.handoffTriggerWantsLiveContact}
+                    onChange={v => setOpts(o => ({ ...o, handoffTriggerWantsLiveContact: v }))}
+                  />
+                  <ToggleRow
+                    icon={PhoneCall}
+                    iconTone="gray"
+                    label="Provides their phone number"
+                    on={opts.handoffTriggerProvidedPhone}
+                    onChange={v => setOpts(o => ({ ...o, handoffTriggerProvidedPhone: v }))}
+                  />
+                  <ToggleRow
+                    icon={PhoneCall}
+                    iconTone="gray"
+                    label="Shares square footage"
+                    on={opts.handoffTriggerProvidedSquareFootage}
+                    onChange={v => setOpts(o => ({ ...o, handoffTriggerProvidedSquareFootage: v }))}
+                  />
+                  <ToggleRow
+                    icon={PhoneCall}
+                    iconTone="gray"
+                    label="Completes qualification questions"
+                    on={opts.handoffTriggerQualificationComplete}
+                    onChange={v => setOpts(o => ({ ...o, handoffTriggerQualificationComplete: v }))}
+                  />
+                </div>
+              </div>
+            </SettingCard>
           </div>
         )}
       </div>

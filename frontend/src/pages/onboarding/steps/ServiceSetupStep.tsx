@@ -8,10 +8,14 @@ import {
   ExternalLink,
   Loader2,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { serviceProfilesApi, type ServiceProfile } from '../../../services/api';
+import { useAppStore } from '../../../store/appStore';
 import { notify } from '../../../store/notificationStore';
+import AccountFaqForm from '../../../components/AccountFaqForm';
+import ServicePricingForm from '../../../components/ServicePricingForm';
 import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
@@ -20,42 +24,24 @@ interface Props {
   setSaving: (v: boolean) => void;
 }
 
-interface EditorState {
-  pricingJson: string;
-  faqJson: string;
-  qualificationSchemaJson: string;
-  quoteRequired: boolean;
-  dirty: boolean;
-  savingThis: boolean;
-}
-
-const EMPTY_EDITOR: EditorState = {
-  pricingJson: '',
-  faqJson: '',
-  qualificationSchemaJson: '',
-  quoteRequired: false,
-  dirty: false,
-  savingThis: false,
-};
-
 /**
  * Wizard "Service setup" step (multi-service refactor 2026-06-18).
  *
- * Accordion of every active+draft ServiceProfile. Each row exposes
- * pricing, customer answers (FAQ), and the optional qualification
- * schema. Save persists via PATCH /v1/service-profiles/:id; activating a
- * draft uses PATCH /v1/service-profiles/:id/status with allowReactivate
- * left false.
+ * Per ServiceProfile accordion. Each row exposes the same structured
+ * editors as Settings → AI Playbook → (per-service tab):
+ *   - <ServicePricingForm  serviceProfileId={...} /> — pricing table
+ *   - <AccountFaqForm      serviceProfileId={...} /> — customer answers
+ *   - lightweight "Additional AI instructions" textarea + deep link
  *
- * Completion semantics (per spec confirmation 2026-06-18):
- *   - ACTIVE services need pricing (table or quoteRequired) AND
- *     customer answers.
- *   - DRAFT services show "incomplete / AI paused" but do NOT block
- *     Done.
- *   - Service options / qualification schema is optional everywhere.
+ * Both forms are already polymorphic on serviceProfileId and write
+ * directly to ServiceProfile.pricingJson / ServiceProfile.faqJson, so
+ * no per-account fan-out and no JSON textareas.
  *
- * The editors are JSON textareas to match Settings → Services. A
- * structured form refactor is a follow-up (tracked separately).
+ * Completion semantics:
+ *   - ACTIVE services need pricing (table OR quoteRequired) AND
+ *     customer answers to count toward serviceSetup.done.
+ *   - DRAFT services show "Draft · AI paused" but do NOT block Done.
+ *   - AI instructions and qualification are optional everywhere.
  */
 export default function ServiceSetupStep({
   onSaveContinue,
@@ -63,20 +49,24 @@ export default function ServiceSetupStep({
   setSaving,
 }: Props) {
   const navigate = useNavigate();
+  const savedAccounts = useAppStore(s => s.savedAccounts);
 
   const [profiles, setProfiles] = useState<ServiceProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
-  // Per-profile draft editor state. Keyed by profile id.
-  const [editors, setEditors] = useState<Record<string, EditorState>>({});
+  // Per-profile AI instructions draft state, keyed by profile id.
+  const [aiDraft, setAiDraft] = useState<Record<string, { value: string; dirty: boolean; saving: boolean }>>({});
+
+  // Primary SavedAccount — required prop for AccountFaqForm /
+  // ServicePricingForm even when they're in serviceProfile mode (only
+  // used for display fallback inside those forms).
+  const primaryAccount = savedAccounts[0];
 
   async function refreshProfiles() {
     try {
       const res = await serviceProfilesApi.list();
       const list = (res.profiles ?? []).filter(p => p.status !== 'archived');
       setProfiles(list);
-      // Open the first incomplete active profile by default so the
-      // user sees something actionable on land.
       if (openId === null && list.length > 0) {
         const firstIncomplete = list.find(p => p.status === 'active' && !looksConfigured(p));
         setOpenId((firstIncomplete ?? list[0]).id);
@@ -91,7 +81,7 @@ export default function ServiceSetupStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sorted: active before draft, then default-first, then name.
+  // Ordered: active before draft, then default-first, then name.
   const ordered = useMemo(
     () => [...profiles].sort((a, b) => {
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
@@ -101,90 +91,76 @@ export default function ServiceSetupStep({
     [profiles],
   );
 
-  // Lazy-load the editor state when a profile is opened for the
-  // first time. We seed from the current ServiceProfile JSON so the
-  // textareas show what's already there.
-  function ensureEditor(profile: ServiceProfile) {
-    if (editors[profile.id]) return;
-    const parsedPricing = safeParse(profile.pricingJson);
-    setEditors(prev => ({
+  // Seed the AI textarea from the profile when first opened so the
+  // user sees their existing additionalInstructions if any.
+  function ensureAiDraft(profile: ServiceProfile) {
+    if (aiDraft[profile.id]) return;
+    const existing = readAdditionalInstructions(profile.aiInstructionsJson);
+    setAiDraft(prev => ({
       ...prev,
-      [profile.id]: {
-        ...EMPTY_EDITOR,
-        pricingJson: profile.pricingJson ?? '',
-        faqJson: profile.faqJson ?? '',
-        qualificationSchemaJson: profile.qualificationSchemaJson ?? '',
-        quoteRequired: parsedPricing?.quoteRequired === true,
-      },
+      [profile.id]: { value: existing, dirty: false, saving: false },
     }));
   }
 
-  function updateEditor(profileId: string, patch: Partial<EditorState>) {
-    setEditors(prev => ({
+  function updateAiDraft(profileId: string, value: string) {
+    setAiDraft(prev => ({
       ...prev,
-      [profileId]: { ...(prev[profileId] ?? EMPTY_EDITOR), ...patch, dirty: true },
+      [profileId]: { ...(prev[profileId] ?? { value: '', dirty: false, saving: false }), value, dirty: true },
     }));
   }
 
-  // Single Save button per profile. Persists all three JSON fields
-  // even when only one changed — cheaper than tracking per-field dirt.
-  async function saveProfile(profile: ServiceProfile) {
-    const editor = editors[profile.id];
-    if (!editor || editor.savingThis) return;
-
-    // Normalize "blank textarea" → null. Empty string is not valid JSON
-    // and would break the backend's parse-on-read.
-    const normalize = (raw: string): string | null => {
-      const trimmed = raw.trim();
-      if (!trimmed) return null;
-      try {
-        JSON.parse(trimmed);
-        return trimmed;
-      } catch {
-        return null;
-      }
-    };
-
-    // If user toggled "quote-required", merge it into pricingJson before
-    // sending. We respect the user's edits if they wrote `quoteRequired`
-    // by hand; the toggle just shifts the default.
-    let pricingPayload = normalize(editor.pricingJson);
-    if (editor.quoteRequired) {
-      const obj = pricingPayload ? safeParse(pricingPayload) : {};
-      pricingPayload = JSON.stringify({ ...(obj ?? {}), quoteRequired: true });
-    }
-
-    setEditors(prev => ({
+  // Persist additionalInstructions into ServiceProfile.aiInstructionsJson
+  // WITHOUT touching the rest of the envelope. Reads the current
+  // wrapper, patches additionalInstructions, writes back. Preserves
+  // serviceRules / aiPlaybookV2 that Settings → AI Playbook may have
+  // configured.
+  async function saveAiInstructions(profile: ServiceProfile) {
+    const draft = aiDraft[profile.id];
+    if (!draft || draft.saving) return;
+    setAiDraft(prev => ({
       ...prev,
-      [profile.id]: { ...prev[profile.id], savingThis: true },
+      [profile.id]: { ...prev[profile.id], saving: true },
     }));
     try {
+      let wrapper: any = {};
+      try {
+        wrapper = profile.aiInstructionsJson ? JSON.parse(profile.aiInstructionsJson) : {};
+      } catch { wrapper = {}; }
+      if (typeof wrapper !== 'object' || wrapper === null) wrapper = {};
+      wrapper.version = wrapper.version ?? 1;
+      const trimmed = draft.value.trim();
+      if (trimmed) wrapper.additionalInstructions = trimmed;
+      else delete wrapper.additionalInstructions;
+
+      // If after patching we have nothing meaningful left, store null
+      // so the resolver doesn't read an empty envelope.
+      const hasMeaning = Object.keys(wrapper).some(k => k !== 'version' && wrapper[k] !== undefined && wrapper[k] !== null);
+      const payload = hasMeaning ? JSON.stringify(wrapper) : null;
+
       const updated = await serviceProfilesApi.update(profile.id, {
-        pricingJson: pricingPayload,
-        faqJson: normalize(editor.faqJson),
-        qualificationSchemaJson: normalize(editor.qualificationSchemaJson),
+        aiInstructionsJson: payload,
       });
       setProfiles(prev => prev.map(p => (p.id === profile.id ? updated : p)));
-      setEditors(prev => ({
+      setAiDraft(prev => ({
         ...prev,
-        [profile.id]: { ...prev[profile.id], dirty: false, savingThis: false },
+        [profile.id]: { value: trimmed, dirty: false, saving: false },
       }));
-      notify.success('Service saved', `${profile.name} updated.`);
+      notify.success('AI instructions saved', `${profile.name} updated.`);
     } catch (err: any) {
-      setEditors(prev => ({
+      setAiDraft(prev => ({
         ...prev,
-        [profile.id]: { ...prev[profile.id], savingThis: false },
+        [profile.id]: { ...prev[profile.id], saving: false },
       }));
       notify.error(
-        'Could not save service',
+        'Could not save AI instructions',
         err.response?.data?.message || 'Please try again.',
       );
     }
   }
 
-  // Draft → active promotion. Backend rejects with EMPTY_CONFIG if the
-  // service has no pricing/FAQ/qualification at all, so the button is
-  // gated to looksConfigured rows.
+  // Draft → active. Backend rejects with EMPTY_CONFIG if the service
+  // has no pricing/FAQ/qualification at all, so the button is gated to
+  // looksConfigured rows.
   async function activate(profile: ServiceProfile) {
     try {
       const updated = await serviceProfilesApi.transitionStatus(profile.id, 'active');
@@ -196,6 +172,16 @@ export default function ServiceSetupStep({
         err.response?.data?.message || 'Add pricing or customer answers first.',
       );
     }
+  }
+
+  // Refetch a single profile after the embedded form saves so the
+  // status pill (and any banner counts) reflects reality without the
+  // user having to collapse/expand the accordion.
+  async function refreshOne(profileId: string) {
+    try {
+      const updated = await serviceProfilesApi.get(profileId);
+      setProfiles(prev => prev.map(p => (p.id === profileId ? updated : p)));
+    } catch { /* non-fatal */ }
   }
 
   async function handleContinue() {
@@ -231,7 +217,7 @@ export default function ServiceSetupStep({
           disabled={saving}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
         >
-          Advanced editor
+          Full AI playbook
           <ExternalLink className="w-3.5 h-3.5" />
         </button>
       </WizardStepActions>
@@ -276,7 +262,6 @@ export default function ServiceSetupStep({
           <div className="space-y-3">
             {ordered.map(profile => {
               const open = openId === profile.id;
-              const editor = editors[profile.id];
               const configured = looksConfigured(profile);
               return (
                 <div
@@ -288,7 +273,13 @@ export default function ServiceSetupStep({
                     onClick={() => {
                       const next = open ? null : profile.id;
                       setOpenId(next);
-                      if (next) ensureEditor(profile);
+                      if (next) {
+                        ensureAiDraft(profile);
+                        // Pull fresh data when re-opening so the embedded
+                        // form initial values reflect what the user
+                        // already saved on a previous visit.
+                        void refreshOne(profile.id);
+                      }
                     }}
                     className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
                   >
@@ -315,64 +306,98 @@ export default function ServiceSetupStep({
                   </button>
 
                   {open && (
-                    <div className="border-t border-slate-100 p-4 space-y-4 bg-slate-50/40">
+                    <div className="border-t border-slate-100 p-4 space-y-6 bg-slate-50/40">
+                      {/* Pricing — same structured form as Settings →
+                          AI Playbook → Pricing Guidance. Writes to
+                          ServiceProfile.pricingJson. */}
                       <Section label="Pricing">
-                        <div className="flex items-center gap-2 mb-2">
-                          <input
-                            type="checkbox"
-                            id={`qr-${profile.id}`}
-                            checked={editor?.quoteRequired ?? false}
-                            onChange={e => updateEditor(profile.id, { quoteRequired: e.target.checked })}
-                            className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500"
-                          />
-                          <label htmlFor={`qr-${profile.id}`} className="text-xs font-semibold text-slate-700 cursor-pointer">
-                            Quote-required (no flat pricing — AI collects info and quotes manually)
-                          </label>
-                        </div>
-                        <textarea
-                          value={editor?.pricingJson ?? ''}
-                          onChange={e => updateEditor(profile.id, { pricingJson: e.target.value })}
-                          placeholder='{"priceTable": [...]} or {"items": [...]} or leave blank with quote-required ticked'
-                          rows={6}
-                          className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg bg-white"
-                        />
+                        {primaryAccount ? (
+                          <div
+                            className="rounded-xl border border-slate-200 bg-white p-3"
+                            onBlur={() => void refreshOne(profile.id)}
+                          >
+                            <ServicePricingForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                            />
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                            Connect an account first to edit pricing.
+                          </div>
+                        )}
                       </Section>
 
+                      {/* Customer answers / FAQ — same structured form as
+                          Settings → AI Playbook → FAQ. Writes to
+                          ServiceProfile.faqJson. */}
                       <Section label="Customer answers (FAQ)">
-                        <textarea
-                          value={editor?.faqJson ?? ''}
-                          onChange={e => updateEditor(profile.id, { faqJson: e.target.value })}
-                          placeholder='{"customQA": [{"question": "Do you bring supplies?", "answer": "Yes"}]}'
-                          rows={6}
-                          className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg bg-white"
-                        />
+                        {primaryAccount ? (
+                          <div
+                            className="rounded-xl border border-slate-200 bg-white p-3"
+                            onBlur={() => void refreshOne(profile.id)}
+                          >
+                            <AccountFaqForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                            />
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                            Connect an account first to edit customer answers.
+                          </div>
+                        )}
                       </Section>
 
-                      <Section label="Service options / qualification (optional)">
-                        <textarea
-                          value={editor?.qualificationSchemaJson ?? ''}
-                          onChange={e => updateEditor(profile.id, { qualificationSchemaJson: e.target.value })}
-                          placeholder='{"questions": [{"key": "rooms", "label": "How many rooms?", "type": "number"}]}'
-                          rows={4}
-                          className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg bg-white"
-                        />
-                        <p className="mt-1 text-xs text-slate-400">
-                          Optional. AI will use these to gather info before quoting
-                          if the customer's first message doesn't include them.
-                        </p>
+                      {/* AI instructions — lightweight textarea that
+                          merges into the aiInstructionsJson envelope as
+                          { additionalInstructions: '...' }. Existing
+                          aiPlaybookV2 / serviceRules entries are
+                          preserved. Deep link points at the full
+                          per-service AI Playbook editor. */}
+                      <Section label="AI instructions (optional)">
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                          <div className="flex items-start gap-2 text-xs text-slate-500">
+                            <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                            <span>
+                              Anything AI should remember when handling{' '}
+                              <strong>{profile.name}</strong> leads — sales
+                              angle, what to avoid, special wording.
+                            </span>
+                          </div>
+                          <textarea
+                            value={aiDraft[profile.id]?.value ?? ''}
+                            onChange={e => updateAiDraft(profile.id, e.target.value)}
+                            placeholder={`e.g., Always mention that insurance is included. Don't quote weekend rates.`}
+                            rows={3}
+                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void saveAiInstructions(profile)}
+                              disabled={aiDraft[profile.id]?.saving || !aiDraft[profile.id]?.dirty}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+                            >
+                              {aiDraft[profile.id]?.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                              {aiDraft[profile.id]?.saving ? 'Saving…' : aiDraft[profile.id]?.dirty ? 'Save AI instructions' : 'Saved'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                            >
+                              Full AI playbook for this service
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
                       </Section>
 
-                      <div className="flex items-center gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => void saveProfile(profile)}
-                          disabled={editor?.savingThis || !editor?.dirty}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
-                        >
-                          {editor?.savingThis ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                          {editor?.savingThis ? 'Saving…' : editor?.dirty ? 'Save service' : 'Saved'}
-                        </button>
-                        {profile.status === 'draft' && configured && (
+                      {profile.status === 'draft' && configured && (
+                        <div className="pt-2">
                           <button
                             type="button"
                             onClick={() => void activate(profile)}
@@ -380,8 +405,8 @@ export default function ServiceSetupStep({
                           >
                             Activate service
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -397,7 +422,9 @@ export default function ServiceSetupStep({
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs font-bold text-slate-700 mb-1">{label}</div>
+      <div className="text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">
+        {label}
+      </div>
       {children}
     </div>
   );
@@ -436,9 +463,7 @@ function StatusPill({
 // Local mirror of the backend `isServicePricingConfigured` +
 // `isServiceCustomerAnswersConfigured` predicates. Kept in sync
 // manually — the wizard wants instant feedback as the user types
-// without a backend round-trip. Status pill semantics:
-//   - quote-required pricing OR populated price table counts as pricing
-//   - non-empty customQA / paymentMethods etc. counts as answers
+// without a backend round-trip.
 function looksConfigured(p: ServiceProfile): boolean {
   return hasPricing(p.pricingJson) && hasCustomerAnswers(p.faqJson);
 }
@@ -455,6 +480,10 @@ function hasPricing(json: string | null): boolean {
   return false;
 }
 
+// Mirror of backend isServiceCustomerAnswersConfigured. Accepts the
+// structured legacy SavedAccount FAQ shape (insuredAndBonded /
+// paymentMethods / etc.) that AccountFaqForm writes, plus the v2
+// admin-template customQA + entries shapes.
 function hasCustomerAnswers(json: string | null): boolean {
   const f = safeParse(json);
   if (!f || typeof f !== 'object') return false;
@@ -464,7 +493,23 @@ function hasCustomerAnswers(json: string | null): boolean {
   if (Array.isArray(f.entries) && f.entries.some((q: any) => (q?.question || q?.answer || '').toString().trim())) {
     return true;
   }
+  const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
+  for (const k of valueKeys) {
+    const v = f[k]?.value;
+    if (typeof v === 'string' && v && v !== 'unset') return true;
+  }
+  if (Array.isArray(f.paymentMethods) && f.paymentMethods.length > 0) return true;
+  if (typeof f.standardScope === 'string' && f.standardScope.trim()) return true;
+  if (typeof f.deepScope === 'string' && f.deepScope.trim()) return true;
   return false;
+}
+
+// Read `additionalInstructions` out of the aiInstructionsJson envelope.
+// Falls back to empty string when the envelope is missing or malformed.
+function readAdditionalInstructions(json: string | null): string {
+  const obj = safeParse(json);
+  if (!obj || typeof obj !== 'object') return '';
+  return typeof obj.additionalInstructions === 'string' ? obj.additionalInstructions : '';
 }
 
 function safeParse(s: string | null | undefined): any {
