@@ -612,13 +612,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
   const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
-  // V2 per-goal completion-stop mixed detection across accounts.
-  // The account-level Goal Completion Behavior radio aggregates these
-  // (mixed if ANY of the three underlying booleans diverges across
-  // accounts), so the user sees a single "mixed" indicator instead of
-  // three separate per-goal warnings.
-  const mxQualifyStopOnComplete = getMixed('qualifyStopOnComplete', v => v ? 'Stop AI' : 'Continue AI');
-  const mxPhoneStopOnComplete   = getMixed('phoneStopOnComplete',   v => v ? 'Stop AI' : 'Continue AI');
+  // Goal Completion Behavior mixed-state detection removed 2026-06-18 —
+  // the underlying per-goal Continue/Stop choice no longer exists.
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -763,32 +758,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     }));
   };
 
-  // V2.1 (2026-06-13): Goal completion behavior is now an account-level
-  // setting, not per-goal. One radio writes all three underlying fields
-  // consistently so a tenant can't accidentally end up with Price=Stop
-  // but Qualify=Continue. Backend writes are unchanged — the save handler
-  // still serializes each field independently (aiStopOnPriceAgreed via
-  // stopRules.price_agreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete);
-  // we just mark all three dirty in one click.
-  //
-  // Derived display: 'stop' only when all three are true. Mixed saved
-  // values (e.g. legacy tenant with price=true but qualify=false) display
-  // as 'continue' and the user's next click normalizes them.
-  const goalCompletionMode: 'continue' | 'stop' =
-    stopRules.price_agreed && qualifyStopOnComplete && phoneStopOnComplete
-      ? 'stop'
-      : 'continue';
-
-  const onGoalCompletionBehavior = (mode: 'continue' | 'stop') => {
-    const v = mode === 'stop';
-    dirtyRef.current = true;
-    dirtyFieldsRef.current.add('stopRules.price_agreed');
-    dirtyFieldsRef.current.add('qualifyStopOnComplete');
-    dirtyFieldsRef.current.add('phoneStopOnComplete');
-    setStopRules({ ...stopRules, price_agreed: v });
-    setQualifyStopOnComplete(v);
-    setPhoneStopOnComplete(v);
-  };
+  // Goal Completion Behavior derived state + handler removed
+  // 2026-06-18. AI always stops on goal complete; no user choice.
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
@@ -903,27 +874,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         toggleBookingDayPeriod={toggleBookingDayPeriod}
       />
 
-      {/* ───── 2.5 Goal Completion Behavior — account-level (V2.1 2026-06-13) ─
-            Replaces the per-goal "When Goal Is Reached" radios that
-            previously lived inside each GoalSetupCard. The product
-            decision (continue replying vs hand off to the team) is the
-            same regardless of which goal AI reaches, so we surface it
-            once at the account level. One click writes all three
-            underlying fields consistently — see onGoalCompletionBehavior. */}
-      <GoalCompletionBehaviorCard
-        mode={goalCompletionMode}
-        onChange={onGoalCompletionBehavior}
-        mixed={
-          mxStopPriceAgreed.mixed ||
-          mxQualifyStopOnComplete.mixed ||
-          mxPhoneStopOnComplete.mixed
-        }
-        mixedTooltip={[
-          mxStopPriceAgreed.tooltip,
-          mxQualifyStopOnComplete.tooltip,
-          mxPhoneStopOnComplete.tooltip,
-        ].filter(Boolean).join('\n\n')}
-      />
+      {/* Goal Completion Behavior removed 2026-06-18 — AI always stops
+          on goal complete. Other stop signals (lead status → done/lost,
+          SF outcome → scheduled/completed) are unchanged. */}
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
             Normal users manage AI behavior via Conversation Goals + the
@@ -1505,75 +1458,9 @@ function BookingPeriodPill({
   );
 }
 
-// ─── Account-level Goal Completion Behavior card ──────────────────────────
-// V2.1 (2026-06-13). Replaces the three per-goal "When Goal Is Reached"
-// radios that previously lived inside <GoalSetupCard>. The product
-// decision is: "after AI reaches any goal, should it continue replying
-// and notify the team, or stop and let the team take over?" That answer
-// is the same regardless of which goal completed, so we surface it once.
-//
-// Selecting one option fans out to all three underlying booleans
-// (aiStopOnPriceAgreed, goalQualifyStopOnComplete, goalPhoneStopOnComplete)
-// via the parent's onGoalCompletionBehavior handler. Backend save logic
-// is unchanged — the save handler still writes each field independently
-// to its existing JSON key.
-//
-// The card explicitly lists the goal completion criteria it applies to
-// (Price agreed / Qualified lead / Phone provided) and notes that Auto
-// goal mode falls through to whichever sub-goal AI picks each turn —
-// this setting still applies when that sub-goal completes.
-function GoalCompletionBehaviorCard({
-  mode, onChange, mixed, mixedTooltip,
-}: {
-  mode: 'continue' | 'stop';
-  onChange: (mode: 'continue' | 'stop') => void;
-  mixed: boolean;
-  mixedTooltip: string;
-}) {
-  return (
-    <SectionCard padding="22px 24px 22px">
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            When the goal is reached
-          </div>
-          {mixed && (
-            <span
-              title={mixedTooltip || 'Differs across accounts'}
-              style={{
-                fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                background: '#fef3c7', color: '#92400e',
-                letterSpacing: 0.05, textTransform: 'uppercase',
-                fontFamily: 'var(--lb-font-mono)',
-                whiteSpace: 'pre-line',
-              }}
-            >
-              Mixed
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
-          What AI does once it achieves the conversation goal.
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <OptionCard
-          selected={mode === 'continue'}
-          onClick={() => onChange('continue')}
-          title="Continue AI + notify team"
-          body="AI keeps replying after the goal is reached; your team is notified."
-        />
-        <OptionCard
-          selected={mode === 'stop'}
-          onClick={() => onChange('stop')}
-          title="Stop AI + notify team"
-          body="AI pauses once the goal is reached and hands off to your team."
-        />
-      </div>
-    </SectionCard>
-  );
-}
+// GoalCompletionBehaviorCard removed 2026-06-18. AI always stops on
+// goal complete; no user choice exposed. See automation.service.ts
+// Price/Qualify/Phone gate blocks for the unconditional stop logic.
 
 /**
  * One editable row inside the Custom Required Fields list. Label is

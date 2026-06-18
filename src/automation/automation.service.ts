@@ -1220,14 +1220,23 @@ export class AutomationService implements OnModuleInit {
           return;
         }
 
-        // PRICE GOAL COMPLETION — customer agrees on price. Stop is
-        // gated by `aiStopOnPriceAgreed` (the Price goal's Continue/Stop
-        // radio in V2). Default true preserves the Savanna 2026-05-13
-        // regression fix: customer said "Yes, I already confirmed the
-        // cleaning for 5/21 at 10am" and the AI followed up with
-        // "Thanks for confirming, all set!" because the field defaulted
-        // falsy. `!== false` matches every other terminal-intent stop.
-        if (intent === 'agreed' && aiRules.aiStopOnPriceAgreed !== false) {
+        // Goal-completion stops — simplified 2026-06-18.
+        //
+        // All goal completions now unconditionally stop AI and hand off
+        // to the team. The previous per-goal "Continue AI + Notify
+        // Team" vs "Stop AI + Notify Team" choice has been removed
+        // from both the wizard and Settings → Conversation; AI always
+        // stops. Other stop signals remain unchanged:
+        //   - lead.status flips to done/lost (manual or platform sync)
+        //   - SF outcome is scheduled/completed
+        //   - wants_live_contact (handled above)
+        //
+        // The legacy `aiStopOnPriceAgreed` / `goalQualifyStopOnComplete`
+        // / `goalPhoneStopOnComplete` JSON keys are intentionally NOT
+        // read here anymore — saved values become inert. The keys
+        // themselves stay in followUpSettingsJson for back-compat (no
+        // migration) until a future cleanup PR drops them.
+        if (intent === 'agreed') {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — Price goal complete (agreed) conf=${classification.confidence.toFixed(2)}`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
@@ -1239,26 +1248,10 @@ export class AutomationService implements OnModuleInit {
           }
           return;
         }
-        // V2 goal completion stops (2026-06-12).
-        //
-        // The Conversation Goals V2 model gives each per-goal completion
-        // its own "Continue AI + Notify Team" vs "Stop AI + Notify Team"
-        // choice. Price already had this via `aiStopOnPriceAgreed` above.
-        // Qualify and Phone get the same shape via two new JSON keys:
-        //
-        //   goalQualifyStopOnComplete  — stop after handoff.reason='qualification_complete'
-        //   goalPhoneStopOnComplete    — stop after handoff.reason='provided_phone_number'
-        //
-        // Both default to undefined/false — existing tenants whose
-        // followUpSettingsJson doesn't carry the keys see no behavior
-        // change. The handoff alert SMS fires independently via
-        // maybeFireHandoffAlert earlier; these gates only decide whether
-        // the AI ALSO falls silent after that event.
         const isQualifyComplete = classification.handoff?.shouldHandoff
-          && classification.handoff.reason === 'qualification_complete'
-          && (aiRules as any).goalQualifyStopOnComplete === true;
+          && classification.handoff.reason === 'qualification_complete';
         if (isQualifyComplete) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete (conf=${classification.confidence.toFixed(2)})`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
               aiStatus: 'stopped_booked',
@@ -1270,10 +1263,9 @@ export class AutomationService implements OnModuleInit {
           return;
         }
         const isPhoneComplete = classification.handoff?.shouldHandoff
-          && classification.handoff.reason === 'provided_phone_number'
-          && (aiRules as any).goalPhoneStopOnComplete === true;
+          && classification.handoff.reason === 'provided_phone_number';
         if (isPhoneComplete) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Phone goal complete + Stop selected (conf=${classification.confidence.toFixed(2)})`);
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Phone goal complete (conf=${classification.confidence.toFixed(2)})`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
               aiStatus: 'stopped_booked',
@@ -1363,9 +1355,11 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Rule: stop on price agreed — hand off to manager. Default ON to
-      // mirror the classifier-driven short-circuit above (Savanna 2026-05-13).
-      if (aiRules.aiStopOnPriceAgreed !== false && context.customerMessage) {
+      // Rule: stop on price agreed (phrase-list fallback for when the
+      // LLM classifier doesn't fire). Unconditional as of 2026-06-18
+      // simplification — AI always stops when the customer signals
+      // agreement, matching the classifier-driven gate above.
+      if (context.customerMessage) {
         const agreedPhrases = ['sounds good', 'let\'s do it', 'i\'ll take it', 'book it', 'schedule it', 'let\'s go', 'perfect, when', 'great, when', 'yes please', 'i\'m in', 'i already confirmed', 'already confirmed'];
         const msgLower = context.customerMessage.toLowerCase();
         if (agreedPhrases.some(p => msgLower.includes(p))) {

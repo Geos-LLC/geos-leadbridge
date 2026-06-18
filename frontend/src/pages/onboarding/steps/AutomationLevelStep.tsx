@@ -29,7 +29,6 @@ interface Props {
 // values, not a wizard-only ghost set.
 type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
 type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
-type GoalCompletionAction = 'continue' | 'stop';
 // First-reply controls — mirror Settings → Automation → Respond.
 type ReplyMode = 'ai' | 'template';
 type ConnMode = 'agent-first' | 'parallel';
@@ -46,11 +45,10 @@ const DEFAULTS = {
   followUpAvailability: 'always' as 'always' | 'active_hours',
   // AI Conversation defaults — mirror Settings → Automation → AI
   // Conversation. The wizard exposes a small subset (Goal +
-  // Response Mode + Goal Completion); handoff triggers and per-goal
-  // qualification fields live on the full page.
+  // Response Mode); the per-goal Continue/Stop choice was removed
+  // in 2026-06-18 simplification — AI always stops on goal complete.
   conversationGoal: 'auto' as ConversationGoal,
   aiResponseMode: 'autopilot' as AiResponseMode,
-  goalCompletionAction: 'continue' as GoalCompletionAction,
 };
 
 const RESUME_DELAY_OPTIONS = ['6 hours', '12 hours', '24 hours', '2 days', '3 days', '1 week'];
@@ -209,10 +207,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             s.aiConversationDeliveryMode,
             s.followUpAvailability,
           ),
-          goalCompletionAction:
-            s.goalQualifyStopOnComplete === true || s.goalPhoneStopOnComplete === true
-              ? 'stop'
-              : 'continue',
         }));
       } catch {
         /* non-fatal */
@@ -257,12 +251,12 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     aiDeferralDelay: opts.aiDeferralDelay,
     aiHiredCompetitorReengage: opts.aiHiredCompetitorReengage,
     aiHiredCompetitorDelay: opts.aiHiredCompetitorDelay,
-    // AI Conversation slice.
+    // AI Conversation slice. Per-goal Continue/Stop choice removed in
+    // 2026-06-18 simplification — runtime always stops on goal complete
+    // regardless of the JSON keys, so the wizard no longer writes them.
     followUpStrategy: opts.conversationGoal,
     aiConversationDeliveryMode: responseModeBackend.aiConversationDeliveryMode,
     followUpAvailability: responseModeBackend.followUpAvailability,
-    goalQualifyStopOnComplete: opts.goalCompletionAction === 'stop',
-    goalPhoneStopOnComplete: opts.goalCompletionAction === 'stop',
   }), [opts, responseModeBackend]);
 
   // Per-account save fan-out — mirrors the rule-update logic in
@@ -681,18 +675,12 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               columns={1}
             />
 
-            {/* ── When the goal is reached ───────────────────────────
-                2 cards: Continue AI + notify / Stop AI + notify.
-                Writes goalQualify/goalPhoneStopOnComplete. */}
-            <RadioCardSection
-              icon={Workflow}
-              title="When the goal is reached"
-              subtitle="What AI does once it achieves the conversation goal."
-              options={GOAL_COMPLETION_OPTIONS}
-              value={opts.goalCompletionAction}
-              onChange={v => setOpts(o => ({ ...o, goalCompletionAction: v }))}
-              columns={2}
-            />
+            {/* Goal-completion behavior is intentionally NOT a wizard
+                control. Per 2026-06-18 simplification, AI always stops
+                and notifies the team when a goal is reached — no
+                Continue/Stop choice anywhere. Other stop signals
+                (lead status → done/lost, SF outcome → scheduled/
+                completed) are unchanged. */}
           </div>
         )}
       </div>
@@ -901,16 +889,6 @@ const AI_RESPONSE_MODE_OPTIONS: Array<{
   { value: 'suggest',   icon: MessageSquare, title: 'Review before sending',  body: 'AI drafts replies and parks them for your approval. Nothing sends until you tap Send.' },
   { value: 'assist',    icon: Moon,          title: 'Assist when unavailable', body: 'AI responds automatically outside your business hours.' },
   { value: 'autopilot', icon: Sparkles,      title: 'Full autopilot',         body: 'AI responds automatically at any time.' },
-];
-
-const GOAL_COMPLETION_OPTIONS: Array<{
-  value: GoalCompletionAction;
-  title: string;
-  body: string;
-  icon: typeof Sparkles;
-}> = [
-  { value: 'continue', icon: Workflow, title: 'Continue AI + notify team', body: 'AI keeps replying after the goal is reached; your team is notified.' },
-  { value: 'stop',     icon: PhoneCall, title: 'Stop AI + notify team',     body: 'AI pauses once the goal is reached and hands off to your team.' },
 ];
 
 // Derive the wizard's Conversation Goal radio value from the backend's
