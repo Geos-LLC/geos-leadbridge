@@ -28,6 +28,89 @@ export interface CaptureErrorOptions {
   context?: Record<string, any>;
 }
 
+/**
+ * Reclassifier — keeps the `token_refresh` bucket clean of unrelated
+ * failures that surface inside our refresh code paths.
+ *
+ * Background: the proactive-refresh cron wraps `serializedAccountRefresh`
+ * in a try/catch and unconditionally tags any throw as
+ * `category: 'token_refresh', code: 'token_expired'`. That swallowed
+ * real OAuth rejections perfectly — but it also let DB schema
+ * mismatches (e.g. the 2026-06-16 Wesley Chapel incident, where the
+ * SavedAccount.update call hit a missing serviceProfileAssignmentsJson
+ * column because the migration hadn't been applied yet) and crypto
+ * errors land in the same bucket. The token-health UI and our health
+ * sweep both treat any unresolved `token_refresh` row as "this tenant
+ * needs to reconnect Thumbtack" — wrong action when the root cause is
+ * actually our own bug.
+ *
+ * Strategy: inspect the message + code for non-OAuth signatures and
+ * redirect them to `category: 'other'` with a structured `code` that
+ * names the real cause. The redirect is intentionally conservative —
+ * a real TT 400 with the standard `invalid_grant` wording never
+ * matches any of these patterns.
+ *
+ * Exported so it can be unit-tested without instantiating the service.
+ */
+export function reclassifyCapture(
+  options: Pick<CaptureErrorOptions, 'category' | 'code' | 'message'>,
+): { category: CaptureErrorOptions['category']; code: string | undefined } {
+  const { category, code, message } = options;
+  // Only reclassify rows that COULD have been mislabeled. We never
+  // re-bucket non-token_refresh inputs — those callers know their domain.
+  if (category !== 'token_refresh') return { category, code };
+  const text = (message ?? '').toLowerCase();
+
+  // Prisma surfaces these phrases in its error.message. Any one of them
+  // means we hit a query-layer failure before TT was ever called, so
+  // it's an LB-side bug, not a tenant reconnect signal.
+  const prismaSignatures = [
+    'prisma',
+    'invalid `prisma.',
+    'does not exist in the current database',
+    'unknown argument',
+    'unknown field',
+    'foreign key constraint',
+    'unique constraint',
+    'pls migrate', // shows up when prisma generate skipped
+  ];
+  if (prismaSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'db_error' };
+  }
+
+  // Local crypto failures (decryption key mismatch, malformed
+  // ciphertext after a manual DB edit, etc.). The token text isn't
+  // even loaded yet — calling this a token_refresh failure tells the
+  // tenant to reconnect when really our key/state is broken.
+  const cryptoSignatures = [
+    'encryptionutil',
+    'bad decrypt',
+    'failed to decrypt',
+    'unable to authenticate data',
+    'wrong final block length',
+    'invalid initialization vector',
+  ];
+  if (cryptoSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'crypto_error' };
+  }
+
+  // Outbound network errors from OUR side — DNS or socket-level
+  // failures that didn't reach Thumbtack's OAuth server. These are
+  // transient and don't mean the refresh token is dead.
+  const networkSignatures = [
+    'econnrefused',
+    'enotfound',
+    'etimedout',
+    'socket hang up',
+    'network error',
+  ];
+  if (networkSignatures.some((s) => text.includes(s))) {
+    return { category: 'other', code: 'network_error' };
+  }
+
+  return { category, code };
+}
+
 export interface SystemHealthIssue {
   accountId: string;
   accountName: string;
@@ -81,6 +164,21 @@ export class MonitoringService implements OnModuleInit {
    */
   async captureError(options: CaptureErrorOptions, db: Db = this.prisma): Promise<void> {
     try {
+      // Defensive: redirect non-OAuth failures out of the token_refresh
+      // bucket so the dead-token UI + sweeps don't ask tenants to
+      // reconnect when the actual cause is an LB-side bug (DB schema,
+      // crypto, transient network). See reclassifyCapture for the rules
+      // and the Wesley Chapel incident motivation.
+      const reclassified = reclassifyCapture(options);
+      if (reclassified.category !== options.category) {
+        this.logger.warn(
+          `[captureError] reclassified ${options.category}→${reclassified.category} ` +
+          `(code=${reclassified.code}) accountId=${options.accountId ?? '-'} ` +
+          `msg="${(options.message ?? '').slice(0, 120)}"`,
+        );
+      }
+      options = { ...options, category: reclassified.category, code: reclassified.code };
+
       const severity = options.severity ?? 'error';
 
       // Dedup: collapse a recurring unresolved error into a single row.
