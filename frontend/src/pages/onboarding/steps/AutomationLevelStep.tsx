@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
-  ArrowRight, CalendarCheck, CircleDollarSign, Clock, Info, MessageSquare,
-  Moon, Phone, PhoneCall, RotateCcw, Sparkles, UserCheck, Workflow, Loader2,
+  ArrowRight, ArrowRightLeft, CalendarCheck, CircleDollarSign, Clock, ExternalLink, Info,
+  MessageCircle, MessageSquare, MessageSquareText, Moon, Phone, PhoneCall, RotateCcw,
+  Sparkles, UserCheck, Workflow, Loader2,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
-import { followUpApi, usersApi } from '../../../services/api';
+import {
+  automationApi, callConnectApi, followUpApi, notificationsApi, usersApi,
+} from '../../../services/api';
+import type { AutomationRule, NotificationRule } from '../../../types';
 import { notify } from '../../../store/notificationStore';
 import { WizardStepActions } from '../WizardStepActions';
-import { SettingCard, FieldRow, ToggleRow } from '../../../components/automation/ui';
+import {
+  FieldRow, FooterBanner, MessageGenerationRow, OptionCard, SettingCard, TimingRow, ToggleRow,
+} from '../../../components/automation/ui';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -23,6 +30,9 @@ interface Props {
 type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
 type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
 type GoalCompletionAction = 'continue' | 'stop';
+// First-reply controls — mirror Settings → Automation → Respond.
+type ReplyMode = 'ai' | 'template';
+type ConnMode = 'agent-first' | 'parallel';
 
 const DEFAULTS = {
   callDuringBusinessHours: true,
@@ -104,6 +114,19 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // tweaked on Automation pages.
   const [opts, setOpts] = useState({ ...DEFAULTS });
 
+  // First-reply state — mirrors Settings → Automation → Respond. The
+  // three master toggles, AI/template mode for the message-generation
+  // blocks, the per-account business-hours flags, and the connection
+  // mode for Instant Call. Hydrated from the primary SavedAccount.
+  const [instantReplyOn, setInstantReplyOn] = useState(true);
+  const [replyType, setReplyType] = useState<ReplyMode>('ai');
+  const [instantTextOn, setInstantTextOn] = useState(true);
+  const [instantTextMode, setInstantTextMode] = useState<ReplyMode>('ai');
+  const [textBizHours, setTextBizHours] = useState(false);
+  const [instantCallOn, setInstantCallOn] = useState(true);
+  const [connMode, setConnMode] = useState<ConnMode>('agent-first');
+  const navigate = useNavigate();
+
   const cascadeNote = savedAccounts.length > 1;
 
   useEffect(() => {
@@ -135,12 +158,38 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         }
         if (savedAccounts.length === 0) return;
         const primary = savedAccounts[0];
-        const [settings, hours] = await Promise.all([
+        const [settings, hours, autoRes, notifRes, callRes] = await Promise.all([
           followUpApi.getSettings(primary.id).catch(() => null),
           usersApi.getAccountHours(primary.id).catch(() => null),
+          automationApi.getRulesForAccount(primary.id).catch(() => ({ rules: [] as AutomationRule[] })),
+          notificationsApi.getRules(primary.id).catch(() => ({ rules: [] as NotificationRule[] })),
+          callConnectApi.getSettings(primary.id).catch(() => ({ settings: null })),
         ]);
         if (cancelled) return;
         const s = (settings as any)?.settings ?? {};
+
+        // First-reply hydration — same shape lookups Respond.tsx uses.
+        const newLeadRule = (autoRes.rules || []).find(
+          r => r.triggerType === 'new_lead' && (!r.delayMinutes || r.delayMinutes === 0),
+        );
+        const customerTextRule = (notifRes.rules || []).find(
+          r => r.triggerType === 'new_lead' && r.sendToCustomer,
+        );
+        const callSettings: any = (callRes as any)?.settings ?? null;
+        if (newLeadRule) {
+          setInstantReplyOn(!!newLeadRule.enabled);
+          setReplyType(newLeadRule.useAi ? 'ai' : 'template');
+        }
+        if (customerTextRule) {
+          setInstantTextOn(!!customerTextRule.enabled);
+        }
+        if (callSettings) {
+          setInstantCallOn(callSettings.enabled !== false);
+          setConnMode(callSettings.mode === 'PARALLEL' ? 'parallel' : 'agent-first');
+        }
+        const rawInstantTextMode = (s as any)?.instantTextMode;
+        setInstantTextMode(rawInstantTextMode === 'template' ? 'template' : 'ai');
+        setTextBizHours((hours as any)?.firstMsgDuringBusinessHours ?? false);
         setOpts(prev => ({
           ...prev,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
@@ -218,6 +267,69 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     goalPhoneStopOnComplete: opts.goalCompletionAction === 'stop',
   }), [opts, responseModeBackend]);
 
+  // Per-account save fan-out — mirrors the rule-update logic in
+  // Settings → Automation → Respond. Each account independently
+  // gets its automation rule (Instant Reply), notification rule
+  // (Instant Text), and call-connect settings (Instant Call) patched.
+  // When a rule doesn't exist on a given account we seed one with
+  // sensible defaults (Instant Reply only — Instant Text + Call rules
+  // are auto-created server-side when the account is first wired).
+  async function saveFirstReplyToAccount(accountId: string): Promise<void> {
+    const ops: Promise<unknown>[] = [];
+
+    // Account-hours fan-out — extend the existing call also writes
+    // firstMsgDuringBusinessHours now that the wizard surfaces it.
+    ops.push(
+      usersApi.updateAccountHours(accountId, {
+        callDuringBusinessHours: opts.callDuringBusinessHours,
+        followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
+        firstMsgDuringBusinessHours: textBizHours,
+      }).catch(() => undefined),
+    );
+
+    // Instant Reply — automation rule. Look up the new_lead rule;
+    // patch or seed.
+    ops.push((async () => {
+      const r = await automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] }));
+      const nl = (r.rules || []).find(
+        x => x.triggerType === 'new_lead' && (!x.delayMinutes || x.delayMinutes === 0),
+      );
+      if (nl) {
+        await automationApi.updateRule(nl.id, {
+          enabled: instantReplyOn,
+          useAi: replyType === 'ai',
+        });
+      } else {
+        await automationApi.createRule({
+          savedAccountId: accountId,
+          name: 'Instant Reply',
+          triggerType: 'new_lead',
+          enabled: instantReplyOn,
+          useAi: replyType === 'ai',
+          delayMinutes: 0,
+        } as any);
+      }
+    })().catch(() => undefined));
+
+    // Instant Text — notification rule (only patch when the rule
+    // exists; rule auto-provisioning is the platform connect's job).
+    ops.push((async () => {
+      const r = await notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] }));
+      const ct = (r.rules || []).find(x => x.triggerType === 'new_lead' && (x as any).sendToCustomer);
+      if (ct) await notificationsApi.updateRule(accountId, ct.id, { enabled: instantTextOn });
+    })().catch(() => undefined));
+
+    // Instant Call — call-connect settings.
+    ops.push(
+      callConnectApi.saveSettings(accountId, {
+        enabled: instantCallOn,
+        mode: (connMode === 'parallel' ? 'PARALLEL' : 'AGENT_FIRST') as any,
+      } as any).catch(() => undefined),
+    );
+
+    await Promise.all(ops);
+  }
+
   async function apply() {
     if (saving) return;
     setSaving(true);
@@ -229,14 +341,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       let firstError: any = null;
       for (const acct of savedAccounts) {
         try {
-          await followUpApi.saveWizardSettings(acct.id, wizardPayload);
-          // firstMsgDuringBusinessHours intentionally omitted — the
-          // wizard no longer surfaces that toggle, so we don't want to
-          // overwrite whatever the account already has saved for it.
-          await usersApi.updateAccountHours(acct.id, {
-            callDuringBusinessHours: opts.callDuringBusinessHours,
-            followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
+          // Compose the followUp payload with instantTextMode merged in
+          // so the AI/template choice for Instant Text persists too.
+          await followUpApi.saveWizardSettings(acct.id, {
+            ...wizardPayload,
+            instantTextMode,
           });
+          await saveFirstReplyToAccount(acct.id);
         } catch (err) {
           if (!firstError) firstError = err;
         }
@@ -312,6 +423,109 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           You can fine-tune behavior for each connected account later in{' '}
           <strong>Settings → Automation</strong>.
         </span>
+      </div>
+
+      {/* ─── First reply section ──────────────────────────────────── */}
+      {/* Mirrors Settings → Automation → Respond. Three master toggles
+          for what happens the moment a new lead arrives. Advanced bits
+          (Agent Whisper, Voicemail TTS, custom AI prompts) deliberately
+          omitted — those live behind the AdvancedExpand on the full
+          settings page; the wizard's footer banner points there. */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h2 style={{
+            margin: 0, fontSize: 18, fontWeight: 700,
+            color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
+          }}>
+            First reply
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
+            What happens automatically when a new lead arrives.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <SettingCard
+            icon={MessageSquareText}
+            iconTone="blue"
+            title="Instant Reply"
+            subtitle="Send the first message automatically when a new lead arrives."
+            enabled={instantReplyOn}
+            onToggle={setInstantReplyOn}
+            contentPad="8px 24px 16px"
+          >
+            <MessageGenerationRow
+              useAi={replyType === 'ai'}
+              onChangeUseAi={next => setReplyType(next ? 'ai' : 'template')}
+              onOpenPlaybook={() => navigate('/settings?tab=ai-playbook')}
+              onOpenTemplates={() => navigate('/templates?filter=auto-reply')}
+            />
+          </SettingCard>
+
+          <SettingCard
+            icon={MessageCircle}
+            iconTone="green"
+            title="Instant Text"
+            subtitle="Automatically text the lead when a new lead arrives."
+            enabled={instantTextOn}
+            onToggle={setInstantTextOn}
+            contentPad="8px 24px 16px"
+          >
+            <TimingRow
+              icon={Clock}
+              checked={textBizHours}
+              onChangeChecked={setTextBizHours}
+              checkboxLabel="Only send during business hours"
+              onEditHours={() => navigate('/settings?tab=hours')}
+            />
+            <MessageGenerationRow
+              useAi={instantTextMode === 'ai'}
+              onChangeUseAi={next => setInstantTextMode(next ? 'ai' : 'template')}
+              onOpenPlaybook={() => navigate('/settings?tab=ai-playbook')}
+              onOpenTemplates={() => navigate('/templates?filter=auto-reply')}
+            />
+          </SettingCard>
+
+          <SettingCard
+            icon={Phone}
+            iconTone="purple"
+            title="Instant Call"
+            subtitle="Call your team and connect to the lead right away."
+            enabled={instantCallOn}
+            onToggle={setInstantCallOn}
+            contentPad="8px 24px 16px"
+          >
+            <TimingRow
+              icon={Clock}
+              checked={opts.callDuringBusinessHours}
+              onChangeChecked={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
+              checkboxLabel="Only call during business hours"
+              onEditHours={() => navigate('/settings?tab=hours')}
+            />
+            <FieldRow
+              icon={ArrowRightLeft}
+              iconTone="gray"
+              label="Connection Mode"
+              align="top"
+              noBorder
+            >
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <OptionCard
+                  selected={connMode === 'agent-first'}
+                  onClick={() => setConnMode('agent-first')}
+                  title="Agent First"
+                  body="We call you first, then bridge the lead."
+                />
+                <OptionCard
+                  selected={connMode === 'parallel'}
+                  onClick={() => setConnMode('parallel')}
+                  title="Parallel"
+                  body="We call you and the lead at the same time."
+                />
+              </div>
+            </FieldRow>
+          </SettingCard>
+        </div>
       </div>
 
       {/* ─── Fine-tune section ──────────────────────────────────────────── */}
@@ -491,7 +705,38 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         )}
       </div>
 
-      <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Advanced-controls banner — points the user at Settings →
+          Automation for the bits the wizard intentionally omits (custom
+          AI prompts, agent whisper, voicemail TTS, per-goal
+          qualification fields, handoff triggers, follow-up plan
+          editor). Uses the shared FooterBanner so the visual rhythm
+          matches the main Automation pages. */}
+      <div style={{ marginTop: 28 }}>
+        <FooterBanner
+          icon={ExternalLink}
+          body={
+            <>
+              <strong>Looking for more?</strong> Custom AI prompts, agent
+              whisper messages, follow-up plan editor, per-goal
+              qualification fields, and handoff triggers all live in{' '}
+              <button
+                type="button"
+                onClick={() => navigate('/automation/respond')}
+                style={{
+                  background: 'transparent', border: 0, padding: 0,
+                  fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 600,
+                  color: 'var(--lb-accent)', cursor: 'pointer',
+                }}
+              >
+                Settings → Automation
+              </button>
+              {' '}after onboarding.
+            </>
+          }
+        />
+      </div>
+
+      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {cascadeNote && (
           <p style={{ margin: 0, fontSize: 12, color: 'var(--lb-ink-5)', maxWidth: 440 }}>
             Applies to all connected accounts. You can customize each account later on the Automation page.
