@@ -17,7 +17,7 @@ import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
-  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other';
+  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'associate_phones' | 'other';
   code?: string; // Structured: 'token_expired', 'webhook_missing', 'automation_failure'
   platform?: string; // 'thumbtack' | 'yelp'
   severity?: 'error' | 'warning';
@@ -937,6 +937,27 @@ export class MonitoringService implements OnModuleInit {
           accountId: account.id, accountName: account.businessName || account.businessId,
           platform: account.platform, issueCode: 'notifications_disabled', status: 'warning',
           message: 'Lead notifications are disabled — new leads will not trigger SMS alerts',
+          firstDetectedAt: now, lastDetectedAt: now,
+        });
+      }
+    }
+
+    // 5. Associate-phone sync failure (Thumbtack only). LB pushes owner phone +
+    // LB dedicated number + custom associates to TT after every OAuth and on
+    // demand. When that fails, proxy calls won't honor LB-side senders — leads
+    // route to a number the customer can't reach. Surfaced today by reading
+    // unresolved category='associate_phones' rows; resolved when a subsequent
+    // successful sync calls `markAssociatePhoneSyncResolved`.
+    if (account.platform === 'thumbtack') {
+      const associatePhonesError = await db.systemErrorLog.findFirst({
+        where: { accountId: account.id, category: 'associate_phones', resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (associatePhonesError) {
+        issues.push({
+          accountId: account.id, accountName: account.businessName || account.businessId,
+          platform: account.platform, issueCode: 'associate_phones_failed', status: 'warning',
+          message: associatePhonesError.message || 'Associate-phone sync failed — proxy calls may not honor LB-side senders',
           firstDetectedAt: now, lastDetectedAt: now,
         });
       }

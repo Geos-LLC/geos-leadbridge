@@ -820,26 +820,62 @@ export class PlatformService {
     credentials?: { accessToken: string } | null,
     adapter?: any,
   ): Promise<void> {
+    const errors: string[] = [];
     try {
       await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`owner: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
       await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`lb: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
       await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`additional-batch: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
+    }
+
+    // Surface sync outcomes through the existing monitoring stack so the
+    // hourly health-check cron + SendGrid alert pipeline + frontend
+    // "Reconnect" UI all light up automatically. See
+    // MonitoringService.checkAccountHealth #5 for the read side.
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true, businessName: true },
+    });
+    if (!account) return;
+    if (errors.length > 0) {
+      await this.monitoring.captureError({
+        category: 'associate_phones',
+        code: 'sync_failed',
+        message: `Associate-phone sync failed — ${errors.join(' | ').slice(0, 400)}`,
+        userId,
+        accountId: account.id,
+        accountName: account.businessName ?? null,
+        platform: 'thumbtack',
+        context: { businessId },
+      });
+    } else {
+      // Full success — auto-resolve any previously unresolved sync errors
+      // for this account so the hourly check stops surfacing the issue.
+      await this.prisma.systemErrorLog.updateMany({
+        where: { accountId: account.id, category: 'associate_phones', resolved: false },
+        data: { resolved: true },
+      }).catch(() => { /* monitoring writes never block the caller */ });
     }
   }
 
