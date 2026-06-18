@@ -1025,6 +1025,10 @@ export const adminServiceTemplatesApi = {
     const { data } = await api.post(`/v1/admin/service-templates/${id}/draft`);
     return data;
   },
+  remove: async (id: string): Promise<{ id: string; deleted: true }> => {
+    const { data } = await api.delete(`/v1/admin/service-templates/${id}`);
+    return data;
+  },
 };
 
 export type ServiceProfile = {

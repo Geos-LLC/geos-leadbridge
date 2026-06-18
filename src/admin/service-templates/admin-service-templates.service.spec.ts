@@ -55,6 +55,12 @@ function buildPrismaStub() {
         Object.assign(row, data, { updatedAt: new Date() });
         return row;
       }),
+      delete: jest.fn(async ({ where }: any) => {
+        const idx = rows.findIndex((r) => r.id === where.id);
+        if (idx === -1) throw new Error('not found');
+        const [row] = rows.splice(idx, 1);
+        return row;
+      }),
     },
   };
 }
@@ -215,6 +221,32 @@ describe('AdminServiceTemplatesService', () => {
       expect(Array.isArray(pub.serviceOptionsJson.groups)).toBe(true);
       expect(typeof pub.pricingJson).toBe('object');
       expect(typeof pub.customerAnswersJson).toBe('object');
+    });
+  });
+
+  describe('delete — hard remove a template row', () => {
+    it('removes the row from the registry', async () => {
+      const { svc, prisma } = buildService();
+      const g = svc.generate({
+        serviceName: 'Test',
+        provider: 'thumbtack',
+        providerCategoryName: 'Test',
+        rawOptionsText: '',
+        rawPricingText: '',
+      });
+      const created = await svc.create({ adminUserId: 'a', input: g });
+      expect(prisma.rows).toHaveLength(1);
+
+      const result = await svc.delete({ templateId: created.id });
+      expect(result).toEqual({ id: created.id, deleted: true });
+      expect(prisma.rows).toHaveLength(0);
+    });
+
+    it('throws NOT_FOUND for unknown id', async () => {
+      const { svc } = buildService();
+      await expect(svc.delete({ templateId: 'nope' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
     });
   });
 

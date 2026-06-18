@@ -185,6 +185,35 @@ export class AdminServiceTemplatesService {
     });
   }
 
+  /**
+   * Hard-delete an admin template row. Used by the trash-can on the
+   * admin Service Templates page when an operator wants to remove a
+   * test / misconfigured row entirely. Soft-archive (status='archived')
+   * remains the recommended path and stays separate; this is for the
+   * "delete forever" case.
+   *
+   * No tenant cascade — ServiceProfile rows created from this template
+   * stay untouched. They already copied the template's fields at
+   * creation time and don't reference the template id beyond that copy,
+   * so deletion is safe for the runtime resolver.
+   */
+  async delete(args: { templateId: string }) {
+    const row = await this.prisma.serviceTemplatePreset.findUnique({
+      where: { id: args.templateId },
+      select: { id: true, key: true },
+    });
+    if (!row) {
+      const err: any = new Error('Service template not found');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    await this.prisma.serviceTemplatePreset.delete({ where: { id: args.templateId } });
+    this.logger.log(
+      `[admin-service-templates] delete id=${row.id} key=${row.key}`,
+    );
+    return { id: row.id, deleted: true as const };
+  }
+
   /** Admin list — all rows, all statuses, newest first. */
   async listAll() {
     return this.prisma.serviceTemplatePreset.findMany({
