@@ -1634,9 +1634,32 @@ function extractServiceRulesFromInstructions(json: string | null | undefined): P
   };
 }
 
+/**
+ * Pull `additionalInstructions` out of the v1 wrapper:
+ *   { version: 1, additionalInstructions: "…" }
+ * Admin Service Template Builder writes this key when an operator fills
+ * in the free-text "Additional Service Instructions" field. Returns the
+ * trimmed string or null when absent.
+ */
+function extractAdditionalInstructions(json: string | null | undefined): string | null {
+  if (!json) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const v = (parsed as Record<string, unknown>).additionalInstructions;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
 function ServiceRulesViewer({ aiInstructionsJson }: { aiInstructionsJson: string | null }) {
   const rules = useMemo(() => extractServiceRulesFromInstructions(aiInstructionsJson), [aiInstructionsJson]);
-  if (!rules) return null;
+  const additional = useMemo(() => extractAdditionalInstructions(aiInstructionsJson), [aiInstructionsJson]);
+  if (!rules && !additional) return null;
   return (
     <div style={{ marginTop: 16 }}>
       <SettingCard
@@ -1645,7 +1668,15 @@ function ServiceRulesViewer({ aiInstructionsJson }: { aiInstructionsJson: string
         title="Service rules"
         subtitle="Operator guardrails sourced from the preset. Editing these inline lands in a follow-up release."
       >
-        {rules.requiredDetails.length > 0 && (
+        {additional && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+              <ListChecks size={14} /> Additional service instructions
+            </div>
+            <div style={{ ...ruleItem, whiteSpace: 'pre-wrap' }}>{additional}</div>
+          </div>
+        )}
+        {rules?.requiredDetails && rules.requiredDetails.length > 0 && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
               <ListChecks size={14} /> Required details
@@ -1657,7 +1688,7 @@ function ServiceRulesViewer({ aiInstructionsJson }: { aiInstructionsJson: string
             </ul>
           </div>
         )}
-        {rules.unsupportedServices.length > 0 && (
+        {rules?.unsupportedServices && rules.unsupportedServices.length > 0 && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#b45309' }}>
               <AlertTriangle size={14} /> Not supported
@@ -1669,7 +1700,7 @@ function ServiceRulesViewer({ aiInstructionsJson }: { aiInstructionsJson: string
             </ul>
           </div>
         )}
-        {rules.workflowSteps.length > 0 && (
+        {rules?.workflowSteps && rules.workflowSteps.length > 0 && (
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
               <ListChecks size={14} /> Workflow steps

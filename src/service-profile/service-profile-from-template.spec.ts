@@ -141,13 +141,66 @@ describe('ServiceProfileService.createFromAdminTemplate (spec #6)', () => {
     expect(ai.additionalInstructions).toBe('Always ask square footage.');
   });
 
-  it('preserves pricingJson verbatim (admin v2 shape)', async () => {
+  it('bridges v2 room_quantity pricing → v1 item_quantity shape for the PricingEditor', async () => {
     const { svc, prisma } = buildService({ publishedTemplate: PUBLISHED_TEMPLATE });
     await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-1' });
     const written = prisma.profiles[0];
     const pricing = JSON.parse(written.pricingJson);
-    expect(pricing.pricingModel).toBe('room_quantity');
-    expect(pricing.basePrices).toHaveLength(1);
+    // v1 shape the PricingEditor knows how to render as a table.
+    expect(pricing.pricingModel).toBe('item_quantity');
+    expect(Array.isArray(pricing.items)).toBe(true);
+    expect(pricing.items).toHaveLength(1);
+    expect(pricing.items[0]).toMatchObject({
+      label: '1 room',
+      price: 79,
+      source: 'thumbtack_average',
+      active: true,
+    });
+    expect(typeof pricing.items[0].key).toBe('string');
+  });
+
+  it('bridges v2 hourly pricing through to v1 hourly', async () => {
+    const hourlyTemplate = {
+      ...PUBLISHED_TEMPLATE,
+      id: 't-hr',
+      pricingJson: JSON.stringify({
+        pricingModel: 'hourly',
+        currency: 'USD',
+        basePrices: [],
+        addOns: [],
+        laborRate: 120,
+        minimumCharge: 100,
+        quoteRequired: true,
+      }),
+    };
+    const { svc, prisma } = buildService({ publishedTemplate: hourlyTemplate });
+    await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-hr' });
+    const pricing = JSON.parse(prisma.profiles[0].pricingJson);
+    expect(pricing.pricingModel).toBe('hourly');
+    expect(pricing.laborRate).toBe(120);
+    expect(pricing.minimumCharge).toBe(100);
+    expect(pricing.quoteRequired).toBe(true);
+  });
+
+  it('maps v2 source values to v1 PresetPricing source union', async () => {
+    const sourceTemplate = {
+      ...PUBLISHED_TEMPLATE,
+      id: 't-src',
+      pricingJson: JSON.stringify({
+        pricingModel: 'item_quantity',
+        currency: 'USD',
+        basePrices: [
+          { quantity: null, label: 'Sofa', price: 96, source: 'admin_input' },
+          { quantity: null, label: 'Chair', price: 0, source: 'missing' },
+        ],
+        addOns: [],
+      }),
+    };
+    const { svc, prisma } = buildService({ publishedTemplate: sourceTemplate });
+    await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-src' });
+    const items = JSON.parse(prisma.profiles[0].pricingJson).items;
+    expect(items[0].source).toBe('manual');
+    expect(items[1].source).toBe('missing_from_thumbtack');
   });
 
   it('attaches a providerCategoryMappings entry for the template provider', async () => {

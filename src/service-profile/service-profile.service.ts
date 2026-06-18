@@ -382,11 +382,10 @@ export class ServiceProfileService {
    *   customerAnswers.entries[]                     →  faq.customQA[]
    *   additionalInstructions (string)               →  aiInstructionsJson { version: 1, additionalInstructions }
    *
-   * pricingJson is stored verbatim — the v2 shape (basePrices/addOns)
-   * differs from any pricing model the existing engine recognises, so
-   * hydratePricing() returns an empty reference and the AI defers to
-   * the owner. Profile defaults to draft regardless so the AI auto-reply
-   * path is gated until the operator promotes it to active anyway.
+   * pricingJson is bridged from the v2 admin shape (room_quantity /
+   * item_quantity / hourly / flat_rate / custom with basePrices+addOns)
+   * to the v1 ServiceProfile UI shape (item_quantity with items[], or
+   * hourly with laborRate+minimumCharge). See bridgeAdminPricingToV1.
    *
    * Status forced to 'draft' per spec — never auto-activate.
    */
@@ -429,6 +428,7 @@ export class ServiceProfileService {
     );
     const faqJson = bridgeCustomerAnswersToFaq(template.customerAnswersJson);
     const aiInstructionsJson = bridgeAdditionalInstructions(template.additionalInstructions);
+    const pricingJson = bridgeAdminPricingToV1(template.pricingJson);
 
     this.logger.log(
       `[service-profile] createFromAdminTemplate userId=${args.userId} ` +
@@ -449,8 +449,7 @@ export class ServiceProfileService {
             categoryName: template.providerCategoryName,
           },
         ] as any,
-        // pricingJson stored verbatim — see comment above.
-        pricingJson: template.pricingJson,
+        pricingJson,
         faqJson,
         qualificationSchemaJson,
         aiInstructionsJson,
@@ -1170,6 +1169,138 @@ function bridgeCustomerAnswersToFaq(raw: string | null | undefined): string | nu
  * the read-side we want for now). A future PR can teach the renderer
  * to inject this string into the AI prompt; until then it sits inert.
  */
+/**
+ * Admin pricingJson (v2 shape) → ServiceProfile.pricingJson (v1 shape
+ * the existing PricingEditor / pricing engine consume).
+ *
+ * v2 input shapes (one of):
+ *   { pricingModel: 'room_quantity', basePrices: [{ quantity, label, price, source }], addOns: [...] }
+ *   { pricingModel: 'item_quantity', basePrices: [...], addOns: [...] }
+ *   { pricingModel: 'hourly', laborRate, minimumCharge, quoteRequired, ... }
+ *   { pricingModel: 'flat_rate', basePrices: [{ ..., price }] }
+ *   { pricingModel: 'custom', ... }
+ *
+ * v1 output shape (what PricingEditor reads):
+ *   { pricingModel: 'item_quantity', items: [{ key, label, price, source, active }], addOns: [...] }
+ *   { pricingModel: 'hourly', currency, laborRate, minimumCharge, quoteRequired, notes }
+ *
+ * Mapping:
+ *  - room_quantity, item_quantity → v1 item_quantity. basePrices rows
+ *    map 1:1 to items rows. Source values are remapped to the existing
+ *    PresetPricing source union (`admin_input` → `manual`,
+ *    `missing` → `missing_from_thumbtack`).
+ *  - hourly → v1 hourly. laborRate / minimumCharge / quoteRequired
+ *    carried through. If absent on the template (rare), defaults of
+ *    100/100/true match the existing custom-service starter.
+ *  - flat_rate → v1 hourly with minimumCharge from the single basePrice.
+ *    (v1 doesn't have a flat_rate model; the hourly editor with just a
+ *    minimum is the closest match.)
+ *  - custom → v1 item_quantity with no items so the operator gets an
+ *    empty Price Table editor to fill in (rather than a JSON textarea).
+ *
+ * On parse failure or unrecognised shape → returns null (the profile's
+ * pricing column stays empty and the editor renders the empty-state
+ * "Add your first priced item" affordance).
+ */
+function bridgeAdminPricingToV1(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const model: string = typeof parsed.pricingModel === 'string' ? parsed.pricingModel : 'custom';
+
+  const mapSource = (s: unknown): string => {
+    if (s === 'thumbtack_average') return 'thumbtack_average';
+    if (s === 'interpolated') return 'interpolated';
+    if (s === 'admin_input') return 'manual';
+    if (s === 'missing') return 'missing_from_thumbtack';
+    return 'manual';
+  };
+
+  const slugify = (s: string): string =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48) || 'item';
+
+  const mapBasePrices = (arr: any): any[] => {
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((b: any) => {
+        if (!b || typeof b !== 'object') return null;
+        const label = typeof b.label === 'string' && b.label.length > 0 ? b.label : '';
+        if (!label) return null;
+        const price = typeof b.price === 'number' ? b.price : 0;
+        return {
+          key: slugify(label),
+          label,
+          price,
+          source: mapSource(b.source),
+          active: true,
+        };
+      })
+      .filter((x: any): x is object => x !== null);
+  };
+
+  const mapAddOns = (arr: any): any[] => {
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((a: any) => {
+        if (!a || typeof a !== 'object') return null;
+        const label = typeof a.label === 'string' && a.label.length > 0 ? a.label : '';
+        if (!label) return null;
+        const price = typeof a.price === 'number' ? a.price : 0;
+        return {
+          key: typeof a.key === 'string' && a.key.length > 0 ? a.key : slugify(label),
+          label,
+          price,
+          source: mapSource(a.source),
+          quoteManually: a.quoteManually === true,
+        };
+      })
+      .filter((x: any): x is object => x !== null);
+  };
+
+  if (model === 'hourly') {
+    return JSON.stringify({
+      pricingModel: 'hourly',
+      currency: typeof parsed.currency === 'string' ? parsed.currency : 'USD',
+      laborRate: typeof parsed.laborRate === 'number' ? parsed.laborRate : 100,
+      minimumCharge: typeof parsed.minimumCharge === 'number' ? parsed.minimumCharge : 100,
+      quoteRequired: parsed.quoteRequired !== false,
+      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+    });
+  }
+
+  if (model === 'flat_rate') {
+    const first = Array.isArray(parsed.basePrices) ? parsed.basePrices[0] : null;
+    const minimum = first && typeof first.price === 'number' ? first.price : 0;
+    return JSON.stringify({
+      pricingModel: 'hourly',
+      currency: typeof parsed.currency === 'string' ? parsed.currency : 'USD',
+      laborRate: 0,
+      minimumCharge: minimum,
+      quoteRequired: true,
+      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+    });
+  }
+
+  // room_quantity, item_quantity, custom → all collapse to v1 item_quantity.
+  const items = mapBasePrices(parsed.basePrices);
+  const addOns = mapAddOns(parsed.addOns);
+  return JSON.stringify({
+    pricingModel: 'item_quantity',
+    items,
+    addOns,
+    currency: typeof parsed.currency === 'string' ? parsed.currency : 'USD',
+  });
+}
+
 function bridgeAdditionalInstructions(text: string | null | undefined): string | null {
   if (!text || typeof text !== 'string' || text.trim().length === 0) return null;
   return JSON.stringify({ version: 1, additionalInstructions: text.trim() });
