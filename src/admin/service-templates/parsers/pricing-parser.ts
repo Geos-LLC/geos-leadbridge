@@ -1,29 +1,45 @@
 /**
  * Deterministic Pricing parser.
  *
- * Input shape (admin paste):
+ * Handles two paste shapes seen in real admin use:
+ *
+ * Shape A — inline (clean spec example):
  *
  *   1 room Avg. $79
  *   2 rooms Avg. $103
- *   3 rooms Avg. $132
  *
- *   Add-ons:
- *   Cleaning 1 flight of stairs
- *   Cleaning stains
- *   Cleaning home with pets
+ * Shape B — separate lines (what you get when you copy/paste straight
+ * from the Thumbtack admin UI — label on one line, price on the next):
+ *
+ *   1 room
+ *
+ *   Avg. $79
+ *
+ *   2 rooms
+ *
+ *   Avg. $103
+ *
+ *   Enter add-on prices
+ *   Tell customers what you charge extra for. …
+ *
+ *   Cleaning home with pet(s)
+ *
+ *   Cleaning home with smoker(s)
  *
  * Algorithm:
- *  1. Walk each line.
- *  2. If a line matches "Add-ons:" / "Add ons:" / "Extras:" we switch
- *     into addOn-collection mode.
- *  3. Each base-price line is parsed into { quantity, label, price, source }.
- *  4. Add-on lines without a number get quoteManually=true.
- *  5. Pricing model is inferred from the base rows:
- *       - all rows say "room" / "rooms"      → room_quantity
- *       - rows look like noun + price        → item_quantity
- *       - "$X/hour" or "X per hour" present  → hourly
- *       - single "Service call $X" / "Flat $X" → flat_rate
- *       - otherwise                           → custom (+ quoteRequired)
+ *  1. Drop blank + narration lines up front.
+ *  2. Walk surviving lines with a 1-line lookahead:
+ *       - if line has $, parse it as a single-line row.
+ *       - else, if the NEXT line has $, pair the two (label + price row).
+ *       - else, it's a no-price line — meaningful only in addon mode
+ *         (becomes a quoteManually addon).
+ *  3. Mode flips:
+ *       - "Add-ons:", "Add-on prices", "Enter add-on prices", "Extras:"
+ *         → addon mode.
+ *       - "Base", "Standard pricing" → base mode.
+ *       - First line that looks like a Service Options question (ends
+ *         in `?`) stops the parser — admin pasted mixed content.
+ *  4. Pricing model inference (see inferModel).
  *
  * Errors: never throws.
  */
@@ -37,44 +53,63 @@ import {
 } from '../admin-service-templates.types';
 import { toKey } from './service-options-parser';
 
-/** Currency token at the start of a money chunk. v1 supports USD only. */
-const PRICE_RE = /\$?\s*([0-9]+(?:\.[0-9]+)?)/;
-
-/** "Avg." / "Avg" / "average" tags from Thumbtack-style copy. */
+const PRICE_TOKEN_RE = /\$\s*([0-9]+(?:\.[0-9]+)?)/;
 const AVG_RE = /\b(avg\.?|average)\b/i;
-
-/** "1 room", "2 rooms", "12 items", "3 bedrooms" — anything starting with a number + noun. */
 const QUANTITY_LABEL_RE = /^\s*(\d+)\s+([a-zA-Z][a-zA-Z\s]*?)(?=\s+\$|\s+avg|\s+@|\s*$)/i;
-
-/** Hourly markers in the price line. */
 const HOURLY_RE = /\b(per\s+hour|\/hour|\/hr|hourly)\b/i;
-
-/** Flat-rate markers. */
 const FLAT_RATE_RE = /\b(flat\s+rate|service\s+call|minimum\s+charge|min\.?\s+charge|starts?\s+at)\b/i;
 
-/** Header lines that switch us into add-on collection mode. */
-const ADDON_HEADER_RE = /^\s*(add[-\s]?ons?|extras|optional|optional add\-?ons?)\s*:?\s*$/i;
+/** Header lines that switch us into add-on collection mode. Broadened
+ *  to cover Thumbtack's "Enter add-on prices" UI header. */
+const ADDON_HEADER_RE =
+  /^\s*(add[-\s]?ons?|enter\s+add[-\s]?on\s+prices?|add[-\s]?on\s+prices?|extras|optional|optional\s+add[-\s]?ons?)\s*:?\s*$/i;
 
-/** Header lines that switch us back to base rows. */
 const BASE_HEADER_RE = /^\s*(base|base\s+pricing|standard|standard\s+pricing|rates?)\s*:?\s*$/i;
+
+/** Narration lines we want to drop on the floor before parsing. */
+const NARRATION_PATTERNS: RegExp[] = [
+  /^\s*tell customers/i,
+  /^\s*or check the box/i,
+  /^\s*for prices and\b/i,
+];
+
+function isNarration(line: string): boolean {
+  return NARRATION_PATTERNS.some((re) => re.test(line));
+}
+
+/**
+ * Stop signal — Thumbtack admins sometimes paste pricing + service
+ * options together. Once we hit a line that looks like a question
+ * heading ("Which types of houses do you clean?"), we stop consuming
+ * — the rest belongs in the Service Options textarea, not Pricing.
+ */
+function looksLikeOptionsHeading(line: string): boolean {
+  const t = line.trim();
+  if (t.length < 5) return false;
+  return /\?\s*$/.test(t);
+}
 
 /**
  * Pull the FIRST money value out of a line. Returns null when nothing
  * looks like a price.
  */
 function extractPrice(line: string): { price: number; source: AdminPricingSource } | null {
-  if (!PRICE_RE.test(line)) return null;
+  if (!PRICE_TOKEN_RE.test(line)) return null;
   const match = line.match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);
   if (!match) return null;
   const price = parseFloat(match[1]);
   if (!isFinite(price)) return null;
-  const source: AdminPricingSource = AVG_RE.test(line)
-    ? 'thumbtack_average'
-    : 'admin_input';
+  const source: AdminPricingSource = AVG_RE.test(line) ? 'thumbtack_average' : 'admin_input';
   return { price, source };
 }
 
-/** "1 room Avg. $79" → { quantity: 1, label: "1 room" }. */
+/**
+ * Extract a quantity + clean label from a line. Handles:
+ *   "1 room"            → quantity=1, label="1 room"
+ *   "1 room Avg. $79"   → quantity=1, label="1 room"
+ *   "Sofa $96"          → quantity=null, label="Sofa"
+ *   "Service call $120" → quantity=null, label="Service call"
+ */
 function extractQuantityAndLabel(line: string): { quantity: number | null; label: string } {
   const match = line.match(QUANTITY_LABEL_RE);
   if (match) {
@@ -88,24 +123,31 @@ function extractQuantityAndLabel(line: string): { quantity: number | null; label
   // item rows like "Sofa $96" or "Service call $120".
   const dollarIdx = line.indexOf('$');
   const cutoff = dollarIdx > 0 ? dollarIdx : line.length;
-  const labelPart = line.slice(0, cutoff).replace(/\b(avg\.?|average)\b/gi, '').trim();
+  const labelPart = line
+    .slice(0, cutoff)
+    .replace(/\b(avg\.?|average)\b/gi, '')
+    .trim();
   return { quantity: null, label: labelPart || line.trim() };
 }
 
 /**
- * Decide which pricing model best fits the parsed rows.
- *  - All base rows reference "room" / "rooms"        → room_quantity
- *  - Any base row matches HOURLY_RE                   → hourly
- *  - Exactly one row + matches FLAT_RATE_RE          → flat_rate
- *  - All base rows have quantity != null + a noun     → item_quantity
- *  - Otherwise                                         → custom
+ * Same logic but applied to a label-only line (no $). When the price
+ * comes from a PAIRED next line ("1 room" \n "Avg. $79"), we want the
+ * quantity from the label line, not the price line.
  */
-function inferModel(
-  basePrices: AdminBasePrice[],
-  rawLines: string[],
-): AdminPricingModel {
+function extractQuantityFromLabelOnly(line: string): { quantity: number | null; label: string } {
+  const trimmed = line.trim();
+  // "1 room", "12 items", "3 bedrooms"
+  const m = trimmed.match(/^(\d+)\s+([a-zA-Z][a-zA-Z\s]*?)\s*$/);
+  if (m) {
+    const q = parseInt(m[1], 10);
+    if (isFinite(q)) return { quantity: q, label: `${q} ${m[2].trim()}` };
+  }
+  return { quantity: null, label: trimmed };
+}
+
+function inferModel(basePrices: AdminBasePrice[], rawLines: string[]): AdminPricingModel {
   if (basePrices.length === 0) {
-    // No base rows but maybe a single hourly / flat line in raw text.
     const joined = rawLines.join(' ');
     if (HOURLY_RE.test(joined)) return 'hourly';
     if (FLAT_RATE_RE.test(joined)) return 'flat_rate';
@@ -116,31 +158,16 @@ function inferModel(
   const allRoomy = basePrices.every((b) => /\brooms?\b/i.test(b.label));
   if (allRoomy) return 'room_quantity';
 
-  if (basePrices.length === 1 && FLAT_RATE_RE.test(basePrices[0].label)) {
-    return 'flat_rate';
-  }
+  if (basePrices.length === 1 && FLAT_RATE_RE.test(basePrices[0].label)) return 'flat_rate';
 
-  // item_quantity matches in two shapes:
-  //   - Explicit per-quantity rows ("1 sofa $96") where quantity != null
-  //   - Per-item rows ("Sofa $96") where the label is a noun + price
-  // Either way: 2+ rows with non-zero prices is the strongest signal.
-  if (basePrices.length >= 2 && basePrices.every((b) => b.price > 0)) {
-    return 'item_quantity';
-  }
+  // item_quantity: 2+ priced rows, none room-shaped.
+  if (basePrices.length >= 2 && basePrices.every((b) => b.price > 0)) return 'item_quantity';
 
-  // Single labeled row with a real price → flat_rate (cleanout, service call).
-  if (basePrices.length === 1 && basePrices[0].price > 0) {
-    return 'flat_rate';
-  }
+  if (basePrices.length === 1 && basePrices[0].price > 0) return 'flat_rate';
 
-  // Mixed shapes / missing prices → leave it to the admin to clean up.
   return 'custom';
 }
 
-/**
- * Extract a labour rate + minimum from hourly-leaning text.
- * "$100/hour, $100 minimum" — picks two numbers.
- */
 function extractHourly(text: string): { laborRate?: number; minimumCharge?: number } {
   const hourMatch = text.match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*hour|\/\s*hr|per\s+hour|hourly)/i);
   const minMatch = text.match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:minimum|min\.?\s*charge)/i);
@@ -156,13 +183,22 @@ function extractHourly(text: string): { laborRate?: number; minimumCharge?: numb
   return out;
 }
 
+/** Track a generated addOn key to keep the registry unique within one parse. */
+function nextUniqueKey(label: string, taken: Set<string>): string {
+  const base = toKey(label, 'option');
+  if (!taken.has(base)) {
+    taken.add(base);
+    return base;
+  }
+  let n = 2;
+  while (taken.has(`${base}_${n}`)) n += 1;
+  const out = `${base}_${n}`;
+  taken.add(out);
+  return out;
+}
+
 /**
  * Main entry point. Pure — no side effects, no exceptions.
- *
- * Returns a pricing JSON in the v2 admin shape. The runtime pricing
- * engine consumes a different shape; the bridge happens when an admin
- * copies a template into a ServiceProfile (see
- * service-profile.service.ts copyTemplateToProfile).
  */
 export function parsePricing(input: string | null | undefined): AdminPricingJson {
   if (!input || typeof input !== 'string') {
@@ -175,72 +211,97 @@ export function parsePricing(input: string | null | undefined): AdminPricingJson
     };
   }
 
-  const lines = input.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  // Pre-filter: drop blank + narration. Keep order so 1-line lookahead works.
+  const allLines = input.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  const lines: string[] = [];
+  for (const l of allLines) {
+    // Stop at the first Options-style question — admin pasted mixed content.
+    if (looksLikeOptionsHeading(l)) break;
+    if (isNarration(l)) continue;
+    lines.push(l);
+  }
 
   const basePrices: AdminBasePrice[] = [];
   const addOns: AdminAddOn[] = [];
   const addOnKeys = new Set<string>();
   let mode: 'base' | 'addon' = 'base';
 
-  for (const line of lines) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Mode switches.
     if (ADDON_HEADER_RE.test(line)) {
       mode = 'addon';
+      i += 1;
       continue;
     }
     if (BASE_HEADER_RE.test(line)) {
       mode = 'base';
+      i += 1;
       continue;
     }
+
     // Strip a leading bullet so "* Sofa $96" parses cleanly.
     const stripped = line.replace(/^\s*[-*•·]\s+/, '');
 
-    const priced = extractPrice(stripped);
-    const { quantity, label } = extractQuantityAndLabel(stripped);
-
-    if (mode === 'addon') {
-      const key = (() => {
-        const base = toKey(label, 'option');
-        if (!addOnKeys.has(base)) {
-          addOnKeys.add(base);
-          return base;
-        }
-        let n = 2;
-        while (addOnKeys.has(`${base}_${n}`)) n += 1;
-        const out = `${base}_${n}`;
-        addOnKeys.add(out);
-        return out;
-      })();
-      addOns.push({
-        key,
-        label,
-        price: priced?.price ?? 0,
-        source: priced?.source ?? 'missing',
-        quoteManually: priced == null,
-      });
-      continue;
-    }
-
-    if (priced == null) {
-      // Base mode but no price — treat as a missing-price row so admin
-      // can fill in the number later. Skip lines that are clearly just
-      // notes / commentary (no digits, no nouns).
-      if (/^[a-zA-Z]/.test(label)) {
-        basePrices.push({
-          quantity,
+    // Case 1 — price on this line.
+    if (PRICE_TOKEN_RE.test(stripped)) {
+      const priced = extractPrice(stripped)!;
+      const { quantity, label } = extractQuantityAndLabel(stripped);
+      if (mode === 'base') {
+        basePrices.push({ quantity, label: label || stripped, price: priced.price, source: priced.source });
+      } else {
+        addOns.push({
+          key: nextUniqueKey(label || stripped, addOnKeys),
           label: label || stripped,
-          price: 0,
-          source: 'missing',
+          price: priced.price,
+          source: priced.source,
+          quoteManually: false,
         });
       }
+      i += 1;
       continue;
     }
 
-    basePrices.push({
-      quantity,
-      label: label || stripped,
-      price: priced.price,
-      source: priced.source,
-    });
+    // Case 2 — base mode only: pair label-line with next priced line.
+    // Restricted to base mode because addon labels are descriptive
+    // ("Cleaning stains") and should NOT swallow the next addon's
+    // price. Also restricted to label lines that LOOK like a paired
+    // label (numeric quantity prefix OR short noun-only line); a long
+    // descriptive line in base mode is more likely just orphan text
+    // (e.g. category divider like "Flights of stairs").
+    const next = i + 1 < lines.length ? lines[i + 1] : null;
+    const looksLikeBasePairLabel = /^\d+\s+[a-zA-Z]/.test(line) || (line.length < 30 && /^[a-zA-Z]/.test(line));
+    if (
+      mode === 'base' &&
+      looksLikeBasePairLabel &&
+      next &&
+      PRICE_TOKEN_RE.test(next) &&
+      !ADDON_HEADER_RE.test(next) &&
+      !BASE_HEADER_RE.test(next)
+    ) {
+      const priced = extractPrice(next)!;
+      const { quantity, label } = extractQuantityFromLabelOnly(line);
+      basePrices.push({ quantity, label, price: priced.price, source: priced.source });
+      i += 2;
+      continue;
+    }
+
+    // Case 3 — no price, no paired price.
+    // In addon mode: capture as a quote-manually addon.
+    // In base mode: skip (just an orphan label / divider like "Flights of stairs").
+    if (mode === 'addon') {
+      const { label } = extractQuantityFromLabelOnly(line);
+      addOns.push({
+        key: nextUniqueKey(label, addOnKeys),
+        label,
+        price: 0,
+        source: 'missing',
+        quoteManually: true,
+      });
+    }
+    i += 1;
   }
 
   const pricingModel = inferModel(basePrices, lines);
@@ -252,9 +313,6 @@ export function parsePricing(input: string | null | undefined): AdminPricingJson
     addOns,
   };
 
-  // Pricing models that can't produce a bound quote without owner input
-  // get quoteRequired=true so the AI prompt assembler later disables the
-  // calculated-total path for them.
   if (pricingModel === 'hourly' || pricingModel === 'custom') {
     out.quoteRequired = true;
   }
@@ -263,9 +321,8 @@ export function parsePricing(input: string | null | undefined): AdminPricingJson
     if (hourly.laborRate !== undefined) out.laborRate = hourly.laborRate;
     if (hourly.minimumCharge !== undefined) out.minimumCharge = hourly.minimumCharge;
   }
-  if (pricingModel === 'flat_rate') {
-    // Minimum charge = the single base price if there's exactly one.
-    if (basePrices.length === 1) out.minimumCharge = basePrices[0].price;
+  if (pricingModel === 'flat_rate' && basePrices.length === 1) {
+    out.minimumCharge = basePrices[0].price;
   }
 
   return out;
