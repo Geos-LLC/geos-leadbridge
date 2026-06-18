@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
-  ArrowRight, Clock, Info, MessageSquare, Moon, PhoneCall, RotateCcw,
-  Sparkles, Workflow, Loader2,
+  ArrowRight, CalendarCheck, CircleDollarSign, Clock, Info, MessageSquare,
+  Moon, Phone, PhoneCall, RotateCcw, Sparkles, UserCheck, Workflow, Loader2,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
 import { followUpApi, usersApi } from '../../../services/api';
@@ -20,6 +20,10 @@ interface Props {
 // state — same delay strings, same toggle defaults. Wizard parity matters
 // so a user who tweaks here and later visits Settings sees the same
 // values, not a wizard-only ghost set.
+type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
+type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
+type GoalCompletionAction = 'continue' | 'stop';
+
 const DEFAULTS = {
   callDuringBusinessHours: true,
   followUpsApplyQuietHours: true,
@@ -30,19 +34,13 @@ const DEFAULTS = {
   aiHiredCompetitorReengage: true,
   aiHiredCompetitorDelay: '3 weeks',
   followUpAvailability: 'always' as 'always' | 'active_hours',
-  // AI Conversation defaults — same as the old TRIAL_BUNDLE pinned
-  // values, now user-editable. Pre-multi-service wizard hardcoded
-  // these to `true`; the wizard's "AI Conversation" card now exposes
-  // them as toggles so the user can opt out of individual handoff
-  // triggers / re-engagement alerts during onboarding instead of
-  // hunting for them in Settings → Automation.
-  aiConversationEnabled: true,
-  reEngagementAlertEnabled: true,
-  handoffTriggerAgreed: true,
-  handoffTriggerWantsLiveContact: true,
-  handoffTriggerProvidedPhone: true,
-  handoffTriggerProvidedSquareFootage: true,
-  handoffTriggerQualificationComplete: true,
+  // AI Conversation defaults — mirror Settings → Automation → AI
+  // Conversation. The wizard exposes a small subset (Goal +
+  // Response Mode + Goal Completion); handoff triggers and per-goal
+  // qualification fields live on the full page.
+  conversationGoal: 'auto' as ConversationGoal,
+  aiResponseMode: 'autopilot' as AiResponseMode,
+  goalCompletionAction: 'continue' as GoalCompletionAction,
 };
 
 const RESUME_DELAY_OPTIONS = ['6 hours', '12 hours', '24 hours', '2 days', '3 days', '1 week'];
@@ -154,15 +152,20 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           aiHiredCompetitorReengage: s.aiHiredCompetitorReengage ?? prev.aiHiredCompetitorReengage,
           aiHiredCompetitorDelay: s.aiHiredCompetitorDelay || prev.aiHiredCompetitorDelay,
           followUpAvailability: (s.followUpAvailability as any) || prev.followUpAvailability,
-          // AI Conversation flags — hydrated so re-visits don't reset
-          // anything the user already turned off.
-          aiConversationEnabled: s.aiConversationEnabled ?? prev.aiConversationEnabled,
-          reEngagementAlertEnabled: s.reEngagementAlertEnabled ?? prev.reEngagementAlertEnabled,
-          handoffTriggerAgreed: s.handoffTriggerAgreed ?? prev.handoffTriggerAgreed,
-          handoffTriggerWantsLiveContact: s.handoffTriggerWantsLiveContact ?? prev.handoffTriggerWantsLiveContact,
-          handoffTriggerProvidedPhone: s.handoffTriggerProvidedPhone ?? prev.handoffTriggerProvidedPhone,
-          handoffTriggerProvidedSquareFootage: s.handoffTriggerProvidedSquareFootage ?? prev.handoffTriggerProvidedSquareFootage,
-          handoffTriggerQualificationComplete: s.handoffTriggerQualificationComplete ?? prev.handoffTriggerQualificationComplete,
+          // AI Conversation — derive the three wizard controls from
+          // the raw backend fields (followUpStrategy /
+          // aiConversationDeliveryMode / followUpAvailability /
+          // goal*StopOnComplete). Mirrors the parseSettings logic in
+          // Settings → Automation → Conversation.
+          conversationGoal: deriveConversationGoal(s.followUpStrategy),
+          aiResponseMode: deriveAiResponseMode(
+            s.aiConversationDeliveryMode,
+            s.followUpAvailability,
+          ),
+          goalCompletionAction:
+            s.goalQualifyStopOnComplete === true || s.goalPhoneStopOnComplete === true
+              ? 'stop'
+              : 'continue',
         }));
       } catch {
         /* non-fatal */
@@ -175,10 +178,30 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // AI Response Mode → split into the two backend fields. Mirrors the
+  // mapping Settings → Automation → Conversation uses:
+  //   review   → deliveryMode='suggest'   (availability irrelevant)
+  //   assist   → deliveryMode='auto_send' + availability='active_hours'
+  //   autopilot → deliveryMode='auto_send' + availability='always'
+  const responseModeBackend = useMemo(() => {
+    if (opts.aiResponseMode === 'suggest') {
+      return { aiConversationDeliveryMode: 'suggest' as const, followUpAvailability: opts.followUpAvailability };
+    }
+    if (opts.aiResponseMode === 'assist') {
+      return { aiConversationDeliveryMode: 'auto_send' as const, followUpAvailability: 'active_hours' as const };
+    }
+    return { aiConversationDeliveryMode: 'auto_send' as const, followUpAvailability: 'always' as const };
+  }, [opts.aiResponseMode, opts.followUpAvailability]);
+
   // Combine the trial bundle + granular toggles + AI Conversation
-  // toggles into the payload for followUpApi.saveWizardSettings.
-  // Granular fields take precedence — a user who flipped one before
-  // saving expects that exact value to land.
+  // controls into the payload for followUpApi.saveWizardSettings.
+  // The AI Conversation slice writes:
+  //   - followUpStrategy (Conversation Goal)
+  //   - aiConversationDeliveryMode + followUpAvailability (Response Mode)
+  //   - goalQualifyStopOnComplete + goalPhoneStopOnComplete (Goal Action)
+  // The two per-goal stops are written symmetrically with the single
+  // wizard radio — the runtime applies whichever matches the currently
+  // active goal. Users can fine-tune per goal in Settings later.
   const wizardPayload = useMemo(() => ({
     ...TRIAL_BUNDLE,
     fuReEnrollOnSilence: opts.fuReEnrollOnSilence,
@@ -187,15 +210,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     aiDeferralDelay: opts.aiDeferralDelay,
     aiHiredCompetitorReengage: opts.aiHiredCompetitorReengage,
     aiHiredCompetitorDelay: opts.aiHiredCompetitorDelay,
-    followUpAvailability: opts.followUpAvailability,
-    aiConversationEnabled: opts.aiConversationEnabled,
-    reEngagementAlertEnabled: opts.reEngagementAlertEnabled,
-    handoffTriggerAgreed: opts.handoffTriggerAgreed,
-    handoffTriggerWantsLiveContact: opts.handoffTriggerWantsLiveContact,
-    handoffTriggerProvidedPhone: opts.handoffTriggerProvidedPhone,
-    handoffTriggerProvidedSquareFootage: opts.handoffTriggerProvidedSquareFootage,
-    handoffTriggerQualificationComplete: opts.handoffTriggerQualificationComplete,
-  }), [opts]);
+    // AI Conversation slice.
+    followUpStrategy: opts.conversationGoal,
+    aiConversationDeliveryMode: responseModeBackend.aiConversationDeliveryMode,
+    followUpAvailability: responseModeBackend.followUpAvailability,
+    goalQualifyStopOnComplete: opts.goalCompletionAction === 'stop',
+    goalPhoneStopOnComplete: opts.goalCompletionAction === 'stop',
+  }), [opts, responseModeBackend]);
 
   async function apply() {
     if (saving) return;
@@ -427,77 +448,45 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                 a user revisiting the wizard's Automation step doesn't
                 wipe what they set on AI Rules. */}
 
-            {/* AI Conversation — master switch + handoff triggers +
-                re-engagement alerts. Pre 2026-06-18 these were hardcoded
-                ON inside TRIAL_BUNDLE; now exposed as toggles so users
-                can dial in their handoff sensitivity during onboarding
-                rather than after the first surprise SMS lands. */}
-            <SettingCard
+            {/* ── AI Conversation: Conversation Goal ─────────────────
+                Mirrors Settings → Automation → Conversation. 5 cards:
+                Auto / Price / Qualify / Booking / Call Handoff. Writes
+                followUpStrategy. */}
+            <RadioCardSection
               icon={Sparkles}
-              iconTone="purple"
-              title="AI Conversation"
-              subtitle="When AI auto-replies to customers and which signals page you to take over."
-              enabled={opts.aiConversationEnabled}
-              onToggle={v => setOpts(o => ({ ...o, aiConversationEnabled: v }))}
-              contentPad="0 24px 16px"
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <ToggleRow
-                  icon={MessageSquare}
-                  iconTone="gray"
-                  label="Send me an SMS when a customer replies"
-                  on={opts.reEngagementAlertEnabled}
-                  onChange={v => setOpts(o => ({ ...o, reEngagementAlertEnabled: v }))}
-                />
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--lb-line, #e2e8f0)' }}>
-                  <div style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--lb-ink-5, #64748b)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    marginBottom: 6,
-                  }}>
-                    Hand off to me when the customer…
-                  </div>
-                  <ToggleRow
-                    icon={PhoneCall}
-                    iconTone="gray"
-                    label="Agrees on price / is ready to book"
-                    on={opts.handoffTriggerAgreed}
-                    onChange={v => setOpts(o => ({ ...o, handoffTriggerAgreed: v }))}
-                  />
-                  <ToggleRow
-                    icon={PhoneCall}
-                    iconTone="gray"
-                    label="Asks for a call or wants live contact"
-                    on={opts.handoffTriggerWantsLiveContact}
-                    onChange={v => setOpts(o => ({ ...o, handoffTriggerWantsLiveContact: v }))}
-                  />
-                  <ToggleRow
-                    icon={PhoneCall}
-                    iconTone="gray"
-                    label="Provides their phone number"
-                    on={opts.handoffTriggerProvidedPhone}
-                    onChange={v => setOpts(o => ({ ...o, handoffTriggerProvidedPhone: v }))}
-                  />
-                  <ToggleRow
-                    icon={PhoneCall}
-                    iconTone="gray"
-                    label="Shares square footage"
-                    on={opts.handoffTriggerProvidedSquareFootage}
-                    onChange={v => setOpts(o => ({ ...o, handoffTriggerProvidedSquareFootage: v }))}
-                  />
-                  <ToggleRow
-                    icon={PhoneCall}
-                    iconTone="gray"
-                    label="Completes qualification questions"
-                    on={opts.handoffTriggerQualificationComplete}
-                    onChange={v => setOpts(o => ({ ...o, handoffTriggerQualificationComplete: v }))}
-                  />
-                </div>
-              </div>
-            </SettingCard>
+              title="Conversation Goal"
+              subtitle="What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation."
+              options={CONVERSATION_GOAL_OPTIONS}
+              value={opts.conversationGoal}
+              onChange={v => setOpts(o => ({ ...o, conversationGoal: v }))}
+              columns={2}
+            />
+
+            {/* ── AI Response Mode ────────────────────────────────────
+                3 cards: Review / Assist when unavailable / Full
+                autopilot. Maps to deliveryMode + availability. */}
+            <RadioCardSection
+              icon={MessageSquare}
+              title="AI Response Mode"
+              subtitle="When AI is allowed to respond automatically to customer messages."
+              options={AI_RESPONSE_MODE_OPTIONS}
+              value={opts.aiResponseMode}
+              onChange={v => setOpts(o => ({ ...o, aiResponseMode: v }))}
+              columns={1}
+            />
+
+            {/* ── When the goal is reached ───────────────────────────
+                2 cards: Continue AI + notify / Stop AI + notify.
+                Writes goalQualify/goalPhoneStopOnComplete. */}
+            <RadioCardSection
+              icon={Workflow}
+              title="When the goal is reached"
+              subtitle="What AI does once it achieves the conversation goal."
+              options={GOAL_COMPLETION_OPTIONS}
+              value={opts.goalCompletionAction}
+              onChange={v => setOpts(o => ({ ...o, goalCompletionAction: v }))}
+              columns={2}
+            />
           </div>
         )}
       </div>
@@ -641,6 +630,170 @@ function PillRow({
           </select>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── AI Conversation: radio-card option lists ───────────────────────────
+//
+// Mirrors the option set in Settings → Automation → Conversation. The
+// internal keys (auto/price/qualify/booking/phone) and labels stay in
+// sync with STRATEGIES there so a wizard-saved value renders correctly
+// on the full settings page next visit.
+
+const CONVERSATION_GOAL_OPTIONS: Array<{
+  value: ConversationGoal;
+  title: string;
+  body: string;
+  icon: typeof Sparkles;
+  recommended?: boolean;
+}> = [
+  { value: 'auto',    icon: Sparkles,         title: 'Auto',         body: 'AI automatically chooses the best approach based on the conversation.', recommended: true },
+  { value: 'price',   icon: CircleDollarSign, title: 'Price',        body: 'Provide pricing information as quickly and accurately as possible.' },
+  { value: 'qualify', icon: UserCheck,        title: 'Qualify',      body: 'Collect the required information before quoting or booking.' },
+  { value: 'booking', icon: CalendarCheck,    title: 'Booking',      body: 'Move the customer toward scheduling the job.' },
+  { value: 'phone',   icon: Phone,            title: 'Call Handoff', body: "Get the customer's number so your team can call." },
+];
+
+const AI_RESPONSE_MODE_OPTIONS: Array<{
+  value: AiResponseMode;
+  title: string;
+  body: string;
+  icon: typeof Sparkles;
+}> = [
+  { value: 'suggest',   icon: MessageSquare, title: 'Review before sending',  body: 'AI drafts replies and parks them for your approval. Nothing sends until you tap Send.' },
+  { value: 'assist',    icon: Moon,          title: 'Assist when unavailable', body: 'AI responds automatically outside your business hours.' },
+  { value: 'autopilot', icon: Sparkles,      title: 'Full autopilot',         body: 'AI responds automatically at any time.' },
+];
+
+const GOAL_COMPLETION_OPTIONS: Array<{
+  value: GoalCompletionAction;
+  title: string;
+  body: string;
+  icon: typeof Sparkles;
+}> = [
+  { value: 'continue', icon: Workflow, title: 'Continue AI + notify team', body: 'AI keeps replying after the goal is reached; your team is notified.' },
+  { value: 'stop',     icon: PhoneCall, title: 'Stop AI + notify team',     body: 'AI pauses once the goal is reached and hands off to your team.' },
+];
+
+// Derive the wizard's Conversation Goal radio value from the backend's
+// followUpStrategy. Legacy 'hybrid' and 'convert' values are remapped
+// for display the same way Settings → Conversation does.
+function deriveConversationGoal(saved: any): ConversationGoal {
+  if (saved === 'hybrid') return 'auto';
+  if (saved === 'convert') return 'qualify';
+  if (saved === 'auto' || saved === 'price' || saved === 'qualify' || saved === 'booking' || saved === 'phone') {
+    return saved;
+  }
+  return 'auto';
+}
+
+// Derive the wizard's AI Response Mode radio value from the two
+// backend fields. Same mapping the full Conversation page uses.
+function deriveAiResponseMode(
+  deliveryMode: any,
+  availability: any,
+): AiResponseMode {
+  if (deliveryMode === 'suggest') return 'suggest';
+  if (availability === 'active_hours') return 'assist';
+  return 'autopilot';
+}
+
+// Lightweight radio-card section. Title + subtitle header on top, grid
+// of selectable cards below. Used for the three AI Conversation
+// sub-controls. Mirrors the OptionCard / SectionCard visual rhythm of
+// Settings → Automation → Conversation without dragging in the whole
+// SectionCard primitive (which has mixed-state badges, save indicators,
+// and other concerns the wizard doesn't need).
+function RadioCardSection<T extends string>({
+  icon: Icon, title, subtitle, options, value, onChange, columns,
+}: {
+  icon: typeof Sparkles;
+  title: string;
+  subtitle: string;
+  options: Array<{ value: T; title: string; body: string; icon: typeof Sparkles; recommended?: boolean }>;
+  value: T;
+  onChange: (v: T) => void;
+  columns: 1 | 2;
+}) {
+  const gridStyle: CSSProperties = columns === 1
+    ? { display: 'grid', gridTemplateColumns: '1fr', gap: 10 }
+    : { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 };
+  return (
+    <div style={{
+      padding: '18px 20px',
+      background: 'white',
+      border: '1px solid var(--lb-line, #e2e8f0)',
+      borderRadius: 14,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(124,58,237,0.08)', color: '#7c3aed',
+          flexShrink: 0,
+        }}>
+          <Icon size={16} />
+        </div>
+        <div>
+          <div style={{
+            fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)',
+            letterSpacing: '-0.01em', lineHeight: 1.2,
+          }}>{title}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+            {subtitle}
+          </div>
+        </div>
+      </div>
+      <div style={gridStyle}>
+        {options.map(opt => {
+          const selected = opt.value === value;
+          const Icon2 = opt.icon;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              style={{
+                position: 'relative',
+                textAlign: 'left',
+                padding: '12px 14px',
+                background: selected ? 'rgba(37,99,235,0.06)' : 'white',
+                border: '1px solid ' + (selected ? 'var(--lb-accent, #2563eb)' : 'var(--lb-line, #e2e8f0)'),
+                borderRadius: 10,
+                cursor: 'pointer',
+                transition: 'background 120ms, border-color 120ms',
+                fontFamily: 'inherit',
+                color: 'inherit',
+              }}
+            >
+              {opt.recommended && (
+                <span style={{
+                  position: 'absolute', top: 8, right: 8,
+                  fontSize: 9.5, fontWeight: 800,
+                  padding: '2px 6px', borderRadius: 4,
+                  background: '#dcfce7', color: '#15803d',
+                  letterSpacing: 0.06, textTransform: 'uppercase',
+                  fontFamily: 'var(--lb-font-mono)',
+                }}>
+                  Rec
+                </span>
+              )}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <Icon2 size={16} style={{ color: selected ? 'var(--lb-accent, #2563eb)' : 'var(--lb-ink-5, #64748b)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
+                    {opt.title}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+                    {opt.body}
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
