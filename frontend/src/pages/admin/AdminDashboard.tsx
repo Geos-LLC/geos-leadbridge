@@ -13,6 +13,35 @@ const tierNames: Record<string, string> = {
   ENTERPRISE: 'Convert',
 };
 
+/**
+ * Convert an axios admin-API error into a user-readable string. Surfaces
+ * three buckets distinctly so the operator can self-diagnose instead of
+ * staring at a generic "Failed" toast:
+ *
+ *   - axios "Network Error" / ECONNABORTED → "couldn't reach server"
+ *     (proxy / VPN / Vercel preview gone cold / browser blocked CORS)
+ *   - any HTTP response → "<status>: <server message>"
+ *     The server's `data.message` is the canonical reason (NestJS-style),
+ *     `data.error` is the fallback (older endpoints).
+ *   - everything else → caller's fallback message.
+ */
+function describeAdminError(err: any, fallback: string): string {
+  if (!err) return fallback;
+  if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+    return `Network error — couldn't reach server. Check your connection or VPN.`;
+  }
+  if (err.code === 'ECONNABORTED') {
+    return `Request timed out. Try again.`;
+  }
+  const status = err.response?.status;
+  const body = err.response?.data;
+  const raw = body?.message ?? body?.error;
+  const msg = Array.isArray(raw) ? raw.join('; ') : (typeof raw === 'string' ? raw : null);
+  if (status && msg) return `${status}: ${msg}`;
+  if (status) return `${status}: ${fallback}`;
+  return fallback;
+}
+
 function getTierDisplay(u: AdminUser): { label: string; className: string } {
   if (u.role === 'ADMIN') {
     return { label: 'Admin', className: 'px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold uppercase' };
@@ -260,7 +289,7 @@ export default function AdminDashboard() {
       loadData();
     } catch (error: any) {
       console.error('Failed to delete user:', error);
-      notify.error('Error', 'Failed to delete user');
+      notify.error('Error', describeAdminError(error, 'Failed to delete user'));
     }
   };
 
@@ -272,7 +301,7 @@ export default function AdminDashboard() {
       loadData();
     } catch (error: any) {
       console.error('Failed to update trial leads:', error);
-      notify.error('Error', 'Failed to update trial leads');
+      notify.error('Error', describeAdminError(error, 'Failed to update trial leads'));
     }
   };
 
@@ -283,7 +312,19 @@ export default function AdminDashboard() {
       loadData();
     } catch (error: any) {
       console.error('Failed to reset trial leads:', error);
-      notify.error('Error', 'Failed to reset trial leads');
+      if (isSupportAccessDenied(error)) {
+        // The SupportGrant scope-guard surfaces as a 404. Most likely
+        // cause: the bundled grant expired (60 min default). Force the
+        // page back into the SupportAccessRequired state so the operator
+        // can refresh the grant in one click.
+        setUsersAccessDenied(true);
+        notify.error(
+          'Support access expired',
+          'Your support grant lapsed. Refresh access and try again.',
+        );
+        return;
+      }
+      notify.error('Error', describeAdminError(error, 'Failed to reset trial leads'));
     }
   };
 
