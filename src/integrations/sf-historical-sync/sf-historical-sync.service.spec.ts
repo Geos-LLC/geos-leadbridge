@@ -1091,6 +1091,9 @@ describe('SfHistoricalSyncService', () => {
   // arrived via live webhook or backfill reconciliation.
   describe('sfJobOutcome mirror parity with live webhook', () => {
     it('manualLink with sfStatus writes both writeStatus AND writeSfJobOutcomeMirror', async () => {
+      // Post 2026-06-08 SF→LB canonical mapping collapses
+      // pending/confirmed/rescheduled/scheduled all into LB `booked`.
+      // sf-status-map.ts mapSfStatus('scheduled') === 'booked'.
       const { prisma } = buildPrisma({
         leads: { 'L1': { id: 'L1', userId: 'U1', status: 'engaged', sfJobId: null, syncStatus: 'pending' } },
       });
@@ -1098,15 +1101,15 @@ describe('SfHistoricalSyncService', () => {
       const svc = new SfHistoricalSyncService(prisma, ls);
       await svc.manualLink('admin-1', { lbLeadId: 'L1', sfJobId: 'SF-A', sfStatus: 'scheduled' });
       expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
-        'L1', 'scheduled', expect.any(Date),
+        'L1', 'booked', expect.any(Date),
         expect.objectContaining({ sfJobId: 'SF-A', userId: 'U1' }),
       );
       expect(ls.writeStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ newStatus: 'scheduled', source: 'service_flow' }),
+        expect.objectContaining({ newStatus: 'booked', source: 'service_flow' }),
       );
     });
 
-    it('applyBulkLink scheduled writes mirror with same canonical value', async () => {
+    it('applyBulkLink scheduled writes mirror with same canonical value (booked post-simplification)', async () => {
       const { prisma } = buildPrisma({
         leads: { 'L1': { id: 'L1', userId: 'U1', status: 'new', sfJobId: null, syncStatus: 'pending' } },
       });
@@ -1121,7 +1124,7 @@ describe('SfHistoricalSyncService', () => {
         }],
       });
       expect(ls.writeSfJobOutcomeMirror).toHaveBeenCalledWith(
-        'L1', 'scheduled', occurredAt,
+        'L1', 'booked', occurredAt,
         expect.objectContaining({ sfJobId: 'SF-A' }),
       );
     });

@@ -442,6 +442,10 @@ function buildYelpHarness(opts: {
   svc.eventEmitter = { emit: jest.fn() };
   svc.crmWebhookService = { emit: jest.fn().mockResolvedValue(undefined) };
   svc.leadCache = { invalidateLeadMessagesAndList: jest.fn().mockResolvedValue(undefined) };
+  // Trial meter — Yelp/TT NEW_EVENT path calls trialService.consumeLead on
+  // every newly-persisted lead (PR #194, 2026-06-02). Stub it out — these
+  // tests don't exercise the trial CAS, just the first-chat-row contract.
+  svc.trialService = { consumeLead: jest.fn().mockResolvedValue(undefined) };
 
   return {
     svc,

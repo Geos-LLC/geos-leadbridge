@@ -42,7 +42,22 @@ function makeService(prisma: any): NotificationsService {
     getOrSet: jest.fn(async (_k: string, _ttl: number, loader: () => Promise<any>) => loader()),
     del: jest.fn().mockResolvedValue(undefined),
   } as any;
-  return new NotificationsService(prisma, configService, cache, {} as any);
+  // The cross-tenant ownership guard runs BEFORE any of the other deps are
+  // touched (savedAccount.findFirst is the first thing the patched methods
+  // do). So `{} as any` stubs for trial / businessHours / conversationContext
+  // / instantTextAi / platformService satisfy DI without needing real
+  // behavior. Six new args were added to NotificationsService between
+  // 2026-04 and 2026-06 — see constructor at notifications.service.ts:195.
+  return new NotificationsService(
+    prisma,
+    configService,
+    cache,
+    {} as any, // trialService
+    {} as any, // businessHours
+    {} as any, // conversationContext
+    {} as any, // instantTextAi
+    {} as any, // platformService (forwardRef)
+  );
 }
 
 describe('NotificationsService — cross-tenant Sigcore access', () => {
