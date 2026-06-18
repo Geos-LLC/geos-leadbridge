@@ -47,6 +47,11 @@ describe('BASE HARD RULES — non-negotiable', () => {
     for (const heading of [
       'SCHEDULING SAFETY',
       'PRICING SAFETY',
+      // Added 2026-06-18: blocks the silent bundling of unknown
+      // services into a known service's price (the cleaning + ironing
+      // incident — AI quoted "cleaning" but had implicitly absorbed
+      // ironing into the number without telling the customer).
+      'PRICING — UNKNOWN SERVICES IN A BUNDLED ASK',
       'FAQ TRUTHFULNESS',
       'SENSITIVE TOPICS',
       'ANTI-LOOP',
@@ -55,6 +60,17 @@ describe('BASE HARD RULES — non-negotiable', () => {
     ]) {
       expect(block).toContain(heading);
     }
+  });
+
+  it('UNKNOWN SERVICES rule prescribes hourly rate OR defer (not silent bundling)', () => {
+    const block = renderPlaybookBlock(makeAccount());
+    // The two named fallbacks must both be present in the rule so the
+    // LLM has a clear next move when it lacks pricing for a requested
+    // service — without them the model defaults back to fabricating.
+    expect(block).toMatch(/hourly\s+(rate|labor\s+rate)/i);
+    expect(block).toMatch(/get back to you|defer|check with the team/i);
+    // Hard prohibition on padding — the failure mode we're guarding.
+    expect(block).toMatch(/NEVER pad|never pad/i);
   });
 });
 
@@ -341,15 +357,15 @@ describe('getCustomInstructions', () => {
 // ─── Token budget regression guard ───────────────────────────────────────
 
 describe('token budget', () => {
-  it('full empty-playbook block stays under 7800 characters', () => {
+  it('full empty-playbook block stays under 8500 characters', () => {
     const block = renderPlaybookBlock(makeAccount());
-    // ~4 chars per token rule-of-thumb → ~1950 tokens. Still small.
+    // ~4 chars per token rule-of-thumb → ~2125 tokens. Still small.
     // Threshold bumped 7000 → 7800 when the PRICE INTENT ENFORCEMENT
-    // clause joined BASE HARD RULES (price-intent runtime guard,
-    // 2026-06-14). That clause is the load-bearing rule that makes the
-    // runtime guard authoritative over softer template language —
-    // worth ~700 chars.
-    expect(block.length).toBeLessThan(7800);
+    // clause joined BASE HARD RULES (2026-06-14, ~700 chars).
+    // Threshold bumped 7800 → 8500 when the UNKNOWN SERVICES IN A
+    // BUNDLED ASK clause joined (2026-06-18, ~600 chars) — the
+    // cleaning + ironing fabrication-bundle guard.
+    expect(block.length).toBeLessThan(8500);
   });
 
   it('section keys covered list matches PLAYBOOK_SECTION_ORDER', () => {
