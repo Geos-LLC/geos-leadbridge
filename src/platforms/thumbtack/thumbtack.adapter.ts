@@ -81,9 +81,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     });
 
     // Force re-authentication so user picks the correct Thumbtack account
-    // (prevents auto-login to a personal account instead of the Pro account)
+    // (prevents auto-login to a personal account instead of the Pro account).
+    // `consent` is included so newly added scopes are re-presented for
+    // approval — without it, Hydra reuses the prior consent grant for users
+    // who already approved older scope sets, silently omitting any scope
+    // that wasn't on the old consent (observed 2026-06-18 with the
+    // associate-phone scopes for user 99e15303).
     // max_age=0 tells the OIDC provider the auth must be fresh (no cached session)
-    params.set('prompt', 'login');
+    params.set('prompt', 'login consent');
     params.set('max_age', '0');
 
     // OIDC login_hint — tells TT/Hydra which identity the user wants to
