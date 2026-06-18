@@ -12,11 +12,14 @@ import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
 import ConnectStep from './steps/ConnectStep';
 import BusinessWebsiteStep from './steps/BusinessWebsiteStep';
-import AIKnowledgeStep from './steps/AIKnowledgeStep';
-import PricingSetupStep from './steps/PricingSetupStep';
+import ServicesOfferedStep from './steps/ServicesOfferedStep';
+import ServiceSetupStep from './steps/ServiceSetupStep';
 import AutomationLevelStep from './steps/AutomationLevelStep';
-import AIRulesStep from './steps/AIRulesStep';
-import { FIRST_ACTIONABLE_STEP, WIZARD_STEP_META, getStepIndex } from './wizardConfig';
+// Legacy step components (ai, pricing, ai_rules) remain on disk but are
+// no longer rendered — the multi-service refactor (2026-06-18) replaced
+// them with services + service_setup. The files are intentionally kept
+// so a rollback is a one-line change to wizardConfig.
+import { FIRST_ACTIONABLE_STEP, RETIRED_WIZARD_STEPS, WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
 // the checklist, and the calls to the backend wizard endpoint; each
@@ -50,11 +53,15 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
   const [configSummary, setConfigSummary] = useState<OnboardingConfigSummary | null>(null);
 
   // Pick the right starting step: prefer the user's last-known
-  // currentStep, but skip legacy 'welcome' (it's no longer in the
-  // wizard) and never land on 'done' on initial mount.
+  // currentStep, but skip retired slugs (welcome + the pre-multi-service
+  // ai/pricing/ai_rules steps) and never land on 'done' on initial
+  // mount. Returning users mid-flow on a retired step land on the
+  // first actionable step instead.
   function resolveInitialStep(p: OnboardingProfile | null): WizardStep {
     const stored = p?.wizardCurrentStep as WizardStep | null | undefined;
-    if (stored && stored !== 'welcome' && stored !== 'done') return stored;
+    if (stored && stored !== 'done' && !RETIRED_WIZARD_STEPS.has(stored)) {
+      return stored;
+    }
     return FIRST_ACTIONABLE_STEP;
   }
   const [currentStep, setCurrentStep] = useState<WizardStep>(resolveInitialStep(profile));
@@ -240,10 +247,9 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
   const stepOwnsActions =
     isDone ||
     currentStep === 'business' ||
-    currentStep === 'ai' ||
-    currentStep === 'pricing' ||
-    currentStep === 'automation' ||
-    currentStep === 'ai_rules';
+    currentStep === 'services' ||
+    currentStep === 'service_setup' ||
+    currentStep === 'automation';
 
   let body: React.ReactNode;
   if (isDone) {
@@ -279,29 +285,31 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
         }}
       />
     );
-  } else if (currentStep === 'ai') {
+  } else if (currentStep === 'services') {
     body = (
-      <AIKnowledgeStep
+      <ServicesOfferedStep
         saving={saving}
         setSaving={setSaving}
         onSaveContinue={async () => {
           if (!nextStep) return;
-          await advance({ finishedStep: 'ai', status: 'done', nextStep });
+          await advance({ finishedStep: 'services', status: 'done', nextStep });
+        }}
+        // "Use default service for now" — skip path. Falls through to
+        // the legacy resolver at runtime until the user revisits.
+        onSkipFallback={async () => {
+          if (!nextStep) return;
+          await advance({ finishedStep: 'services', status: 'skipped', nextStep });
         }}
       />
     );
-  } else if (currentStep === 'pricing') {
+  } else if (currentStep === 'service_setup') {
     body = (
-      <PricingSetupStep
+      <ServiceSetupStep
         saving={saving}
         setSaving={setSaving}
         onSaveContinue={async () => {
           if (!nextStep) return;
-          await advance({ finishedStep: 'pricing', status: 'done', nextStep });
-        }}
-        onSkipManual={async () => {
-          if (!nextStep) return;
-          await advance({ finishedStep: 'pricing', status: 'skipped', nextStep });
+          await advance({ finishedStep: 'service_setup', status: 'done', nextStep });
         }}
       />
     );
@@ -316,18 +324,11 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
         }}
       />
     );
-  } else if (currentStep === 'ai_rules') {
-    body = (
-      <AIRulesStep
-        saving={saving}
-        setSaving={setSaving}
-        onSaveContinue={async () => {
-          if (!nextStep) return;
-          await advance({ finishedStep: 'ai_rules', status: 'done', nextStep });
-        }}
-      />
-    );
   } else {
+    // Retired slugs (welcome / ai / pricing / ai_rules) and any future
+    // unknown step land here. PlaceholderStep is a generic "nothing to
+    // do, hit Continue" pane — keeps the wizard navigable for users
+    // mid-flow during the rollout.
     body = <PlaceholderStep step={currentStep} />;
   }
 

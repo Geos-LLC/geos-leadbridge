@@ -18,9 +18,15 @@ export interface WizardStepMeta {
 
 // Welcome is intentionally absent from this list — the Overview's
 // "Start setup" card is the welcome moment, no need for a separate
-// in-wizard splash. The backend keeps 'welcome' as a valid slug for
-// historical wizardChecklistStatus rows; the frontend just never
-// navigates there now.
+// in-wizard splash. The backend keeps 'welcome' (and the legacy `ai`,
+// `pricing`, `ai_rules` slugs from the pre-multi-service flow) as
+// valid WizardStep values so historical wizardChecklistStatus rows
+// continue to round-trip; the frontend just never navigates to them.
+//
+// 2026-06-18 — multi-service refactor. New step list:
+//   connect → business → services → service_setup → automation → done
+// Replaces the prior global FAQ / global Pricing / AI Rules steps with
+// per-ServiceProfile assignment + setup.
 export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'connect',
@@ -37,17 +43,17 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     countsTowardChecklist: true,
   },
   {
-    slug: 'ai',
-    label: 'FAQ',
-    title: 'Your business FAQ',
-    description: 'Answers AI uses verbatim when leads ask. Pre-filled from your website where possible.',
+    slug: 'services',
+    label: 'Services',
+    title: 'Which services does each account offer?',
+    description: 'Assign your services to each connected account, or add new ones from a template.',
     countsTowardChecklist: true,
   },
   {
-    slug: 'pricing',
-    label: 'Pricing',
-    title: 'Set your pricing',
-    description: 'Start from a recommended template or build it yourself later.',
+    slug: 'service_setup',
+    label: 'Service setup',
+    title: 'Set up each service',
+    description: 'Pricing, customer answers, and optional service-specific questions. Active services need at least pricing + answers.',
     countsTowardChecklist: true,
   },
   {
@@ -58,13 +64,6 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     countsTowardChecklist: true,
   },
   {
-    slug: 'ai_rules',
-    label: 'AI Rules',
-    title: 'AI conversation rules',
-    description: 'Goal AI is chasing, when it can reply, and what happens the moment it gets there.',
-    countsTowardChecklist: true,
-  },
-  {
     slug: 'done',
     label: 'Done',
     title: "You're all set!",
@@ -72,6 +71,17 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     countsTowardChecklist: false,
   },
 ];
+
+// Legacy step slugs the multi-service refactor removed from the active
+// rail. Existing OnboardingProfile rows may still carry these in
+// `wizardCurrentStep` / `wizardChecklistStatus`; we filter them out at
+// render time so a returning user lands on the new flow gracefully.
+export const RETIRED_WIZARD_STEPS = new Set<WizardStep>([
+  'welcome',
+  'ai',
+  'pricing',
+  'ai_rules',
+]);
 
 // Welcome was the first step in the original 8-step flow. Removed
 // because the Overview "Start setup" card is the welcome moment.
