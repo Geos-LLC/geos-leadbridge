@@ -598,7 +598,11 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             {/* ── AI Conversation: Conversation Goal ─────────────────
                 Mirrors Settings → Automation → Conversation. 5 cards:
                 Auto / Price / Qualify / Booking / Call Handoff. Writes
-                followUpStrategy. */}
+                followUpStrategy. The trailing "Advanced settings" tile
+                fills the empty 6th grid slot and deep-links to the
+                full Conversation page where each goal has its own
+                advanced card (qualification fields, booking
+                availability windows, handoff triggers, etc.). */}
             <RadioCardSection
               icon={Sparkles}
               title="Conversation Goal"
@@ -607,6 +611,12 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               value={opts.conversationGoal}
               onChange={v => setOpts(o => ({ ...o, conversationGoal: v }))}
               columns={2}
+              extraTile={{
+                icon: ExternalLink,
+                title: 'Advanced settings',
+                body: 'Fine-tune each goal — qualification fields, booking windows, handoff triggers.',
+                onClick: () => navigate('/automation/conversation'),
+              }}
             />
 
             {/* ── AI Response Mode ────────────────────────────────────
@@ -868,7 +878,7 @@ function deriveAiResponseMode(
 // SectionCard primitive (which has mixed-state badges, save indicators,
 // and other concerns the wizard doesn't need).
 function RadioCardSection<T extends string>({
-  icon: Icon, title, subtitle, options, value, onChange, columns,
+  icon: Icon, title, subtitle, options, value, onChange, columns, extraTile,
 }: {
   icon: typeof Sparkles;
   title: string;
@@ -877,6 +887,20 @@ function RadioCardSection<T extends string>({
   value: T;
   onChange: (v: T) => void;
   columns: 1 | 2;
+  /**
+   * Optional trailing tile rendered at the end of the grid. Visually
+   * distinct from the radio options (dashed border, neutral tint) and
+   * acts as a deep-link action rather than a selectable value. Used
+   * for "Advanced settings →" handoffs to Settings → Automation where
+   * each goal has its own deep configuration card (qualification
+   * fields, booking windows, handoff triggers, etc.).
+   */
+  extraTile?: {
+    icon: typeof Sparkles;
+    title: string;
+    body: string;
+    onClick: () => void;
+  };
 }) {
   const gridStyle: CSSProperties = columns === 1
     ? { display: 'grid', gridTemplateColumns: '1fr', gap: 10 }
@@ -955,6 +979,53 @@ function RadioCardSection<T extends string>({
             </button>
           );
         })}
+        {extraTile && (() => {
+          const ExtraIcon = extraTile.icon;
+          return (
+            <button
+              type="button"
+              onClick={extraTile.onClick}
+              style={{
+                position: 'relative',
+                textAlign: 'left',
+                padding: '12px 14px',
+                background: '#fafbfc',
+                // Dashed neutral border so the tile reads as an action
+                // (jumps to Settings) rather than a selectable goal.
+                border: '1px dashed var(--lb-line, #cbd5e1)',
+                borderRadius: 10,
+                cursor: 'pointer',
+                transition: 'background 120ms, border-color 120ms',
+                fontFamily: 'inherit',
+                color: 'inherit',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.background = '#f1f5f9';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--lb-accent, #2563eb)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.background = '#fafbfc';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--lb-line, #cbd5e1)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <ExtraIcon size={16} style={{ color: 'var(--lb-accent, #2563eb)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{
+                    fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}>
+                    {extraTile.title}
+                    <ArrowRight size={13} style={{ color: 'var(--lb-accent, #2563eb)' }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+                    {extraTile.body}
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })()}
       </div>
     </div>
   );
