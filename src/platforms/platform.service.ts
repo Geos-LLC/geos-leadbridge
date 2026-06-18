@@ -526,7 +526,22 @@ export class PlatformService {
           } catch {}
         }
 
-        const newCredentials = await adapter.refreshAccessToken(currentRefreshToken);
+        let newCredentials: PlatformCredentials;
+        try {
+          newCredentials = await adapter.refreshAccessToken(currentRefreshToken);
+        } catch (err: any) {
+          // OAuth provider rejected the refresh — mark the per-account token
+          // signal so the UI can render "reconnect required" inline instead
+          // of leaving the user guessing. `revoked` is the safe assumption
+          // when a refresh fails for any reason (invalid_grant, network 5xx,
+          // etc.) — the next successful refresh/reauth flips it back to ok.
+          await this.connectionHealth.updateOAuthToken(accountId, {
+            status: 'revoked',
+            lastErrorAt: new Date().toISOString(),
+            lastErrorMessage: err?.message ?? String(err),
+          });
+          throw err;
+        }
 
         // Store the new credentials (with new refresh token) immediately
         await this.updateAccountCredentials(accountId, {
@@ -534,6 +549,16 @@ export class PlatformService {
           refreshToken: newCredentials.refreshToken || refreshToken,
           email,
           expiresAt: newCredentials.expiresAt,
+        });
+        // Refresh worked — mark the per-account token signal healthy and
+        // record the freshly-granted scope claim for UI rendering.
+        await this.connectionHealth.updateOAuthToken(accountId, {
+          status: 'ok',
+          scopes: newCredentials.scope,
+          expiresAt: newCredentials.expiresAt?.toISOString(),
+          lastRefreshAt: new Date().toISOString(),
+          lastErrorAt: undefined,
+          lastErrorMessage: undefined,
         });
 
         // Also sync to Platform table so platform-level fallback stays fresh
@@ -636,8 +661,10 @@ export class PlatformService {
    * Automatically cleans up any existing webhooks before creating a new one
    */
   async setupThumbtackWebhook(userId: string, businessId: string): Promise<{ webhookId: string; businessId: string }> {
-    // Try account-specific credentials first, then fall back to platform credentials
-    let credentials: { accessToken: string; refreshToken?: string };
+    // Try account-specific credentials first, then fall back to platform credentials.
+    // Picking up `scope` + `expiresAt` so the connection-health write at the end
+    // of this method records the freshly-granted OAuth token claim accurately.
+    let credentials: { accessToken: string; refreshToken?: string; scope?: string; expiresAt?: Date };
     const accountCreds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
     if (accountCreds) {
       console.log(`[PlatformService] Using account-specific credentials for webhook setup (business: ${businessId})`);
@@ -671,8 +698,17 @@ export class PlatformService {
       // Continue with registration even if cleanup fails
     }
 
-    // Register webhook with Thumbtack
-    const result = await adapter.registerWebhook(credentials, businessId, webhookUrl);
+    // Register webhook with Thumbtack. Wrap in try/catch so the connection-health
+    // webhook signal records the failure before re-throwing — the caller still
+    // gets the original error, but the UI gets a persistent "webhook setup
+    // failed" indicator instead of having to rely on Loki spelunking.
+    let result: { webhookId: string };
+    try {
+      result = await adapter.registerWebhook(credentials, businessId, webhookUrl);
+    } catch (err: any) {
+      await this.writeWebhookHealthFailure(userId, businessId, err?.message ?? String(err));
+      throw err;
+    }
 
     // Store businessId and webhookId in platform connection.
     // CRITICAL: always set connected=true here — this is the only reliable place
@@ -714,6 +750,11 @@ export class PlatformService {
 
     await this.invalidateSavedAccountsCache(userId);
 
+    // Write OAuth-token + webhook health signals while we still have fresh
+    // credentials in scope. Both writes are non-blocking by design — the
+    // ConnectionHealthService swallows DB errors as a warn log.
+    await this.writeOAuthAndWebhookHealthSuccess(userId, businessId, credentials, result.webhookId);
+
     // Auto-register agent phone + LB number as Thumbtack associate phones
     // (allows calling without access code, and lets the LB number act as a
     // fallback sender when the customer's real phone isn't available).
@@ -723,6 +764,56 @@ export class PlatformService {
       webhookId: result.webhookId,
       businessId,
     };
+  }
+
+  private async writeOAuthAndWebhookHealthSuccess(
+    userId: string,
+    businessId: string,
+    credentials: { scope?: string; expiresAt?: Date | string },
+    webhookId: string,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true },
+    });
+    if (!account) return;
+    const nowIso = new Date().toISOString();
+    const expiresAtIso = credentials.expiresAt
+      ? (credentials.expiresAt instanceof Date
+          ? credentials.expiresAt.toISOString()
+          : new Date(credentials.expiresAt).toISOString())
+      : undefined;
+    await this.connectionHealth.updateOAuthToken(account.id, {
+      status: 'ok',
+      scopes: credentials.scope,
+      expiresAt: expiresAtIso,
+      lastRefreshAt: nowIso,
+      lastErrorAt: undefined,
+      lastErrorMessage: undefined,
+    });
+    await this.connectionHealth.updateWebhook(account.id, {
+      status: 'registered',
+      webhookId,
+      lastCheckedAt: nowIso,
+      lastErrorMessage: undefined,
+    });
+  }
+
+  private async writeWebhookHealthFailure(
+    userId: string,
+    businessId: string,
+    message: string,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true },
+    });
+    if (!account) return;
+    await this.connectionHealth.updateWebhook(account.id, {
+      status: 'failed',
+      lastCheckedAt: new Date().toISOString(),
+      lastErrorMessage: message,
+    });
   }
 
   /**
