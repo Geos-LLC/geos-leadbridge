@@ -13,7 +13,7 @@
  * each form.
  */
 
-import { ChevronDown, ChevronUp, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
 export function UnifiedSaveButton({
@@ -375,65 +375,110 @@ export function PriceRow({
 export const PriceTableSection = CollapsibleSection;
 
 /**
- * Compact Q&A row used by every FAQ form. Two-line layout: question
- * input on top (bold, single line), answer textarea below. Hover-only
- * borders so the row stays clean by default but is fully inline-
- * editable. Trash button on the right.
+ * Custom-Q&A row rendered as a chip-style FAQ entry — matches the
+ * structured FAQ chip groups above (uppercase grey question label,
+ * answer as a row of multi-select chips with inline + Add chip).
+ *
+ * Storage stays as a single `customQA[].answer` string for backend
+ * compat: the chips are persisted comma-separated, then split on read.
+ * Sentence-style answers ("Yes, …") stay as one chip — operators add
+ * commas only when they want multiple chips.
  */
 export function FaqRow({
   question,
   answer,
-  index,
   onChangeQuestion,
   onChangeAnswer,
   onRemove,
 }: {
   question: string;
   answer: string;
-  index: number;
+  index?: number;
   onChangeQuestion: (next: string) => void;
   onChangeAnswer: (next: string) => void;
   onRemove?: () => void;
 }) {
+  // Split for display only; storage stays a single string. We DON'T
+  // split on every comma — the simplest heuristic is to look for the
+  // `,` separator the operator types when they intend multiple chips
+  // and trim each segment. A single comma in a sentence answer (Q4-
+  // style "Yes, standard …") collapses to one chip after the user
+  // re-edits if it bothers them; we don't auto-fix that.
+  const chips = answer
+    .split(/,(?![^\(]*\))/g) // split on `,` but not inside parens
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const writeChips = (nextChips: string[]) =>
+    onChangeAnswer(nextChips.join(', '));
+  const updateChip = (idx: number, next: string) => {
+    const out = [...chips];
+    out[idx] = next;
+    writeChips(out);
+  };
+  const removeChip = (idx: number) => writeChips(chips.filter((_, i) => i !== idx));
+  const addChip = () => writeChips([...chips, '']);
+
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
-        padding: '12px 14px',
+        padding: '14px 14px',
         borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
       }}
     >
-      <div
-        style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          color: 'var(--lb-ink-5, #64748b)',
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          paddingTop: 6,
-          width: 32,
-          flexShrink: 0,
-        }}
-      >
-        Q{index + 1}
-      </div>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <input
           type="text"
           value={question}
           onChange={(e) => onChangeQuestion(e.target.value)}
           placeholder="What question would a lead ask?"
-          style={FAQ_INLINE_QUESTION_INPUT}
+          style={{
+            width: '100%',
+            padding: '4px 6px',
+            border: '1px solid transparent',
+            borderRadius: 6,
+            background: 'transparent',
+            fontFamily: 'inherit',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--lb-ink-5, #64748b)',
+            boxSizing: 'border-box',
+          }}
         />
-        <textarea
-          value={answer}
-          onChange={(e) => onChangeAnswer(e.target.value)}
-          placeholder="Answer the AI will give verbatim"
-          rows={2}
-          style={FAQ_INLINE_ANSWER_INPUT}
-        />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {chips.map((chip, i) => (
+            <FaqAnswerChip
+              key={i}
+              value={chip}
+              onChange={(v) => updateChip(i, v)}
+              onRemove={() => removeChip(i)}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={addChip}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+              background: 'var(--lb-accent-tint, #e7efff)',
+              color: 'var(--lb-accent, #2563eb)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <Plus size={11} /> Add answer
+          </button>
+        </div>
       </div>
       {onRemove && (
         <button
@@ -452,7 +497,7 @@ export function FaqRow({
             color: 'var(--lb-ink-5, #64748b)',
             cursor: 'pointer',
             flexShrink: 0,
-            marginTop: 4,
+            marginTop: 2,
           }}
         >
           <Trash2 size={13} />
@@ -462,31 +507,80 @@ export function FaqRow({
   );
 }
 
-const FAQ_INLINE_QUESTION_INPUT: CSSProperties = {
-  width: '100%',
-  padding: '4px 6px',
-  border: '1px solid transparent',
-  borderRadius: 6,
-  background: 'transparent',
-  fontFamily: 'inherit',
-  fontSize: 13.5,
-  fontWeight: 600,
-  color: 'var(--lb-ink-1, #0a1530)',
-  boxSizing: 'border-box',
-};
-
-const FAQ_INLINE_ANSWER_INPUT: CSSProperties = {
-  width: '100%',
-  padding: '4px 6px',
-  border: '1px solid transparent',
-  borderRadius: 6,
-  background: 'transparent',
-  fontFamily: 'inherit',
-  fontSize: 13,
-  color: 'var(--lb-ink-2, #1f2a44)',
-  resize: 'vertical',
-  boxSizing: 'border-box',
-};
+/**
+ * One answer chip — outline-blue pill with an inline-editable text
+ * field that auto-sizes to its content, plus a small X to remove. The
+ * X collapses the chip from the parent row's answer string. Same
+ * outline-blue selected style as the structured FAQ chip groups so
+ * Custom Q&A reads as a continuation of them.
+ */
+function FaqAnswerChip({
+  value,
+  onChange,
+  onRemove,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onRemove: () => void;
+}) {
+  const width = Math.max(60, Math.min(360, (value.length || 8) * 7.5));
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 8px 6px 12px',
+        borderRadius: 999,
+        border: '1px solid #93c5fd',
+        background: '#eff6ff',
+        color: '#1d4ed8',
+        fontSize: 12.5,
+        fontWeight: 600,
+      }}
+    >
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Type an answer"
+        style={{
+          width,
+          padding: '2px 4px',
+          border: '1px solid transparent',
+          borderRadius: 6,
+          background: 'transparent',
+          fontFamily: 'inherit',
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: '#1d4ed8',
+          boxSizing: 'border-box',
+          outline: 'none',
+        }}
+      />
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove answer chip"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 18,
+          height: 18,
+          borderRadius: 999,
+          border: 0,
+          background: 'transparent',
+          color: '#1d4ed8',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <X size={11} />
+      </button>
+    </span>
+  );
+}
 
 const INLINE_LABEL_INPUT: CSSProperties = {
   width: '100%',
