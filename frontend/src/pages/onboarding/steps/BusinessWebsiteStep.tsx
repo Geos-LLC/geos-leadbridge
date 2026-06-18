@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, DownloadCloud, Globe,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
   Loader2, Phone, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
@@ -92,8 +92,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     // bizInfo it's 0 even when the scrape found 7 facts. Use the gap
     // to differentiate "page yielded nothing" from "already saved."
     fieldsExtracted: number;
+    /** Actual key/value pairs the scrape returned. Powers the
+     *  expandable "Show what we pulled" disclosure under the card. */
+    extractedFields?: Record<string, string | string[]>;
+    /** GPT-generated prose summary of the scraped page. Shown directly
+     *  in the card body for a quick "what does the AI see on this
+     *  page?" read — same surface Settings → General uses. */
+    summary?: string;
     accountsAffected: number;
   } | null>(null);
+  // Disclosure for the "Show what we pulled" panel under the card.
+  const [showExtracted, setShowExtracted] = useState(false);
 
   // ── LeadBridge phone state (TenantPhoneNumber) ─────────────────────
   const savedAccounts = useAppStore(s => s.savedAccounts);
@@ -149,6 +158,33 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts.length]);
+
+  // Rehydrate the TT/Yelp confirmation card from the persisted snapshot
+  // on user.websiteMetadataJson.lastBusinessApply. Without this the
+  // wizard's Business step looked empty after a reload, even though
+  // Settings → General was happily rendering the same data. Mirrors
+  // the General.tsx rehydration block (2026-06-17 fix).
+  //
+  // fieldsApplied is saved as 0 (delta is meaningless across sessions)
+  // and fieldsExtracted = patch size, so the card-body logic reads as
+  // "N fields already saved" on restore — accurate.
+  useEffect(() => {
+    if (lastApply) return; // a fresh apply in this session wins over the snapshot
+    const snap = (user as any)?.websiteMetadataJson?.lastBusinessApply;
+    if (!snap || !snap.url || !snap.platform) return;
+    if (snap.platform === 'website') return; // website branch has WebsitePreviewCard
+    const extracted = (snap.extractedFields && Object.keys(snap.extractedFields).length) || 0;
+    setLastApply({
+      platform: snap.platform,
+      url: snap.url,
+      fieldsApplied: 0,
+      fieldsExtracted: extracted,
+      extractedFields: snap.extractedFields,
+      summary: snap.summary,
+      accountsAffected: snap.accountsAffected ?? 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,14 +352,21 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
       }
       // Snapshot the apply outcome so the in-step confirmation card can
       // render even for TT / Yelp paths (which don't populate the
-      // User.website-driven WebsitePreviewCard).
+      // User.website-driven WebsitePreviewCard). Includes the GPT
+      // summary + extractedFields so the wizard mirrors Settings →
+      // General — same "Show what we pulled" disclosure.
       setLastApply({
         platform: res.platform,
         url: res.savedUrl,
         fieldsApplied: res.fieldsApplied ?? 0,
         fieldsExtracted: extracted,
+        extractedFields: res.extractedFields,
+        summary: res.summary,
         accountsAffected: res.accountsAffected ?? 0,
       });
+      // Default the disclosure to collapsed on each fresh fetch so the
+      // card doesn't visually balloon every Pull click.
+      setShowExtracted(false);
       const outcome: VerifyOutcome = {
         reachable: true,
         normalizedUrl: res.savedUrl,
@@ -803,13 +846,13 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
           </div>
         )}
 
-        {/* TT / Yelp confirmation card — the website preview card above
-            renders nothing for these platforms because User.website isn't
-            populated. Without this, a successful TT/Yelp fetch leaves the
-            wizard looking inert (no card, no badge change, just a toast
-            that disappears). Tenants reported "I fetched TT but no info
-            showed up". */}
-        {lastApply && lastApply.platform !== 'website' && !isBusy && verifyState.kind === 'valid' && (
+        {/* TT / Yelp confirmation card. Renders for any populated
+            lastApply (fresh fetch in this session OR persisted snapshot
+            on user.websiteMetadataJson.lastBusinessApply) — Settings →
+            General does the same. The previous `verifyState=valid`
+            gate hid the card on reload, leaving the wizard looking
+            inert even when info was actually saved server-side. */}
+        {lastApply && lastApply.platform !== 'website' && !isBusy && (
           <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-2.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <div className="min-w-0 text-xs flex-1">
@@ -838,6 +881,58 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
                 <div className="text-[11px] text-emerald-700 mt-1.5">
                   Your AI Playbook already reflects this page's facts.
+                </div>
+              )}
+
+              {/* GPT prose summary — same content WebsitePreviewCard
+                  shows for the website branch. Lets the tenant scan
+                  "what does the AI think this business is about?"
+                  without opening the structured-fields disclosure. */}
+              {lastApply.summary && (
+                <div
+                  className="mt-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] text-slate-700 italic leading-snug"
+                >
+                  {lastApply.summary}
+                </div>
+              )}
+
+              {/* Expandable "Show what we pulled" — renders the
+                  extractedFields blob the backend now returns. Tells
+                  the tenant which specific fields were saved (instead
+                  of just a count) and saves a trip to Settings → AI
+                  Playbook just to verify the scrape did the right
+                  thing. */}
+              {lastApply.extractedFields && Object.keys(lastApply.extractedFields).length > 0 && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowExtracted(v => !v)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900"
+                  >
+                    {showExtracted ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showExtracted ? 'Hide details' : 'Show what we pulled'}
+                  </button>
+                  {showExtracted && (
+                    <div
+                      className="mt-1.5 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] grid"
+                      style={{ gridTemplateColumns: 'auto 1fr', columnGap: 12, rowGap: 4 }}
+                    >
+                      {Object.entries(lastApply.extractedFields).map(([key, value]) => {
+                        const display = formatExtractedValue(value);
+                        if (!display) return null;
+                        return (
+                          <Fragment key={key}>
+                            <div className="font-semibold text-emerald-700 whitespace-nowrap">
+                              {humanizeFieldKey(key)}
+                            </div>
+                            <div className="text-slate-700 break-words">
+                              {display}
+                            </div>
+                          </Fragment>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -912,6 +1007,39 @@ function platformLabel(p: 'thumbtack' | 'yelp' | 'website'): string {
   if (p === 'thumbtack') return 'Thumbtack profile';
   if (p === 'yelp') return 'Yelp business page';
   return 'Website';
+}
+
+// Friendly labels for the extracted-fields disclosure. Mirrors the
+// EXTRACTED_FIELD_LABELS map in Settings → General; kept inline here
+// because the seed schema isn't yet a shared module. If you add a new
+// key in either place, add it in both.
+const EXTRACTED_FIELD_LABELS: Record<string, string> = {
+  serviceArea: 'Service area',
+  teamSize: 'Team size',
+  yearsInBusiness: 'Years in business',
+  ownerName: 'Owner / founder',
+  suppliesPolicy: 'Supplies policy',
+  petsPolicy: 'Pets policy',
+  paymentMethods: 'Payment methods',
+  officeLocations: 'Office locations',
+  insurance: 'Insurance',
+  bonding: 'Bonding',
+  licensing: 'Licensing',
+  guarantees: 'Guarantees',
+  ecoFriendly: 'Eco-friendly',
+};
+
+function humanizeFieldKey(key: string): string {
+  if (EXTRACTED_FIELD_LABELS[key]) return EXTRACTED_FIELD_LABELS[key];
+  return key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, c => c.toUpperCase());
+}
+
+function formatExtractedValue(v: string | string[] | undefined): string {
+  if (v === undefined || v === null) return '';
+  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
+  return String(v);
 }
 
 // Parse the additionalAssociatePhones list out of a SavedAccount's
