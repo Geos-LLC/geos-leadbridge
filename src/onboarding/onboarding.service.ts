@@ -304,24 +304,22 @@ export class OnboardingService {
       serviceOptionsConfigured: isServiceOptionsConfigured(p.qualificationSchemaJson),
     }));
 
-    // Services step: at least one active service exists AND at least one
-    // account has assignments configured (non-null `serviceProfileAssignmentsJson`).
-    // We accept "at least one" rather than "all" so a tenant with five
-    // accounts can finish the wizard after assigning the first one and
-    // come back later — the rest fall through to legacy resolution.
-    const servicesDone =
-      activeServiceCount > 0 &&
-      (accountsWithAssignments > 0 || totalAccounts === 0);
-
-    // Service-setup step: every ACTIVE service has pricing (rows OR
-    // quoteRequired=true) AND customer answers. Drafts are intentionally
-    // ignored — per spec they show as incomplete but don't block Done.
-    // Empty active service list short-circuits to not-done.
-    const serviceSetupDone =
-      activeServiceCount > 0 &&
-      services
-        .filter(s => s.status === 'active')
-        .every(s => s.pricingConfigured && s.customerAnswersConfigured);
+    // Services step (2026-06-18 consolidation): the wizard no longer
+    // gates on per-account assignments — the runtime resolver handles
+    // category → ServiceProfile → tenant default fallback on its own,
+    // so onboarding shouldn't force the user to wire up account ↔
+    // service links. "Services done" now means: at least one ACTIVE
+    // ServiceProfile exists AND every active profile has minimum
+    // setup (pricing + customer answers). Drafts don't gate.
+    //
+    // `serviceSetup.done` is kept in the response shape for back-compat
+    // with older client builds; it carries the same value as
+    // `services.done` so legacy callers stay green/red consistently.
+    const everyActiveConfigured = services
+      .filter(s => s.status === 'active')
+      .every(s => s.pricingConfigured && s.customerAnswersConfigured);
+    const servicesDone = activeServiceCount > 0 && everyActiveConfigured;
+    const serviceSetupDone = servicesDone;
 
     // Automation reads off the primary SavedAccount's followUpSettingsJson
     // as before; the qualify-field picker (per-service required fields)

@@ -12,13 +12,12 @@ import DoneStep from './steps/DoneStep';
 import PlaceholderStep from './steps/PlaceholderStep';
 import ConnectStep from './steps/ConnectStep';
 import BusinessWebsiteStep from './steps/BusinessWebsiteStep';
-import ServicesOfferedStep from './steps/ServicesOfferedStep';
-import ServiceSetupStep from './steps/ServiceSetupStep';
+import ServicesStep from './steps/ServicesStep';
 import AutomationLevelStep from './steps/AutomationLevelStep';
-// Legacy step components (ai, pricing, ai_rules) remain on disk but are
-// no longer rendered — the multi-service refactor (2026-06-18) replaced
-// them with services + service_setup. The files are intentionally kept
-// so a rollback is a one-line change to wizardConfig.
+// Legacy step components (ai, pricing, ai_rules, plus the
+// short-lived two-step services/service_setup split) remain on disk
+// but are no longer rendered. The files are intentionally kept so a
+// rollback is a one-line change to wizardConfig.
 import { FIRST_ACTIONABLE_STEP, RETIRED_WIZARD_STEPS, WIZARD_STEP_META, getStepIndex } from './wizardConfig';
 
 // The 8-step guided setup wizard. The container owns the current step,
@@ -248,7 +247,6 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
     isDone ||
     currentStep === 'business' ||
     currentStep === 'services' ||
-    currentStep === 'service_setup' ||
     currentStep === 'automation';
 
   let body: React.ReactNode;
@@ -287,29 +285,12 @@ export default function SetupWizard({ onExit }: SetupWizardProps = {}) {
     );
   } else if (currentStep === 'services') {
     body = (
-      <ServicesOfferedStep
+      <ServicesStep
         saving={saving}
         setSaving={setSaving}
         onSaveContinue={async () => {
           if (!nextStep) return;
           await advance({ finishedStep: 'services', status: 'done', nextStep });
-        }}
-        // "Use default service for now" — skip path. Falls through to
-        // the legacy resolver at runtime until the user revisits.
-        onSkipFallback={async () => {
-          if (!nextStep) return;
-          await advance({ finishedStep: 'services', status: 'skipped', nextStep });
-        }}
-      />
-    );
-  } else if (currentStep === 'service_setup') {
-    body = (
-      <ServiceSetupStep
-        saving={saving}
-        setSaving={setSaving}
-        onSaveContinue={async () => {
-          if (!nextStep) return;
-          await advance({ finishedStep: 'service_setup', status: 'done', nextStep });
         }}
       />
     );

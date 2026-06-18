@@ -19,14 +19,18 @@ export interface WizardStepMeta {
 // Welcome is intentionally absent from this list — the Overview's
 // "Start setup" card is the welcome moment, no need for a separate
 // in-wizard splash. The backend keeps 'welcome' (and the legacy `ai`,
-// `pricing`, `ai_rules` slugs from the pre-multi-service flow) as
-// valid WizardStep values so historical wizardChecklistStatus rows
-// continue to round-trip; the frontend just never navigates to them.
+// `pricing`, `ai_rules`, `service_setup` slugs from earlier wizard
+// shapes) as valid WizardStep values so historical
+// wizardChecklistStatus rows continue to round-trip; the frontend just
+// never navigates to them.
 //
-// 2026-06-18 — multi-service refactor. New step list:
-//   connect → business → services → service_setup → automation → done
-// Replaces the prior global FAQ / global Pricing / AI Rules steps with
-// per-ServiceProfile assignment + setup.
+// 2026-06-18 — consolidation: account ↔ service assignment is no
+// longer a wizard concern (runtime resolver handles category →
+// ServiceProfile → tenant default fallback). One combined `services`
+// step covers create-from-template + create-custom + per-service
+// pricing/FAQ/rules editing.
+//
+// Step list:  connect → business → services → automation → done
 export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'connect',
@@ -45,15 +49,8 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'services',
     label: 'Services',
-    title: 'Which services does each account offer?',
-    description: 'Assign your services to each connected account, or add new ones from a template.',
-    countsTowardChecklist: true,
-  },
-  {
-    slug: 'service_setup',
-    label: 'Service setup',
-    title: 'Set up each service',
-    description: 'Pricing, customer answers, and optional service-specific questions. Active services need at least pricing + answers.',
+    title: 'Set up the services you offer',
+    description: 'Add services from a template or create your own. For each one set pricing, customer answers, and any service rules.',
     countsTowardChecklist: true,
   },
   {
@@ -72,15 +69,19 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   },
 ];
 
-// Legacy step slugs the multi-service refactor removed from the active
-// rail. Existing OnboardingProfile rows may still carry these in
-// `wizardCurrentStep` / `wizardChecklistStatus`; we filter them out at
-// render time so a returning user lands on the new flow gracefully.
+// Legacy step slugs no longer rendered in the active rail. Existing
+// OnboardingProfile rows may still carry these in `wizardCurrentStep`
+// / `wizardChecklistStatus`; we filter them out at render time so a
+// returning user lands on the new flow gracefully.
+//
+// `service_setup` joined this list 2026-06-18 when the two-step
+// services flow was consolidated back into one `services` step.
 export const RETIRED_WIZARD_STEPS = new Set<WizardStep>([
   'welcome',
   'ai',
   'pricing',
   'ai_rules',
+  'service_setup',
 ]);
 
 // Welcome was the first step in the original 8-step flow. Removed

@@ -7,11 +7,18 @@ import {
   Circle,
   ExternalLink,
   Loader2,
+  Plus,
   ShieldAlert,
   Sparkles,
+  Wrench,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { serviceProfilesApi, type ServiceProfile } from '../../../services/api';
+import {
+  serviceProfilePresetsApi,
+  serviceProfilesApi,
+  type ServiceProfile,
+  type ServiceProfilePreset,
+} from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
 import { notify } from '../../../store/notificationStore';
 import AccountFaqForm from '../../../components/AccountFaqForm';
@@ -25,48 +32,57 @@ interface Props {
 }
 
 /**
- * Wizard "Service setup" step (multi-service refactor 2026-06-18).
+ * Wizard "Services" step — unified create + configure (2026-06-18 v3).
  *
- * Per ServiceProfile accordion. Each row exposes the same structured
- * editors as Settings → AI Playbook → (per-service tab):
- *   - <ServicePricingForm  serviceProfileId={...} /> — pricing table
- *   - <AccountFaqForm      serviceProfileId={...} /> — customer answers
- *   - lightweight "Additional AI instructions" textarea + deep link
+ * Earlier versions split this into two steps (assignments + per-service
+ * setup). That gave us five wizard steps and a per-account assignment
+ * grid that nobody actually needed — the runtime resolver already
+ * handles "lead category → matching ServiceProfile → tenant default
+ * fallback" without per-account wiring. So this step is now a single
+ * surface that does both jobs:
  *
- * Both forms are already polymorphic on serviceProfileId and write
- * directly to ServiceProfile.pricingJson / ServiceProfile.faqJson, so
- * no per-account fan-out and no JSON textareas.
+ *   1. Top panel: add a service (from a preset/template OR custom).
+ *   2. Accordion: per active/draft ServiceProfile, edit pricing
+ *      (ServicePricingForm), customer answers (AccountFaqForm),
+ *      service rules (imported from template — read-only viewer +
+ *      deep link), and a lightweight "additional AI instructions"
+ *      textarea.
  *
- * Completion semantics:
- *   - ACTIVE services need pricing (table OR quoteRequired) AND
- *     customer answers to count toward serviceSetup.done.
- *   - DRAFT services show "Draft · AI paused" but do NOT block Done.
- *   - AI instructions and qualification are optional everywhere.
+ * Completion: at least one ACTIVE service with pricing + customer
+ * answers configured. Drafts show "AI paused" but don't gate Done.
  */
-export default function ServiceSetupStep({
+export default function ServicesStep({
   onSaveContinue,
   saving,
   setSaving,
 }: Props) {
   const navigate = useNavigate();
   const savedAccounts = useAppStore(s => s.savedAccounts);
-
-  const [profiles, setProfiles] = useState<ServiceProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [openId, setOpenId] = useState<string | null>(null);
-  // Per-profile AI instructions draft state, keyed by profile id.
-  const [aiDraft, setAiDraft] = useState<Record<string, { value: string; dirty: boolean; saving: boolean }>>({});
-
-  // Primary SavedAccount — required prop for AccountFaqForm /
-  // ServicePricingForm even when they're in serviceProfile mode (only
-  // used for display fallback inside those forms).
   const primaryAccount = savedAccounts[0];
 
-  async function refreshProfiles() {
+  const [profiles, setProfiles] = useState<ServiceProfile[]>([]);
+  const [presets, setPresets] = useState<ServiceProfilePreset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  // Per-profile AI draft state.
+  const [aiDraft, setAiDraft] = useState<Record<string, { value: string; dirty: boolean; saving: boolean }>>({});
+
+  // Add-service panel state.
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [selectedPresetKey, setSelectedPresetKey] = useState<string>('');
+  const [customName, setCustomName] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  async function refreshAll() {
     try {
-      const res = await serviceProfilesApi.list();
-      const list = (res.profiles ?? []).filter(p => p.status !== 'archived');
+      const [profilesRes, presetsRes] = await Promise.all([
+        serviceProfilesApi.list(),
+        serviceProfilePresetsApi.list().catch(() => ({ presets: [] as ServiceProfilePreset[] })),
+      ]);
+      const list = (profilesRes.profiles ?? []).filter(p => p.status !== 'archived');
       setProfiles(list);
+      setPresets(presetsRes.presets ?? []);
       if (openId === null && list.length > 0) {
         const firstIncomplete = list.find(p => p.status === 'active' && !looksConfigured(p));
         setOpenId((firstIncomplete ?? list[0]).id);
@@ -77,11 +93,11 @@ export default function ServiceSetupStep({
   }
 
   useEffect(() => {
-    void refreshProfiles();
+    void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ordered: active before draft, then default-first, then name.
+  // Sorted: active before draft, default-first within status, then name.
   const ordered = useMemo(
     () => [...profiles].sort((a, b) => {
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
@@ -91,8 +107,33 @@ export default function ServiceSetupStep({
     [profiles],
   );
 
-  // Seed the AI textarea from the profile when first opened so the
-  // user sees their existing additionalInstructions if any.
+  // Group presets the same way Settings does: Generic on top, curated
+  // code presets in the middle, published admin templates at the bottom.
+  const groupedPresets = useMemo(() => {
+    const generic: typeof presets = [];
+    const curated: typeof presets = [];
+    const admin: typeof presets = [];
+    for (const p of presets) {
+      if (p.source === 'admin_template') admin.push(p);
+      else if (p.key === 'generic_custom_service' || p.presetKey === 'generic_custom_service') generic.push(p);
+      else curated.push(p);
+    }
+    const byLabel = (a: typeof presets[number], b: typeof presets[number]) => a.label.localeCompare(b.label);
+    return {
+      generic,
+      curated: curated.sort(byLabel),
+      admin: admin.sort(byLabel),
+    };
+  }, [presets]);
+
+  // Pre-select Generic when the panel opens so "Add" with no other
+  // input creates the always-works starter.
+  useEffect(() => {
+    if (!showAddPanel || selectedPresetKey || groupedPresets.generic.length === 0) return;
+    const g = groupedPresets.generic[0];
+    setSelectedPresetKey(g.source === 'code_preset' ? g.presetKey! : g.templateId!);
+  }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
+
   function ensureAiDraft(profile: ServiceProfile) {
     if (aiDraft[profile.id]) return;
     const existing = readAdditionalInstructions(profile.aiInstructionsJson);
@@ -109,11 +150,6 @@ export default function ServiceSetupStep({
     }));
   }
 
-  // Persist additionalInstructions into ServiceProfile.aiInstructionsJson
-  // WITHOUT touching the rest of the envelope. Reads the current
-  // wrapper, patches additionalInstructions, writes back. Preserves
-  // serviceRules / aiPlaybookV2 that Settings → AI Playbook may have
-  // configured.
   async function saveAiInstructions(profile: ServiceProfile) {
     const draft = aiDraft[profile.id];
     if (!draft || draft.saving) return;
@@ -131,12 +167,8 @@ export default function ServiceSetupStep({
       const trimmed = draft.value.trim();
       if (trimmed) wrapper.additionalInstructions = trimmed;
       else delete wrapper.additionalInstructions;
-
-      // If after patching we have nothing meaningful left, store null
-      // so the resolver doesn't read an empty envelope.
       const hasMeaning = Object.keys(wrapper).some(k => k !== 'version' && wrapper[k] !== undefined && wrapper[k] !== null);
       const payload = hasMeaning ? JSON.stringify(wrapper) : null;
-
       const updated = await serviceProfilesApi.update(profile.id, {
         aiInstructionsJson: payload,
       });
@@ -158,9 +190,6 @@ export default function ServiceSetupStep({
     }
   }
 
-  // Draft → active. Backend rejects with EMPTY_CONFIG if the service
-  // has no pricing/FAQ/qualification at all, so the button is gated to
-  // looksConfigured rows.
   async function activate(profile: ServiceProfile) {
     try {
       const updated = await serviceProfilesApi.transitionStatus(profile.id, 'active');
@@ -174,14 +203,62 @@ export default function ServiceSetupStep({
     }
   }
 
-  // Refetch a single profile after the embedded form saves so the
-  // status pill (and any banner counts) reflects reality without the
-  // user having to collapse/expand the accordion.
   async function refreshOne(profileId: string) {
     try {
       const updated = await serviceProfilesApi.get(profileId);
       setProfiles(prev => prev.map(p => (p.id === profileId ? updated : p)));
     } catch { /* non-fatal */ }
+  }
+
+  async function handleCreateFromPreset() {
+    if (!selectedPresetKey || creating) return;
+    const preset = presets.find(p =>
+      (p.source === 'code_preset' && p.presetKey === selectedPresetKey)
+      || (p.source === 'admin_template' && p.templateId === selectedPresetKey),
+    );
+    if (!preset) {
+      notify.error('Pick a service template', 'Select one from the dropdown first.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'code_preset'
+          ? { presetKey: preset.presetKey!, status: 'active' }
+          : { templateId: preset.templateId! },
+      );
+      setSelectedPresetKey('');
+      await refreshAll();
+      setOpenId(created.profileId);
+      notify.success('Service added', `${preset.label} is ready to set up.`);
+    } catch (err: any) {
+      notify.error(
+        'Could not add service',
+        err.response?.data?.message || 'Please try again.',
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleCreateCustom() {
+    const name = customName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    try {
+      const created = await serviceProfilesApi.createBlank(name);
+      setCustomName('');
+      await refreshAll();
+      setOpenId(created.profileId);
+      notify.success('Service added', `${name} is ready to set up.`);
+    } catch (err: any) {
+      notify.error(
+        'Could not add service',
+        err.response?.data?.message || 'Please try again.',
+      );
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function handleContinue() {
@@ -222,22 +299,145 @@ export default function ServiceSetupStep({
         </button>
       </WizardStepActions>
 
+      {/* ── Add a service ─────────────────────────────────────────────
+          Always visible (collapsed when there's already content) so
+          the user understands they can add more services anytime. */}
+      <div className="mb-5">
+        {!showAddPanel ? (
+          <button
+            type="button"
+            onClick={() => setShowAddPanel(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Add a service
+          </button>
+        ) : (
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5 space-y-4">
+            <div className="flex items-start gap-2 text-xs text-slate-600">
+              <Sparkles className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+              <div>
+                Start from a curated template (Thumbtack/Yelp categories
+                pre-mapped) or create a custom service with just a name
+                and fill it in below.
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                From a template
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedPresetKey}
+                  onChange={e => setSelectedPresetKey(e.target.value)}
+                  disabled={creating || presets.length === 0}
+                  className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+                >
+                  <option value="">Pick a template…</option>
+                  {groupedPresets.generic.length > 0 && (
+                    <optgroup label="Recommended starter">
+                      {groupedPresets.generic.map(p => {
+                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                        return (
+                          <option key={`${p.source}-${key}`} value={key}>
+                            {p.label} — works for any service
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {groupedPresets.curated.length > 0 && (
+                    <optgroup label="Curated templates">
+                      {groupedPresets.curated.map(p => {
+                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                        return (
+                          <option key={`${p.source}-${key}`} value={key}>
+                            {p.label}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {groupedPresets.admin.length > 0 && (
+                    <optgroup label="Published custom templates">
+                      {groupedPresets.admin.map(p => (
+                        <option key={`admin-${p.templateId}`} value={p.templateId!}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateFromPreset()}
+                  disabled={creating || !selectedPresetKey}
+                  className="inline-flex items-center gap-1 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+                >
+                  {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Add
+                </button>
+              </div>
+              {groupedPresets.admin.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  More templates will appear here when admins publish them.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                Custom service
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={e => setCustomName(e.target.value)}
+                  disabled={creating}
+                  maxLength={80}
+                  placeholder="e.g. Pressure washing"
+                  className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleCreateCustom()}
+                  disabled={creating || !customName.trim()}
+                  className="inline-flex items-center gap-1 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+                >
+                  {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wrench className="w-3.5 h-3.5" />}
+                  Create
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAddPanel(false)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+            >
+              Hide add panel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Per-service accordion ──────────────────────────────────── */}
+
       {loading ? (
         <div className="py-12 text-center text-sm text-slate-400">
           <Loader2 className="w-5 h-5 animate-spin mx-auto" />
         </div>
       ) : ordered.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-          You don't have any services yet. Go back to the{' '}
-          <strong>Services</strong> step to add one from a template or
-          create a custom service.
+          No services yet. Add one from a template or create a custom
+          service above to get started.
         </div>
       ) : (
         <>
-          {/* Status summary banner. Tells the user what's blocking
-              Done at the top so they don't need to scan the accordion. */}
           {incompleteActive.length > 0 && (
-            <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
               <div>
                 <strong>{incompleteActive.length}</strong> active service
@@ -248,7 +448,7 @@ export default function ServiceSetupStep({
             </div>
           )}
           {draftServices.length > 0 && (
-            <div className="mb-5 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
               <Circle className="w-4 h-4 shrink-0 mt-0.5 text-slate-400" />
               <div>
                 <strong>{draftServices.length}</strong> draft service
@@ -263,6 +463,7 @@ export default function ServiceSetupStep({
             {ordered.map(profile => {
               const open = openId === profile.id;
               const configured = looksConfigured(profile);
+              const serviceRules = readServiceRules(profile.aiInstructionsJson);
               return (
                 <div
                   key={profile.id}
@@ -275,9 +476,6 @@ export default function ServiceSetupStep({
                       setOpenId(next);
                       if (next) {
                         ensureAiDraft(profile);
-                        // Pull fresh data when re-opening so the embedded
-                        // form initial values reflect what the user
-                        // already saved on a previous visit.
                         void refreshOne(profile.id);
                       }
                     }}
@@ -307,9 +505,6 @@ export default function ServiceSetupStep({
 
                   {open && (
                     <div className="border-t border-slate-100 p-4 space-y-6 bg-slate-50/40">
-                      {/* Pricing — same structured form as Settings →
-                          AI Playbook → Pricing Guidance. Writes to
-                          ServiceProfile.pricingJson. */}
                       <Section label="Pricing">
                         {primaryAccount ? (
                           <div
@@ -329,9 +524,6 @@ export default function ServiceSetupStep({
                         )}
                       </Section>
 
-                      {/* Customer answers / FAQ — same structured form as
-                          Settings → AI Playbook → FAQ. Writes to
-                          ServiceProfile.faqJson. */}
                       <Section label="Customer answers (FAQ)">
                         {primaryAccount ? (
                           <div
@@ -351,26 +543,65 @@ export default function ServiceSetupStep({
                         )}
                       </Section>
 
-                      {/* AI instructions — lightweight textarea that
-                          merges into the aiInstructionsJson envelope as
-                          { additionalInstructions: '...' }. Existing
-                          aiPlaybookV2 / serviceRules entries are
-                          preserved. Deep link points at the full
-                          per-service AI Playbook editor. */}
+                      {/* Service rules — read-only viewer over the
+                          rules that came with the template (or empty
+                          for blank services). Editing happens on the
+                          full AI Playbook deep link; the wizard just
+                          surfaces what the template seeded. */}
+                      <Section label="Service rules">
+                        {serviceRules ? (
+                          <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                            <ServiceRulesRow
+                              title="Required details"
+                              items={serviceRules.requiredDetails}
+                            />
+                            <ServiceRulesRow
+                              title="Workflow steps"
+                              items={serviceRules.workflowSteps}
+                            />
+                            <ServiceRulesRow
+                              title="Unsupported services"
+                              items={serviceRules.unsupportedServices}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                            >
+                              Edit service rules in AI Playbook
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                            No rules yet — templates ship with required
+                            details, workflow steps, and unsupported
+                            services. Add them via the{' '}
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
+                              className="font-semibold text-blue-700 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              full AI Playbook
+                              <ExternalLink className="w-3 h-3" />
+                            </button>.
+                          </div>
+                        )}
+                      </Section>
+
                       <Section label="AI instructions (optional)">
                         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
                           <div className="flex items-start gap-2 text-xs text-slate-500">
                             <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                             <span>
                               Anything AI should remember when handling{' '}
-                              <strong>{profile.name}</strong> leads — sales
-                              angle, what to avoid, special wording.
+                              <strong>{profile.name}</strong> leads.
                             </span>
                           </div>
                           <textarea
                             value={aiDraft[profile.id]?.value ?? ''}
                             onChange={e => updateAiDraft(profile.id, e.target.value)}
-                            placeholder={`e.g., Always mention that insurance is included. Don't quote weekend rates.`}
+                            placeholder="e.g., Always mention that insurance is included. Don't quote weekend rates."
                             rows={3}
                             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
                           />
@@ -383,14 +614,6 @@ export default function ServiceSetupStep({
                             >
                               {aiDraft[profile.id]?.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                               {aiDraft[profile.id]?.saving ? 'Saving…' : aiDraft[profile.id]?.dirty ? 'Save AI instructions' : 'Saved'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
-                            >
-                              Full AI playbook for this service
-                              <ExternalLink className="w-3 h-3" />
                             </button>
                           </div>
                         </div>
@@ -460,10 +683,25 @@ function StatusPill({
   );
 }
 
-// Local mirror of the backend `isServicePricingConfigured` +
-// `isServiceCustomerAnswersConfigured` predicates. Kept in sync
-// manually — the wizard wants instant feedback as the user types
-// without a backend round-trip.
+function ServiceRulesRow({ title, items }: { title: string; items: string[] | undefined }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+        {title}
+      </div>
+      <ul className="space-y-1">
+        {items.map((item, i) => (
+          <li key={`${title}-${i}`} className="text-xs text-slate-700 leading-relaxed pl-3 relative">
+            <span className="absolute left-0 top-1.5 w-1 h-1 bg-slate-400 rounded-full" />
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function looksConfigured(p: ServiceProfile): boolean {
   return hasPricing(p.pricingJson) && hasCustomerAnswers(p.faqJson);
 }
@@ -480,10 +718,6 @@ function hasPricing(json: string | null): boolean {
   return false;
 }
 
-// Mirror of backend isServiceCustomerAnswersConfigured. Accepts the
-// structured legacy SavedAccount FAQ shape (insuredAndBonded /
-// paymentMethods / etc.) that AccountFaqForm writes, plus the v2
-// admin-template customQA + entries shapes.
 function hasCustomerAnswers(json: string | null): boolean {
   const f = safeParse(json);
   if (!f || typeof f !== 'object') return false;
@@ -504,12 +738,27 @@ function hasCustomerAnswers(json: string | null): boolean {
   return false;
 }
 
-// Read `additionalInstructions` out of the aiInstructionsJson envelope.
-// Falls back to empty string when the envelope is missing or malformed.
 function readAdditionalInstructions(json: string | null): string {
   const obj = safeParse(json);
   if (!obj || typeof obj !== 'object') return '';
   return typeof obj.additionalInstructions === 'string' ? obj.additionalInstructions : '';
+}
+
+function readServiceRules(json: string | null): {
+  requiredDetails?: string[];
+  workflowSteps?: string[];
+  unsupportedServices?: string[];
+} | null {
+  const obj = safeParse(json);
+  if (!obj || typeof obj !== 'object') return null;
+  const rules = obj.serviceRules;
+  if (!rules || typeof rules !== 'object') return null;
+  const out: any = {};
+  if (Array.isArray(rules.requiredDetails)) out.requiredDetails = rules.requiredDetails.filter((x: any) => typeof x === 'string');
+  if (Array.isArray(rules.workflowSteps)) out.workflowSteps = rules.workflowSteps.filter((x: any) => typeof x === 'string');
+  if (Array.isArray(rules.unsupportedServices)) out.unsupportedServices = rules.unsupportedServices.filter((x: any) => typeof x === 'string');
+  if (Object.keys(out).length === 0) return null;
+  return out;
 }
 
 function safeParse(s: string | null | undefined): any {

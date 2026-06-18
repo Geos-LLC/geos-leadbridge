@@ -13,14 +13,14 @@ import { ACTIONABLE_STEPS, FIRST_ACTIONABLE_STEP, RETIRED_WIZARD_STEPS, WIZARD_S
 // `connect` itself is handled separately because its completion signal
 // IS the data (SavedAccount existence).
 //
-// Post 2026-06-18 multi-service refactor: `services` + `service_setup`
-// + `automation` are the live steps that gate on account presence.
-// Legacy `ai` / `pricing` / `ai_rules` slugs are kept in the list so
-// returning users with old wizardChecklistStatus rows still see their
-// pre-refactor ticks drop on account disconnect (consistent UX).
+// Post 2026-06-18 consolidation: `services` + `automation` are the
+// live steps that gate on account presence. Retired slugs
+// (`service_setup`, `ai`, `pricing`, `ai_rules`) are kept in the list
+// so returning users with old wizardChecklistStatus rows still see
+// their pre-refactor ticks drop on account disconnect (consistent UX).
 const ACCOUNT_DATA_STEPS: WizardStep[] = [
-  'services', 'service_setup', 'automation',
-  'ai', 'pricing', 'ai_rules',
+  'services', 'automation',
+  'service_setup', 'ai', 'pricing', 'ai_rules',
 ];
 
 export interface DisplayChecklistContext {
@@ -119,13 +119,15 @@ export function deriveDisplayChecklist(
   // the tick off on mount.
   const summary = context.configSummary;
   if (summary) {
-    // New multi-service step rollups.
+    // Active step rollups.
     applyDataDerivation(copy, 'services', summary.services?.done ?? false);
-    applyDataDerivation(copy, 'service_setup', summary.serviceSetup?.done ?? false);
     applyDataDerivation(copy, 'automation', summary.automation?.done ?? summary.automationConfigured);
 
-    // Legacy back-compat slugs — only relevant for users who already
-    // have stored 'done' on these from before the refactor.
+    // Retired-slug back-compat — only relevant for users who already
+    // have stored 'done' on these from before the consolidation.
+    // `serviceSetup.done` mirrors `services.done` on the backend, so
+    // this derivation keeps old client-side checklists in sync.
+    applyDataDerivation(copy, 'service_setup', summary.serviceSetup?.done ?? false);
     applyDataDerivation(copy, 'ai', summary.faqConfigured);
     applyDataDerivation(copy, 'pricing', summary.pricingConfigured);
     applyDataDerivation(copy, 'ai_rules', summary.aiRulesConfigured);

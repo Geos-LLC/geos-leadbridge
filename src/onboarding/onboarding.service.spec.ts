@@ -302,11 +302,13 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
     expect(summary.automation).toEqual({ done: false, mode: null });
   });
 
-  it('one connected account + one default active service with full setup = services + serviceSetup both done', async () => {
-    // Spec test #1: single-default-service tenant should pass cleanly.
+  it('one active service with full setup flips services.done = true regardless of account assignments', async () => {
+    // 2026-06-18 consolidation: wizard no longer gates on per-account
+    // assignments. Single-default-service tenant with no assignments
+    // (or null assignments) still passes once pricing + FAQ exist.
     const svc = service(buildSummaryPrisma({
       primary: null,
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":["sp-1"]}' }],
+      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
       profiles: [{
         id: 'sp-1',
         name: 'House Cleaning',
@@ -319,7 +321,8 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
     const summary = await svc.getConfigSummary('u-1');
     expect(summary.services.done).toBe(true);
     expect(summary.services.activeServiceCount).toBe(1);
-    expect(summary.services.accountsWithAssignments).toBe(1);
+    // serviceSetup.done is kept in the shape for back-compat and now
+    // mirrors services.done verbatim.
     expect(summary.serviceSetup.done).toBe(true);
     expect(summary.serviceSetup.services).toHaveLength(1);
     expect(summary.serviceSetup.services[0]).toMatchObject({
@@ -331,11 +334,10 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
     });
   });
 
-  it('two active services where one is incomplete = serviceSetup NOT done; services list reports per-service state', async () => {
-    // Spec test #2: per-service completion detection.
+  it('multiple active services where one is incomplete = services.done false', async () => {
     const svc = service(buildSummaryPrisma({
       primary: null,
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":["sp-1","sp-2"]}' }],
+      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
       profiles: [
         {
           id: 'sp-1',
@@ -354,19 +356,18 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
       ],
     }));
     const summary = await svc.getConfigSummary('u-1');
-    expect(summary.services.done).toBe(true); // active services exist + assignments configured
+    expect(summary.services.done).toBe(false);
     expect(summary.services.activeServiceCount).toBe(2);
-    expect(summary.serviceSetup.done).toBe(false); // sp-2 incomplete
+    expect(summary.serviceSetup.done).toBe(false);
     const sp2 = summary.serviceSetup.services.find(s => s.id === 'sp-2')!;
     expect(sp2.pricingConfigured).toBe(false);
     expect(sp2.customerAnswersConfigured).toBe(false);
   });
 
-  it('draft services do not block serviceSetup.done even when empty', async () => {
-    // Spec confirmation: drafts are reported but do not gate completion.
+  it('draft services are reported but do not block services.done', async () => {
     const svc = service(buildSummaryPrisma({
       primary: null,
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":["sp-1"]}' }],
+      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
       profiles: [
         {
           id: 'sp-1',
@@ -385,7 +386,7 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
       ],
     }));
     const summary = await svc.getConfigSummary('u-1');
-    expect(summary.serviceSetup.done).toBe(true);
+    expect(summary.services.done).toBe(true);
     const draft = summary.serviceSetup.services.find(s => s.id === 'sp-draft')!;
     expect(draft.status).toBe('draft');
     expect(draft.pricingConfigured).toBe(false);
@@ -395,7 +396,7 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
   it('quoteRequired pricing counts as configured even with no priceTable rows', async () => {
     const svc = service(buildSummaryPrisma({
       primary: null,
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":["sp-1"]}' }],
+      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
       profiles: [{
         id: 'sp-1',
         name: 'Custom Quote Service',
@@ -406,14 +407,33 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
     }));
     const summary = await svc.getConfigSummary('u-1');
     expect(summary.serviceSetup.services[0].pricingConfigured).toBe(true);
-    expect(summary.serviceSetup.done).toBe(true);
+    expect(summary.services.done).toBe(true);
   });
 
-  it('services step requires at least one active service AND at least one account assigned', async () => {
-    // Spec test #3: assignments + active service requirement.
-    // Active service exists but no account has been assigned yet.
-    const noAssignments = service(buildSummaryPrisma({
+  it('services.done stays false when no active service exists (only drafts)', async () => {
+    const svc = service(buildSummaryPrisma({
       primary: null,
+      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
+      profiles: [{
+        id: 'sp-1',
+        name: 'House Cleaning (draft only)',
+        status: 'draft',
+        pricingJson: null,
+        faqJson: null,
+      }],
+    }));
+    expect((await svc.getConfigSummary('u-1')).services.done).toBe(false);
+  });
+
+  it('does not depend on primary SavedAccount FAQ/pricing for services.done', async () => {
+    // Primary account intentionally empty; the ServiceProfile carries
+    // the real configuration. services.done must still flip true.
+    const svc = service(buildSummaryPrisma({
+      primary: {
+        faqJson: null,
+        servicePricingJson: null,
+        followUpSettingsJson: null,
+      },
       accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: null }],
       profiles: [{
         id: 'sp-1',
@@ -423,44 +443,8 @@ describe('OnboardingService.getConfigSummary (multi-service rollup)', () => {
         faqJson: JSON.stringify({ customQA: [{ question: 'Q', answer: 'A' }] }),
       }],
     }));
-    expect((await noAssignments.getConfigSummary('u-1')).services.done).toBe(false);
-
-    // Account has assignments but no active service exists.
-    const noActiveService = service(buildSummaryPrisma({
-      primary: null,
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":[]}' }],
-      profiles: [{
-        id: 'sp-1',
-        name: 'House Cleaning (draft only)',
-        status: 'draft',
-        pricingJson: null,
-        faqJson: null,
-      }],
-    }));
-    expect((await noActiveService.getConfigSummary('u-1')).services.done).toBe(false);
-  });
-
-  it('does not depend on primary SavedAccount FAQ/pricing for serviceSetup', async () => {
-    // Spec test #4: wizard does not depend on first SavedAccount FAQ/pricing.
-    // Primary account is intentionally empty; the ServiceProfile carries
-    // the real configuration. serviceSetup.done must still flip true.
-    const svc = service(buildSummaryPrisma({
-      primary: {
-        faqJson: null,
-        servicePricingJson: null,
-        followUpSettingsJson: null,
-      },
-      accounts: [{ id: 'sa-1', serviceProfileAssignmentsJson: '{"enabledServiceProfileIds":["sp-1"]}' }],
-      profiles: [{
-        id: 'sp-1',
-        name: 'House Cleaning',
-        status: 'active',
-        pricingJson: JSON.stringify({ priceTable: [{ bed: 1, bath: 1, regular: 100 }] }),
-        faqJson: JSON.stringify({ customQA: [{ question: 'Q', answer: 'A' }] }),
-      }],
-    }));
     const summary = await svc.getConfigSummary('u-1');
-    expect(summary.serviceSetup.done).toBe(true);
+    expect(summary.services.done).toBe(true);
     // And the legacy SavedAccount-derived booleans correctly stay false.
     expect(summary.faqConfigured).toBe(false);
     expect(summary.pricingConfigured).toBe(false);
