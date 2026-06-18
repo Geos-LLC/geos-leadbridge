@@ -203,6 +203,53 @@ describe('ServiceProfileService.createFromAdminTemplate (spec #6)', () => {
     expect(items[1].source).toBe('missing_from_thumbtack');
   });
 
+  it('flattens v2 addOns INTO items[] (no separate addOns key) so the editor renders them', async () => {
+    const tmpl = {
+      ...PUBLISHED_TEMPLATE,
+      id: 't-ao',
+      pricingJson: JSON.stringify({
+        pricingModel: 'room_quantity',
+        currency: 'USD',
+        basePrices: [
+          { quantity: 1, label: '1 room', price: 79, source: 'thumbtack_average' },
+        ],
+        addOns: [
+          { key: 'flights_of_stairs', label: 'Flights of stairs', price: 0, source: 'missing', quoteManually: true },
+          { key: 'pets', label: 'Cleaning home with pet(s)', price: 0, source: 'missing', quoteManually: true },
+        ],
+      }),
+    };
+    const { svc, prisma } = buildService({ publishedTemplate: tmpl });
+    await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-ao' });
+    const pricing = JSON.parse(prisma.profiles[0].pricingJson);
+
+    // All 3 rows show up in items[] — the PricingEditor will render
+    // them as editable table rows.
+    expect(pricing.items).toHaveLength(3);
+    expect(pricing.items.map((i: any) => i.label)).toEqual([
+      '1 room',
+      'Flights of stairs',
+      'Cleaning home with pet(s)',
+    ]);
+
+    // Add-on rows carry the `Add-on` tag in notes and a missing-price
+    // source so an operator can spot the ones that need pricing.
+    const addOnRow = pricing.items.find((i: any) => i.label === 'Flights of stairs');
+    expect(addOnRow).toMatchObject({
+      notes: 'Add-on',
+      source: 'missing_from_thumbtack',
+      price: 0,
+      active: true,
+    });
+
+    // Base rows do NOT get the Add-on tag.
+    const baseRow = pricing.items.find((i: any) => i.label === '1 room');
+    expect(baseRow.notes).toBeUndefined();
+
+    // No separate addOns key — flattening into items[] is the whole point.
+    expect(pricing.addOns).toBeUndefined();
+  });
+
   it('attaches a providerCategoryMappings entry for the template provider', async () => {
     const { svc, prisma } = buildService({ publishedTemplate: PUBLISHED_TEMPLATE });
     await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-1' });

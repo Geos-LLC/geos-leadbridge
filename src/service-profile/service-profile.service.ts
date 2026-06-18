@@ -1247,7 +1247,21 @@ function bridgeAdminPricingToV1(raw: string | null | undefined): string | null {
       .filter((x: any): x is object => x !== null);
   };
 
-  const mapAddOns = (arr: any): any[] => {
+  /**
+   * Convert admin add-ons → v1 items so they render as editable rows in
+   * the PricingEditor table. The existing PricingEditor only iterates
+   * `items[]` for the rendered rows; a separate `addOns[]` field gets
+   * passed through silently and never reaches the user. That broke the
+   * common Thumbtack flow where add-on labels arrive without prices
+   * (admin marks each "incl." or fills the number later) — the labels
+   * were captured by the parser but invisible in the per-service UI.
+   *
+   * We tag each converted row with `notes: 'Add-on'` so an operator can
+   * distinguish them in the table at a glance. `active: true` so the
+   * row is included in default views; price 0 / source 'missing_from_…'
+   * indicates the number still needs to be entered.
+   */
+  const mapAddOnsAsItems = (arr: any): any[] => {
     if (!Array.isArray(arr)) return [];
     return arr
       .map((a: any) => {
@@ -1260,7 +1274,8 @@ function bridgeAdminPricingToV1(raw: string | null | undefined): string | null {
           label,
           price,
           source: mapSource(a.source),
-          quoteManually: a.quoteManually === true,
+          notes: 'Add-on',
+          active: true,
         };
       })
       .filter((x: any): x is object => x !== null);
@@ -1291,12 +1306,17 @@ function bridgeAdminPricingToV1(raw: string | null | undefined): string | null {
   }
 
   // room_quantity, item_quantity, custom → all collapse to v1 item_quantity.
-  const items = mapBasePrices(parsed.basePrices);
-  const addOns = mapAddOns(parsed.addOns);
+  // Add-on rows are flattened INTO `items[]` (rather than kept as a
+  // separate `addOns[]` field) so the per-service PricingEditor renders
+  // them as editable rows. Without this, priceless add-ons captured by
+  // the parser were invisible in the price table — the editor only
+  // renders `items[]`. The `notes: 'Add-on'` tag from mapAddOnsAsItems
+  // lets operators tell them apart at a glance.
+  const baseItems = mapBasePrices(parsed.basePrices);
+  const addOnItems = mapAddOnsAsItems(parsed.addOns);
   return JSON.stringify({
     pricingModel: 'item_quantity',
-    items,
-    addOns,
+    items: [...baseItems, ...addOnItems],
     currency: typeof parsed.currency === 'string' ? parsed.currency : 'USD',
   });
 }
