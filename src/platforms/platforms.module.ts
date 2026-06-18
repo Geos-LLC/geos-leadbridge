@@ -11,6 +11,7 @@ import { YelpController } from './yelp/yelp.controller';
 import { PlatformsController } from './platforms.controller';
 import { PlatformFactory } from './platform.factory';
 import { PlatformService } from './platform.service';
+import { ConnectionHealthService } from './connection-health.service';
 import { LeadsModule } from '../leads/leads.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
@@ -23,7 +24,13 @@ import { ConversationContextModule } from '../conversation-context/conversation-
     ConversationContextModule,
   ],
   controllers: [ThumbtackController, YelpController, PlatformsController],
-  providers: [ThumbtackAdapter, YelpAdapter, PlatformFactory, PlatformService],
-  exports: [PlatformFactory, PlatformService, YelpAdapter],
+  providers: [
+    ThumbtackAdapter,
+    YelpAdapter,
+    PlatformFactory,
+    PlatformService,
+    ConnectionHealthService,
+  ],
+  exports: [PlatformFactory, PlatformService, YelpAdapter, ConnectionHealthService],
 })
 export class PlatformsModule {}

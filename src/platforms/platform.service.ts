@@ -18,6 +18,8 @@ import { TrialService } from '../trial/trial.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { ConnectionHealthService } from './connection-health.service';
+import { AssociatePhoneOutcome, AssociatePhonesSignal } from './connection-health.types';
 
 const SAVED_ACCOUNTS_TTL_SECONDS = 60;
 
@@ -135,6 +137,7 @@ export class PlatformService {
     private cache: CacheService,
     private leadCache: LeadCacheService,
     private eventEmitter: EventEmitter2,
+    private connectionHealth: ConnectionHealthService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -732,7 +735,7 @@ export class PlatformService {
     businessId: string,
     credentials?: { accessToken: string } | null,
     adapter?: any,
-  ): Promise<void> {
+  ): Promise<AssociatePhoneOutcome> {
     // Resolve the agent's phone: account override > user default
     const account = await this.prisma.savedAccount.findFirst({
       where: { userId, platform: 'thumbtack', businessId },
@@ -748,7 +751,7 @@ export class PlatformService {
       this.logger.log(
         `[tt.associate-phone] skip-owner reason=no_agent_phone userId=${userId} businessId=${businessId}`,
       );
-      return;
+      return 'skipped';
     }
 
     if (!adapter) {
@@ -756,7 +759,7 @@ export class PlatformService {
     }
     if (!credentials) {
       const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
-      if (!creds) return;
+      if (!creds) return 'skipped';
       credentials = creds;
     }
 
@@ -764,6 +767,7 @@ export class PlatformService {
     this.logger.log(
       `[tt.associate-phone] owner ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${agentPhone} name="LeadBridge Agent"`,
     );
+    return registered ? 'registered' : 'already_present';
   }
 
   /**
@@ -782,19 +786,19 @@ export class PlatformService {
     businessId: string,
     credentials?: { accessToken: string } | null,
     adapter?: any,
-  ): Promise<void> {
+  ): Promise<AssociatePhoneOutcome> {
     const account = await this.prisma.savedAccount.findFirst({
       where: { userId, platform: 'thumbtack', businessId },
       select: { id: true },
     });
-    if (!account) return;
+    if (!account) return 'skipped';
 
     const lbPhone = await this.notificationsService.resolveBotPhone(userId, account.id);
     if (!lbPhone) {
       this.logger.log(
         `[tt.associate-phone] skip-lb reason=no_lb_number userId=${userId} businessId=${businessId} savedAccountId=${account.id}`,
       );
-      return;
+      return 'skipped';
     }
 
     if (!adapter) {
@@ -802,7 +806,7 @@ export class PlatformService {
     }
     if (!credentials) {
       const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
-      if (!creds) return;
+      if (!creds) return 'skipped';
       credentials = creds;
     }
 
@@ -810,6 +814,7 @@ export class PlatformService {
     this.logger.log(
       `[tt.associate-phone] lb ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${lbPhone} name="LeadBridge Number"`,
     );
+    return registered ? 'registered' : 'already_present';
   }
 
   /**
@@ -823,27 +828,80 @@ export class PlatformService {
     credentials?: { accessToken: string } | null,
     adapter?: any,
   ): Promise<void> {
+    let ownerOutcome: AssociatePhoneOutcome = 'skipped';
+    let lbOutcome: AssociatePhoneOutcome = 'skipped';
+    let additionalOutcomes: Array<{ phone: string; name: string; status: AssociatePhoneOutcome }> = [];
+    const errors: string[] = [];
+
     try {
-      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
+      ownerOutcome = await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      ownerOutcome = 'failed';
+      const msg = err?.message ?? String(err);
+      errors.push(`owner: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] owner failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
-      await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
+      lbOutcome = await this.registerLeadBridgeNumberWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      lbOutcome = 'failed';
+      const msg = err?.message ?? String(err);
+      errors.push(`lb: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] lb failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
     try {
-      await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
+      additionalOutcomes = await this.registerAdditionalAssociatePhonesWithThumbtack(userId, businessId, credentials, adapter);
     } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      errors.push(`additional-batch: ${msg}`);
       this.logger.warn(
-        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${err?.message ?? err}"`,
+        `[tt.associate-phone] additional batch-failed businessId=${businessId} userId=${userId} message="${msg}"`,
       );
     }
+
+    await this.writeAssociatePhonesHealth(
+      userId,
+      businessId,
+      ownerOutcome,
+      lbOutcome,
+      additionalOutcomes,
+      errors,
+    );
+  }
+
+  private async writeAssociatePhonesHealth(
+    userId: string,
+    businessId: string,
+    owner: AssociatePhoneOutcome,
+    lb: AssociatePhoneOutcome,
+    additional: Array<{ phone: string; name: string; status: AssociatePhoneOutcome }>,
+    errors: string[],
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { id: true },
+    });
+    if (!account) return;
+
+    const everyOutcome: AssociatePhoneOutcome[] = [owner, lb, ...additional.map(a => a.status)];
+    const anyFail = everyOutcome.includes('failed');
+    const anyOk = everyOutcome.some(o => o === 'registered' || o === 'already_present');
+    const status: AssociatePhonesSignal['status'] = anyFail
+      ? (anyOk ? 'warn' : 'fail')
+      : anyOk ? 'ok' : 'unknown';
+
+    await this.connectionHealth.updateAssociatePhones(account.id, {
+      status,
+      lastSyncedAt: new Date().toISOString(),
+      owner,
+      lb,
+      additional,
+      lastErrorMessage: errors.length ? errors.join(' | ') : undefined,
+    });
   }
 
   /**
@@ -864,30 +922,31 @@ export class PlatformService {
     businessId: string,
     credentials?: { accessToken: string } | null,
     adapter?: any,
-  ): Promise<void> {
+  ): Promise<Array<{ phone: string; name: string; status: AssociatePhoneOutcome }>> {
+    const outcomes: Array<{ phone: string; name: string; status: AssociatePhoneOutcome }> = [];
     const account = await this.prisma.savedAccount.findFirst({
       where: { userId, platform: 'thumbtack', businessId },
       select: { followUpSettingsJson: true },
     });
-    if (!account?.followUpSettingsJson) return;
+    if (!account?.followUpSettingsJson) return outcomes;
     let parsed: any = null;
     try {
       parsed = JSON.parse(account.followUpSettingsJson);
     } catch {
-      return;
+      return outcomes;
     }
     const raw = parsed?.additionalAssociatePhones as
       | Array<{ id?: string; phoneNumber: string; label?: string }>
       | null
       | undefined;
-    if (!Array.isArray(raw) || raw.length === 0) return;
+    if (!Array.isArray(raw) || raw.length === 0) return outcomes;
 
     if (!adapter) {
       adapter = this.platformFactory.getAdapter('thumbtack') as any;
     }
     if (!credentials) {
       const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
-      if (!creds) return;
+      if (!creds) return outcomes;
       credentials = creds;
     }
 
@@ -900,13 +959,16 @@ export class PlatformService {
         this.logger.log(
           `[tt.associate-phone] additional ${registered ? 'registered' : 'already_present'} businessId=${businessId} phone=${phone} name="${name}"`,
         );
+        outcomes.push({ phone, name, status: registered ? 'registered' : 'already_present' });
       } catch (err: any) {
         // One bad entry shouldn't stop the rest of the list.
         this.logger.warn(
           `[tt.associate-phone] additional failed businessId=${businessId} phone=${phone} name="${name}" message="${err?.message ?? err}"`,
         );
+        outcomes.push({ phone, name, status: 'failed' });
       }
     }
+    return outcomes;
   }
 
   /**

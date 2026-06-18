@@ -3,10 +3,11 @@
  * Handles platform connection status and configuration
  */
 
-import { Controller, Get, Post, Header, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Header, Param, NotFoundException, UseGuards, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PlatformService } from './platform.service';
+import { ConnectionHealthService, deriveOverall } from './connection-health.service';
 import { PrismaService } from '../common/utils/prisma.service';
 
 export interface HealthIssue {
@@ -26,7 +27,41 @@ export class PlatformsController {
   constructor(
     private platformService: PlatformService,
     private prisma: PrismaService,
+    private connectionHealth: ConnectionHealthService,
   ) {}
+
+  /**
+   * Per-business connection-health blob. Single shape for the UI to render
+   * "Last sync: ✓ just now" / "⚠ token expired" / "✗ webhook missing"
+   * inline next to each connected business. Replaces the scattered surfaces
+   * (Loki for associate-phone, /health for Yelp, ad-hoc UI banners).
+   *
+   * Returns `{ overall: 'ok'|'warn'|'fail'|'unknown', health: ConnectionHealth | null }`.
+   * `null` health means nothing has been written yet (account exists but no
+   * health signals captured — common for accounts older than this feature).
+   */
+  @Get('saved-accounts/:savedAccountId/connection-health')
+  @Header('Cache-Control', 'no-store')
+  async getSavedAccountConnectionHealth(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.id },
+      select: { id: true, businessId: true, platform: true },
+    });
+    if (!account) {
+      throw new NotFoundException('Saved account not found or not yours');
+    }
+    const health = await this.connectionHealth.getHealth(savedAccountId);
+    return {
+      savedAccountId: account.id,
+      businessId: account.businessId,
+      platform: account.platform,
+      overall: deriveOverall(health),
+      health,
+    };
+  }
 
   /**
    * Get connection status for all platforms
