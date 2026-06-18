@@ -269,23 +269,38 @@ export class FollowUpGateService {
     }
 
     // Terminal-state intent on a non-re-engagement sequence — block.
-    // Side-effect mapping:
-    //   agreed / wants_live_contact / wants_to_schedule → stop_and_booked  (positive handoff)
-    //   deferring      → stop_only        (bounded pause; will re-engage later)
-    //   terminal_defer → stop_and_lost    (unbounded deflection ≈ soft no)
-    //   opt_out / hired_elsewhere → stop_and_lost
+    // Side-effect mapping (2026-06-17 lifecycle rule cleanup):
     //
-    // wants_live_contact / wants_to_schedule are POSITIVE conversions — customer
-    // is asking for a call/walkthrough or naming a time slot. Mario Evans
-    // 2026-06-10 incident: "Please schedule a walkthrough. So I can get a quote."
-    // classified as wants_live_contact @ 0.9 and was misrouted into the else
-    // branch (stop_and_lost / lostReason=hired_someone). Treat these as
-    // handoff/booked so the dispatcher is paged instead of flipping the lead lost.
-    const sideEffect: GateSideEffect = intent === 'agreed' || intent === 'wants_live_contact' || intent === 'wants_to_schedule'
-      ? 'stop_and_booked'
-      : intent === 'deferring'
-        ? 'stop_only'
-        : 'stop_and_lost';
+    //   opt_out         → stop_and_lost   (explicit unsubscribe — real terminal)
+    //   hired_elsewhere → stop_and_lost   (real terminal; Guard 2c will reject
+    //                                       the canonical write when prior
+    //                                       status is booked/in_progress/completed)
+    //   terminal_defer  → stop_and_lost   (unbounded deflection ≈ soft no)
+    //
+    //   agreed / wants_live_contact / wants_to_schedule → stop_only
+    //     Positive handoff signals. AI never books — only SF / platform_sync
+    //     / manual can write `booked`. Stop the sequence and let the
+    //     dispatcher take it. (Inbound classifier path fires the handoff
+    //     alert; the gate doesn't need to write the canonical status here.)
+    //
+    //   completed → stop_only
+    //     The Savanna 2026-05-12 / Donna case: customer says "Thanks!" /
+    //     "Sounds good!" / "Perfect!" after a holding-shape AI message. The
+    //     classifier already overrides bare-ack → engaged when the prior AI
+    //     was a holding message (intent-classifier.service.ts:283), but for
+    //     other cases of `completed` the safe action is to stop the sequence
+    //     without rewriting `Lead.status` — the customer concluded the
+    //     conversation, they did not actively churn.
+    //
+    //   deferring → stop_only
+    //     Bounded pause ("back next week" / "let me think"). Stop current
+    //     sequence; re-enrollment after wait time is the existing behavior.
+    const sideEffect: GateSideEffect =
+      intent === 'opt_out' ||
+      intent === 'hired_elsewhere' ||
+      intent === 'terminal_defer'
+        ? 'stop_and_lost'
+        : 'stop_only';
 
     this.logger.log(`[FollowUpGate] BLOCK intent=${intent} conf=${classification.confidence.toFixed(2)} reason="${classification.reason}" sideEffect=${sideEffect}`);
 

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "approvedAt": "2026-06-18",
+  "approver": "operator-2026-06-18",
+  "description": "A2 hired_someone-needs-review batch 1. Per-lead decisions from manual inspection of last-5-message conversations on chore/ai-classifier-lifecycle-cleanup. Excludes the 34 A1 safe-restore leads (those wait for separate review of booked vs engaged).",
+  "context": {
+    "branch": "chore/ai-classifier-lifecycle-cleanup",
+    "auditScript": "scripts/audit-ai-terminal-leads-split.ts",
+    "spec": "2026-06-17 lifecycle rule cleanup"
+  },
+  "entries": [
+    { "leadId": "5c9d5b9d-b227-475c-acf0-5cbb24935845", "customer": "Rome LaForce",          "tenant": "adanettka@gmail.com",          "action": "restore_engaged_followup_eligible", "note": "Completed customer paying for cleaning; AI mis-flipped" },
+    { "leadId": "df592528-39cd-4419-9320-88ef1596d269", "customer": "Myloan Hoang",          "tenant": "adanettka@gmail.com",          "action": "restore_engaged_followup_eligible", "note": "Completed customer paying" },
+    { "leadId": "22188a51-69f3-4d92-ab18-679c39560652", "customer": "Rachana Ghanathe",      "tenant": "adanettka@gmail.com",          "action": "restore_engaged_followup_eligible", "note": "Completed customer paying" },
+    { "leadId": "9a61bac4-831c-45aa-b3d4-194f832b25fd", "customer": "Zin Htun",              "tenant": "adanettka@gmail.com",          "action": "restore_engaged_followup_eligible", "note": "Completed customer post-cleaning" },
+    { "leadId": "118a0040-8825-486e-8188-2233a35feb4f", "customer": "Tom M.",                "tenant": "info@spotless.homes",          "action": "restore_engaged_followup_eligible", "note": "Customer deferring; not hired_else" },
+    { "leadId": "868b5ec0-d058-41a2-99f4-cd2450c53638", "customer": "GoGo Grandparent",      "tenant": "lavandacleaningsd@gmail.com",  "action": "restore_engaged_followup_eligible", "note": "Customer said 'I'll check back'; deferring" },
+    { "leadId": "e32519a4-92b6-4803-bdac-81f0d6a09578", "customer": "vicki norman",          "tenant": "lavandacleaningsd@gmail.com",  "action": "restore_engaged_followup_eligible", "note": "Price objection; not hired_else" },
+    { "leadId": "790db1dd-8667-4a79-8d11-e90295850e2b", "customer": "Yong-Yi H.",            "tenant": "lavandacleaningsd@gmail.com",  "action": "restore_engaged_followup_eligible", "note": "Last-minute deferring; not hired_else" },
+    { "leadId": "a8459037-e28a-464e-8a79-afe32208a803", "customer": "Rishabh Desai",         "tenant": "nataliaparanina1990@gmail.com", "action": "restore_engaged_followup_eligible", "note": "Recurring customer; not lost" },
+    { "leadId": "efe423ea-44a1-445f-8dfe-071ed7a55816", "customer": "Hannah Coe",            "tenant": "nataliaparanina1990@gmail.com", "action": "restore_engaged_followup_eligible", "note": "Actively booking; not lost" },
+    { "leadId": "4585b219-7d62-48bd-8539-5a00d0f10bd6", "customer": "Dan Miles",             "tenant": "shenehome@gmail.com",          "action": "restore_engaged_followup_eligible", "note": "Customer 'switching to' us; AI misread" },
+
+    { "leadId": "bcb2158a-59b7-4919-b67a-48c8789bbda1", "customer": "Kevin Cole",            "tenant": "lavandacleaningsd@gmail.com",  "action": "restore_booked", "note": "Dispatcher confirmed Fri 9am with address/email/phone provided by customer" },
+    { "leadId": "8d991d47-bf05-4467-95ef-7529111172f6", "customer": "Ignacio Andreu",        "tenant": "nataliaparanina1990@gmail.com", "action": "restore_booked", "note": "Customer 'Let's do that / Thanks!' confirming recurring schedule" },
+    { "leadId": "6ed8548a-826c-4379-a838-4dde108a8038", "customer": "Chelsey Barvarz",      "tenant": "nataliaparanina1990@gmail.com", "action": "restore_booked", "note": "Booked June 25 9:30, customer said 'Great, thank you!'" },
+
+    { "leadId": "90c39d1a-2bf4-4e95-9b61-c84ba033a15f", "customer": "Michelle Drobot",      "tenant": "lavandacleaningsd@gmail.com",  "action": "keep_hired_elsewhere_reengage", "note": "Customer said 'I went ahead and scheduled someone else' — real hired_someone signal regex missed" },
+
+    { "leadId": "d6ac2a23-f2f8-496e-b109-cf1b1dd39a82", "customer": "Julie P.",              "tenant": "info@spotless.homes",          "action": "manual_review_noop", "note": "Ambiguous: 'Please cancel' + 'What company is this!' — privacy concern, possibly opt_out, possibly hired_else. Needs human review." },
+    { "leadId": "88fedd8f-1126-43cb-895a-3765efccc0f1", "customer": "Femcee L.",             "tenant": "info@spotless.homes",          "action": "manual_review_noop", "note": "Yelp 'no longer pursuing' auto-signal — likely belongs in opt_out not hired_someone, needs operator decision" },
+    { "leadId": "d10cbd43-006c-4bca-96c3-3be77eac72e8", "customer": "Ashley Anthony",       "tenant": "nataliaparanina1990@gmail.com", "action": "manual_review_noop", "note": "Past customer declined next round ('No, thank you for asking') — not hired_else, not opt_out, needs operator decision" },
+    { "leadId": "90943ab9-8ff5-4471-bba4-6b758c0b6f82", "customer": "Rachael Glover",        "tenant": "shenehome@gmail.com",          "action": "manual_review_noop", "note": "Ending 6-month recurring contract — not hired_else, needs operator decision on re-engagement" }
+  ]
+}

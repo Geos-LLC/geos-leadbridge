@@ -282,50 +282,68 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
     });
   });
 
-  // Feryal Berjawi 2026-06-14 incident: classifier intent=`completed` @ 0.90
-  // on "Thanks again!" after the customer had already booked. Previously
-  // mapped to hired_someone → writes lost. The guard reads the lead's
-  // current Lead.status and suppresses the lost write when the customer was
-  // already past `booked` — a positive wrap-up should NOT downgrade a
-  // confirmed booking. SF stays Scheduled; LB stays booked.
-  describe('classifier=completed/hired_elsewhere guard on booked leads', () => {
+  // 2026-06-17 lifecycle rule cleanup (Spec D 1, 5, 6):
+  // The classifier intent mapping at intentToTransitionKind was reshaped so
+  // `completed` and `agreed` no longer attempt terminal writes — they fall
+  // through to `engaged`. The original Feryal Berjawi 2026-06-14 guard at
+  // automation.service.ts:1617 still fires for `hired_elsewhere` only (since
+  // that is the only intent that still maps to `hired_someone`). For
+  // `completed`/`agreed`, no terminal write is even attempted now; the
+  // pipeline-downgrade guard inside LeadStatusService is what prevents
+  // the booked→engaged downgrade if those intents fire on a booked lead.
+  describe('classifier mapping (2026-06-17 lifecycle cleanup)', () => {
     const llmCompleted = { intent: 'completed', confidence: 0.9, reason: 'wrap-up', fromLlm: true };
     const llmHiredElsewhere = { intent: 'hired_elsewhere', confidence: 0.9, reason: 'hired competitor', fromLlm: true };
+    const llmAgreed = { intent: 'agreed', confidence: 0.9, reason: 'price accepted', fromLlm: true };
 
-    it('SUPPRESSES classifier=completed → lost when current Lead.status is booked', async () => {
-      const { svc, writeStatus, prisma } = buildSvc({ currentLeadStatus: 'booked' });
+    // Spec D.6: classifier `completed` never maps to lost.
+    it('classifier=completed maps to engaged transition (not lost)', async () => {
+      const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'engaged' });
       await runTransition(svc, 'Thanks again!', {}, llmCompleted);
-      expect(prisma.lead.findUnique).toHaveBeenCalledWith({
-        where: { id: LEAD_ID },
-        select: { status: true },
+      // writeStatus is called with engaged (not lost). The same-status guard
+      // inside LeadStatusService no-ops because the lead is already engaged,
+      // but at the AutomationService boundary the intent is correctly
+      // routed to engaged.
+      expect(writeStatus).toHaveBeenCalledTimes(1);
+      expect(writeStatus.mock.calls[0][0]).toMatchObject({
+        newStatus: 'engaged',
       });
-      expect(writeStatus).not.toHaveBeenCalled();
+      expect(writeStatus.mock.calls[0][0]).not.toMatchObject({ newStatus: 'lost' });
     });
 
-    it('SUPPRESSES classifier=hired_elsewhere → lost when current Lead.status is booked', async () => {
+    // Spec D.1: booked lead + customer wrap-up phrase must not flip lost.
+    it('classifier=completed on booked lead does NOT attempt lost write', async () => {
       const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'booked' });
-      // The LLM occasionally returns hired_elsewhere for positive wrap-up
-      // phrasing too (the two intents are merged at intentToTransitionKind).
-      // Same guard fires for the same reason.
+      await runTransition(svc, 'Thanks again!', {}, llmCompleted);
+      // Either: writeStatus called with engaged (LeadStatusService's
+      // pipeline-downgrade guard then blocks the actual change) OR not called
+      // at all if guarded earlier. Either is acceptable — what we pin is
+      // that NO lost write attempt is made.
+      const allCalls = writeStatus.mock.calls.map((c: any[]) => c[0]);
+      for (const call of allCalls) {
+        expect(call).not.toMatchObject({ newStatus: 'lost' });
+      }
+    });
+
+    // Spec D.5: hired_elsewhere on booked lead → suppressed (Berjawi guard
+    // preserved). The guard returns early before calling writeStatus.
+    it('SUPPRESSES classifier=hired_elsewhere on booked lead (Berjawi guard preserved)', async () => {
+      const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'booked' });
       await runTransition(svc, 'Sounds perfect, see you then.', {}, llmHiredElsewhere);
       expect(writeStatus).not.toHaveBeenCalled();
     });
 
-    it('SUPPRESSES classifier=completed → lost when current Lead.status is already completed', async () => {
-      // Lead.status='completed' means SF/platform marked the job done.
-      // The customer saying "Thanks again!" post-completion should also
-      // never flip the row to lost.
+    // Spec D.5 (companion): hired_elsewhere on completed lead → also suppressed.
+    it('SUPPRESSES classifier=hired_elsewhere on completed lead (Berjawi guard preserved)', async () => {
       const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'completed' });
-      await runTransition(svc, 'Thanks again!', {}, llmCompleted);
+      await runTransition(svc, "we're all done", {}, llmHiredElsewhere);
       expect(writeStatus).not.toHaveBeenCalled();
     });
 
-    it('ALLOWS classifier=completed → lost when current Lead.status is engaged (pre-booking)', async () => {
-      // Pre-booking, classifier=completed retains its legacy meaning:
-      // the customer is winding down (often "we already had it done by
-      // someone else"). Mapping to lost + 21d reengage is correct here.
+    // Spec D.4: hired_elsewhere on active (engaged) lead → lost+hired_someone.
+    it('ALLOWS classifier=hired_elsewhere on engaged lead → lost+hired_someone', async () => {
       const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'engaged' });
-      await runTransition(svc, "actually it's already taken care of", {}, llmCompleted);
+      await runTransition(svc, 'we hired someone else', {}, llmHiredElsewhere);
       expect(writeStatus).toHaveBeenCalledTimes(1);
       expect(writeStatus.mock.calls[0][0]).toMatchObject({
         newStatus: 'lost',
@@ -333,20 +351,8 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
       });
     });
 
-    it('ALLOWS classifier=hired_elsewhere → lost when current Lead.status is engaged', async () => {
-      const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'engaged' });
-      await runTransition(svc, "we hired someone else", {}, llmHiredElsewhere);
-      expect(writeStatus).toHaveBeenCalledTimes(1);
-      expect(writeStatus.mock.calls[0][0]).toMatchObject({
-        newStatus: 'lost',
-        lostReason: 'hired_someone',
-      });
-    });
-
-    it('ALLOWS classifier=opt_out → lost even on booked leads (different terminal)', async () => {
-      // Opt-out is a regulatory signal — the customer can revoke consent
-      // at any status. The guard intentionally only catches
-      // completed/hired_elsewhere, not opt_out.
+    // Spec D.3: opt_out → lost+opt_out even on booked leads (regulatory).
+    it('ALLOWS classifier=opt_out → lost+opt_out even on booked leads', async () => {
       const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'booked' });
       const llmOptOut = { intent: 'opt_out', confidence: 0.99, reason: 'stop', fromLlm: true };
       await runTransition(svc, 'stop messaging me', {}, llmOptOut);
@@ -357,14 +363,18 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
       });
     });
 
-    it('does NOT call prisma.lead.findUnique when classifier intent is not completed/hired_elsewhere', async () => {
-      // The lookup is only done when there's actually a risk of the
-      // completed/hired_elsewhere → hired_someone downgrade. Other intents
-      // (engaged, agreed, opt_out) skip the lookup entirely.
-      const { svc, prisma } = buildSvc({ currentLeadStatus: 'booked' });
-      const llmAgreed = { intent: 'agreed', confidence: 0.9, reason: 'booked', fromLlm: true };
+    // 2026-06-17: agreed no longer triggers Lead.status='booked' from AI.
+    // It maps to engaged at the transition layer; handoff alert fires
+    // separately via maybeFireHandoffAlert.
+    it('classifier=agreed maps to engaged transition (AI no longer authors booked)', async () => {
+      const { svc, writeStatus } = buildSvc({ currentLeadStatus: 'engaged' });
       await runTransition(svc, 'sounds good', {}, llmAgreed);
-      expect(prisma.lead.findUnique).not.toHaveBeenCalled();
+      // Same-status guard inside LeadStatusService will no-op the actual
+      // write, but the attempted newStatus is engaged, not booked.
+      const allCalls = writeStatus.mock.calls.map((c: any[]) => c[0]);
+      for (const call of allCalls) {
+        expect(call).not.toMatchObject({ newStatus: 'booked' });
+      }
     });
   });
 });

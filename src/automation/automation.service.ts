@@ -1545,10 +1545,22 @@ export class AutomationService implements OnModuleInit {
    * kind. Returns null when the classifier isn't trustworthy here — caller
    * should fall back to the phrase-list `detectCustomerReplyTransition`.
    *
-   * - opt_out                       -> opt_out
-   * - hired_elsewhere | completed   -> hired_someone (same status + 21d reengage)
-   * - agreed                        -> agreed
-   * - deferring | asking | engaged  -> engaged (no terminal write; no-downgrade guarded)
+   * 2026-06-17 lifecycle rule cleanup:
+   *   - opt_out         -> opt_out          (Lead.status='lost', lostReason='opt_out')
+   *   - hired_elsewhere -> hired_someone    (Lead.status='lost', lostReason='hired_someone';
+   *                                          Guard 2c suppresses on booked/in_progress/completed)
+   *   - completed       -> engaged          (changed from hired_someone — wrap-up
+   *                                          phrases like "thanks/sounds good" must
+   *                                          NOT mark a customer lost. The bare-ack
+   *                                          guard in IntentClassifierService catches
+   *                                          most cases; this is the floor.)
+   *   - agreed          -> engaged          (changed from agreed/booked — AI cannot
+   *                                          author `booked`. Handoff alert fires
+   *                                          separately. Dispatcher/SF/platform
+   *                                          confirms the actual booking.)
+   *   - deferring | asking | engaged | wants_live_contact | wants_to_schedule
+   *                     -> engaged          (no terminal write; pipeline-downgrade
+   *                                          guard handles already-past leads)
    */
   private intentToTransitionKind(c: IntentClassification): CustomerReplyTransition['kind'] | null {
     if (!c.fromLlm || c.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
@@ -1556,9 +1568,11 @@ export class AutomationService implements OnModuleInit {
     }
     switch (c.intent) {
       case 'opt_out': return 'opt_out';
-      case 'hired_elsewhere':
-      case 'completed': return 'hired_someone';
-      case 'agreed': return 'agreed';
+      case 'hired_elsewhere': return 'hired_someone';
+      // 'completed' and 'agreed' deliberately fall through to 'engaged' — see
+      // doc-comment above. AI must not author terminal lifecycle statuses.
+      case 'completed':
+      case 'agreed':
       case 'deferring':
       case 'asking':
       case 'engaged':
