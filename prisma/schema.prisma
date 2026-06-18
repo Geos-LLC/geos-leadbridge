@@ -716,8 +716,9 @@ model SavedAccount {
   serviceProfileAssignmentsJson String?  @db.Text
   // Team — when set, org members can access this account
   organizationId                String?
-  lastUsedAt                    DateTime @default(now())
-  createdAt                     DateTime @default(now())
+  lastUsedAt                    DateTime  @default(now())
+  archivedAt                    DateTime?
+  createdAt                     DateTime  @default(now())
 
   // Relationships
   user                 User                        @relation(fields: [userId], references: [id], onDelete: Cascade)

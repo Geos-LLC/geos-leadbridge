@@ -698,6 +698,122 @@ export class MonitoringService implements OnModuleInit {
     }
   }
 
+  // ==========================================
+  // Daily SavedAccount Auto-Archive Sweep
+  //
+  // Background: when a tenant deletes their LeadBridge integration on
+  // the platform side (e.g. Wesley Chapel — operator deleted the TT
+  // business itself), our refresh tokens go permanently invalid. We
+  // can't probe the platform to confirm "deleted vs transient" since
+  // we have no auth, so we use **time** as the proxy: 30 days of
+  // unresolved token_refresh failures is a strong signal the account
+  // is gone for good (real expiries get reconnected within days).
+  //
+  // What it does:
+  //   - Find SavedAccount rows where archivedAt IS NULL AND there's
+  //     an unresolved SystemErrorLog row of category='token_refresh'
+  //     with createdAt >= 30 days ago.
+  //   - Set archivedAt = now(). The row stays in the DB — user-facing
+  //     reads (loadSavedAccounts) filter archivedAt:null, so it drops
+  //     out of the connected-accounts list and dead-token warning.
+  //   - A fresh OAuth reconnect on the same userId+platform+businessId
+  //     hits the upsert path in saveAccount() which clears archivedAt,
+  //     resurrecting the row with all its config (FAQ, pricing, AI
+  //     playbook, follow-up settings) intact.
+  //
+  // Schedule: '0 4 * * *' = 04:00 UTC daily. Advisory lock 17005
+  // prevents staging+production double-execution on the shared DB.
+  // ==========================================
+
+  /** Threshold for auto-archiving an account with dead refresh tokens. */
+  private static readonly ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+  @Cron('0 4 * * *')
+  async archiveOrphanedAccounts(): Promise<void> {
+    try {
+      await withCronLock(
+        this.prisma,
+        this.logger,
+        17005,
+        'ArchiveOrphanedAccounts',
+        async (tx) => {
+          const result = await this.runArchiveOrphanedAccountsSweep(tx);
+          this.logger.log(
+            `[ArchiveOrphanedAccounts] swept candidates=${result.candidates} archived=${result.archived}`,
+          );
+        },
+      );
+    } catch (err: any) {
+      if (isSkipped(err)) {
+        this.logger.log('[ArchiveOrphanedAccounts] skipped — another instance holds the lock');
+        return;
+      }
+      this.logger.error(
+        `[ArchiveOrphanedAccounts] result=error error=${(err?.message ?? 'unknown').slice(0, 300)}`,
+      );
+    }
+  }
+
+  /**
+   * The sweep itself, factored out so the cron, manual admin trigger,
+   * and unit tests can all share one implementation. Returns counts
+   * for logging — pure side-effect on the DB otherwise.
+   */
+  async runArchiveOrphanedAccountsSweep(db: Db = this.prisma): Promise<{
+    candidates: number;
+    archived: number;
+  }> {
+    const threshold = new Date(Date.now() - MonitoringService.ARCHIVE_AFTER_MS);
+
+    const stale = await db.systemErrorLog.findMany({
+      where: {
+        category: 'token_refresh',
+        resolved: false,
+        createdAt: { lte: threshold },
+        accountId: { not: null },
+      },
+      select: { accountId: true, createdAt: true },
+    });
+
+    const oldestByAccount = new Map<string, Date>();
+    for (const e of stale) {
+      const id = e.accountId!;
+      const prev = oldestByAccount.get(id);
+      if (!prev || e.createdAt < prev) oldestByAccount.set(id, e.createdAt);
+    }
+
+    const accountIds = Array.from(oldestByAccount.keys());
+    if (accountIds.length === 0) {
+      return { candidates: 0, archived: 0 };
+    }
+
+    const candidates = await db.savedAccount.findMany({
+      where: { id: { in: accountIds }, archivedAt: null },
+      select: { id: true, businessName: true, platform: true, userId: true },
+    });
+
+    if (candidates.length === 0) {
+      return { candidates: accountIds.length, archived: 0 };
+    }
+
+    const now = new Date();
+    const result = await db.savedAccount.updateMany({
+      where: { id: { in: candidates.map((c) => c.id) }, archivedAt: null },
+      data: { archivedAt: now },
+    });
+
+    for (const c of candidates) {
+      const sinceWhen = oldestByAccount.get(c.id);
+      this.logger.warn(
+        `[ArchiveOrphanedAccounts] archived ${c.platform}/${c.businessName} ` +
+        `(id=${c.id} user=${c.userId}) — first dead-token error at ` +
+        `${sinceWhen?.toISOString() ?? '?'}`,
+      );
+    }
+
+    return { candidates: accountIds.length, archived: result.count };
+  }
+
   /**
    * Manual trigger for the integrity check — invoked from admin endpoint or
    * scripts. Bypasses the cron's advisory lock so a human can always run it
