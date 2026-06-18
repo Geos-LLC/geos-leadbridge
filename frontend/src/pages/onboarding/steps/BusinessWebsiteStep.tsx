@@ -62,7 +62,15 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
   // Title + description live in WizardShell header (2026-06-13 redesign).
 
   // ── Website state ──────────────────────────────────────────────────
-  const [value, setValue] = useState<string>(user?.website ?? '');
+  // Intentionally NOT seeded from user.website. For TT/Yelp tenants the
+  // canonical URL lives on SavedAccount.publicProfileUrl, not User.website,
+  // and the cached user.website can be a stale value from before the
+  // unified field landed. getBusinessProfileUrl (below) runs the
+  // canonical TT > Yelp > User.website resolution server-side; with a
+  // stale local seed the `!value.trim()` guard would block it from
+  // overwriting, leaving the wrong URL visible. Mirrors the same fix
+  // Settings → General got (2026-06-17).
+  const [value, setValue] = useState<string>('');
   const [verifyState, setVerifyState] = useState<
     | { kind: 'idle' }
     | { kind: 'checking' }
