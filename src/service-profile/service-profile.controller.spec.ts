@@ -276,7 +276,8 @@ describe('ServiceProfileService.createFromPreset — integration with build help
         }),
       },
     };
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const monitoring: any = { captureError: jest.fn(async () => undefined) };
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, monitoring);
     const out = await svc.createFromPreset({
       userId: 'user-1',
       preset: UPHOLSTERY_FURNITURE_CLEANING_PRESET,

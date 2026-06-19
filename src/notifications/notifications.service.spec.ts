@@ -113,6 +113,9 @@ describe('NotificationsService', () => {
     } as any, {
       // PlatformService stub — wired 2026-06-13 for TT associate-phone
       // resync. No method on PlatformService is exercised by this suite.
+    } as any, {
+      // CallConnectService stub — wired 2026-06-18 for botNumberE164
+      // back-fill on phone purchase. Not exercised by this suite.
     } as any);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls

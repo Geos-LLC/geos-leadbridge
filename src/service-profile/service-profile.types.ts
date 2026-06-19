@@ -32,17 +32,20 @@ export type ServiceOverrides = {
 };
 
 /**
- * Output of the resolver's main entry point. Either:
- *  - status='resolved' — a profile applies, the caller should use its
- *    pricing/FAQ/AI overlay
- *  - status='ai_paused' — a profile applies but the AI auto-reply
- *    path should be gated off (lead still tracked). Two reasons today:
- *      - 'draft_profile': matched profile is still draft
- *      - 'setup_mismatch': matched profile is NOT in the SavedAccount's
- *        enabledServiceProfileIds list (PR-E account ↔ service
- *        assignment layer)
- *  - status='legacy_fallback' — no profile applies; caller reads the
- *    legacy SavedAccount columns directly
+ * Output of the resolver's main entry point. After the A3 collapse there
+ * are three terminal states:
+ *  - status='resolved' — the service-group classifier matched a profile,
+ *    caller should use its pricing/FAQ/AI overlay
+ *  - status='ai_paused' — classifier matched a profile, but the AI
+ *    auto-reply path should be gated off because the matched profile is
+ *    still 'draft' (lead is still tracked). The legacy 'setup_mismatch'
+ *    reason was retired with the assignments gate.
+ *  - status='no_match' — no profile applies for this lead. The caller
+ *    should treat this as "no quote available" — render the AI without
+ *    pricing context and answer something like "I don't have a price
+ *    for that service." Replaces the old 'legacy_fallback' status; the
+ *    legacy SavedAccount read path is no longer consulted by the
+ *    resolver.
  */
 export type ResolvedProfile =
   | {
@@ -52,17 +55,17 @@ export type ResolvedProfile =
       effectivePricingJson: string | null;
       effectiveFaqJson: string | null;
       effectiveAiInstructionsJson: string | null;
-      matchedBy: 'serviceGroup' | 'categoryId' | 'categoryName' | 'default';
+      matchedBy: 'serviceGroup';
     }
   | {
       status: 'ai_paused';
       profileId: string;
       profileName: string;
-      reason: 'draft_profile' | 'setup_mismatch';
+      reason: 'draft_profile';
     }
   | {
-      status: 'legacy_fallback';
-      reason: 'no_default_profile' | 'no_profile_matched_and_no_default';
+      status: 'no_match';
+      reason: 'no_profiles' | 'no_classifier_match';
     };
 
 /**
@@ -130,10 +133,17 @@ export type LeadForResolver = {
   // that lands on staging, this field starts populating. Until then it
   // stays null — name-based matching covers the common case.
   categoryId?: string | null;
+  // Optional — used by the no-match monitoring warning so the pricing
+  // capture bucket carries platform context (TT / Yelp). Resolver
+  // doesn't dispatch on it; safe to omit at call sites.
+  platform?: string | null;
 };
 
 export type SavedAccountForResolver = {
   id: string;
+  // Optional — used by the no-match monitoring warning to label
+  // captureError rows. Resolver doesn't dispatch on it.
+  businessName?: string | null;
   servicePricingJson: string | null;
   faqJson: string | null;
   serviceOverridesJson?: string | null;
