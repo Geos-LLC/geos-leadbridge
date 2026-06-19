@@ -166,6 +166,23 @@ describe('IntentClassifierService', () => {
       expect(result.intent).toBe('completed');
     });
 
+    // Yvonne case 2026-06-19 — gpt-4o-mini live-classified this message as
+    // opt_out @ 0.95 ("Customer explicitly states they no longer need the
+    // service."), which routed the lead to lostReason='opt_out' (no re-engage)
+    // instead of the intended hired_someone path (reengageAt=now+21d +
+    // customer_hired_competitor sequence). The prompt was updated to make
+    // "no longer need" explicitly route to completed/hired_elsewhere, not
+    // opt_out. This pins the contract for the mocked response we expect.
+    it('Yvonne case — "Sorry, I no longer need this service" → completed (NOT opt_out)', async () => {
+      const svc = makeService(llmReply('completed', 0.9, 'no longer needs service'));
+      const result = await svc.classify({
+        message: 'Sorry, I no longer need this service',
+        leadStatus: 'new',
+      });
+      expect(result.intent).toBe('completed');
+      expect(result.intent).not.toBe('opt_out');
+    });
+
     it('Lewam case — "It\'s ok we can cancel" → completed (job called off)', async () => {
       const svc = makeService(llmReply('completed', 0.85, 'customer canceling existing booking'));
       const result = await svc.classify({
