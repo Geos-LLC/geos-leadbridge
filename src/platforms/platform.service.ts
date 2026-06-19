@@ -1544,11 +1544,27 @@ export class PlatformService {
         where: { id: savedAccountId },
         select: { followUpSettingsJson: true },
       });
+      const existing = existingAccount?.followUpSettingsJson
+        ? JSON.parse(existingAccount.followUpSettingsJson)
+        : {};
+      // 2d — seed the 5 default-ON keys explicitly when absent. The
+      // runtime check was flipped from `!== false` to `=== true` in 2c,
+      // so a missing key now reads as `false`. Without these defaults a
+      // brand-new SavedAccount would silently have opt-out / booked /
+      // deferral / re-engagement features OFF until the operator opens
+      // Services and hits save. Existing operator-set values win — we
+      // only fill keys that are undefined.
+      const defaultOn: Record<string, true> = {
+        reEngagementAlertEnabled: true,
+        aiStopOnOptOut: true,
+        aiStopOnBooked: true,
+        aiHiredCompetitorReengage: true,
+        aiDeferralCheckIn: true,
+      };
       const merged = {
-        ...(existingAccount?.followUpSettingsJson
-          ? JSON.parse(existingAccount.followUpSettingsJson)
-          : {}),
-        instantTextMode: 'ai',
+        ...defaultOn, // defaults first
+        ...existing, // existing operator values win
+        instantTextMode: 'ai', // always overwrite — see note above
       };
       await this.prisma.savedAccount.update({
         where: { id: savedAccountId },

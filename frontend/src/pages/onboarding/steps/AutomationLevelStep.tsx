@@ -60,6 +60,16 @@ const HIRED_DELAY_OPTIONS = ['1 week', '2 weeks', '3 weeks', '1 month', '2 month
 // during onboarding instead of hunting for them later.
 const TRIAL_BUNDLE: Record<string, unknown> = {
   mode: 'auto_send',
+  // 2d — write the 3 default-ON keys the wizard doesn't otherwise
+  // expose so a brand-new SavedAccount has them explicit on first
+  // save. After 2c, the runtime treats absent keys as `false`, so
+  // omitting them here would silently leave the opt-out / booked /
+  // re-engagement features OFF for fresh tenants. (aiDeferralCheckIn
+  // and aiHiredCompetitorReengage are written below from the
+  // user-editable opts, so they're already explicit.)
+  aiStopOnOptOut: true,
+  aiStopOnBooked: true,
+  reEngagementAlertEnabled: true,
 };
 
 /**
