@@ -43,6 +43,7 @@ import {
 import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
 import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 /**
  * Per-field source tracking for telemetry. The top-level `source` field
@@ -66,6 +67,7 @@ export class ServiceProfileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly adminTemplates: AdminServiceTemplatesService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   /**
@@ -147,6 +149,38 @@ export class ServiceProfileService {
           matched = defaultMatch;
           matchedBy = 'default';
         }
+      }
+
+      // A1 guardrail — emit a monitoring warning whenever resolution did
+      // not land via category-mapping (steps 1+2). This includes both the
+      // default fallback and the legacy_fallback path. Goal is to
+      // measure how often category-mapping fails *before* A3 collapses
+      // the fallback chain — once this warning rate hits zero, A3 is
+      // safe to ship. Fire-and-forget; never blocks lead processing.
+      if (!matched || matchedBy === 'default') {
+        const code = matched ? 'fellback_to_default_profile' : 'no_profile_match';
+        const reason = matched
+          ? 'Lead category did not match any ServiceProfile mappings — resolver fell back to User.defaultServiceProfileId.'
+          : 'Lead category did not match any ServiceProfile mappings and no defaultServiceProfileId is set — resolver returned legacy_fallback.';
+        this.monitoring.captureError({
+          category: 'pricing',
+          code,
+          severity: 'warning',
+          message: reason,
+          userId: lead.userId,
+          accountId: savedAccount?.id,
+          accountName: savedAccount?.businessName ?? undefined,
+          platform: lead.platform ?? undefined,
+          context: {
+            leadId: lead.id,
+            leadCategory: lead.category ?? null,
+            leadCategoryId: lead.categoryId ?? null,
+            matchedProfileId: matched?.id ?? null,
+            matchedProfileName: matched?.name ?? null,
+          },
+        }).catch((err) => {
+          this.logger.warn(`[service-profile] monitoring.captureError failed: ${err?.message ?? err}`);
+        });
       }
 
       if (!matched) {
@@ -658,6 +692,20 @@ export class ServiceProfileService {
         err.code = 'EMPTY_CONFIG';
         throw err;
       }
+      // A1 guardrail — activation also requires at least one provider
+      // category mapping. An active profile with no mappings matches
+      // zero leads, which is the "AI silently no-quotes everything"
+      // failure mode A3 collapses to. Caught at transition time so the
+      // operator gets a clear "add a category first" error instead of
+      // shipping a dead profile.
+      const mappings = parseMappings(profile.providerCategoryMappingsJson);
+      if (mappings.length === 0) {
+        const err: any = new Error(
+          'Cannot activate: profile has no provider category mappings — add a Thumbtack or Yelp category so incoming leads can be matched to it.',
+        );
+        err.code = 'EMPTY_MAPPINGS';
+        throw err;
+      }
     }
 
     if (nextStatus === 'archived' && profile.isDefault) {
@@ -735,6 +783,19 @@ export class ServiceProfileService {
     if (patch.providerCategoryMappingsJson !== undefined) {
       if (!Array.isArray(patch.providerCategoryMappingsJson)) {
         const err: any = new Error('providerCategoryMappingsJson must be an array');
+        err.code = 'INVALID_MAPPINGS';
+        throw err;
+      }
+      // A1 guardrail — an empty mappings array is the most common cause
+      // of "AI doesn't quote anything" (no category match → today's
+      // fallback rescues, but after A3 the resolver returns "no price
+      // for that"). Reject empty saves so new/edited profiles can't
+      // ship in that broken-by-design state. Existing rows with empty
+      // arrays are NOT touched here — A2's migration backfills them.
+      if (patch.providerCategoryMappingsJson.length === 0) {
+        const err: any = new Error(
+          'A ServiceProfile must claim at least one provider category — add a Thumbtack or Yelp category before saving.',
+        );
         err.code = 'INVALID_MAPPINGS';
         throw err;
       }

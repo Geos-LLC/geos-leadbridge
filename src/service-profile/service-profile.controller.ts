@@ -308,6 +308,7 @@ export class ServiceProfileController {
       if (
         err?.code === 'INVALID_TRANSITION' ||
         err?.code === 'EMPTY_CONFIG' ||
+        err?.code === 'EMPTY_MAPPINGS' ||
         err?.code === 'DEFAULT_BLOCKED'
       ) {
         throw new BadRequestException(err.message);

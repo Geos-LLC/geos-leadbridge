@@ -130,10 +130,17 @@ export type LeadForResolver = {
   // that lands on staging, this field starts populating. Until then it
   // stays null — name-based matching covers the common case.
   categoryId?: string | null;
+  // Optional — used by the A1 no-match monitoring warning so the
+  // pricing-category bucket carries platform context. Resolver never
+  // dispatches on this; safe to omit from older call sites.
+  platform?: string | null;
 };
 
 export type SavedAccountForResolver = {
   id: string;
+  // Optional — used by the A1 no-match monitoring warning to label
+  // captureError rows. Resolver never dispatches on this.
+  businessName?: string | null;
   servicePricingJson: string | null;
   faqJson: string | null;
   serviceOverridesJson?: string | null;
