@@ -2017,8 +2017,12 @@ function GlobalPlaybookEditor() {
               - Human Handoff Guidance
               - Objection Handling
               - Follow-up Tone
-              - Communication Style & Brand Voice
-                (backend key: personality_brand_voice) */}
+
+            Communication Style & Brand Voice (personality_brand_voice)
+            has no UI surface at all — runtime default in
+            src/ai/section-default-prompts.ts drives tone uniformly and
+            tenants never used the override. Admin who really needs to
+            hand-tune can PATCH the JSON via API. */}
 
       {accounts.length > 0 && <>
         {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
@@ -2032,13 +2036,10 @@ function GlobalPlaybookEditor() {
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
         />
 
-        {/* Communication Style & Brand Voice card removed — tenants
-              consistently left it empty, so the runtime's hardcoded
-              default in src/ai/section-default-prompts.ts
-              ('personality_brand_voice') drives tone uniformly. Power
-              users can still override via the advanced section list
-              below (?advanced=1) which renders all eight section keys
-              including this one. */}
+        {/* Communication Style & Brand Voice has no UI surface — not
+              in the visible cards, not in the advanced fallback. The
+              runtime default in src/ai/section-default-prompts.ts
+              ('personality_brand_voice') drives tone uniformly. */}
 
         {/* Service-scoped info card — FaqCard + PricingGuidanceCard were
               removed in PR-B.1 because their content is inherently service-
@@ -2090,13 +2091,6 @@ function GlobalPlaybookEditor() {
               value={v2.followup_tone?.customInstructions ?? ''}
               onChange={v => onSectionChange('followup_tone', v)}
               legacyAdvanced
-            />
-            <HowSectionCard
-              section="personality_brand_voice"
-              value={v2.personality_brand_voice?.customInstructions ?? ''}
-              onChange={v => onSectionChange('personality_brand_voice', v)}
-              legacyAdvanced
-              isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
             />
           </>
         )}
