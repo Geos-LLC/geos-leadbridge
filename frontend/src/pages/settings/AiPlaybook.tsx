@@ -2032,15 +2032,13 @@ function GlobalPlaybookEditor() {
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
         />
 
-        {/* 2. Communication Style & Brand Voice (promoted from advanced in
-              PR-B.1 — tenant-wide tone belongs on the Global tab so users
-              don't have to flip ?advanced=1 to set their default voice.) */}
-        <HowSectionCard
-          section="personality_brand_voice"
-          value={v2.personality_brand_voice?.customInstructions ?? ''}
-          onChange={v => onSectionChange('personality_brand_voice', v)}
-          isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
-        />
+        {/* Communication Style & Brand Voice card removed — tenants
+              consistently left it empty, so the runtime's hardcoded
+              default in src/ai/section-default-prompts.ts
+              ('personality_brand_voice') drives tone uniformly. Power
+              users can still override via the advanced section list
+              below (?advanced=1) which renders all eight section keys
+              including this one. */}
 
         {/* Service-scoped info card — FaqCard + PricingGuidanceCard were
               removed in PR-B.1 because their content is inherently service-
@@ -2092,6 +2090,13 @@ function GlobalPlaybookEditor() {
               value={v2.followup_tone?.customInstructions ?? ''}
               onChange={v => onSectionChange('followup_tone', v)}
               legacyAdvanced
+            />
+            <HowSectionCard
+              section="personality_brand_voice"
+              value={v2.personality_brand_voice?.customInstructions ?? ''}
+              onChange={v => onSectionChange('personality_brand_voice', v)}
+              legacyAdvanced
+              isSuggested={!!v2.personality_brand_voice?.suggestedFromWebsite}
             />
           </>
         )}
