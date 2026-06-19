@@ -237,15 +237,22 @@ export class FollowUpEngineService {
    * Called after recordMessage() when awaitingCustomerReply becomes true.
    *
    * @param firstStepDelayMinutesOverride
-   *   Optional override forwarded to enrollInSequence. Used by the webhook
-   *   external-pro path so the first follow-up doesn't fire 2 min after a
-   *   manager-on-platform reply — it waits the account's fuReEnrollDelay
-   *   (e.g. 6h) so the customer has breathing room to respond first.
+   *   Classifier-extracted customer-stated re-engage window (e.g. "back in 2
+   *   weeks" → 20160 min). Only applied on a fresh enrollment (startStepIndex
+   *   === 0) so a stale window from an old message can't reset progress.
+   * @param resumeDelayMinutesOverride
+   *   Account's `fuReEnrollDelay` ("Resume follow-ups after conversation").
+   *   Applies regardless of startStepIndex — the user-configured resume gap
+   *   is the SOLE delay before the next step after any conversation event
+   *   (customer reply, AI reply, manager-on-platform reply). This overrides
+   *   the template's step delay so "resume in 1 hour" means literally that,
+   *   not "wait at least 1 hour, then jump to whatever step's delay applies".
    */
   async evaluateThread(
     conversationId: string,
     platform: string,
     firstStepDelayMinutesOverride?: number,
+    resumeDelayMinutesOverride?: number,
   ): Promise<void> {
     // Skip leads with terminal/archived status — no follow-up needed
     const statusCheck = await this.prisma.lead.findFirst({
@@ -351,6 +358,7 @@ export class FollowUpEngineService {
       platform,
       lead?.id,
       firstStepDelayMinutesOverride,
+      resumeDelayMinutesOverride,
     );
   }
 
@@ -358,13 +366,16 @@ export class FollowUpEngineService {
    * Enroll a conversation in a follow-up sequence.
    *
    * @param firstStepDelayMinutesOverride
-   *   Optional override for the first step's delay. Used when the customer
-   *   stated an explicit return window in their message (e.g. "back in 2
-   *   weeks" → 20160 minutes). The classifier extracts the duration; callers
-   *   pass it through to anchor the first re-engagement to the customer's
-   *   own timing instead of the seed template's default cadence. Only applied
-   *   when startStepIndex === 0 (no prior follow-ups on this thread). Bounded
-   *   by the classifier service to [1, 180] days.
+   *   Classifier-extracted customer-stated return window (e.g. "back in 2
+   *   weeks" → 20160 min). Anchors the first re-engagement to the customer's
+   *   own timing instead of the template's cadence. Only applied when
+   *   startStepIndex === 0 — keeps stale windows from re-anchoring an
+   *   in-flight sequence. Bounded by the classifier service to [1, 180] days.
+   * @param resumeDelayMinutesOverride
+   *   Account's `fuReEnrollDelay` ("Resume follow-ups after conversation").
+   *   Always wins regardless of startStepIndex — this is the user's literal
+   *   "after a conversation event, wait X then resume" knob and the only
+   *   way for the setting to apply on threads that already have prior FUs.
    */
   async enrollInSequence(
     conversationId: string,
@@ -372,6 +383,7 @@ export class FollowUpEngineService {
     platform: string,
     leadId?: string,
     firstStepDelayMinutesOverride?: number,
+    resumeDelayMinutesOverride?: number,
   ): Promise<string> {
     const template = await this.prisma.followUpSequenceTemplate.findUnique({
       where: { id: templateId },
@@ -523,20 +535,33 @@ export class FollowUpEngineService {
     // so step delays reflect time since last contact, not enrollment time.
     // Follow-ups do NOT use active hours — quiet hours are handled by scheduler.
     //
-    // When the caller provides firstStepDelayMinutesOverride AND we're starting
-    // from step 0 (no prior follow-ups), the override wins. This is the
-    // classifier-extracted "back in 2 weeks" path: customer named a specific
-    // return window, so we anchor to that instead of the configured cadence.
-    // For re-enrollment (startStepIndex > 0) we keep the configured delay so
-    // a stale duration from a months-old message doesn't reset progress.
+    // Two override paths, distinct semantics:
+    //   1. resumeDelayMinutesOverride — account's `fuReEnrollDelay` (Mary T.
+    //      Lavanda 2026-06-19). ALWAYS wins regardless of startStepIndex —
+    //      this is "Resume follow-ups after conversation: X" and the user
+    //      means literally X, not "at least X". Without this, prior-send
+    //      count (messageBasedIndex) silently dominates and the configured
+    //      resume delay never applies once any FUs have fired.
+    //   2. firstStepDelayMinutesOverride — classifier-extracted "back in 2
+    //      weeks" (Devi). Only when startStepIndex === 0, so a stale
+    //      months-old window can't re-anchor an in-flight sequence.
+    // Resume wins over classifier when both are set (user-configured policy
+    // beats heuristic extraction).
     const firstStep = steps[startStepIndex];
-    const useOverride = startStepIndex === 0
+    const useResume = typeof resumeDelayMinutesOverride === 'number'
+      && resumeDelayMinutesOverride > 0;
+    const useClassifier = !useResume
+      && startStepIndex === 0
       && typeof firstStepDelayMinutesOverride === 'number'
       && firstStepDelayMinutesOverride > 0;
-    const effectiveDelay = useOverride
-      ? firstStepDelayMinutesOverride!
-      : firstStep.delayMinutes;
-    if (useOverride) {
+    const effectiveDelay = useResume
+      ? resumeDelayMinutesOverride!
+      : useClassifier
+        ? firstStepDelayMinutesOverride!
+        : firstStep.delayMinutes;
+    if (useResume) {
+      this.logger.log(`[FollowUp] First-step delay overridden to ${resumeDelayMinutesOverride}m (template step ${startStepIndex} was ${firstStep.delayMinutes}m) — account fuReEnrollDelay`);
+    } else if (useClassifier) {
       this.logger.log(`[FollowUp] First-step delay overridden to ${firstStepDelayMinutesOverride}m (configured was ${firstStep.delayMinutes}m) — customer-stated re-engage window`);
     }
     const fromTime = lastMessageSentAt || new Date();
