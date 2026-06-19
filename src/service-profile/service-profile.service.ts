@@ -40,6 +40,11 @@ import {
   parseServiceOverrides,
   parseServiceAssignments,
 } from './service-profile.types';
+import {
+  classifyLeadCategory,
+  SERVICE_GROUP_PRIORITY,
+  type ServiceGroup,
+} from './service-group-classifier';
 import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
 import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
@@ -103,15 +108,38 @@ export class ServiceProfileService {
         return { status: 'legacy_fallback', reason: 'no_default_profile' };
       }
 
-      // Priority 1+2: try to match by mapping. categoryId wins; name
-      // is the fallback. The first match across the iteration wins,
-      // so callers that want strict priority should put categoryId
-      // mappings first (we don't enforce ordering since both lookups
-      // run independently below).
+      // Priority 1: service-group classifier.
+      //
+      // The classifier maps `lead.category` (e.g. "Regular home cleaning",
+      // "Carpet and upholstery cleaning") to one or more candidate
+      // groups ('cleaning' | 'upholstery_carpet' | 'other'). The
+      // resolver walks SERVICE_GROUP_PRIORITY in order and picks the
+      // first profile whose `serviceGroup` is in the candidate list.
+      // Result: a tenant who runs cleaning + upholstery routes carpet
+      // leads to the upholstery profile (specific wins), while a
+      // tenant who only has a cleaning profile still catches "Carpet
+      // and upholstery cleaning" via the cleaning candidate (no
+      // regression).
       let matched: typeof profiles[number] | null = null;
-      let matchedBy: 'categoryId' | 'categoryName' | 'default' = 'default';
+      let matchedBy: 'serviceGroup' | 'categoryId' | 'categoryName' | 'default' = 'default';
 
-      if (lead.categoryId) {
+      const candidateGroups = classifyLeadCategory(lead.category);
+      for (const g of SERVICE_GROUP_PRIORITY) {
+        if (!candidateGroups.includes(g)) continue;
+        const profile = profiles.find((p) => p.serviceGroup === g);
+        if (profile) {
+          matched = profile;
+          matchedBy = 'serviceGroup';
+          break;
+        }
+      }
+
+      // Priority 2+3: legacy exact-match fallback. Kept because (a)
+      // power-user mappings on `providerCategoryMappingsJson` may
+      // intentionally route a string outside the classifier's regex,
+      // and (b) provides a safety net while we validate the classifier
+      // in prod via A1 monitoring. categoryId match wins over name.
+      if (!matched && lead.categoryId) {
         for (const p of profiles) {
           const mappings = parseMappings(p.providerCategoryMappingsJson);
           if (mappings.some((m) => m.providerCategoryId === lead.categoryId)) {

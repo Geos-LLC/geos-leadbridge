@@ -52,7 +52,7 @@ export type ResolvedProfile =
       effectivePricingJson: string | null;
       effectiveFaqJson: string | null;
       effectiveAiInstructionsJson: string | null;
-      matchedBy: 'categoryId' | 'categoryName' | 'default';
+      matchedBy: 'serviceGroup' | 'categoryId' | 'categoryName' | 'default';
     }
   | {
       status: 'ai_paused';

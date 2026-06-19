@@ -2300,9 +2300,21 @@ model ServiceProfile {
 
   // Per-provider category attachments. Shape:
   //   [{ provider: 'thumbtack', providerCategoryId?: string, categoryName?: string }]
-  // The resolver scans this on every lead — categoryId match wins;
-  // case-insensitive name match is the fallback.
+  // KEPT as the runtime fallback for the classifier in
+  // src/service-profile/service-group-classifier.ts. When the
+  // classifier misses (no group hit), the resolver falls through to
+  // exact-string match here. New profiles should declare a
+  // serviceGroup; this field stays for back-compat + power-user
+  // overrides on a per-string basis.
   providerCategoryMappingsJson Json @default("[]")
+
+  // Coarse routing bucket the classifier matches against. Values:
+  //   'cleaning'         — house cleaning, maid, janitorial, housekeeping
+  //   'upholstery_carpet' — upholstery, furniture, carpet, rug
+  //   'other'            — anything else (catchall, won't auto-match)
+  // Priority order at resolve time: upholstery_carpet > cleaning > other,
+  // so the more specific niche wins for tenants who run both.
+  serviceGroup String @default("other")
 
   // Pricing config. Same shape as today's SavedAccount.servicePricingJson
   // (the deterministic pricing engine in src/pricing/ consumes both).
