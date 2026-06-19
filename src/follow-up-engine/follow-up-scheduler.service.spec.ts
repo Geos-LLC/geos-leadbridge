@@ -162,6 +162,68 @@ describe('FollowUpSchedulerService', () => {
       expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'lead_status_hired');
     });
 
+    // 2026-06-19 Yvonne-and-4-friends incident: lostReason='hired_someone' leads
+    // were enrolled in customer_hired_competitor sequences but the terminal-status
+    // guard stopped every one at fire time because status='lost'. The bypass keeps
+    // re-engagement sequences alive on lost+hired_someone; FollowUpGateService
+    // still rechecks the latest customer intent at send time so explicit opt_out
+    // or hired_elsewhere still stops the sequence.
+    it('does NOT stop customer_hired_competitor enrollment when lead.status=lost (re-engage bypass)', async () => {
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'lost', thumbtackStatus: null });
+      prisma.message.findFirst.mockResolvedValue(null);
+
+      await (service as any).processEnrollment(
+        {
+          id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, leadId: LEAD_ID,
+          currentStepIndex: 0, createdAt: new Date(), mode: 'auto_send', platform: 'yelp',
+          sequenceTemplate: {
+            stepsJson: { steps: [{ delayMinutes: 0, objective: 'reengage' }] },
+            triggerState: 'customer_hired_competitor',
+          },
+        },
+        new Date(),
+      );
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalledWith(ENROLLMENT_ID, 'lead_status_lost');
+    });
+
+    it('does NOT stop customer_deferred enrollment when lead.status=lost (re-engage bypass)', async () => {
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'lost', thumbtackStatus: null });
+      prisma.message.findFirst.mockResolvedValue(null);
+
+      await (service as any).processEnrollment(
+        {
+          id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, leadId: LEAD_ID,
+          currentStepIndex: 0, createdAt: new Date(), mode: 'auto_send', platform: 'yelp',
+          sequenceTemplate: {
+            stepsJson: { steps: [{ delayMinutes: 0, objective: 'reengage' }] },
+            triggerState: 'customer_deferred',
+          },
+        },
+        new Date(),
+      );
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalledWith(ENROLLMENT_ID, 'lead_status_lost');
+    });
+
+    it('STILL stops customer_hired_competitor when lead.status=booked (only lost is bypassed)', async () => {
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'booked', thumbtackStatus: null });
+
+      await (service as any).processEnrollment(
+        {
+          id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, leadId: LEAD_ID,
+          currentStepIndex: 0, createdAt: new Date(), mode: 'auto_send',
+          sequenceTemplate: {
+            stepsJson: { steps: [{ delayMinutes: 0, objective: 'reengage' }] },
+            triggerState: 'customer_hired_competitor',
+          },
+        },
+        new Date(),
+      );
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'lead_status_booked');
+    });
+
     it('stops enrollment when customer replied after enrollment', async () => {
       prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null });
       prisma.message.findFirst.mockResolvedValue({ id: 'msg-customer', sender: 'customer', sentAt: new Date() });
