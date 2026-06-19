@@ -17,7 +17,7 @@ import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
-  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'associate_phones' | 'other';
+  category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'associate_phones' | 'pricing' | 'other';
   code?: string; // Structured: 'token_expired', 'webhook_missing', 'automation_failure'
   platform?: string; // 'thumbtack' | 'yelp'
   severity?: 'error' | 'warning';

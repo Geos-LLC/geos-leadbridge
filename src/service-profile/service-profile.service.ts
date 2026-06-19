@@ -1,28 +1,24 @@
 /**
- * ServiceProfileService — Phase 1 read-side resolver.
+ * ServiceProfileService — read-side resolver.
  *
- * Selects the right ServiceProfile for a lead and merges any
- * per-location override from SavedAccount.serviceOverridesJson over
- * the profile's base pricing/FAQ.
+ * Picks the right ServiceProfile for a lead by classifying the lead's
+ * category text into a service group and matching against
+ * ServiceProfile.serviceGroup. After the A3 collapse (2026-06-19) this
+ * is the resolver's ONLY matching rule — the previous 5-step priority
+ * chain (gate, exact-match, User.defaultServiceProfileId fallback,
+ * legacy SavedAccount columns, override merge) is gone.
  *
- * Phase 1 scope:
+ * Scope:
  *  - Read-side only. No writes to ServiceProfile from this service.
- *  - Dual-read: if no profile matches AND the tenant has no default,
- *    returns 'legacy_fallback' so the caller reads the legacy
- *    SavedAccount columns. Existing tenants without a backfilled
- *    profile see zero behavior change.
- *  - Draft profile gating: if the matched profile is in draft, returns
- *    'ai_paused' so the caller can skip auto-reply. Lead lifecycle
- *    independent — lead still created/tracked/notified.
+ *  - Draft profile gating: if the classifier matches a draft profile,
+ *    returns 'ai_paused' so the caller can skip auto-reply. Lead
+ *    lifecycle independent — lead still created/tracked/notified.
  *  - Archived profiles are excluded from matching entirely.
- *
- * Resolution priority (in order, first match wins):
- *   1. Lead.categoryId   → mapping with matching providerCategoryId
- *   2. Lead.category     → mapping with case-insensitive name match
- *   3. User.defaultServiceProfileId fallback
- *
- * Operator-pinned override is reserved for a Phase 1b PR (needs a UI
- * surface that doesn't exist yet).
+ *  - No-match cases (no profiles at all OR no profile matches the
+ *    lead's group) return status='no_match'; caller should answer
+ *    without a pricing block. A fire-and-forget `pricing` capture
+ *    fires in monitoring for every no-match so health-check dashboards
+ *    can surface the tenants whose classifier coverage is broken.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -31,13 +27,6 @@ import {
   LeadForResolver,
   ResolvedProfile,
   SavedAccountForResolver,
-  ServiceOverrides,
-  extractAiPlaybookV2,
-  isEffectivelyEmpty,
-  mergeFaqJson,
-  mergePricingJson,
-  parseMappings,
-  parseServiceOverrides,
   parseServiceAssignments,
 } from './service-profile.types';
 import {
@@ -48,6 +37,7 @@ import {
 import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
 import type { ServicePreset } from './presets/service-presets.types';
 import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 /**
  * Per-field source tracking for telemetry. The top-level `source` field
@@ -57,7 +47,7 @@ import { AdminServiceTemplatesService } from '../admin/service-templates/admin-s
  * per-field fallback fires (and therefore which tenants still have
  * legacy data the profile didn't migrate).
  */
-type FieldSource = 'service_profile' | 'legacy_saved_account' | 'none';
+type FieldSource = 'service_profile' | 'none';
 type FieldSources = {
   pricing: FieldSource;
   faq: FieldSource;
@@ -71,145 +61,74 @@ export class ServiceProfileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly adminTemplates: AdminServiceTemplatesService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   /**
-   * Main entry point. Picks a ServiceProfile for the lead, merges
-   * SavedAccount overrides on top, and returns either:
-   *  - 'resolved' values the caller should use,
-   *  - 'ai_paused' if the matched profile is draft,
-   *  - 'legacy_fallback' if no profile applies (caller reads legacy).
+   * Main entry point. Classifies the lead's category text into a
+   * service group and returns the matching profile (or a no-match
+   * signal). Never throws — DB errors degrade to no_match with a warn
+   * log so the AI can still answer (without a quote) instead of the
+   * request 500ing.
    *
-   * Never throws — any DB error degrades to legacy_fallback with a
-   * warn log, since the only consequence is "use the old read path."
+   * Returns:
+   *  - 'resolved' — classifier matched, caller should use the profile's
+   *    pricing/FAQ/AI overlay
+   *  - 'ai_paused' (reason='draft_profile') — matched profile is still
+   *    draft, caller should skip the AI auto-reply
+   *  - 'no_match' — tenant has no profiles OR none match the lead's
+   *    group, caller renders the AI without a pricing block
    */
   async resolveForLead(
     lead: LeadForResolver,
     savedAccount: SavedAccountForResolver | null,
   ): Promise<ResolvedProfile> {
     try {
-      // Pull the tenant's active+draft profiles + the default pointer
-      // in one round trip. Archived profiles are excluded server-side
-      // so they can't even be considered for matching.
-      const [profiles, user] = await Promise.all([
-        this.prisma.serviceProfile.findMany({
-          where: {
-            userId: lead.userId,
-            status: { in: ['active', 'draft'] },
-          },
-        }),
-        this.prisma.user.findUnique({
-          where: { id: lead.userId },
-          select: { defaultServiceProfileId: true },
-        }),
-      ]);
+      // Pull the tenant's active+draft profiles. Archived profiles are
+      // excluded server-side so they can't even be considered for
+      // matching.
+      const profiles = await this.prisma.serviceProfile.findMany({
+        where: {
+          userId: lead.userId,
+          status: { in: ['active', 'draft'] },
+        },
+      });
 
       if (profiles.length === 0) {
-        return { status: 'legacy_fallback', reason: 'no_default_profile' };
+        this.emitNoMatchWarning(lead, savedAccount, 'no_profiles', null);
+        return { status: 'no_match', reason: 'no_profiles' };
       }
 
-      // Priority 1: service-group classifier.
+      // Service-group classifier — the only matching rule after A3.
       //
-      // The classifier maps `lead.category` (e.g. "Regular home cleaning",
-      // "Carpet and upholstery cleaning") to one or more candidate
-      // groups ('cleaning' | 'upholstery_carpet' | 'other'). The
-      // resolver walks SERVICE_GROUP_PRIORITY in order and picks the
-      // first profile whose `serviceGroup` is in the candidate list.
-      // Result: a tenant who runs cleaning + upholstery routes carpet
-      // leads to the upholstery profile (specific wins), while a
-      // tenant who only has a cleaning profile still catches "Carpet
-      // and upholstery cleaning" via the cleaning candidate (no
-      // regression).
-      let matched: typeof profiles[number] | null = null;
-      let matchedBy: 'serviceGroup' | 'categoryId' | 'categoryName' | 'default' = 'default';
-
+      // classifyLeadCategory maps `lead.category` (e.g. "Regular home
+      // cleaning", "Carpet and upholstery cleaning") to one or more
+      // candidate groups ('cleaning' | 'upholstery_carpet' | 'other').
+      // We walk SERVICE_GROUP_PRIORITY in order and pick the first
+      // profile whose `serviceGroup` is in the candidate list. Result:
+      // a tenant who runs cleaning + upholstery routes carpet leads to
+      // the upholstery profile (specific wins), while a tenant who only
+      // has a cleaning profile still catches "Carpet and upholstery
+      // cleaning" via the cleaning candidate (no regression).
       const candidateGroups = classifyLeadCategory(lead.category);
+      let matched: typeof profiles[number] | null = null;
       for (const g of SERVICE_GROUP_PRIORITY) {
         if (!candidateGroups.includes(g)) continue;
         const profile = profiles.find((p) => p.serviceGroup === g);
         if (profile) {
           matched = profile;
-          matchedBy = 'serviceGroup';
           break;
         }
       }
 
-      // Priority 2+3: legacy exact-match fallback. Kept because (a)
-      // power-user mappings on `providerCategoryMappingsJson` may
-      // intentionally route a string outside the classifier's regex,
-      // and (b) provides a safety net while we validate the classifier
-      // in prod via A1 monitoring. categoryId match wins over name.
-      if (!matched && lead.categoryId) {
-        for (const p of profiles) {
-          const mappings = parseMappings(p.providerCategoryMappingsJson);
-          if (mappings.some((m) => m.providerCategoryId === lead.categoryId)) {
-            matched = p;
-            matchedBy = 'categoryId';
-            break;
-          }
-        }
-      }
-
-      if (!matched && lead.category) {
-        const normalized = lead.category.trim().toLowerCase();
-        if (normalized.length > 0) {
-          for (const p of profiles) {
-            const mappings = parseMappings(p.providerCategoryMappingsJson);
-            if (
-              mappings.some(
-                (m) => typeof m.categoryName === 'string' && m.categoryName.toLowerCase() === normalized,
-              )
-            ) {
-              matched = p;
-              matchedBy = 'categoryName';
-              break;
-            }
-          }
-        }
-      }
-
-      // Priority 3: fall through to default.
-      if (!matched && user?.defaultServiceProfileId) {
-        const defaultMatch = profiles.find((p) => p.id === user.defaultServiceProfileId);
-        if (defaultMatch) {
-          matched = defaultMatch;
-          matchedBy = 'default';
-        }
-      }
-
       if (!matched) {
-        return { status: 'legacy_fallback', reason: 'no_profile_matched_and_no_default' };
+        this.emitNoMatchWarning(lead, savedAccount, 'no_classifier_match', null);
+        return { status: 'no_match', reason: 'no_classifier_match' };
       }
 
-      // PR-E — account ↔ service assignment enforcement.
-      //
-      // The resolver runs this check before draft gating so a tenant
-      // who hasn't enabled a service for an account never accidentally
-      // pulls in stale draft content either.
-      //
-      //   null  → not configured, preserve legacy behavior (no change).
-      //   []    → configured but empty, treat as "no service selected".
-      //           Today the safest fallthrough is the existing default
-      //           behavior — the matched profile still resolves so we
-      //           don't break existing leads. The UI surfaces a "no
-      //           services selected" warning so operators notice.
-      //   [...] → enforcement on. Matched profile must be in the list
-      //           or the resolver returns ai_paused/setup_mismatch.
-      const assignments = parseServiceAssignments(
-        savedAccount?.serviceProfileAssignmentsJson ?? null,
-      );
-      if (assignments && assignments.enabledServiceProfileIds.length > 0) {
-        if (!assignments.enabledServiceProfileIds.includes(matched.id)) {
-          return {
-            status: 'ai_paused',
-            profileId: matched.id,
-            profileName: matched.name,
-            reason: 'setup_mismatch',
-          };
-        }
-      }
-
-      // Draft gating — even if matched, AI auto-reply is paused.
+      // Draft gating — classifier matched but profile is still draft.
+      // AI auto-reply pauses; lead lifecycle (tracking, notifications)
+      // continues independently.
       if (matched.status === 'draft') {
         return {
           status: 'ai_paused',
@@ -219,48 +138,79 @@ export class ServiceProfileService {
         };
       }
 
-      // Merge SavedAccount override (if any) on top of profile base.
-      const overrides: ServiceOverrides = parseServiceOverrides(
-        savedAccount?.serviceOverridesJson ?? null,
-      );
-      const ownOverride = overrides[matched.id] ?? {};
-
       return {
         status: 'resolved',
         profileId: matched.id,
         profileName: matched.name,
-        effectivePricingJson: mergePricingJson(
-          matched.pricingJson ?? null,
-          ownOverride.pricingDeltasJson,
-        ),
-        effectiveFaqJson: mergeFaqJson(matched.faqJson ?? null, ownOverride.faqAdditionsJson),
+        effectivePricingJson: matched.pricingJson ?? null,
+        effectiveFaqJson: matched.faqJson ?? null,
         effectiveAiInstructionsJson: matched.aiInstructionsJson ?? null,
-        matchedBy,
+        matchedBy: 'serviceGroup',
       };
     } catch (err: any) {
       this.logger.warn(`[service-profile] resolveForLead failed: ${err?.message ?? err}`);
-      return { status: 'legacy_fallback', reason: 'no_default_profile' };
+      return { status: 'no_match', reason: 'no_profiles' };
     }
   }
 
   /**
+   * Fire-and-forget monitoring signal for the two cases that mean the
+   * AI will quote without a profile (or not at all). Surfaced via the
+   * existing `pricing` capture bucket so the health-check dashboard
+   * lights up when a tenant's classifier coverage breaks.
+   */
+  private emitNoMatchWarning(
+    lead: LeadForResolver,
+    savedAccount: SavedAccountForResolver | null,
+    code: 'no_profiles' | 'no_classifier_match',
+    matched: { id: string; name: string } | null,
+  ): void {
+    const message =
+      code === 'no_profiles'
+        ? 'Tenant has no active/draft ServiceProfile rows — resolver returned no_match.'
+        : 'Lead category did not match any ServiceProfile.serviceGroup — resolver returned no_match.';
+    this.monitoring
+      .captureError({
+        category: 'pricing',
+        code,
+        severity: 'warning',
+        message,
+        userId: lead.userId,
+        accountId: savedAccount?.id,
+        accountName: savedAccount?.businessName ?? undefined,
+        platform: lead.platform ?? undefined,
+        context: {
+          leadId: lead.id,
+          leadCategory: lead.category ?? null,
+          leadCategoryId: lead.categoryId ?? null,
+          matchedProfileId: matched?.id ?? null,
+          matchedProfileName: matched?.name ?? null,
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`[service-profile] monitoring.captureError failed: ${err?.message ?? err}`);
+      });
+  }
+
+  /**
    * Convenience wrapper for the AI prompt assembler: returns the
-   * effective pricing + FAQ + AI instructions the assembler should
-   * use, with **per-field fallback** to SavedAccount when the matched
-   * ServiceProfile is missing that specific field.
+   * effective pricing + FAQ + AI instructions the assembler should use.
    *
-   * Phase 1 callers: ai.controller.ts preview-for-lead, preview-with-context.
+   * After A3 the resolver has exactly one matching rule (classifier →
+   * serviceGroup). Three terminal states map to three caller behaviors:
    *
-   * Returns the same shape regardless of source, so the assembler
-   * doesn't need branching. `fieldSources` is included for telemetry
-   * — callers can ignore it.
+   *  - resolved → use the profile's pricing/FAQ/instructions (which may
+   *    individually be null; the caller's prompt builder already knows
+   *    how to render with missing slots)
+   *  - ai_paused → pricingJson/faqJson/aiInstructionsJson are null,
+   *    aiPaused=true. Caller should skip the AI auto-reply.
+   *  - no_match → pricingJson/faqJson/aiInstructionsJson are null,
+   *    aiPaused=false. Caller renders the AI without a pricing block,
+   *    which prompts a "no price for that" style answer.
    *
-   * The per-field fallback is what stops the Spotless-shaped incident
-   * from PR #244: a default profile backfilled from an account whose
-   * faqJson was null would have wiped the tenant's FAQ for every
-   * lead. With per-field fallback, an empty profile field falls
-   * through to the SavedAccount equivalent rather than overriding it
-   * with null.
+   * Phase 1 callers: ai.controller.ts preview-for-lead, preview-with-context,
+   * automation.service.ts, follow-up-generator.service.ts,
+   * instant-text-ai.service.ts.
    */
   async resolveEffectivePromptInputs(
     lead: LeadForResolver,
@@ -271,7 +221,7 @@ export class ServiceProfileService {
     aiInstructionsJson: string | null;
     aiPaused: boolean;
     profileId: string | null;
-    source: 'service_profile' | 'legacy_saved_account';
+    source: 'service_profile' | 'none';
     fieldSources: FieldSources;
   }> {
     const resolved = await this.resolveForLead(lead, savedAccount);
@@ -288,59 +238,33 @@ export class ServiceProfileService {
       };
     }
 
-    // Legacy SavedAccount values we may need to fall through to.
-    const legacyPricing = savedAccount?.servicePricingJson ?? null;
-    const legacyFaq = savedAccount?.faqJson ?? null;
-    const legacyAi = extractAiPlaybookV2(savedAccount?.followUpSettingsJson ?? null);
-
     if (resolved.status === 'resolved') {
-      const profilePricing = resolved.effectivePricingJson;
-      const profileFaq = resolved.effectiveFaqJson;
-      const profileAi = resolved.effectiveAiInstructionsJson;
-
-      // Per-field fallback: profile wins when it has content, else SA.
-      // `isEffectivelyEmpty` treats null, '', '[]', '{}', and unparseable
-      // strings as empty — anything past that is preserved verbatim.
-      const pricingUseLegacy = isEffectivelyEmpty(profilePricing);
-      const faqUseLegacy = isEffectivelyEmpty(profileFaq);
-      const aiUseLegacy = isEffectivelyEmpty(profileAi);
-
-      const pricingJson = pricingUseLegacy ? legacyPricing : profilePricing;
-      const faqJson = faqUseLegacy ? legacyFaq : profileFaq;
-      const aiInstructionsJson = aiUseLegacy ? legacyAi : profileAi;
-
-      const fieldSources: FieldSources = {
-        pricing: pricingJson == null ? 'none' : pricingUseLegacy ? 'legacy_saved_account' : 'service_profile',
-        faq: faqJson == null ? 'none' : faqUseLegacy ? 'legacy_saved_account' : 'service_profile',
-        aiInstructions: aiInstructionsJson == null ? 'none' : aiUseLegacy ? 'legacy_saved_account' : 'service_profile',
-      };
-
       return {
-        pricingJson,
-        faqJson,
-        aiInstructionsJson,
+        pricingJson: resolved.effectivePricingJson,
+        faqJson: resolved.effectiveFaqJson,
+        aiInstructionsJson: resolved.effectiveAiInstructionsJson,
         aiPaused: false,
         profileId: resolved.profileId,
         source: 'service_profile',
-        fieldSources,
+        fieldSources: {
+          pricing: resolved.effectivePricingJson == null ? 'none' : 'service_profile',
+          faq: resolved.effectiveFaqJson == null ? 'none' : 'service_profile',
+          aiInstructions: resolved.effectiveAiInstructionsJson == null ? 'none' : 'service_profile',
+        },
       };
     }
 
-    // legacy_fallback — read directly from SavedAccount columns. The AI
-    // instructions extractor now runs here too so consumers that adopt
-    // aiInstructionsJson get the legacy data even when no profile exists.
+    // no_match — classifier returned no candidate group OR no profile
+    // for any candidate. AI proceeds without pricing context; the
+    // monitoring warning was already emitted inside resolveForLead.
     return {
-      pricingJson: legacyPricing,
-      faqJson: legacyFaq,
-      aiInstructionsJson: legacyAi,
+      pricingJson: null,
+      faqJson: null,
+      aiInstructionsJson: null,
       aiPaused: false,
       profileId: null,
-      source: 'legacy_saved_account',
-      fieldSources: {
-        pricing: legacyPricing == null ? 'none' : 'legacy_saved_account',
-        faq: legacyFaq == null ? 'none' : 'legacy_saved_account',
-        aiInstructions: legacyAi == null ? 'none' : 'legacy_saved_account',
-      },
+      source: 'none',
+      fieldSources: { pricing: 'none', faq: 'none', aiInstructions: 'none' },
     };
   }
 

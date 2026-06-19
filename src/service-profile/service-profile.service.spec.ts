@@ -35,6 +35,13 @@ const ADMIN_TEMPLATES_STUB: any = {
   listPublished: jest.fn(async () => []),
 };
 
+/** Stub for the MonitoringService dep — the resolver's no-match
+ *  warning fires through captureError, but the tests don't assert on
+ *  it; a no-op stub keeps the constructor signature satisfied. */
+const MONITORING_STUB: any = {
+  captureError: jest.fn(async () => undefined),
+};
+
 type ProfileRow = {
   id: string;
   userId: string;
@@ -42,6 +49,7 @@ type ProfileRow = {
   slug: string;
   status: string;
   isDefault: boolean;
+  serviceGroup: 'cleaning' | 'upholstery_carpet' | 'other';
   providerCategoryMappingsJson: unknown;
   pricingJson: string | null;
   faqJson: string | null;
@@ -111,6 +119,7 @@ function buildPrismaMock(
           slug: data.slug,
           status: data.status ?? 'active',
           isDefault: data.isDefault ?? false,
+          serviceGroup: data.serviceGroup ?? 'other',
           providerCategoryMappingsJson: data.providerCategoryMappingsJson ?? [],
           pricingJson: data.pricingJson ?? null,
           faqJson: data.faqJson ?? null,
@@ -169,6 +178,7 @@ function buildProfile(overrides: Partial<ProfileRow> = {}): ProfileRow {
     slug: 'seed-profile',
     status: 'active',
     isDefault: false,
+    serviceGroup: 'other',
     providerCategoryMappingsJson: [],
     pricingJson: null,
     faqJson: null,
@@ -184,249 +194,198 @@ function buildProfile(overrides: Partial<ProfileRow> = {}): ProfileRow {
 const USER_ID = 'user-1';
 const LEAD_BASE = { id: 'lead-1', userId: USER_ID };
 
-describe('ServiceProfileService — resolver', () => {
-  it('case 4: resolver reads ServiceProfile first when categoryId mapping matches', async () => {
+describe('ServiceProfileService — resolver (classifier-only after A3)', () => {
+  it('routes a cleaning lead to the cleaning profile via classifier', async () => {
     const prisma = buildPrismaMock({
       profiles: [
         buildProfile({
           id: 'prof-cleaning',
           name: 'House Cleaning',
           slug: 'house-cleaning',
-          providerCategoryMappingsJson: [
-            { provider: 'thumbtack', providerCategoryId: '219264413294461288', categoryName: 'House Cleaning' },
-          ],
-          pricingJson: '{"base":219}',
-          faqJson: '[{"q":"supplies?","a":"yes"}]',
+          serviceGroup: 'cleaning',
+          pricingJson: '{"base":279}',
+          faqJson: '[{"q":"insured?","a":"yes"}]',
         }),
       ],
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: '219264413294461288' },
-      { id: 'acct-1', servicePricingJson: '{"base":99}', faqJson: '[]', serviceOverridesJson: null },
-    );
-
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.matchedBy).toBe('categoryId');
-    expect(result.profileId).toBe('prof-cleaning');
-    expect(result.effectivePricingJson).toBe('{"base":219}');
-    expect(result.effectiveFaqJson).toBe('[{"q":"supplies?","a":"yes"}]');
-  });
-
-  it('case 4b: resolver matches by categoryName when categoryId absent', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          name: 'House Cleaning',
-          slug: 'house-cleaning',
-          providerCategoryMappingsJson: [
-            { provider: 'thumbtack', categoryName: 'House Cleaning' },
-          ],
-          pricingJson: '{"base":219}',
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'house cleaning', categoryId: null }, // case-insensitive
+      { ...LEAD_BASE, category: 'Regular home cleaning' },
       null,
     );
-
     expect(result.status).toBe('resolved');
     if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.matchedBy).toBe('categoryName');
+    expect(result.profileId).toBe('prof-cleaning');
+    expect(result.matchedBy).toBe('serviceGroup');
+    expect(result.effectivePricingJson).toBe('{"base":279}');
   });
 
-  it('case 5: falls back to SavedAccount legacy fields when tenant has no profiles', async () => {
+  it('routes an upholstery/carpet lead to the upholstery_carpet profile (specific wins)', async () => {
+    // Tenant with cleaning + upholstery profiles. A "Carpet and
+    // upholstery cleaning" lead classifies to both groups; the
+    // priority order picks upholstery_carpet first.
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          serviceGroup: 'cleaning',
+          pricingJson: '{"cleaning":1}',
+        }),
+        buildProfile({
+          id: 'prof-uphol',
+          serviceGroup: 'upholstery_carpet',
+          pricingJson: '{"uphol":1}',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Carpet and upholstery cleaning' },
+      null,
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-uphol');
+  });
+
+  it('falls back to the cleaning profile for a carpet lead when only cleaning is configured', async () => {
+    // Tenant has only a cleaning profile. The same "Carpet and
+    // upholstery cleaning" lead classifies to [upholstery_carpet,
+    // cleaning]; with no upholstery profile, the cleaning profile
+    // catches it.
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning-only',
+          serviceGroup: 'cleaning',
+          pricingJson: '{"cleaning":1}',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Carpet and upholstery cleaning' },
+      null,
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.profileId).toBe('prof-cleaning-only');
+  });
+
+  it('returns no_match when the classifier finds no candidate group', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning',
+          serviceGroup: 'cleaning',
+          pricingJson: '{"cleaning":1}',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Lawn maintenance' },
+      null,
+    );
+    expect(result.status).toBe('no_match');
+    if (result.status !== 'no_match') throw new Error('typeguard');
+    expect(result.reason).toBe('no_classifier_match');
+  });
+
+  it('returns no_match when the tenant has zero profiles', async () => {
     const prisma = buildPrismaMock({
       profiles: [],
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"legacy":true}',
-        faqJson: '[{"q":"hi"}]',
-        serviceOverridesJson: null,
-      },
-    );
-
-    expect(out.source).toBe('legacy_saved_account');
-    expect(out.pricingJson).toBe('{"legacy":true}');
-    expect(out.faqJson).toBe('[{"q":"hi"}]');
-    expect(out.aiPaused).toBe(false);
-  });
-
-  it('case 5b: falls back to SavedAccount when profiles exist but none match and no default', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }], // no default pointer
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { ...LEAD_BASE, category: 'Window Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"legacy":true}',
-        faqJson: null,
-        serviceOverridesJson: null,
-      },
-    );
-
-    expect(out.source).toBe('legacy_saved_account');
-    expect(out.pricingJson).toBe('{"legacy":true}');
-  });
-
-  it('case 6: SavedAccount override merges over ServiceProfile base (shallow object merge)', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          providerCategoryMappingsJson: [
-            { provider: 'thumbtack', categoryName: 'House Cleaning' },
-          ],
-          pricingJson: '{"base":219,"deep":299,"fridge":40}',
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const overrideForJax = JSON.stringify({
-      'prof-cleaning': { pricingDeltasJson: '{"base":249}' }, // JAX charges more
-    });
-
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-jax',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: overrideForJax,
-      },
-    );
-
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    const merged = JSON.parse(result.effectivePricingJson!);
-    expect(merged.base).toBe(249); // overridden
-    expect(merged.deep).toBe(299); // inherited
-    expect(merged.fridge).toBe(40); // inherited
-  });
-
-  it('case 7: draft profile pauses AI even when it matches', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-handyman',
-          status: 'draft',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Handyman' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'Handyman', categoryId: null },
+      { ...LEAD_BASE, category: 'House Cleaning' },
       null,
     );
+    expect(result.status).toBe('no_match');
+    if (result.status !== 'no_match') throw new Error('typeguard');
+    expect(result.reason).toBe('no_profiles');
+  });
 
+  it('pauses AI when the classifier-matched profile is still in draft', async () => {
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-cleaning-draft',
+          serviceGroup: 'cleaning',
+          status: 'draft',
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'House Cleaning' },
+      null,
+    );
     expect(result.status).toBe('ai_paused');
     if (result.status !== 'ai_paused') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-handyman');
     expect(result.reason).toBe('draft_profile');
+    expect(result.profileId).toBe('prof-cleaning-draft');
 
-    // And the wrapper signals aiPaused with no pricing/FAQ to assemble.
+    // And the wrapper signals aiPaused with no pricing to assemble.
     const inputs = await svc.resolveEffectivePromptInputs(
-      { ...LEAD_BASE, category: 'Handyman', categoryId: null },
+      { ...LEAD_BASE, category: 'House Cleaning' },
       null,
     );
     expect(inputs.aiPaused).toBe(true);
     expect(inputs.pricingJson).toBeNull();
   });
 
-  it('case 8: archived profile is never selected, even if mappings match', async () => {
+  it('archived profiles are excluded from classifier matching', async () => {
     const prisma = buildPrismaMock({
       profiles: [
         buildProfile({
-          id: 'prof-old-upholstery',
+          id: 'prof-old-cleaning',
           status: 'archived',
           archivedAt: new Date('2026-01-01'),
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
+          serviceGroup: 'cleaning',
           pricingJson: '{"shouldNotBeRead":true}',
         }),
         buildProfile({
-          id: 'prof-default',
-          slug: 'default-service',
-          isDefault: true,
-          providerCategoryMappingsJson: [],
-          pricingJson: '{"defaultUsed":true}',
+          id: 'prof-active-uphol',
+          serviceGroup: 'upholstery_carpet',
+          pricingJson: '{"uphol":1}',
         }),
       ],
-      users: [{ id: USER_ID, defaultServiceProfileId: 'prof-default' }],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    // House Cleaning classifies to cleaning; the only cleaning profile
+    // is archived, so the resolver no_matches.
     const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'Upholstery', categoryId: null },
+      { ...LEAD_BASE, category: 'House Cleaning' },
       null,
     );
-
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    // Archived "Upholstery" profile is invisible; falls through to default.
-    expect(result.profileId).toBe('prof-default');
-    expect(result.matchedBy).toBe('default');
+    expect(result.status).toBe('no_match');
   });
 
-  it('case 9: Yelp/manual lead (no categoryId) falls back to default profile', async () => {
+  it('resolveEffectivePromptInputs returns null pricing + source=none on no_match', async () => {
     const prisma = buildPrismaMock({
       profiles: [
-        buildProfile({
-          id: 'prof-default',
-          slug: 'default-service',
-          isDefault: true,
-          providerCategoryMappingsJson: [],
-          pricingJson: '{"yourBase":219}',
-          faqJson: '[{"q":"default"}]',
-        }),
-        buildProfile({
-          id: 'prof-specific',
-          providerCategoryMappingsJson: [
-            { provider: 'thumbtack', categoryName: 'Carpet Cleaning' },
-          ],
-        }),
+        buildProfile({ id: 'prof-cleaning', serviceGroup: 'cleaning' }),
       ],
-      users: [{ id: USER_ID, defaultServiceProfileId: 'prof-default' }],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    // Yelp lead: no category set, no categoryId.
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: null, categoryId: null },
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const inputs = await svc.resolveEffectivePromptInputs(
+      { ...LEAD_BASE, category: 'Roof repair' },
       null,
     );
-
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-default');
-    expect(result.matchedBy).toBe('default');
-    expect(result.effectivePricingJson).toBe('{"yourBase":219}');
+    expect(inputs.aiPaused).toBe(false);
+    expect(inputs.pricingJson).toBeNull();
+    expect(inputs.faqJson).toBeNull();
+    expect(inputs.profileId).toBeNull();
+    expect(inputs.source).toBe('none');
   });
 });
 
@@ -744,433 +703,6 @@ describe('pickPrimarySavedAccount — tiered preference', () => {
   });
 });
 
-describe('ServiceProfileService — per-field fallback (Phase 1b)', () => {
-  // Re-declare the local helpers from the file's first describe block —
-  // jest sets up describe contexts independently, so we need our own
-  // copies here to keep the new tests isolated.
-  type LocalProfile = {
-    id: string;
-    userId: string;
-    name: string;
-    slug: string;
-    status: string;
-    isDefault: boolean;
-    providerCategoryMappingsJson: unknown;
-    pricingJson: string | null;
-    faqJson: string | null;
-    aiInstructionsJson: string | null;
-    qualificationSchemaJson: string | null;
-    archivedAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  };
-
-  function makeProfile(overrides: Partial<LocalProfile> = {}): LocalProfile {
-    return {
-      id: 'prof-default',
-      userId: 'user-1',
-      name: 'Default',
-      slug: 'default-service',
-      status: 'active',
-      isDefault: true,
-      providerCategoryMappingsJson: [],
-      pricingJson: null,
-      faqJson: null,
-      aiInstructionsJson: null,
-      qualificationSchemaJson: null,
-      archivedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      ...overrides,
-    };
-  }
-
-  function makeMock(profile: LocalProfile, defaultProfileId: string | null) {
-    return {
-      serviceProfile: {
-        findMany: jest.fn().mockResolvedValue([profile]),
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn(),
-      },
-      user: {
-        findUnique: jest.fn().mockResolvedValue({ defaultServiceProfileId: defaultProfileId }),
-        update: jest.fn(),
-      },
-      savedAccount: { findFirst: jest.fn() },
-    } as any;
-  }
-
-  it('profile has pricing but null FAQ → returns profile pricing + SavedAccount FAQ', async () => {
-    // This is exactly the Spotless incident in micro: profile field
-    // missing, SavedAccount has the canonical content.
-    const prisma = makeMock(
-      makeProfile({ pricingJson: '{"base":219}', faqJson: null }),
-      'prof-default',
-    );
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"legacy":true}',
-        faqJson: '[{"q":"supplies?","a":"yes"}]',
-        serviceOverridesJson: null,
-        followUpSettingsJson: null,
-      },
-    );
-
-    expect(out.pricingJson).toBe('{"base":219}'); // profile wins
-    expect(out.faqJson).toBe('[{"q":"supplies?","a":"yes"}]'); // SA wins (fallback)
-    expect(out.fieldSources.pricing).toBe('service_profile');
-    expect(out.fieldSources.faq).toBe('legacy_saved_account');
-    expect(out.source).toBe('service_profile');
-    expect(out.profileId).toBe('prof-default');
-  });
-
-  it('profile has FAQ + empty-array pricing → returns profile FAQ + SavedAccount pricing', async () => {
-    // Mixed mode: opposite direction. Empty array `[]` and empty object
-    // `{}` both register as "effectively empty" so the fallback fires.
-    const prisma = makeMock(
-      makeProfile({ pricingJson: '{}', faqJson: '[{"q":"FAQ from profile"}]' }),
-      'prof-default',
-    );
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"legacy_pricing":true}',
-        faqJson: '[{"q":"FAQ from SA"}]',
-        serviceOverridesJson: null,
-        followUpSettingsJson: null,
-      },
-    );
-
-    expect(out.pricingJson).toBe('{"legacy_pricing":true}'); // SA wins (profile empty)
-    expect(out.faqJson).toBe('[{"q":"FAQ from profile"}]'); // profile wins
-    expect(out.fieldSources.pricing).toBe('legacy_saved_account');
-    expect(out.fieldSources.faq).toBe('service_profile');
-  });
-
-  it('profile has all-null fields → every field falls back to SavedAccount', async () => {
-    // Tests "profile fields all null → legacy fallback" per the spec.
-    // Note: this is per-field fallback while the profile IS still matched.
-    // (Status remains 'resolved' / source='service_profile', not 'legacy_fallback'.)
-    const prisma = makeMock(
-      makeProfile({ pricingJson: null, faqJson: '[]', aiInstructionsJson: '' }),
-      'prof-default',
-    );
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { id: 'lead-1', userId: 'user-1', category: null, categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"sa":1}',
-        faqJson: '[{"q":"sa"}]',
-        serviceOverridesJson: null,
-        followUpSettingsJson: JSON.stringify({
-          aiPlaybookV2: { brand_voice: { customInstructions: 'Friendly tone.' } },
-        }),
-      },
-    );
-
-    expect(out.pricingJson).toBe('{"sa":1}');
-    expect(out.faqJson).toBe('[{"q":"sa"}]');
-    expect(out.aiInstructionsJson).not.toBeNull();
-    expect(JSON.parse(out.aiInstructionsJson!)).toEqual({
-      brand_voice: { customInstructions: 'Friendly tone.' },
-    });
-    expect(out.fieldSources).toEqual({
-      pricing: 'legacy_saved_account',
-      faq: 'legacy_saved_account',
-      aiInstructions: 'legacy_saved_account',
-    });
-    expect(out.profileId).toBe('prof-default'); // still resolved against profile
-  });
-
-  it('legacy_fallback path also extracts aiPlaybookV2 from followUpSettingsJson', async () => {
-    // When no ServiceProfile exists at all (no profiles + no default
-    // pointer), the legacy_fallback branch should still hydrate
-    // aiInstructionsJson from the SavedAccount.
-    const prisma: any = {
-      serviceProfile: {
-        findMany: jest.fn().mockResolvedValue([]),
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn(),
-      },
-      user: {
-        findUnique: jest.fn().mockResolvedValue({ defaultServiceProfileId: null }),
-        update: jest.fn(),
-      },
-      savedAccount: { findFirst: jest.fn() },
-    };
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    const out = await svc.resolveEffectivePromptInputs(
-      { id: 'lead-1', userId: 'user-1', category: null, categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: '{"x":1}',
-        faqJson: '[{"q":"a"}]',
-        serviceOverridesJson: null,
-        followUpSettingsJson: JSON.stringify({
-          aiPlaybookV2: { faq: { customInstructions: 'Refer to product docs.' } },
-        }),
-      },
-    );
-
-    expect(out.source).toBe('legacy_saved_account');
-    expect(out.profileId).toBeNull();
-    expect(out.pricingJson).toBe('{"x":1}');
-    expect(out.faqJson).toBe('[{"q":"a"}]');
-    expect(JSON.parse(out.aiInstructionsJson!)).toEqual({
-      faq: { customInstructions: 'Refer to product docs.' },
-    });
-  });
-
-  it('Spotless-like fixture: Wesley Chapel null FAQ does not wipe tenant FAQ at runtime', async () => {
-    // Acceptance scenario for the bug we hit on staging:
-    //   - Backfill chose Wesley Chapel (null FAQ) as primary
-    //   - Default profile inherited null faqJson
-    //   - A lead landing on Tampa's SavedAccount would previously have
-    //     been served null FAQ (regression)
-    //   - With per-field fallback, Tampa's lead reads Tampa's SA FAQ
-    //     because the profile's FAQ slot is empty
-    const prisma = makeMock(
-      makeProfile({
-        pricingJson: '{"base":219}', // shared pricing — fine
-        faqJson: null, // <-- the bug, profile has null FAQ
-      }),
-      'prof-default',
-    );
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-
-    // A lead landing on Tampa SavedAccount which has a populated FAQ.
-    const out = await svc.resolveEffectivePromptInputs(
-      { id: 'lead-1', userId: 'user-1', category: 'House Cleaning', categoryId: null },
-      {
-        id: 'spotless-tampa',
-        servicePricingJson: '{"base":219}',
-        faqJson: JSON.stringify([
-          { q: 'Do you bring supplies?', a: 'Yes' },
-          { q: 'Pet policy?', a: 'Extra charge if sheds 20$' },
-        ]),
-        serviceOverridesJson: null,
-        followUpSettingsJson: null,
-      },
-    );
-
-    expect(out.faqJson).not.toBeNull();
-    const faqArray = JSON.parse(out.faqJson!);
-    expect(faqArray).toHaveLength(2);
-    expect(faqArray[0].q).toBe('Do you bring supplies?');
-    expect(out.fieldSources.faq).toBe('legacy_saved_account');
-    expect(out.fieldSources.pricing).toBe('service_profile');
-  });
-});
-
-// ─── PR-E: account ↔ service assignments ─────────────────────────────
-
-describe('ServiceProfileService — account-service assignments (PR-E)', () => {
-  it('case 1: account with no assignments uses current resolver behavior', async () => {
-    // serviceProfileAssignmentsJson=null → pre-PR-E behavior preserved
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          name: 'House Cleaning',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
-          pricingJson: '{"base":219}',
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        // serviceProfileAssignmentsJson omitted — undefined treated as null
-      },
-    );
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-cleaning');
-  });
-
-  it('case 2: account with House Cleaning enabled resolves House Cleaning', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          name: 'House Cleaning',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
-        }),
-        buildProfile({
-          id: 'prof-uphol',
-          name: 'Upholstery',
-          slug: 'upholstery',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        serviceProfileAssignmentsJson: JSON.stringify({
-          enabledServiceProfileIds: ['prof-cleaning'],
-          defaultServiceProfileId: null,
-        }),
-      },
-    );
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-cleaning');
-  });
-
-  it('case 3: account with Upholstery NOT enabled but category matches Upholstery returns setup_mismatch ai_paused', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
-        }),
-        buildProfile({
-          id: 'prof-uphol',
-          name: 'Upholstery',
-          slug: 'upholstery',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'Upholstery', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        serviceProfileAssignmentsJson: JSON.stringify({
-          enabledServiceProfileIds: ['prof-cleaning'],
-          defaultServiceProfileId: null,
-        }),
-      },
-    );
-    expect(result.status).toBe('ai_paused');
-    if (result.status !== 'ai_paused') throw new Error('typeguard');
-    expect(result.reason).toBe('setup_mismatch');
-    expect(result.profileId).toBe('prof-uphol');
-  });
-
-  it('case 4: account with Upholstery enabled resolves Upholstery', async () => {
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-uphol',
-          name: 'Upholstery',
-          slug: 'upholstery',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'Upholstery' }],
-          pricingJson: '{"sofa":96}',
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'Upholstery', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        serviceProfileAssignmentsJson: JSON.stringify({
-          enabledServiceProfileIds: ['prof-uphol'],
-          defaultServiceProfileId: 'prof-uphol',
-        }),
-      },
-    );
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-uphol');
-    expect(result.effectivePricingJson).toBe('{"sofa":96}');
-  });
-
-  it('case 5: empty enabledServiceProfileIds[] falls back to legacy behavior (no enforcement)', async () => {
-    // Spec: "If no services selected → use tenant default profile as fallback."
-    // Existing tenants with an empty array should NOT have AI paused —
-    // the resolver behaves like the not-configured case.
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        serviceProfileAssignmentsJson: JSON.stringify({
-          enabledServiceProfileIds: [],
-          defaultServiceProfileId: null,
-        }),
-      },
-    );
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-cleaning');
-  });
-
-  it('case 6: malformed assignments JSON behaves like not-configured', async () => {
-    // Resolver must never throw on bad JSON — parser returns null and
-    // legacy resolver behavior takes over so a corrupted blob doesn't
-    // brick AI replies for an account.
-    const prisma = buildPrismaMock({
-      profiles: [
-        buildProfile({
-          id: 'prof-cleaning',
-          providerCategoryMappingsJson: [{ provider: 'thumbtack', categoryName: 'House Cleaning' }],
-        }),
-      ],
-      users: [{ id: USER_ID, defaultServiceProfileId: null }],
-    });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
-    const result = await svc.resolveForLead(
-      { ...LEAD_BASE, category: 'House Cleaning', categoryId: null },
-      {
-        id: 'acct-1',
-        servicePricingJson: null,
-        faqJson: null,
-        serviceOverridesJson: null,
-        serviceProfileAssignmentsJson: 'not valid json {{',
-      },
-    );
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('typeguard');
-    expect(result.profileId).toBe('prof-cleaning');
-  });
-});
-
 /**
  * createBlank — the "Create custom service" backend path. Pins that
  * the new profile carries the generic preset's data (so the AI has
@@ -1181,7 +713,7 @@ describe('ServiceProfileService — account-service assignments (PR-E)', () => {
 describe('ServiceProfileService — createBlank (generic Custom Service preset)', () => {
   it('seeds the new profile from GENERIC_CUSTOM_SERVICE_PRESET', async () => {
     const prisma = buildPrismaMock();
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const created = await svc.createBlank({ userId: USER_ID, name: 'Roof inspection' });
 
     // The mock's create returns the row it persisted — find it back in
@@ -1222,7 +754,7 @@ describe('ServiceProfileService — createBlank (generic Custom Service preset)'
       ],
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const created = await svc.createBlank({ userId: USER_ID, name: 'Window cleaning' });
     const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
     expect(row.slug).toBe('window-cleaning-3');
@@ -1230,7 +762,7 @@ describe('ServiceProfileService — createBlank (generic Custom Service preset)'
 
   it('falls back to "new-service" when the name has no slug-safe chars', async () => {
     const prisma = buildPrismaMock();
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const created = await svc.createBlank({ userId: USER_ID, name: '!!!' });
     const row = prisma._state.profiles.find((p: ProfileRow) => p.id === created.id);
     expect(row.slug).toBe('new-service');
@@ -1245,7 +777,7 @@ describe('ServiceProfileService — deleteProfile', () => {
       ],
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     const result = await svc.deleteProfile(USER_ID, 'prof-x');
     expect(result).toEqual({ id: 'prof-x', deleted: true });
     expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-x')).toBeUndefined();
@@ -1255,7 +787,7 @@ describe('ServiceProfileService — deleteProfile', () => {
     const prisma = buildPrismaMock({
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     await expect(svc.deleteProfile(USER_ID, 'missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
@@ -1267,7 +799,7 @@ describe('ServiceProfileService — deleteProfile', () => {
         { id: 'someone-else', defaultServiceProfileId: null },
       ],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     await expect(svc.deleteProfile(USER_ID, 'prof-other')).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-other')).toBeDefined();
   });
@@ -1277,7 +809,7 @@ describe('ServiceProfileService — deleteProfile', () => {
       profiles: [buildProfile({ id: 'prof-def', userId: USER_ID, slug: 'default-service', isDefault: true })],
       users: [{ id: USER_ID, defaultServiceProfileId: null }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     await expect(svc.deleteProfile(USER_ID, 'prof-def')).rejects.toMatchObject({ code: 'DEFAULT_BLOCKED' });
     expect(prisma._state.profiles.find((p: ProfileRow) => p.id === 'prof-def')).toBeDefined();
   });
@@ -1287,7 +819,7 @@ describe('ServiceProfileService — deleteProfile', () => {
       profiles: [buildProfile({ id: 'prof-pointed-at', userId: USER_ID, slug: 'roof', isDefault: false })],
       users: [{ id: USER_ID, defaultServiceProfileId: 'prof-pointed-at' }],
     });
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB);
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
     await expect(svc.deleteProfile(USER_ID, 'prof-pointed-at')).rejects.toMatchObject({
       code: 'DEFAULT_BLOCKED',
     });
