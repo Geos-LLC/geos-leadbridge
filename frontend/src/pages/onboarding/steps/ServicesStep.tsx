@@ -263,6 +263,11 @@ export default function ServicesStep({
 
   async function handleContinue() {
     if (saving) return;
+    const hasActive = profiles.some(p => p.status === 'active');
+    if (!hasActive) {
+      notify.error('Add a service first', 'Set up at least one active service before continuing.');
+      return;
+    }
     setSaving(true);
     try {
       await onSaveContinue();
@@ -274,6 +279,7 @@ export default function ServicesStep({
   const activeServices = ordered.filter(p => p.status === 'active');
   const incompleteActive = activeServices.filter(p => !looksConfigured(p));
   const draftServices = ordered.filter(p => p.status === 'draft');
+  const canContinue = activeServices.length > 0;
 
   return (
     <div className="pt-2">
@@ -281,7 +287,8 @@ export default function ServicesStep({
         <button
           type="button"
           onClick={() => void handleContinue()}
-          disabled={saving}
+          disabled={saving || !canContinue}
+          title={!canContinue ? 'Add at least one active service to continue' : undefined}
           className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -297,6 +304,11 @@ export default function ServicesStep({
           Full AI playbook
           <ExternalLink className="w-3.5 h-3.5" />
         </button>
+        {!canContinue && !loading && (
+          <span className="text-xs text-amber-600 font-medium">
+            Add at least one active service before continuing.
+          </span>
+        )}
       </WizardStepActions>
 
       {/* ── Add a service ─────────────────────────────────────────────
