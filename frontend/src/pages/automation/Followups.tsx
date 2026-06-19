@@ -6,7 +6,7 @@ import {
   Plus, Trash2, X, RotateCcw,
 } from 'lucide-react';
 import {
-  SectionCard, FieldRow, OptionCard,
+  SectionCard,
   Dropdown, IconTile, FooterBanner, StatusPill, MixedBadge,
   PlanOffEmptyState, TimingRow, MessageGenerationRow,
   type IconTone,
@@ -448,7 +448,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // to the shell PlanSwitcher in the 2026-06-13 design refresh. Kept the
   // helper call shape inline-deleted; the mixed-state badge for the master
   // toggle now belongs on the shell (Phase 4 follow-up).
-  const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
   const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
   const mixedQuiet    = getMixedF('quietOn', v => v ? 'On' : 'Off');
   const mixedResume   = getMixedF('resumeDelay', v => String(v));
@@ -511,7 +510,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     }
     setFollowUpsOn(v);
   };
-  const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; dirtyFieldsRef.current.add('deliveryMode');  setDeliveryMode(v); };
   const onMessageMode   = (v: 'template' | 'ai')    => { dirtyRef.current = true; dirtyFieldsRef.current.add('messageMode');   setMessageMode(v); };
   const onQuietOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('quietOn');       setQuietOn(v); };
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
@@ -576,35 +574,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onEditHours={goQuietSettings}
           mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
         />
-
-        {/* Delivery mode picker. Suggest card hidden by default
-            2026-06-18 — new users always send follow-ups actively. The
-            opt-in toggle for suggest mode now lives on Settings → AI
-            Playbook → Delivery mode (advanced). The card still renders
-            here when the saved value IS suggest so users currently on
-            it can switch off without hunting through Playbook. */}
-        <FieldRow label="Delivery mode" sublabel="How follow-ups are sent." align="top">
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {deliveryMode === 'suggest' && (
-              <OptionCard
-                selected={deliveryMode === 'suggest'}
-                onClick={() => onDeliveryMode('suggest')}
-                title="Suggest"
-                body="Draft follow-ups for you to review and approve."
-                mixed={mixedDelivery.mixed && deliveryMode === 'suggest'}
-                mixedTooltip={mixedDelivery.tooltip}
-              />
-            )}
-            <OptionCard
-              selected={deliveryMode === 'active'}
-              onClick={() => onDeliveryMode('active')}
-              title="Active"
-              body="Send follow-ups automatically without approval."
-              mixed={mixedDelivery.mixed && deliveryMode === 'active'}
-              mixedTooltip={mixedDelivery.tooltip}
-            />
-          </div>
-        </FieldRow>
 
         {/* Unified Message generation row (spec 2e) bound to messageMode.
             Backend wiring unchanged — saveWizardSettings still reads
@@ -761,36 +730,23 @@ function longestStepLabel(plan: PlanStepData[]): string {
   return planUnitLabel(bestVal, bestUnit);
 }
 
-// Choose up to six nodes to render from the live plan. For plans of >6
-// steps we show steps 1-5 + the final node with a dashed connector to
-// signal the gap. Smaller plans render every step linearly.
+// Render every real step from the live plan. The stepper is the user's
+// source of truth for what's configured, so collapsing long plans to
+// head-5 + last (which we did before) misrepresented the cadence — users
+// saw "1...5, 11" instead of all 11 saved steps. The cadence container
+// is horizontally scrollable, so longer plans just extend rightward.
 function nodesForPlan(plan: PlanStepData[]): PlanNode[] {
   if (plan.length === 0) return [];
-  const styleFor = (idx: number, total: number): PlanNodeStyle => {
+  const styleFor = (idx: number): PlanNodeStyle => {
     if (idx === 0) return 'solid-accent';
     if (idx === 1) return 'outline-accent';
-    if (idx === total - 1 && total > 6) return 'outline-dashed';
     return 'outline-gray';
   };
-  if (plan.length <= 6) {
-    return plan.map((s, i) => ({
-      n: i + 1,
-      time: planUnitLabel(s.val, s.unit),
-      style: styleFor(i, plan.length),
-    }));
-  }
-  const head = plan.slice(0, 5).map((s, i) => ({
+  return plan.map((s, i) => ({
     n: i + 1,
     time: planUnitLabel(s.val, s.unit),
-    style: styleFor(i, plan.length),
+    style: styleFor(i),
   }));
-  const last = plan[plan.length - 1];
-  head.push({
-    n: plan.length,
-    time: planUnitLabel(last.val, last.unit),
-    style: 'outline-dashed',
-  });
-  return head;
 }
 
 function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
