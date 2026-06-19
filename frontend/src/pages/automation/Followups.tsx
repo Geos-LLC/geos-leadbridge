@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, History,
   RefreshCw, Clock, UserX, Info, Power,
@@ -120,6 +120,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // 'suggest' UI mode → API 'suggest'; 'active' UI mode → API 'auto_send'.
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
+  // Suggest delivery mode hidden by default 2026-06-18 — same rationale
+  // as the AI Conversation suggest hide. Surfaced via ?advanced=1 /
+  // ?debug=1 for support / power users, and auto-surfaced when the
+  // tenant's saved value IS suggest so they aren't locked out.
+  const [searchParams] = useSearchParams();
+  const advancedMode =
+    searchParams.get('advanced') === '1' ||
+    searchParams.get('debug') === '1';
   const [messageMode, setMessageMode] = useState<'template' | 'ai'>('ai');
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
@@ -193,7 +201,11 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       // for new accounts and the legacy column's NULL state).
       followUpsOn: s?.followUpMode != null && s?.followUpMode !== 'off',
       quietOn: accountHoursQuiet !== undefined ? accountHoursQuiet : true,
-      deliveryMode: s?.followUpMode === 'auto_send' ? 'active' : 'suggest',
+      // 2026-06-18: flipped default to 'active'. Only explicit 'suggest'
+      // shows as suggest; everything else (auto_send, undefined, missing,
+      // legacy unset) renders as active. New users default to Active
+      // delivery; existing tenants on explicit suggest are preserved.
+      deliveryMode: s?.followUpMode === 'suggest' ? 'suggest' : 'active',
       messageMode: s?.followUpReplyType === 'template' ? 'template' : 'ai',
       activeHoursStart: s?.followUpActiveHoursStart || '09:00',
       activeHoursEnd: s?.followUpActiveHoursEnd || '18:00',
@@ -569,16 +581,25 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
         />
 
+        {/* Delivery mode picker. Suggest card hidden by default
+            2026-06-18 — new users always send follow-ups actively.
+            Surfaced only when ?advanced=1 / ?debug=1 OR the saved
+            value IS suggest (so existing suggest tenants can still
+            see + change it). When both cards are hidden (only Active
+            visible) the FieldRow still renders so users understand
+            this is the delivery mode picker. */}
         <FieldRow label="Delivery mode" sublabel="How follow-ups are sent." align="top">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={deliveryMode === 'suggest'}
-              onClick={() => onDeliveryMode('suggest')}
-              title="Suggest"
-              body="Draft follow-ups for you to review and approve."
-              mixed={mixedDelivery.mixed && deliveryMode === 'suggest'}
-              mixedTooltip={mixedDelivery.tooltip}
-            />
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {(advancedMode || deliveryMode === 'suggest') && (
+              <OptionCard
+                selected={deliveryMode === 'suggest'}
+                onClick={() => onDeliveryMode('suggest')}
+                title="Suggest"
+                body="Draft follow-ups for you to review and approve."
+                mixed={mixedDelivery.mixed && deliveryMode === 'suggest'}
+                mixedTooltip={mixedDelivery.tooltip}
+              />
+            )}
             <OptionCard
               selected={deliveryMode === 'active'}
               onClick={() => onDeliveryMode('active')}
