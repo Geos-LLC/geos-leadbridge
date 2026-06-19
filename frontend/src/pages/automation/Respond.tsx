@@ -735,45 +735,39 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           mixedLabelBadge={mixedCallBizHours ? <MixedBadge tooltip={tipCallBizHours} /> : undefined}
         />
 
-        <FieldRow
-          icon={ArrowRightLeft}
-          iconTone="gray"
-          label="Connection Mode"
-          align="top"
-        >
-          <div style={{ display: 'flex', gap: 12 }}>
-            <OptionCard
-              selected={connMode === 'agent-first'}
-              onClick={() => onConnMode('agent-first')}
-              title="Agent First"
-              body="We call you first, then bridge the lead."
-              illustration={<ConnDiagram kind="serial" />}
-              mixed={mixedConnMode && connMode === 'agent-first'}
-              mixedTooltip={tipConnMode}
-            />
-            <OptionCard
-              selected={connMode === 'parallel'}
-              onClick={() => onConnMode('parallel')}
-              title="Parallel"
-              body="We call you and the lead at the same time."
-              illustration={<ConnDiagram kind="parallel" />}
-              mixed={mixedConnMode && connMode === 'parallel'}
-              mixedTooltip={tipConnMode}
-            />
-          </div>
-        </FieldRow>
-
-        {/* Advanced call messages — Agent Whisper + Voicemail editors hidden
-            by default per the Automation Simplification (2026-06-12). The
-            default templates work for most teams; power users + support
-            reach the editors here. Runtime is unchanged: the saved
-            template values are still read from callSettings on every
-            call-connect, regardless of whether this section is open. */}
         <AdvancedExpand
-          title="Advanced call messages"
-          helper="Default call messages work for most teams. Edit only if you need custom wording for the agent whisper or voicemail."
+          title="Advanced call settings"
+          helper="Defaults work for most teams. Switch to Parallel calling or edit agent whisper / voicemail wording here."
           defaultOpen={advancedMode}
         >
+          <FieldRow
+            icon={ArrowRightLeft}
+            iconTone="gray"
+            label="Connection Mode"
+            align="top"
+          >
+            <div style={{ display: 'flex', gap: 12 }}>
+              <OptionCard
+                selected={connMode === 'agent-first'}
+                onClick={() => onConnMode('agent-first')}
+                title="Agent First"
+                body="We call you first, then bridge the lead."
+                illustration={<ConnDiagram kind="serial" />}
+                mixed={mixedConnMode && connMode === 'agent-first'}
+                mixedTooltip={tipConnMode}
+              />
+              <OptionCard
+                selected={connMode === 'parallel'}
+                onClick={() => onConnMode('parallel')}
+                title="Parallel"
+                body="We call you and the lead at the same time."
+                illustration={<ConnDiagram kind="parallel" />}
+                mixed={mixedConnMode && connMode === 'parallel'}
+                mixedTooltip={tipConnMode}
+              />
+            </div>
+          </FieldRow>
+
           <FieldRow icon={Volume2} iconTone="violet" label="Agent Whisper Message">
             <InfoTile
               title={whisperTpl?.name || 'CC - Agent Whisper'}
