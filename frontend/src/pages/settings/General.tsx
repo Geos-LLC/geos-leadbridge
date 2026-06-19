@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Building, Globe, Info, Loader2, Phone, Layers, Plus, Edit3,
   CheckCircle2, Archive, Settings2, X, ChevronDown, ChevronUp,
+  Trash2, AlertTriangle,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
@@ -18,7 +20,30 @@ export function SettingsGeneral() {
   const user = useAuthStore(s => s.user);
   const token = useAuthStore(s => s.token);
   const setAuth = useAuthStore(s => s.setAuth);
+  const logout = useAuthStore(s => s.logout);
   const savedAccounts = useAppStore(s => s.savedAccounts);
+  const navigate = useNavigate();
+
+  // Danger Zone — tenant self-delete. Hidden for ADMIN role (admins
+  // already have the admin-side delete affordance and shouldn't be one
+  // typo away from nuking their own account). Confirmation requires
+  // re-typing the user's email — same gate the legacy SettingsPage
+  // shipped in commit 94a635f0 (since deleted in 8fdc00f6).
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const handleDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await usersApi.deleteOwnAccount();
+      logout();
+      navigate('/');
+    } catch (err: any) {
+      notify.error('Error', err?.message || 'Failed to delete account');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
 
   // The "Pull from Thumbtack / Yelp" buttons are removed in the unified
   // URL flow — the Apply button on the URL field does both jobs (save
@@ -754,6 +779,116 @@ export function SettingsGeneral() {
           setFallbackOpen(false);
         }}
       />
+
+      {/* Danger Zone — tenant self-delete. Hidden for ADMIN. */}
+      {(user as any)?.role !== 'ADMIN' && (
+        <div style={{
+          marginTop: 8,
+          background: '#fff',
+          borderRadius: 18,
+          border: '1px solid #fecaca',
+          padding: 24,
+        }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
+            Danger Zone
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginBottom: 16 }}>
+            Permanently delete your account and all associated data. This cannot be undone.
+          </div>
+          {!showDeleteConfirm ? (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '10px 16px', borderRadius: 10,
+                background: '#fef2f2', color: '#dc2626',
+                border: '1px solid #fecaca',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <Trash2 size={14} />
+              Delete Account
+            </button>
+          ) : (
+            <div style={{
+              padding: 16,
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: 12,
+              display: 'flex', flexDirection: 'column', gap: 12,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <AlertTriangle size={16} style={{ color: '#dc2626', flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#7f1d1d' }}>
+                    This will permanently delete:
+                  </div>
+                  <ul style={{ fontSize: 13, color: '#991b1b', margin: '4px 0 0 20px', padding: 0, lineHeight: 1.6 }}>
+                    <li>Your account and profile</li>
+                    <li>All connected business accounts</li>
+                    <li>All leads, messages, and automation rules</li>
+                    <li>Phone numbers and notification settings</li>
+                    <li>Active subscriptions will be cancelled</li>
+                  </ul>
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#7f1d1d', marginBottom: 6 }}>
+                  Type your email <span style={{ fontWeight: 700 }}>{user?.email}</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmEmail}
+                  onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                  placeholder={user?.email || ''}
+                  autoComplete="off"
+                  style={{
+                    width: '100%', padding: '10px 12px', borderRadius: 10,
+                    border: '1px solid #fecaca', background: '#fff',
+                    fontSize: 13, color: 'var(--lb-ink-1)', fontFamily: 'inherit',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleDeleteAccount}
+                  disabled={deleteConfirmEmail !== user?.email || deletingAccount}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 16px', borderRadius: 10,
+                    background: '#dc2626', color: '#fff', border: 0,
+                    fontSize: 13, fontWeight: 600,
+                    cursor: (deleteConfirmEmail !== user?.email || deletingAccount) ? 'not-allowed' : 'pointer',
+                    opacity: (deleteConfirmEmail !== user?.email || deletingAccount) ? 0.4 : 1,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {deletingAccount ? (
+                    <><Loader2 size={14} className="animate-spin" /> Deleting…</>
+                  ) : (
+                    'Permanently Delete Account'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmEmail(''); }}
+                  style={{
+                    padding: '10px 16px', borderRadius: 10,
+                    background: '#fff', color: 'var(--lb-ink-3)',
+                    border: '1px solid var(--lb-line)',
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
