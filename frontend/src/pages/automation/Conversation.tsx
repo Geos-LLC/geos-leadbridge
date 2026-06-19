@@ -68,14 +68,6 @@ type CachedConvSettings = {
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
   qualificationRequiredFields: string[];
   qualificationCustomFields: QualificationCustomField[];
-  // V2 per-goal completion stops (2026-06-12). Each Conversation Goal
-  // owns its own "Stop AI + Notify Team" choice. Price reuses the
-  // existing `aiStopOnPriceAgreed` field (stopRules.price_agreed here).
-  // Qualify + Phone get their own new JSON keys
-  // (`goalQualifyStopOnComplete` / `goalPhoneStopOnComplete`) — both
-  // default false so existing tenants behave identically.
-  qualifyStopOnComplete: boolean;
-  phoneStopOnComplete: boolean;
   // Per-account booking-availability (Booking goal). 7 weekdays × 2
   // periods (morning / afternoon). Missing in older saves → defaulted
   // to Mon–Fri both on, weekends both off by normalizeBookingAvailability.
@@ -233,12 +225,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [qualificationCustomFields, setQualificationCustomFields] =
     useState<QualificationCustomField[]>([]);
 
-  // V2 per-goal completion stops. Default false: existing tenants
-  // unaffected. Backend gates in automation.service treat undefined as
-  // false too (no behavior change for accounts without the key).
-  const [qualifyStopOnComplete, setQualifyStopOnComplete] = useState(false);
-  const [phoneStopOnComplete, setPhoneStopOnComplete] = useState(false);
-
   // Booking-goal availability — 7-day × 2-period toggle grid. Stored at
   // followUpSettingsJson.bookingAvailability. Defaults render Mon–Fri
   // morning + afternoon on for fresh accounts (matches DEFAULT on the
@@ -267,7 +253,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
     | 'qualificationRequiredFields' | 'qualificationCustomFields'
-    | 'qualifyStopOnComplete' | 'phoneStopOnComplete'
     | 'bookingAvailability';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
 
@@ -369,11 +354,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       },
       qualificationRequiredFields: requiredFields,
       qualificationCustomFields: customFields,
-      // V2 goal completion stops. Missing key → default false. The new
-      // backend gates in automation.service.ts check `=== true` strictly,
-      // so undefined or false both mean "Continue AI + Notify Team".
-      qualifyStopOnComplete: !!s?.goalQualifyStopOnComplete,
-      phoneStopOnComplete:   !!s?.goalPhoneStopOnComplete,
       // Defensive parsing — older saves without this key fall through to
       // the Mon–Fri morning/afternoon default via normalizeBookingAvailability.
       bookingAvailability: normalizeBookingAvailability(s?.bookingAvailability),
@@ -393,8 +373,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setTakeover(first.takeover);
         setQualificationRequiredFields(first.qualificationRequiredFields);
         setQualificationCustomFields(first.qualificationCustomFields);
-        setQualifyStopOnComplete(first.qualifyStopOnComplete);
-        setPhoneStopOnComplete(first.phoneStopOnComplete);
         setBookingAvailability(first.bookingAvailability);
       }
     } else {
@@ -407,8 +385,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setTakeover(cached.takeover);
         setQualificationRequiredFields(cached.qualificationRequiredFields);
         setQualificationCustomFields(cached.qualificationCustomFields);
-        setQualifyStopOnComplete(cached.qualifyStopOnComplete);
-        setPhoneStopOnComplete(cached.phoneStopOnComplete);
         setBookingAvailability(cached.bookingAvailability);
       }
     }
@@ -439,8 +415,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setTakeover(parsed.takeover);
             setQualificationRequiredFields(parsed.qualificationRequiredFields);
             setQualificationCustomFields(parsed.qualificationCustomFields);
-            setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
-            setPhoneStopOnComplete(parsed.phoneStopOnComplete);
             setBookingAvailability(parsed.bookingAvailability);
           }
         }
@@ -462,8 +436,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setTakeover(parsed.takeover);
               setQualificationRequiredFields(parsed.qualificationRequiredFields);
               setQualificationCustomFields(parsed.qualificationCustomFields);
-              setQualifyStopOnComplete(parsed.qualifyStopOnComplete);
-              setPhoneStopOnComplete(parsed.phoneStopOnComplete);
               setBookingAvailability(parsed.bookingAvailability);
             }
           }
@@ -508,13 +480,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         customFields: qualificationCustomFields,
       };
     }
-    // V2 goal completion stops — Qualify + Phone goals each carry their
-    // own "Stop AI + Notify Team" choice as a new top-level JSON key.
-    // Backend reads these via aiRules.goalQualifyStopOnComplete /
-    // .goalPhoneStopOnComplete (see automation.service handleCustomerReply).
-    // Price keeps writing aiStopOnPriceAgreed via stopRules.price_agreed.
-    if (fields.has('qualifyStopOnComplete')) payload.goalQualifyStopOnComplete = qualifyStopOnComplete;
-    if (fields.has('phoneStopOnComplete'))   payload.goalPhoneStopOnComplete   = phoneStopOnComplete;
     if (fields.has('bookingAvailability'))   payload.bookingAvailability       = bookingAvailability;
 
     // Optimistic cache update — merge ONLY the changed fields onto each
@@ -528,7 +493,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           strategy, availability, aiConversationDeliveryMode,
           stopRules, takeover,
           qualificationRequiredFields, qualificationCustomFields,
-          qualifyStopOnComplete, phoneStopOnComplete,
           bookingAvailability,
         });
         return;
@@ -556,8 +520,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (fields.has('qualificationCustomFields')) {
         next.qualificationCustomFields = qualificationCustomFields;
       }
-      if (fields.has('qualifyStopOnComplete')) next.qualifyStopOnComplete = qualifyStopOnComplete;
-      if (fields.has('phoneStopOnComplete'))   next.phoneStopOnComplete   = phoneStopOnComplete;
       if (fields.has('bookingAvailability'))   next.bookingAvailability   = bookingAvailability;
       convCache.set(id, next);
     });
@@ -602,8 +564,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   }
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
-  // Goal Completion Behavior mixed-state detection removed 2026-06-18 —
-  // the underlying per-goal Continue/Stop choice no longer exists.
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -654,7 +614,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete, bookingAvailability]);
+  }, [strategy, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, bookingAvailability]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
@@ -746,9 +706,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       [day]: { ...prev[day], [period]: !prev[day][period] },
     }));
   };
-
-  // Goal Completion Behavior derived state + handler removed
-  // 2026-06-18. AI always stops on goal complete; no user choice.
 
   const goFollowups = () => navigate('/automation/engage', { state: fromState });
   const goAlerts = () => navigate('/settings?tab=communication', { state: fromState });
@@ -860,16 +817,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         toggleBookingDayPeriod={toggleBookingDayPeriod}
       />
 
-      {/* Goal Completion Behavior removed 2026-06-18 — AI always stops
-          on goal complete. Other stop signals (lead status → done/lost,
-          SF outcome → scheduled/completed) are unchanged. */}
-
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
-            Normal users manage AI behavior via Conversation Goals + the
-            per-goal When-Goal-Is-Reached radio above. The 9 legacy
-            Stop Rules / Human Takeover toggles still drive the backend
-            (aiStopOn* / handoffTrigger* fields) and remain reachable
-            for support and power users through the URL param. */}
+            Normal users manage AI behavior via Conversation Goals. The
+            legacy Stop Rules / Human Takeover toggles still drive the
+            backend (aiStopOn* / handoffTrigger* fields) and remain
+            reachable for support and power users through the URL param. */}
       {advancedMode && (
         <AdvancedRulesCard
           stopRules={stopRules}
@@ -981,7 +933,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           How it works
         </div>
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginBottom: 18 }}>
-          AI pursues the Conversation Goal until the goal is reached. Then it either keeps replying (Continue) or stops (Stop) — and your team is notified either way.
+          AI pursues the Conversation Goal until the goal is reached. Then it stops and hands the lead off — your team is notified.
         </div>
 
         <div style={{
@@ -993,9 +945,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           <FlowArrow />
           <FlowStep icon={Target}             iconTone="violet" title="Goal reached"            subtitle="(or protected event fired)" />
           <FlowArrow />
-          <FlowStep icon={Bell}               iconTone="green"  title="Team is notified"        subtitle="dispatcher SMS fires" />
-          <FlowArrow />
-          <FlowStep icon={Hand}               iconTone="rose"   title="Continue or stop"        subtitle="per your setting" />
+          <FlowStep icon={Hand}               iconTone="rose"   title="AI hands off"            subtitle="team is notified" />
         </div>
       </SectionCard>
 
@@ -1509,21 +1459,12 @@ function CustomFieldRow({
   );
 }
 
-// ─── When-goal-is-reached card ─────────────────────────────────────────────
-// Replaces the old Stop Rules + Human Takeover cards with one simplified
-// radio (Continue AI + Notify Team / Stop AI + Notify Team) plus an
-// "Advanced rules" accordion that exposes every original toggle for users
-// whose saved state doesn't match either preset. Backend fields are
-// UNCHANGED — the radio just batches the underlying setters.
-//
-// PROTECTED behavior (never changeable from the simplified radio):
-//   - aiStopOnOptOut          ← compliance, must always stop on opt-out
-//   - aiStopOnBooked.done      ← terminal status, must always stop
-//   - All 5 handoffTrigger*    ← team gets notified regardless of mode
-//
-// MODE-DIFFERENTIATING fields (the only two that differ Continue vs Stop):
-//   - aiStopOnBooked        Continue=false / Stop=true
-//   - aiStopOnPriceAgreed   Continue=false / Stop=true
+// ─── Advanced rules card ───────────────────────────────────────────────────
+// Legacy compatibility surface for the 9 original Stop Rules / Human
+// Takeover toggles. Hidden by default; reachable via ?advanced=1 or
+// ?debug=1. Backend fields (aiStopOn* / handoffTrigger*) are still live
+// except aiStopOnPriceAgreed, which became inert with the 2026-06-18
+// handoff-on-goal simplification but remains here for legacy parity.
 type StopRulesState = { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
 type TakeoverState  = { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
 
