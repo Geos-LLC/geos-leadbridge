@@ -42,8 +42,7 @@ const DEFAULTS = {
   followUpAvailability: 'always' as 'always' | 'active_hours',
   // AI Conversation defaults — mirror Settings → Automation → AI
   // Conversation. The wizard exposes a small subset (Goal +
-  // Response Mode); the per-goal Continue/Stop choice was removed
-  // in 2026-06-18 simplification — AI always stops on goal complete.
+  // Response Mode); AI always hands off on goal completion.
   conversationGoal: 'auto' as ConversationGoal,
   aiResponseMode: 'autopilot' as AiResponseMode,
 };
@@ -194,11 +193,11 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           aiHiredCompetitorReengage: s.aiHiredCompetitorReengage ?? prev.aiHiredCompetitorReengage,
           aiHiredCompetitorDelay: s.aiHiredCompetitorDelay || prev.aiHiredCompetitorDelay,
           followUpAvailability: (s.followUpAvailability as any) || prev.followUpAvailability,
-          // AI Conversation — derive the three wizard controls from
+          // AI Conversation — derive the two wizard controls from
           // the raw backend fields (followUpStrategy /
-          // aiConversationDeliveryMode / followUpAvailability /
-          // goal*StopOnComplete). Mirrors the parseSettings logic in
-          // Settings → Automation → Conversation.
+          // aiConversationDeliveryMode / followUpAvailability).
+          // Mirrors the parseSettings logic in Settings → Automation
+          // → Conversation.
           conversationGoal: deriveConversationGoal(s.followUpStrategy),
           aiResponseMode: deriveAiResponseMode(
             s.aiConversationDeliveryMode,
@@ -236,10 +235,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // The AI Conversation slice writes:
   //   - followUpStrategy (Conversation Goal)
   //   - aiConversationDeliveryMode + followUpAvailability (Response Mode)
-  //   - goalQualifyStopOnComplete + goalPhoneStopOnComplete (Goal Action)
-  // The two per-goal stops are written symmetrically with the single
-  // wizard radio — the runtime applies whichever matches the currently
-  // active goal. Users can fine-tune per goal in Settings later.
   const wizardPayload = useMemo(() => ({
     ...TRIAL_BUNDLE,
     fuReEnrollOnSilence: opts.fuReEnrollOnSilence,
@@ -248,9 +243,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     aiDeferralDelay: opts.aiDeferralDelay,
     aiHiredCompetitorReengage: opts.aiHiredCompetitorReengage,
     aiHiredCompetitorDelay: opts.aiHiredCompetitorDelay,
-    // AI Conversation slice. Per-goal Continue/Stop choice removed in
-    // 2026-06-18 simplification — runtime always stops on goal complete
-    // regardless of the JSON keys, so the wizard no longer writes them.
     followUpStrategy: opts.conversationGoal,
     aiConversationDeliveryMode: responseModeBackend.aiConversationDeliveryMode,
     followUpAvailability: responseModeBackend.followUpAvailability,

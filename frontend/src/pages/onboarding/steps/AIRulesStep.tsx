@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowRight, Bot, CircleDollarSign, Eye, Flag, Loader2, MoonStar, Phone, Sparkles, UserCheck, Zap,
+  ArrowRight, Bot, CircleDollarSign, Eye, Loader2, MoonStar, Phone, Sparkles, UserCheck, Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
@@ -17,7 +17,7 @@ interface Props {
 /**
  * Wizard step 7 — AI Rules.
  *
- * Three conversation-level controls, all account-wide and applied to
+ * Two conversation-level controls, all account-wide and applied to
  * every connected SavedAccount on save:
  *
  *   1. Conversation Goal — what AI tries to achieve.
@@ -35,21 +35,12 @@ interface Props {
  *        Full autopilot → deliveryMode='auto_send' +
  *          followUpAvailability='always' (sends any time).
  *
- *   3. Goal Completion Behavior — what AI does the moment it hits the
- *      conversation goal.
- *        Continue AI + Notify Team → keep the AI replying (it'll handle
- *          follow-ups, scheduling questions, etc.) and ping the team so
- *          a human can step in if they want.
- *        Stop AI + Notify Team    → pause AI immediately on goal hit,
- *          alert the team, hand the lead off cleanly.
- *      Writes three underlying fields uniformly: aiStopOnPriceAgreed,
- *      goalQualifyStopOnComplete, goalPhoneStopOnComplete. This is the
- *      same shape Conversation page V2 uses for the account-level
- *      goal-completion radio (Conversation.tsx:686).
+ * Goal-completion behavior is no longer user-configurable: AI always
+ * stops on goal completion and hands off to the team (2026-06-18
+ * simplification).
  */
 type GoalKey = 'auto' | 'price' | 'qualify' | 'phone';
 type ResponseMode = 'review' | 'assist' | 'autopilot';
-type GoalCompletion = 'continue' | 'stop';
 
 interface GoalMeta {
   key: GoalKey;
@@ -96,15 +87,13 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
 
   const [goal, setGoal] = useState<GoalKey>('auto');
   const [responseMode, setResponseMode] = useState<ResponseMode>('autopilot');
-  const [goalCompletion, setGoalCompletion] = useState<GoalCompletion>('continue');
   const [businessHoursLabel, setBusinessHoursLabel] = useState<string>('Mon–Fri, 9:00 AM – 6:00 PM');
   const [loading, setLoading] = useState(true);
 
   // Hydrate from the first connected account's saved settings so a
   // returning user sees what they had. Defaults: auto goal, autopilot
-  // response mode, continue-on-goal-hit. When nothing is on file (fresh
-  // tenant), the defaults match what the trial bundle sets up on the
-  // Automation step.
+  // response mode. When nothing is on file (fresh tenant), the defaults
+  // match what the trial bundle sets up on the Automation step.
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -146,12 +135,6 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
           setResponseMode('autopilot');
         }
 
-        // Goal Completion. 'stop' only when all three underlying
-        // fields are explicitly true — matches Conversation.tsx:686.
-        // Mixed legacy saves (e.g. price=true / qualify=false) display
-        // as 'continue' and the user's next Save normalizes them.
-        const isStop = !!s?.aiStopOnPriceAgreed && !!s?.goalQualifyStopOnComplete && !!s?.goalPhoneStopOnComplete;
-        setGoalCompletion(isStop ? 'stop' : 'continue');
       } catch {
         /* non-fatal */
       } finally {
@@ -177,17 +160,11 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
       // two surfaces sees the same selection.
       const deliveryMode = responseMode === 'review' ? 'suggest' : 'auto_send';
       const availability = responseMode === 'assist' ? 'active_hours' : 'always';
-      const stopOnGoal = goalCompletion === 'stop';
 
       const payload = {
         followUpStrategy: goal,
         aiConversationDeliveryMode: deliveryMode,
         followUpAvailability: availability,
-        // Goal-completion stops — written uniformly so one click in the
-        // wizard normalizes any mixed legacy saves.
-        aiStopOnPriceAgreed: stopOnGoal,
-        goalQualifyStopOnComplete: stopOnGoal,
-        goalPhoneStopOnComplete: stopOnGoal,
       };
 
       let firstError: any = null;
@@ -317,34 +294,6 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
             </div>
           </section>
 
-          {/* ─── 3. Goal Completion Behavior ──────────────────────── */}
-          <section>
-            <div className="flex items-start gap-3 mb-3">
-              <span className="w-9 h-9 rounded-xl inline-flex items-center justify-center bg-slate-100 text-emerald-600 shrink-0">
-                <Flag className="w-4 h-4" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <h2 className="text-base font-extrabold text-slate-900 tracking-tight">Goal Completion Behavior</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  What AI does the moment it reaches your Conversation Goal — keep replying, or stop and hand the lead off?
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <RadioRow
-                label="Continue AI + Notify Team"
-                description="AI keeps replying after the goal is reached (follow-up questions, scheduling, edge cases). Your team is alerted so they can step in any time."
-                checked={goalCompletion === 'continue'}
-                onSelect={() => setGoalCompletion('continue')}
-              />
-              <RadioRow
-                label="Stop AI + Notify Team"
-                description="AI pauses immediately once the goal is reached. Your team gets an alert and takes the lead from there."
-                checked={goalCompletion === 'stop'}
-                onSelect={() => setGoalCompletion('stop')}
-              />
-            </div>
-          </section>
         </div>
       )}
 
