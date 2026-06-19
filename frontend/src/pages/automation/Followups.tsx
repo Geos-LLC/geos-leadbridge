@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
   RefreshCw, Clock, UserX, Info, Power,
@@ -120,14 +120,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // 'suggest' UI mode → API 'suggest'; 'active' UI mode → API 'auto_send'.
   const [quietOn, setQuietOn] = useState(true);
   const [deliveryMode, setDeliveryMode] = useState<'suggest' | 'active'>('active');
-  // Suggest delivery mode hidden by default 2026-06-18 — same rationale
-  // as the AI Conversation suggest hide. Surfaced via ?advanced=1 /
-  // ?debug=1 for support / power users, and auto-surfaced when the
-  // tenant's saved value IS suggest so they aren't locked out.
-  const [searchParams] = useSearchParams();
-  const advancedMode =
-    searchParams.get('advanced') === '1' ||
-    searchParams.get('debug') === '1';
+  // Suggest delivery mode hidden by default. Opt-in toggle lives on
+  // Settings → AI Playbook → Delivery mode (advanced). Card still
+  // renders inline when saved value IS suggest so off-switch is
+  // reachable here too.
   const [messageMode, setMessageMode] = useState<'template' | 'ai'>('ai');
   const [activeHoursStart, setActiveHoursStart] = useState('09:00');
   const [activeHoursEnd, setActiveHoursEnd] = useState('18:00');
@@ -582,15 +578,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         />
 
         {/* Delivery mode picker. Suggest card hidden by default
-            2026-06-18 — new users always send follow-ups actively.
-            Surfaced only when ?advanced=1 / ?debug=1 OR the saved
-            value IS suggest (so existing suggest tenants can still
-            see + change it). When both cards are hidden (only Active
-            visible) the FieldRow still renders so users understand
-            this is the delivery mode picker. */}
+            2026-06-18 — new users always send follow-ups actively. The
+            opt-in toggle for suggest mode now lives on Settings → AI
+            Playbook → Delivery mode (advanced). The card still renders
+            here when the saved value IS suggest so users currently on
+            it can switch off without hunting through Playbook. */}
         <FieldRow label="Delivery mode" sublabel="How follow-ups are sent." align="top">
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {(advancedMode || deliveryMode === 'suggest') && (
+            {deliveryMode === 'suggest' && (
               <OptionCard
                 selected={deliveryMode === 'suggest'}
                 onClick={() => onDeliveryMode('suggest')}

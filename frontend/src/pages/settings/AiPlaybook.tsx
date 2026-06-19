@@ -2098,6 +2098,13 @@ function GlobalPlaybookEditor() {
 
         {/* 4. Global Custom Instructions — surfaces User.globalAiPrompt */}
         <GlobalCustomInstructionsCard />
+
+        {/* 5. Advanced delivery modes — Suggest toggles for AI Conversation
+            + Follow-ups. Hidden away here so power users can opt in to the
+            "park drafts for my approval" flow without the toggle cluttering
+            the wizard or the main Automation pages. Each toggle auto-saves
+            and fans out to every connected account. */}
+        <AdvancedDeliveryModesCard accounts={accounts} />
       </>}
 
       {/* Footer save button */}
@@ -2419,6 +2426,267 @@ function GlobalCustomInstructionsCard() {
         </div>
       )}
     </PlaybookSectionShell>
+  );
+}
+
+// ─── Advanced delivery modes — Suggest toggles ────────────────────────────
+// Hidden home for the "park drafts for my approval" workflows that the
+// wizard + Settings → Automation pages intentionally don't expose by
+// default. Two independent toggles:
+//   - AI Conversation: park AI replies (aiConversationDeliveryMode='suggest')
+//   - Follow-ups:      park follow-ups  (mode='suggest', backend field
+//                                          followUpMode='suggest')
+//
+// Each toggle auto-saves and fans out to every connected account via
+// followUpApi.saveWizardSettings — same path the wizard / Conversation
+// page already use. No new backend wiring.
+//
+// Why here: AI Playbook is the natural "advanced AI behavior" home, and
+// it lives behind the AI Playbook tab which is already off the
+// new-user critical path. Surfacing it here avoids the URL-hack-only
+// fallback (?advanced=1) while keeping it out of the wizard.
+
+function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string }> }) {
+  const [aiConvSuggest, setAiConvSuggest] = useState(false);
+  const [followUpSuggest, setFollowUpSuggest] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busyKind, setBusyKind] = useState<null | 'ai_conv' | 'follow_up'>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Load current state from the first connected account (Playbook is
+  // global; per-account divergence is intentional but rare here).
+  useEffect(() => {
+    let alive = true;
+    if (accounts.length === 0) {
+      setLoading(false);
+      return;
+    }
+    followUpApi
+      .getSettings(accounts[0].id)
+      .then((res: { settings?: Record<string, unknown> | null }) => {
+        if (!alive) return;
+        const s = (res?.settings ?? {}) as Record<string, unknown>;
+        setAiConvSuggest(s.aiConversationDeliveryMode === 'suggest');
+        // Backend field is `followUpMode`. The wizard payload key is `mode`.
+        setFollowUpSuggest(s.followUpMode === 'suggest');
+      })
+      .catch(() => {
+        /* non-fatal — defaults render fine */
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts.length]);
+
+  async function fanOutSave(payload: Record<string, unknown>) {
+    if (accounts.length === 0) return;
+    await Promise.all(
+      accounts.map((a) =>
+        followUpApi
+          .saveWizardSettings(a.id, payload)
+          .catch(() => undefined),
+      ),
+    );
+    setSavedAt(Date.now());
+    setTimeout(() => setSavedAt(null), 2000);
+  }
+
+  async function onAiConvToggle(next: boolean) {
+    setAiConvSuggest(next);
+    setBusyKind('ai_conv');
+    try {
+      await fanOutSave({
+        aiConversationDeliveryMode: next ? 'suggest' : 'auto_send',
+      });
+    } finally {
+      setBusyKind(null);
+    }
+  }
+
+  async function onFollowUpToggle(next: boolean) {
+    setFollowUpSuggest(next);
+    setBusyKind('follow_up');
+    try {
+      // Wizard payload key is `mode`; backend persists as followUpMode.
+      await fanOutSave({ mode: next ? 'suggest' : 'auto_send' });
+    } finally {
+      setBusyKind(null);
+    }
+  }
+
+  if (loading || accounts.length === 0) return null;
+
+  return (
+    <SectionCard padding="22px 24px">
+      <div
+        style={{
+          display: 'flex',
+          gap: 14,
+          alignItems: 'flex-start',
+          marginBottom: 14,
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background: '#e0e7ff',
+            color: '#4338ca',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Send size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 700,
+              color: 'var(--lb-ink-1)',
+              letterSpacing: '-0.01em',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            Delivery mode (advanced)
+            {savedAt && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#15803d',
+                  background: '#dcfce7',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                }}
+              >
+                Saved
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: 'var(--lb-ink-5)',
+              marginTop: 4,
+              lineHeight: 1.5,
+            }}
+          >
+            Most teams keep these OFF — AI sends automatically. Turn
+            either toggle ON to park drafts for your review before they
+            send. Applies to all {accounts.length} connected
+            {accounts.length === 1 ? ' account' : ' accounts'}.
+          </div>
+        </div>
+      </div>
+
+      <SuggestToggleRow
+        title="Park AI Conversation replies for review"
+        body="AI drafts replies to customer messages and parks them for your approval. Nothing sends until you tap Send on the Lead Activity page."
+        on={aiConvSuggest}
+        busy={busyKind === 'ai_conv'}
+        onChange={onAiConvToggle}
+      />
+      <div style={{ height: 1, background: 'var(--lb-line-soft)', margin: '12px 0' }} />
+      <SuggestToggleRow
+        title="Park follow-ups for review"
+        body="Follow-up sequences draft each message and park it for your approval before sending. The cadence still runs; messages just wait at the gate."
+        on={followUpSuggest}
+        busy={busyKind === 'follow_up'}
+        onChange={onFollowUpToggle}
+      />
+    </SectionCard>
+  );
+}
+
+function SuggestToggleRow({
+  title,
+  body,
+  on,
+  busy,
+  onChange,
+}: {
+  title: string;
+  body: string;
+  on: boolean;
+  busy: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 14,
+        padding: '4px 0',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13.5,
+            fontWeight: 700,
+            color: 'var(--lb-ink-1)',
+            marginBottom: 4,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: 'var(--lb-ink-5)',
+            lineHeight: 1.5,
+          }}
+        >
+          {body}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={busy}
+        onClick={() => onChange(!on)}
+        style={{
+          width: 44,
+          height: 24,
+          borderRadius: 999,
+          background: on ? 'var(--lb-accent)' : '#cbd5e1',
+          border: 0,
+          padding: 0,
+          cursor: busy ? 'wait' : 'pointer',
+          position: 'relative',
+          flexShrink: 0,
+          transition: 'background 160ms ease',
+          opacity: busy ? 0.65 : 1,
+          marginTop: 2,
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            top: 3,
+            left: on ? 23 : 3,
+            width: 18,
+            height: 18,
+            borderRadius: 99,
+            background: 'white',
+            transition: 'left 160ms ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          }}
+        />
+      </button>
+    </div>
   );
 }
 

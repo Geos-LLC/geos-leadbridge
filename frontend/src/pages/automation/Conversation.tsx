@@ -938,11 +938,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* "Review before sending" hidden by default 2026-06-18. New
               users skip suggest mode entirely — they want AI to start
-              replying ASAP, not park drafts for review. Visible only when
-              (a) ?advanced=1 is set, OR (b) the tenant is already on
-              suggest (so they aren't locked out of changing it). The
-              runtime still honors suggest end-to-end. */}
-          {(advancedMode || aiConversationDeliveryMode === 'suggest') && (
+              replying ASAP, not park drafts for review. The opt-in
+              toggle for suggest mode now lives on Settings → AI
+              Playbook → Delivery mode (advanced). This card still
+              renders here when the tenant's saved value IS suggest so
+              they're never locked out of switching off without
+              hunting through Playbook. */}
+          {aiConversationDeliveryMode === 'suggest' && (
             <ResponseModeOption
               selected={aiConversationDeliveryMode === 'suggest'}
               onClick={() => onResponseMode('review')}
