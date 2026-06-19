@@ -380,12 +380,25 @@ export class FollowUpGeneratorService {
           // authoritative; the LLM will quote these numbers verbatim
           // instead of inferring from the table.
           try {
+            // priceQuoteMode flips the engine between single-total and
+            // range output (2026-06-18). Read off the account's
+            // followUpSettingsJson; undefined keeps legacy behavior.
+            let priceQuoteMode: 'range' | 'exact' | undefined;
+            if (account?.followUpSettingsJson) {
+              try {
+                const s = JSON.parse(account.followUpSettingsJson);
+                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
+                  priceQuoteMode = s.priceQuoteMode;
+                }
+              } catch { /* ignore */ }
+            }
             const built = computeQuoteAndIntent({
               pricing: p,
               leadDetails: leadFactsRecord,
               customerMessage: lead?.message ?? null,
               conversationHistory: context?.recentMessages ?? null,
               additionalInfo,
+              priceQuoteMode,
             });
             if (built.quoteBlock) {
               quoteContext =

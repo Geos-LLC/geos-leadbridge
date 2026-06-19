@@ -29,7 +29,8 @@
  * without re-litigating which prompt won.
  */
 
-import type { PricingCalculationResult } from './pricing-engine';
+import type { PricingCalculationResult, QuoteShapeOptions } from './pricing-engine';
+import { computeQuoteRange } from './pricing-engine';
 
 /**
  * Whole-word(ish) match against the price-intent vocabulary. Tolerant
@@ -83,6 +84,8 @@ export interface PriceIntentInput {
   customerMessage?: string | null;
   /** Engine output. Required to know whether quote is ready or needs clarification. */
   calculation?: PricingCalculationResult | null;
+  /** Per-account shape — drives single-number vs range output. */
+  shape?: QuoteShapeOptions;
 }
 
 /**
@@ -105,18 +108,24 @@ export function buildPriceIntentBlock(input: PriceIntentInput): string | null {
   const lines: string[] = [];
 
   if (calc.totalPrice !== null) {
-    // Ready quote — strictest directive.
+    // Ready quote — strictest directive. priceQuoteMode='range'
+    // renders a $low–$high bracket the AI must quote verbatim;
+    // 'exact' (or unset) keeps the single-number behavior.
+    const range = computeQuoteRange(calc.totalPrice, input.shape ?? {});
+    const quoteRendered = range
+      ? `$${range.low}–$${range.high}`
+      : `$${calc.totalPrice}`;
     lines.push('The customer just asked about price.');
     lines.push(
-      `Lead THIS reply with the calculated quote: $${calc.totalPrice}.` +
+      `Lead THIS reply with the calculated quote: ${quoteRendered}.` +
       (calc.explanation ? ` (${calc.explanation})` : ''),
     );
     lines.push(
       'DO NOT ask for scheduling, square footage, or any qualifying detail before quoting. ' +
-      'Give the number first. You may ask one follow-up question AFTER the quote if needed (typically a short offer to schedule).',
+      'Give the quote first. You may ask one follow-up question AFTER the quote if needed (typically a short offer to schedule).',
     );
     lines.push(
-      'This instruction overrides any softer "give a price range if you have enough info" wording in the PRIMARY INSTRUCTION or template — the system already verified the inputs and computed the number. Use it verbatim.',
+      'This instruction overrides any softer "give a price range if you have enough info" wording in the PRIMARY INSTRUCTION or template — the system already verified the inputs and computed the quote. Use it verbatim.',
     );
     return lines.join('\n');
   }

@@ -357,15 +357,18 @@ describe('getCustomInstructions', () => {
 // ─── Token budget regression guard ───────────────────────────────────────
 
 describe('token budget', () => {
-  it('full empty-playbook block stays under 8500 characters', () => {
+  it('full empty-playbook block stays under 8900 characters', () => {
     const block = renderPlaybookBlock(makeAccount());
-    // ~4 chars per token rule-of-thumb → ~2125 tokens. Still small.
-    // Threshold bumped 7000 → 7800 when the PRICE INTENT ENFORCEMENT
-    // clause joined BASE HARD RULES (2026-06-14, ~700 chars).
-    // Threshold bumped 7800 → 8500 when the UNKNOWN SERVICES IN A
-    // BUNDLED ASK clause joined (2026-06-18, ~600 chars) — the
-    // cleaning + ironing fabrication-bundle guard.
-    expect(block.length).toBeLessThan(8500);
+    // ~4 chars per token rule-of-thumb → ~2225 tokens. Still small.
+    // Threshold bumped 7000 → 7800 when PRICE INTENT ENFORCEMENT
+    // joined BASE HARD RULES (2026-06-14, ~700 chars).
+    // Threshold bumped 7800 → 8500 when UNKNOWN SERVICES IN A
+    // BUNDLED ASK joined (2026-06-18, ~600 chars).
+    // Threshold bumped 8500 → 8900 when DETERMINISTIC QUOTE gained
+    // the dual-form (single total OR calculated range) wording so
+    // the AI can quote a range when priceQuoteMode='range' is set
+    // (2026-06-18, ~300 chars).
+    expect(block.length).toBeLessThan(8900);
   });
 
   it('section keys covered list matches PLAYBOOK_SECTION_ORDER', () => {

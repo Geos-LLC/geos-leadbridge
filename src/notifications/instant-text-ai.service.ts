@@ -307,6 +307,7 @@ export class InstantTextAiService {
       pricingJson: effectivePricingJson,
       leadRawJson: opts.leadRawJson,
       customerMessage: opts.customerMessage,
+      followUpSettingsJson: account.followUpSettingsJson ?? null,
     });
 
     const accountName = opts.accountName ?? account.businessName ?? undefined;
@@ -346,6 +347,10 @@ export class InstantTextAiService {
     pricingJson: string | null;
     leadRawJson: string | null | undefined;
     customerMessage: string;
+    /** 2026-06-18 — flips the engine between single-total ("exact")
+     *  and "Calculated range" output. Passed from buildBody where
+     *  the account's followUpSettingsJson is in scope. */
+    followUpSettingsJson?: string | null;
   }): { quoteBlock: string; priceIntentBlock: string } {
     const empty = { quoteBlock: '', priceIntentBlock: '' };
     if (!opts.pricingJson) return empty;
@@ -363,6 +368,15 @@ export class InstantTextAiService {
         if (raw?.project?.additional_info) additionalInfo = String(raw.project.additional_info);
       } catch {}
     }
+    let priceQuoteMode: 'range' | 'exact' | undefined;
+    if (opts.followUpSettingsJson) {
+      try {
+        const s = JSON.parse(opts.followUpSettingsJson);
+        if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
+          priceQuoteMode = s.priceQuoteMode;
+        }
+      } catch { /* ignore */ }
+    }
     try {
       const built = computeQuoteAndIntent({
         pricing,
@@ -370,6 +384,7 @@ export class InstantTextAiService {
         customerMessage: opts.customerMessage,
         conversationHistory: null,
         additionalInfo,
+        priceQuoteMode,
       });
       return {
         quoteBlock: built.quoteBlock ?? '',

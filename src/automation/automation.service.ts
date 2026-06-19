@@ -2262,12 +2262,27 @@ export class AutomationService implements OnModuleInit {
           try {
             const p = hydratePricing(JSON.parse(pricingJson));
             const additionalInfo = leadDetails['Additional details'] ?? null;
+            // Read priceQuoteMode off the account's followUpSettingsJson
+            // so the engine emits a "Calculated range" line for tenants
+            // who opted into range mode (vs. the legacy single-total
+            // line). 2026-06-18: range support added to the engine; this
+            // wiring activates it.
+            let priceQuoteMode: 'range' | 'exact' | undefined;
+            if (account?.followUpSettingsJson) {
+              try {
+                const s = JSON.parse(account.followUpSettingsJson);
+                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
+                  priceQuoteMode = s.priceQuoteMode;
+                }
+              } catch { /* invalid JSON — engine defaults to single total */ }
+            }
             const built = computeQuoteAndIntent({
               pricing: p,
               leadDetails,
               customerMessage,
               conversationHistory,
               additionalInfo,
+              priceQuoteMode,
             });
             if (built.quoteBlock) quoteBlock = built.quoteBlock;
             if (built.priceIntentBlock) priceIntentBlock = built.priceIntentBlock;

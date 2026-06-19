@@ -24,6 +24,68 @@ import { ServicePricing, PricingRow } from '../users/pricing-hydrate';
 import { extractAddons } from './addon-extractor';
 import { buildPriceIntentBlock } from './price-intent';
 
+/**
+ * Per-account pricing-quote shape options. Determines whether the
+ * calculated quote is rendered as a single number or a low/high range
+ * in both buildQuoteBlock + buildPriceIntentBlock outputs.
+ *
+ * Mirrors the field stored on SavedAccount.followUpSettingsJson keys
+ * `priceQuoteMode` (range | exact) and the gap config inferred from
+ * price-range.ts (`PriceRangeGap`).
+ */
+export interface QuoteShapeOptions {
+  priceQuoteMode?: 'range' | 'exact';
+  /** Optional ± gap config; falls back to ±10% when mode='range' and unset. */
+  priceRange?: {
+    minus?: { type?: '%' | '$'; value?: number };
+    plus?: { type?: '%' | '$'; value?: number };
+  } | null;
+}
+
+/**
+ * Compute low/high bracket for a calculated total using the gap config.
+ * Returns null when mode is exact, total is null, or the resulting
+ * range collapses to a single point.
+ *
+ * Range semantics:
+ *   - '%' type → multiplicative (default ±10%)
+ *   - '$' type → absolute dollar offset
+ *   - mixed types are honored independently per side
+ *
+ * Rounded to the nearest $5 to match the sqft scaling convention
+ * (price-range.ts SQFT_INSTRUCTION) so the AI quotes a clean number.
+ */
+export function computeQuoteRange(
+  total: number | null,
+  opts: QuoteShapeOptions,
+): { low: number; high: number } | null {
+  if (total === null || total <= 0) return null;
+  if (opts.priceQuoteMode !== 'range') return null;
+  const minusVal = Number(opts.priceRange?.minus?.value);
+  const plusVal = Number(opts.priceRange?.plus?.value);
+  const minusType = opts.priceRange?.minus?.type === '$' ? '$' : '%';
+  const plusType = opts.priceRange?.plus?.type === '$' ? '$' : '%';
+  // Sane default — ±10% — when gap is missing or both zero. Matches the
+  // legacy inference in price-range.ts fmtRange().
+  const eMinus = !Number.isFinite(minusVal) || minusVal <= 0 ? 10 : minusVal;
+  const ePlus = !Number.isFinite(plusVal) || plusVal <= 0 ? 10 : plusVal;
+  const eMinusType =
+    (!Number.isFinite(minusVal) || minusVal <= 0) && (!Number.isFinite(plusVal) || plusVal <= 0)
+      ? '%'
+      : minusType;
+  const ePlusType =
+    (!Number.isFinite(minusVal) || minusVal <= 0) && (!Number.isFinite(plusVal) || plusVal <= 0)
+      ? '%'
+      : plusType;
+  const lowRaw = eMinusType === '$' ? total - eMinus : total * (1 - eMinus / 100);
+  const highRaw = ePlusType === '$' ? total + ePlus : total * (1 + ePlus / 100);
+  // Snap to $5 — same chrome the sqft scaling instruction uses.
+  const low = Math.max(0, Math.round(lowRaw / 5) * 5);
+  const high = Math.max(low, Math.round(highRaw / 5) * 5);
+  if (low === high) return null;
+  return { low, high };
+}
+
 export interface MatchedExtra {
   /** Pricing key on `ServicePricing.extras[].key`. */
   key: string;
@@ -225,7 +287,7 @@ export function calculateQuote(input: PricingCalculationInput): PricingCalculati
  */
 export function buildQuoteBlock(
   result: PricingCalculationResult,
-  opts: { ambiguousAddons?: string[] } = {},
+  opts: { ambiguousAddons?: string[] } & QuoteShapeOptions = {},
 ): string | null {
   const ambiguous = (opts.ambiguousAddons ?? []).filter(Boolean);
 
@@ -269,7 +331,17 @@ export function buildQuoteBlock(
     }
   }
   if (result.totalPrice !== null) {
-    lines.push(`  Calculated total: $${result.totalPrice}`);
+    // priceQuoteMode='range' → render as low–high bracket so the AI
+    // quotes a range to the customer instead of a single rigid number.
+    // priceQuoteMode='exact' (or unset) preserves legacy single-total
+    // output. The runtime sees ONE of these two lines and uses it
+    // verbatim per BASE_HARD_RULES → PRICING — DETERMINISTIC QUOTE.
+    const range = computeQuoteRange(result.totalPrice, opts);
+    if (range) {
+      lines.push(`  Calculated range: $${range.low}–$${range.high}`);
+    } else {
+      lines.push(`  Calculated total: $${result.totalPrice}`);
+    }
   }
   if (result.explanation) {
     lines.push(`Pricing explanation: ${result.explanation}`);
@@ -340,6 +412,10 @@ export interface BuildQuoteFromContextInput {
   customerMessage?: string | null;
   conversationHistory?: Array<{ role: 'customer' | 'pro'; content: string }> | null;
   additionalInfo?: string | null;
+  /** Per-account: 'range' renders Calculated range, 'exact' renders Calculated total. */
+  priceQuoteMode?: 'range' | 'exact';
+  /** Optional ± gap config (defaults to ±10% when mode='range' and unset). */
+  priceRange?: QuoteShapeOptions['priceRange'];
 }
 
 export function buildQuoteFromContext(input: BuildQuoteFromContextInput): string | null {
@@ -378,10 +454,23 @@ export function computeQuoteAndIntent(input: BuildQuoteFromContextInput): QuoteA
     extras: addons.matched,
     pricing: input.pricing,
   });
-  const quoteBlock = buildQuoteBlock(result, { ambiguousAddons: addons.ambiguous });
+  // Resolve range gap config: explicit input.priceRange wins; otherwise
+  // fall back to the gap configured on the pricing JSON itself (the
+  // existing ServicePricing.priceRange field that powers the legacy
+  // buildPriceRangeInstruction path). Without that fallback, every
+  // call site would need to dig into pricing.priceRange itself.
+  const shape: QuoteShapeOptions = {
+    priceQuoteMode: input.priceQuoteMode,
+    priceRange: input.priceRange ?? (input.pricing as any)?.priceRange ?? null,
+  };
+  const quoteBlock = buildQuoteBlock(result, {
+    ambiguousAddons: addons.ambiguous,
+    ...shape,
+  });
   const priceIntentBlock = buildPriceIntentBlock({
     customerMessage: input.customerMessage ?? null,
     calculation: result,
+    shape,
   });
   return { quoteBlock, priceIntentBlock };
 }

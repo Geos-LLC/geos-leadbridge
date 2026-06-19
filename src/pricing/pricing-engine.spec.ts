@@ -328,6 +328,54 @@ describe('buildQuoteFromContext (facade used by AI surfaces)', () => {
     expect(block).toContain('Calculated total: $219');
   });
 
+  // priceQuoteMode='range' renders the calculated total as a $low–$high
+  // bracket instead of a single number. Uses the default ±10% gap when
+  // no priceRange config is supplied, snapped to $5.
+  it('priceQuoteMode="range" with default ±10% gap renders "Calculated range" line', () => {
+    const block = buildQuoteFromContext({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: 'Hey, can you also clean inside the fridge and inside the oven?',
+      priceQuoteMode: 'range',
+    })!;
+    // $299 ±10% → $269.10–$328.90 → snapped to $5 → $270–$330.
+    expect(block).toContain('Calculated range: $270–$330');
+    expect(block).not.toContain('Calculated total: $299');
+  });
+
+  it('priceQuoteMode="exact" preserves the legacy single-total line', () => {
+    const block = buildQuoteFromContext({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: null,
+      priceQuoteMode: 'exact',
+    })!;
+    expect(block).toContain('Calculated total: $219');
+    expect(block).not.toContain('Calculated range');
+  });
+
+  it('priceQuoteMode unset preserves legacy single-total (no behavior change for untouched accounts)', () => {
+    const block = buildQuoteFromContext({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: null,
+    })!;
+    expect(block).toContain('Calculated total: $219');
+    expect(block).not.toContain('Calculated range');
+  });
+
+  it('priceQuoteMode="range" with explicit $ gap uses absolute offsets', () => {
+    const block = buildQuoteFromContext({
+      pricing,
+      leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
+      customerMessage: null,
+      priceQuoteMode: 'range',
+      priceRange: { minus: { type: '$', value: 25 }, plus: { type: '$', value: 25 } },
+    })!;
+    // $219 - $25 = $194 → snap to $195; $219 + $25 = $244 → snap to $245.
+    expect(block).toContain('Calculated range: $195–$245');
+  });
+
   it('returns null when the corpus is completely empty and pricing has no anchor', () => {
     const block = buildQuoteFromContext({
       pricing,

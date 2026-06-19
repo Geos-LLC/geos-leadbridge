@@ -14,6 +14,25 @@ import { ServiceProfileService } from '../service-profile/service-profile.servic
 import { resolveGlobalPrompt } from './global-prompt-resolver';
 import { extractLeadDetails } from '../leads/extract-lead-details';
 
+/**
+ * Pull priceQuoteMode ('range' | 'exact') off the account's
+ * followUpSettingsJson. Returns undefined when the JSON is missing /
+ * unparseable / has no priceQuoteMode key — the engine then falls back
+ * to legacy single-total output (unchanged behavior).
+ */
+function readPriceQuoteMode(
+  followUpSettingsJson: string | null | undefined,
+): 'range' | 'exact' | undefined {
+  if (!followUpSettingsJson) return undefined;
+  try {
+    const s = JSON.parse(followUpSettingsJson);
+    if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
+      return s.priceQuoteMode;
+    }
+  } catch { /* invalid JSON — fall back to undefined */ }
+  return undefined;
+}
+
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
 export class AiController {
@@ -102,6 +121,7 @@ export class AiController {
       customerMessage: customerMessage || lead.message || '',
       conversationHistory: conversationHistory ?? null,
       additionalInfo: details?.['Additional details'] ?? null,
+      priceQuoteMode: readPriceQuoteMode(account?.followUpSettingsJson ?? null),
     });
 
     let reply: string;
@@ -227,6 +247,7 @@ export class AiController {
       customerMessage: customerMessage || lead.message || '',
       conversationHistory,
       additionalInfo: details?.['Additional details'] ?? null,
+      priceQuoteMode: readPriceQuoteMode(account?.followUpSettingsJson ?? null),
     });
 
     let reply: string;
@@ -424,6 +445,10 @@ export class AiController {
     customerMessage: string;
     conversationHistory: ConversationMessage[] | null;
     additionalInfo: string | null;
+    /** Per-account: 'range' → emits "Calculated range", 'exact' → single number. */
+    priceQuoteMode?: 'range' | 'exact';
+    /** Optional ± gap config alongside priceQuoteMode. */
+    priceRange?: { minus?: { type?: '%' | '$'; value?: number }; plus?: { type?: '%' | '$'; value?: number } } | null;
   }): QuoteAndIntent {
     const pricing = parseAndHydratePricing(opts.pricingJson ?? null);
     if (!pricing) return { quoteBlock: null, priceIntentBlock: null };
@@ -434,6 +459,8 @@ export class AiController {
         customerMessage: opts.customerMessage,
         conversationHistory: opts.conversationHistory,
         additionalInfo: opts.additionalInfo,
+        priceQuoteMode: opts.priceQuoteMode,
+        priceRange: opts.priceRange,
       });
     } catch (err: any) {
       // Engine is pure — failures here are programming bugs, not data
