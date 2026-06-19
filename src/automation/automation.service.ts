@@ -1157,7 +1157,7 @@ export class AutomationService implements OnModuleInit {
       if (classification && classification.fromLlm
           && classification.confidence >= AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
         const intent = classification.intent;
-        if (intent === 'opt_out' && aiRules.aiStopOnOptOut !== false) {
+        if (intent === 'opt_out' && aiRules.aiStopOnOptOut === true) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=opt_out conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
@@ -1169,7 +1169,7 @@ export class AutomationService implements OnModuleInit {
           }
           return;
         }
-        if ((intent === 'hired_elsewhere' || intent === 'completed') && aiRules.aiStopOnBooked !== false) {
+        if ((intent === 'hired_elsewhere' || intent === 'completed') && aiRules.aiStopOnBooked === true) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=${intent} conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
@@ -1179,7 +1179,7 @@ export class AutomationService implements OnModuleInit {
               conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
             });
           }
-          if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
+          if (aiRules.aiHiredCompetitorReengage === true && context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_hired_competitor',
               context.leadId,
@@ -1283,7 +1283,7 @@ export class AutomationService implements OnModuleInit {
         // (hidden, default-ON) and aiDeferralCheckIn (UI). The matching UI
         // copy already says "silence the AI and schedule one nudge later"
         // — this aligns runtime with the copy.
-        if (intent === 'deferring' && aiRules.aiDeferralCheckIn !== false) {
+        if (intent === 'deferring' && aiRules.aiDeferralCheckIn === true) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=deferring conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
           if (lead?.threadId) {
             await this.conversationRuntime.setState(lead.threadId, {
@@ -1317,7 +1317,7 @@ export class AutomationService implements OnModuleInit {
       // non-terminal intent. These checks predate the classifier and remain
       // as a safety net — never delete without a separate cleanup PR.
       // Rule: stop on opt-out keywords in customer message.
-      if (aiRules.aiStopOnOptOut !== false && context.customerMessage) {
+      if (aiRules.aiStopOnOptOut === true && context.customerMessage) {
         const inlineExtras = ['stop', 'not interested'];
         const allOptOut = [...OPT_OUT_PHRASES, ...inlineExtras];
         const msgLower = context.customerMessage.toLowerCase();
@@ -1333,12 +1333,12 @@ export class AutomationService implements OnModuleInit {
       // job may not work out, and a polite check-in then captures the
       // dissatisfied ones. Sources HIRED_SOMEONE_PHRASES (canonical — also
       // drives lead.status -> lost transition) so the two paths can't drift.
-      if (aiRules.aiStopOnBooked !== false && context.customerMessage) {
+      if (aiRules.aiStopOnBooked === true && context.customerMessage) {
         const msgLower = context.customerMessage.toLowerCase();
         const matched = HIRED_SOMEONE_PHRASES.find(p => msgLower.includes(p));
         if (matched) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere ("${matched}")`);
-          if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
+          if (aiRules.aiHiredCompetitorReengage === true && context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_hired_competitor',
               context.leadId,
@@ -1373,7 +1373,7 @@ export class AutomationService implements OnModuleInit {
       // Replying after these reads as pestering and is a top complaint source.
       // Gated by the same "Check in after customer deferral" toggle the UI
       // exposes (aiDeferralCheckIn). Defaults ON.
-      if (aiRules.aiDeferralCheckIn !== false && context.customerMessage) {
+      if (aiRules.aiDeferralCheckIn === true && context.customerMessage) {
         const deferralPhrases = [
           'get back to you', 'get back to u',
           'let me think', 'let me check', 'let me look',

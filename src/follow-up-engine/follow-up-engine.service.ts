@@ -1091,7 +1091,7 @@ export class FollowUpEngineService {
         });
         if (acct?.followUpSettingsJson) {
           const settings = JSON.parse(acct.followUpSettingsJson);
-          if (settings.reEngagementAlertEnabled !== false) {
+          if (settings.reEngagementAlertEnabled === true) {
             // Check if customer_reply notification rules exist — if so, skip re-engagement
             // to avoid double-alerting.
             const notifSettings = await this.prisma.notificationSettings.findUnique({
