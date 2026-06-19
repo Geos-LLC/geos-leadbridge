@@ -1127,38 +1127,6 @@ export const serviceProfilesApi = {
     );
     return data;
   },
-  // PR-E — account ↔ service assignments
-  listSavedAccountAssignments: async (): Promise<{
-    accounts: Array<{
-      savedAccountId: string;
-      businessName: string;
-      platform: string;
-      configured: boolean;
-      enabledServiceProfileIds: string[];
-      defaultServiceProfileId: string | null;
-    }>;
-  }> => {
-    const { data } = await api.get('/v1/saved-accounts/service-assignments');
-    return data;
-  },
-  setSavedAccountAssignments: async (
-    savedAccountId: string,
-    body: {
-      enabledServiceProfileIds: string[] | null;
-      defaultServiceProfileId?: string | null;
-    },
-  ): Promise<{
-    savedAccountId: string;
-    configured: boolean;
-    enabledServiceProfileIds: string[];
-    defaultServiceProfileId: string | null;
-  }> => {
-    const { data } = await api.put(
-      `/v1/saved-accounts/${savedAccountId}/service-assignments`,
-      body,
-    );
-    return data;
-  },
 };
 
 export const conversationContextApi = {
