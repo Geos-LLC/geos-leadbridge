@@ -113,7 +113,7 @@ Intents (pick exactly one):
 
 - hired_elsewhere — Customer got service from another provider. Examples: "I already hired someone else", "found a guy", "going with another company", "we booked someone else".
 
-- completed — The work is done. Could be done by us or by another, the customer is signaling they no longer need anything. Examples: "It's already done, thanks", "all set", "all done", "taken care of already", "we don't need it anymore", "I sold the place / moved out".
+- completed — The work is done. Could be done by us or by another, the customer is signaling they no longer need anything. Examples: "It's already done, thanks", "all set", "all done", "taken care of already", "we don't need it anymore", "I no longer need this service", "don't need this anymore", "I sold the place / moved out".
 
 - agreed — Customer accepts a proposal/quote and is ready to book. Examples: "sounds good", "let's do it", "book it", "yes please", "I'm in", "perfect, when can you come?". Active forward motion.
 
@@ -144,7 +144,8 @@ Rules:
 4. Cancellation phrases ("cancel that", "we can cancel") with context that a job exists → 'completed'. Cancellation as a question ("can I cancel my morning slot to switch to afternoon?") → 'engaged' — they want to reschedule, not stop.
 5. Lead status context matters. If status = 'booked', "it's done" likely means the booked job ran successfully (still 'completed' — no further action needed). If status = 'engaged' or 'contacted', "it's done" means they got service elsewhere ('completed').
 6. "Please lose my information" / "delete my info" / "remove my info" — opt_out, high confidence. The customer is explicitly invoking data-removal language.
-7. Never classify based on customer sentiment alone (frustration, terseness). Only on what they're asking for or stating.
+7. "No longer need" / "don't need this anymore" / "we're good" / "we're all set" — completed (or hired_elsewhere if they name a competitor), NOT opt_out. opt_out requires explicit stop-contacting / data-removal language. Yvonne case 2026-06-19: "Sorry, I no longer need this service" was misclassified as opt_out and lost a recoverable re-engage candidate — "no longer need" describes the SERVICE state, not a request to stop messaging.
+8. Never classify based on customer sentiment alone (frustration, terseness). Only on what they're asking for or stating.
 
 suggestedReengageInDays:
 - ONLY set this when intent is 'deferring', 'hired_elsewhere', or 'completed' AND the customer's message contains an explicit duration or return window.
