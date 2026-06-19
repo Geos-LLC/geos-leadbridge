@@ -57,6 +57,7 @@ function makeService(prisma: any): NotificationsService {
     {} as any, // conversationContext
     {} as any, // instantTextAi
     {} as any, // platformService (forwardRef)
+    {} as any, // callConnectService (CC botNumber back-fill on phone purchase)
   );
 }
 

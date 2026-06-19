@@ -13,6 +13,7 @@ import { TrialService } from '../trial/trial.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { InstantTextAiService } from './instant-text-ai.service';
 import { PlatformService } from '../platforms/platform.service';
+import { CallConnectService } from '../call-connect/call-connect.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -216,6 +217,13 @@ export class NotificationsService {
     // as a TT associate phone after the resolveBotPhone() result changes.
     @Inject(forwardRef(() => PlatformService))
     private platformService: PlatformService,
+    // Wired 2026-06-18 — purchaseTenantPhoneNumber back-fills the new
+    // bot number onto every CallConnectSettings row that doesn't have
+    // one set, then pushes to Sigcore. Closes the "Bot number not
+    // configured" gap that broke Globus's Madison Pelosi lead (the
+    // CC settings botNumberE164 stayed NULL because the user had
+    // never manually opened CC settings + pressed Save).
+    private callConnectService: CallConnectService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -3348,6 +3356,18 @@ export class NotificationsService {
     });
 
     this.logger.log(`[purchaseTenantPhone] Created tenant phone: ${tenantPhone.id} — ${phoneNumber}`);
+
+    // Back-fill CallConnectSettings.botNumberE164 across every account
+    // for this user that currently has it NULL, then push to Sigcore.
+    // Non-blocking — if Sigcore is down the LB-side write still lands,
+    // and the next saveSettings call will re-push. Without this step the
+    // user has to manually open CC settings + press Save before
+    // triggerForLead can succeed (Globus / Madison Pelosi, 2026-06-18).
+    this.callConnectService
+      .propagateBotNumberOnPhonePurchase(userId, phoneNumber)
+      .catch((err) =>
+        this.logger.warn(`[purchaseTenantPhone] CC botNumber back-fill failed (non-blocking): ${err?.message ?? err}`),
+      );
 
     // Register the new LB number as an associate phone on every connected
     // Thumbtack business so TT honors it as a legitimate pro-side sender

@@ -433,6 +433,64 @@ export class CallConnectService {
   }
 
   /**
+   * Back-fill the new bot phone onto every CallConnectSettings row for
+   * this user that doesn't already have one set. Called from
+   * notifications.service.purchaseTenantPhoneNumber immediately after
+   * a TenantPhoneNumber row is created.
+   *
+   * The 2026-06-18 Globus / Madison Pelosi incident exposed why this
+   * matters: Globus had purchased an LB phone (+17473183083) two weeks
+   * earlier, but the CC settings row for the TT account that received
+   * Madison's lead still carried botNumberE164=NULL because the user
+   * never manually opened CC settings + pressed Save. triggerForLead
+   * then sent fromNumberHint=undefined to Sigcore → 422 "Bot number
+   * not configured" → Instant Call silently failed.
+   *
+   * Strategy: fill only the NULLs. Existing per-account bot numbers
+   * (e.g. a multi-location tenant that bought one number per
+   * SavedAccount) are preserved. After updating LB DB, push to Sigcore
+   * so its in-memory state lines up.
+   */
+  async propagateBotNumberOnPhonePurchase(
+    userId: string,
+    phoneNumber: string,
+  ): Promise<{ updated: number; pushed: number }> {
+    let updated = 0;
+    let pushed = 0;
+    // Only touch rows where botNumberE164 is null — leaves per-account
+    // explicit assignments untouched.
+    const ccRows = await this.prisma.callConnectSettings.findMany({
+      where: { userId, botNumberE164: null },
+      select: { id: true, savedAccountId: true },
+    });
+    for (const cc of ccRows) {
+      try {
+        const fresh = await this.prisma.callConnectSettings.update({
+          where: { id: cc.id },
+          data: { botNumberE164: phoneNumber },
+        });
+        updated++;
+        try {
+          await this.pushSettingsToSigcore(cc.savedAccountId, fresh);
+          pushed++;
+        } catch (err: any) {
+          this.logger.warn(
+            `[propagateBotNumber] Sigcore push failed for ${cc.savedAccountId}: ${err.message ?? err}`,
+          );
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[propagateBotNumber] CC settings update failed for ${cc.id}: ${err.message ?? err}`,
+        );
+      }
+    }
+    this.logger.log(
+      `[propagateBotNumber] user=${userId} phone=${phoneNumber} cc_filled=${updated} sigcore_pushed=${pushed}`,
+    );
+    return { updated, pushed };
+  }
+
+  /**
    * Push destinationPhone as callForwardingNumber to Sigcore tenant metadata.
    * All call forwarding goes to the agent's phone (destinationPhone).
    * Called after ensureSigcoreProvisioned so sigcoreTenantId is always fresh/correct.

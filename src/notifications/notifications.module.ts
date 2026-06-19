@@ -12,6 +12,7 @@ import { ConversationContextModule } from '../conversation-context/conversation-
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AiModule } from '../ai/ai.module';
 import { ServiceProfileModule } from '../service-profile/service-profile.module';
+import { CallConnectModule } from '../call-connect/call-connect.module';
 import { PrismaService } from '../common/utils/prisma.service';
 
 @Module({
@@ -23,12 +24,17 @@ import { PrismaService } from '../common/utils/prisma.service';
   // via the same AiService the Lead Activity / Follow-up generators use.
   // ServiceProfileModule wired so Instant Text routes pricing/FAQ through
   // the per-field resolver (Phase 1b adoption).
+  // CallConnectModule wired 2026-06-18 so purchaseTenantPhoneNumber can
+  // back-fill CC settings botNumberE164 immediately after a phone is
+  // created — closes the "Bot number not configured" gap that broke
+  // Globus's Madison lead.
   imports: [
     ConfigModule,
     ConversationContextModule,
     forwardRef(() => PlatformsModule),
     AiModule,
     ServiceProfileModule,
+    CallConnectModule,
   ],
   controllers: [NotificationsController],
   providers: [NotificationsService, InstantTextAiService, PrismaService],
