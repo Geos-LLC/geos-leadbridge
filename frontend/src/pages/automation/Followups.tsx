@@ -739,14 +739,26 @@ const STEP_MINUTES: Record<PlanUnit, number> = {
   year: 60 * 24 * 365,
 };
 
-function totalPlanLabel(plan: PlanStepData[]): string {
-  const totalMin = plan.reduce((acc, s) => acc + s.val * STEP_MINUTES[s.unit], 0);
-  if (totalMin >= STEP_MINUTES.year)  return `${Math.round(totalMin / STEP_MINUTES.year)} yr`;
-  if (totalMin >= STEP_MINUTES.month) return `${Math.round(totalMin / STEP_MINUTES.month)} mo`;
-  if (totalMin >= STEP_MINUTES.week)  return `${Math.round(totalMin / STEP_MINUTES.week)} wk`;
-  if (totalMin >= STEP_MINUTES.day)   return `${Math.round(totalMin / STEP_MINUTES.day)} day`;
-  if (totalMin >= STEP_MINUTES.hour)  return `${Math.round(totalMin / STEP_MINUTES.hour)} hr`;
-  return `${Math.max(1, Math.round(totalMin))} min`;
+// Find the longest individual delay in the plan. Replaces the prior
+// cumulative-sum label (which rendered "2 yr" for a plan whose biggest
+// gap was 1 year — users read it as a doubled value vs. their real
+// setting, reported 2026-06-18). The longest-gap reading matches what
+// the user sees on the largest circle in the cadence picture, so the
+// stat strip and the picture agree.
+function longestStepLabel(plan: PlanStepData[]): string {
+  if (plan.length === 0) return '—';
+  let bestMin = 0;
+  let bestVal = plan[0].val;
+  let bestUnit: PlanUnit = plan[0].unit;
+  for (const s of plan) {
+    const m = s.val * STEP_MINUTES[s.unit];
+    if (m > bestMin) {
+      bestMin = m;
+      bestVal = s.val;
+      bestUnit = s.unit;
+    }
+  }
+  return planUnitLabel(bestVal, bestUnit);
 }
 
 // Choose up to six nodes to render from the live plan. For plans of >6
@@ -905,7 +917,7 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
         }}
       >
         <StatCell value={String(plan.length)} label={plan.length === 1 ? 'step total' : 'steps total'} />
-        <StatCell value={totalPlanLabel(plan)} label="total schedule" divided />
+        <StatCell value={longestStepLabel(plan)} label="longest gap" divided />
         <StatCell
           value={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
