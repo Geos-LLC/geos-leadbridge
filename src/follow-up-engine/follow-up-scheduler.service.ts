@@ -802,6 +802,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
     }
 
     // Check if lead has a terminal status (booked, done, scheduled, in progress) — no follow-up needed
+    //
+    // Re-engagement sequences (customer_deferred, customer_hired_competitor) are
+    // a deliberate exception: their entire purpose is to message lost leads
+    // ("hired someone else" or "back next month") at a delayed reengageAt. Treating
+    // status='lost' as terminal here stops every re-engage enrollment before it
+    // can send — the very bug that left Yvonne and 4 other 2026-06-19 cases dead
+    // in the water. Bypass JUST the 'lost' case for these trigger states; the
+    // gate (FollowUpGateService) still re-checks the latest customer intent at
+    // send time, so an explicit opt_out / hired_elsewhere still stops the sequence.
+    // Other terminal statuses (booked/in_progress/etc.) still stop everything —
+    // a re-engage on a now-booked lead is incoherent.
     if (enrollment.leadId) {
       const lead = await this.prisma.lead.findUnique({
         where: { id: enrollment.leadId },
@@ -811,11 +822,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
         const s = (lead.status || '').toLowerCase();
         const ts = (lead.thumbtackStatus || '').toLowerCase();
         const terminalStatuses = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost', 'closed', 'not hired', 'not_hired', 'job complete', 'no response'];
+        const triggerState = enrollment.sequenceTemplate?.triggerState;
+        const isReEngagement = triggerState === 'customer_hired_competitor' || triggerState === 'customer_deferred';
         const terminalMatch = terminalStatuses.includes(ts) ? ts : terminalStatuses.includes(s) ? s : null;
-        if (terminalMatch) {
+        const bypass = isReEngagement && (terminalMatch === 'lost' || terminalMatch === 'not hired' || terminalMatch === 'not_hired' || terminalMatch === 'no response');
+        if (terminalMatch && !bypass) {
           await this.engineService.stopEnrollment(enrollment.id, `lead_status_${terminalMatch}`);
           this.logger.log(`[FollowUpScheduler] Lead status is "${terminalMatch}" — stopping enrollment ${enrollment.id}`);
           return;
+        }
+        if (bypass) {
+          this.logger.log(`[FollowUpScheduler] Lead status is "${terminalMatch}" but enrollment is re-engagement (${triggerState}) — bypassing terminal guard for ${enrollment.id}`);
         }
       }
     }
