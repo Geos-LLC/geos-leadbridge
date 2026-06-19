@@ -2212,14 +2212,10 @@ export class AutomationService implements OnModuleInit {
             const p = hydratePricing(JSON.parse(pricingJson));
             const allTypes = p.cleaningTypes;
             if (p.priceTable.length > 0 && allTypes.length > 0) {
-              // Resolve the per-account range/exact toggle stored in followUpSettingsJson.
-              let priceQuoteMode: 'range' | 'exact' | undefined;
-              if (account?.followUpSettingsJson) {
-                try {
-                  const s = JSON.parse(account.followUpSettingsJson);
-                  if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
-                } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
-              }
+              // Quote shape lives on the pricing JSON (since 2026-06-18 —
+              // picker moved from Conversation goal=Price to the pricing
+              // table editor). Hydrator default is 'range'.
+              const priceQuoteMode: 'range' | 'exact' = p.priceQuoteMode;
               const sqftAdjustEnabled = p.sqftAdjustEnabled !== false; // default ON
               const priceParts: string[] = [];
               for (const row of p.priceTable.slice(0, 10)) {
@@ -2262,27 +2258,14 @@ export class AutomationService implements OnModuleInit {
           try {
             const p = hydratePricing(JSON.parse(pricingJson));
             const additionalInfo = leadDetails['Additional details'] ?? null;
-            // Read priceQuoteMode off the account's followUpSettingsJson
-            // so the engine emits a "Calculated range" line for tenants
-            // who opted into range mode (vs. the legacy single-total
-            // line). 2026-06-18: range support added to the engine; this
-            // wiring activates it.
-            let priceQuoteMode: 'range' | 'exact' | undefined;
-            if (account?.followUpSettingsJson) {
-              try {
-                const s = JSON.parse(account.followUpSettingsJson);
-                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
-                  priceQuoteMode = s.priceQuoteMode;
-                }
-              } catch { /* invalid JSON — engine defaults to single total */ }
-            }
+            // priceQuoteMode is resolved from pricing.priceQuoteMode inside
+            // the engine (default 'range' since 2026-06-18 picker move).
             const built = computeQuoteAndIntent({
               pricing: p,
               leadDetails,
               customerMessage,
               conversationHistory,
               additionalInfo,
-              priceQuoteMode,
             });
             if (built.quoteBlock) quoteBlock = built.quoteBlock;
             if (built.priceIntentBlock) priceIntentBlock = built.priceIntentBlock;

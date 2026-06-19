@@ -14,24 +14,12 @@ import { ServiceProfileService } from '../service-profile/service-profile.servic
 import { resolveGlobalPrompt } from './global-prompt-resolver';
 import { extractLeadDetails } from '../leads/extract-lead-details';
 
-/**
- * Pull priceQuoteMode ('range' | 'exact') off the account's
- * followUpSettingsJson. Returns undefined when the JSON is missing /
- * unparseable / has no priceQuoteMode key — the engine then falls back
- * to legacy single-total output (unchanged behavior).
- */
-function readPriceQuoteMode(
-  followUpSettingsJson: string | null | undefined,
-): 'range' | 'exact' | undefined {
-  if (!followUpSettingsJson) return undefined;
-  try {
-    const s = JSON.parse(followUpSettingsJson);
-    if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
-      return s.priceQuoteMode;
-    }
-  } catch { /* invalid JSON — fall back to undefined */ }
-  return undefined;
-}
+// priceQuoteMode now lives on the pricing JSON (ServicePricing.priceQuoteMode)
+// since 2026-06-18. The deterministic engine reads it directly from the
+// hydrated pricing, so call sites no longer need to extract it from
+// followUpSettingsJson before calling computeQuoteAndIntent. The legacy
+// followUpSettings.priceQuoteMode key is still honored ONLY by the
+// handoff-alert gate in automation.service.ts (it isn't a prompt builder).
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -98,7 +86,7 @@ export class AiController {
     );
 
     const details = extractLeadDetails(lead.rawJson);
-    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson, account?.followUpSettingsJson);
+    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson);
     const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
@@ -121,7 +109,8 @@ export class AiController {
       customerMessage: customerMessage || lead.message || '',
       conversationHistory: conversationHistory ?? null,
       additionalInfo: details?.['Additional details'] ?? null,
-      priceQuoteMode: readPriceQuoteMode(account?.followUpSettingsJson ?? null),
+      // priceQuoteMode is resolved from pricing.priceQuoteMode inside
+      // computeQuoteAndIntent (default 'range'). No need to pass it here.
     });
 
     let reply: string;
@@ -233,7 +222,7 @@ export class AiController {
       activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
       timezone: account?.followUpTimezone ?? null,
     });
-    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson, account?.followUpSettingsJson);
+    const pricingBlock = this.buildPricingPrompt(profileInputs.pricingJson);
     const faqBlock = buildFaqBlock(parseAccountFaq(profileInputs.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
@@ -247,7 +236,8 @@ export class AiController {
       customerMessage: customerMessage || lead.message || '',
       conversationHistory,
       additionalInfo: details?.['Additional details'] ?? null,
-      priceQuoteMode: readPriceQuoteMode(account?.followUpSettingsJson ?? null),
+      // priceQuoteMode is resolved from pricing.priceQuoteMode inside
+      // computeQuoteAndIntent (default 'range'). No need to pass it here.
     });
 
     let reply: string;
@@ -334,7 +324,6 @@ export class AiController {
 
   private buildPricingPrompt(
     pricingJson: string | null | undefined,
-    followUpSettingsJson?: string | null,
   ): string | null {
     if (!pricingJson) return null;
     try {
@@ -346,14 +335,10 @@ export class AiController {
       const p = hydratePricing(JSON.parse(pricingJson));
       const parts: string[] = ['--- Your Pricing Guide (use these EXACT prices when quoting) ---'];
 
-      // Resolve quote mode from AI strategy settings (per-account toggle).
-      let priceQuoteMode: 'range' | 'exact' | undefined;
-      if (followUpSettingsJson) {
-        try {
-          const s = JSON.parse(followUpSettingsJson);
-          if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
-        } catch { /* invalid JSON — fall back to legacy inference */ }
-      }
+      // Quote shape lives on the pricing JSON (since 2026-06-18 — picker
+      // moved from Conversation goal=Price to the pricing table editor).
+      // Falls back to 'range' via the hydrator default.
+      const priceQuoteMode: 'range' | 'exact' = p.priceQuoteMode;
       const sqftAdjustEnabled = p.sqftAdjustEnabled !== false; // default ON
 
       // Price table — emit each row with its sqft range (min/max) and the

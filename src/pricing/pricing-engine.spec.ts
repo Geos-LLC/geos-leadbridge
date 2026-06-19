@@ -221,7 +221,7 @@ describe('inferQuoteFacts', () => {
 });
 
 describe('buildQuoteBlock', () => {
-  it('emits "Calculated total" line when basePrice + totalPrice are known', () => {
+  it('emits "Calculated total" line when priceQuoteMode=exact', () => {
     const out = calculateQuote({
       pricing,
       serviceType: 'deep',
@@ -229,7 +229,7 @@ describe('buildQuoteBlock', () => {
       bathrooms: 2,
       extras: ['fridge', 'oven'],
     });
-    const block = buildQuoteBlock(out)!;
+    const block = buildQuoteBlock(out, { priceQuoteMode: 'exact' })!;
     expect(block).toContain('Calculated total: $299');
     expect(block).toContain('Inside Fridge: +$40');
     expect(block).toContain('Inside Oven: +$40');
@@ -249,7 +249,7 @@ describe('buildQuoteBlock', () => {
     expect(block).toContain('bedrooms');
   });
 
-  it('surfaces ambiguous add-ons separately from matched', () => {
+  it('surfaces ambiguous add-ons separately from matched (exact mode)', () => {
     const out = calculateQuote({
       pricing,
       serviceType: 'deep',
@@ -257,7 +257,10 @@ describe('buildQuoteBlock', () => {
       bathrooms: 2,
       extras: [],
     });
-    const block = buildQuoteBlock(out, { ambiguousAddons: ['appliances'] })!;
+    const block = buildQuoteBlock(out, {
+      ambiguousAddons: ['appliances'],
+      priceQuoteMode: 'exact',
+    })!;
     expect(block).toContain('appliances');
     expect(block).toContain('Calculated total: $219'); // base still quoted
   });
@@ -291,7 +294,7 @@ describe('buildQuoteBlock', () => {
 });
 
 describe('buildQuoteFromContext (facade used by AI surfaces)', () => {
-  it('extracts bed/bath from leadDetails + fridge/oven from message and produces a full quote', () => {
+  it('extracts bed/bath from leadDetails + fridge/oven from message and produces a full quote (exact mode)', () => {
     const block = buildQuoteFromContext({
       pricing,
       leadDetails: {
@@ -300,6 +303,7 @@ describe('buildQuoteFromContext (facade used by AI surfaces)', () => {
         'Cleaning type': 'Deep Clean',
       },
       customerMessage: 'Hey, can you also clean inside the fridge and inside the oven?',
+      priceQuoteMode: 'exact',
     })!;
     expect(block).toContain('Calculated total: $299');
     expect(block).toContain('Inside Fridge');
@@ -319,11 +323,12 @@ describe('buildQuoteFromContext (facade used by AI surfaces)', () => {
     expect(block).not.toContain('Inside Oven: +$40');
   });
 
-  it('falls back to platform-data-only when no customer message is provided', () => {
+  it('falls back to platform-data-only when no customer message is provided (exact mode)', () => {
     const block = buildQuoteFromContext({
       pricing,
       leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
       customerMessage: null,
+      priceQuoteMode: 'exact',
     })!;
     expect(block).toContain('Calculated total: $219');
   });
@@ -354,14 +359,18 @@ describe('buildQuoteFromContext (facade used by AI surfaces)', () => {
     expect(block).not.toContain('Calculated range');
   });
 
-  it('priceQuoteMode unset preserves legacy single-total (no behavior change for untouched accounts)', () => {
+  it('priceQuoteMode unset defaults to range (new default since 2026-06-18 picker move)', () => {
+    // Hydrated default pricing carries priceQuoteMode='range', and the
+    // engine treats unset/undefined as range as well. So an unset caller
+    // gets the customer-friendly bracket form, NOT the legacy single
+    // total. $219 ±10% → snap to $5 → $195–$240.
     const block = buildQuoteFromContext({
       pricing,
       leadDetails: { 'Bedrooms': '3', 'Bathrooms': '2', 'Cleaning type': 'Deep Clean' },
       customerMessage: null,
     })!;
-    expect(block).toContain('Calculated total: $219');
-    expect(block).not.toContain('Calculated range');
+    expect(block).toContain('Calculated range: $195–$240');
+    expect(block).not.toContain('Calculated total: $219');
   });
 
   it('priceQuoteMode="range" with explicit $ gap uses absolute offsets', () => {

@@ -159,8 +159,9 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     // The block content is fully tested in src/pricing/*.spec.ts — here we
     // only pin the wiring: when SavedAccount has pricing JSON, the lead
     // rawJson has bed/bath, and the customer mentions a configured add-on,
-    // the engine produces a "Calculated total" line and the service hands
-    // it through as `quoteBlock` to AiService.generateReply.
+    // the engine produces a "Calculated range" line (default since
+    // 2026-06-18 — picker moved to the pricing table editor) and the
+    // service hands it through as `quoteBlock` to AiService.generateReply.
     const pricingJson = JSON.stringify({
       cleaningTypes: [
         { key: 'regular', label: 'Regular', enabled: true },
@@ -192,7 +193,8 @@ describe('InstantTextAiService.generateInstantTextBody — context wiring', () =
     });
     const quoteBlock = generateReply.mock.calls[0][0].quoteBlock;
     expect(typeof quoteBlock).toBe('string');
-    expect(quoteBlock).toContain('Calculated total: $299');
+    // $299 ±10% (hydrated default priceRange) snapped to $5 → $270–$330.
+    expect(quoteBlock).toContain('Calculated range: $270–$330');
     expect(quoteBlock).toContain('Inside Fridge');
     expect(quoteBlock).toContain('Inside Oven');
     expect(quoteBlock).toMatch(/use these numbers verbatim/i);

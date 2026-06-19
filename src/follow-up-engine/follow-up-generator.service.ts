@@ -337,14 +337,10 @@ export class FollowUpGeneratorService {
           const p = hydratePricing(JSON.parse(effectivePricingJson));
           const allTypes = p.cleaningTypes;
           if (p.priceTable.length > 0 && allTypes.length > 0) {
-            // Same range/exact toggle as automation.service / ai.controller.
-            let priceQuoteMode: 'range' | 'exact' | undefined;
-            if (account?.followUpSettingsJson) {
-              try {
-                const s = JSON.parse(account.followUpSettingsJson);
-                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
-              } catch { /* fall back to legacy inference */ }
-            }
+            // Quote shape lives on pricing JSON (since 2026-06-18 — picker
+            // moved from Conversation goal=Price to the pricing table
+            // editor). Hydrator default is 'range'.
+            const priceQuoteMode: 'range' | 'exact' = p.priceQuoteMode;
             const sqftAdjustEnabled = p.sqftAdjustEnabled !== false;
             const priceParts = [
               '=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===',
@@ -380,25 +376,14 @@ export class FollowUpGeneratorService {
           // authoritative; the LLM will quote these numbers verbatim
           // instead of inferring from the table.
           try {
-            // priceQuoteMode flips the engine between single-total and
-            // range output (2026-06-18). Read off the account's
-            // followUpSettingsJson; undefined keeps legacy behavior.
-            let priceQuoteMode: 'range' | 'exact' | undefined;
-            if (account?.followUpSettingsJson) {
-              try {
-                const s = JSON.parse(account.followUpSettingsJson);
-                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
-                  priceQuoteMode = s.priceQuoteMode;
-                }
-              } catch { /* ignore */ }
-            }
+            // priceQuoteMode is resolved from pricing.priceQuoteMode inside
+            // the engine (default 'range' since 2026-06-18 picker move).
             const built = computeQuoteAndIntent({
               pricing: p,
               leadDetails: leadFactsRecord,
               customerMessage: lead?.message ?? null,
               conversationHistory: context?.recentMessages ?? null,
               additionalInfo,
-              priceQuoteMode,
             });
             if (built.quoteBlock) {
               quoteContext =

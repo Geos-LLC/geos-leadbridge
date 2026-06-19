@@ -54,13 +54,17 @@ export interface QuoteShapeOptions {
  *
  * Rounded to the nearest $5 to match the sqft scaling convention
  * (price-range.ts SQFT_INSTRUCTION) so the AI quotes a clean number.
+ *
+ * Default is RANGE: only an explicit 'exact' suppresses range output.
+ * unset / null / undefined → range (user-friendly default since
+ * 2026-06-18, when the picker moved to the pricing table editor).
  */
 export function computeQuoteRange(
   total: number | null,
   opts: QuoteShapeOptions,
 ): { low: number; high: number } | null {
   if (total === null || total <= 0) return null;
-  if (opts.priceQuoteMode !== 'range') return null;
+  if (opts.priceQuoteMode === 'exact') return null;
   const minusVal = Number(opts.priceRange?.minus?.value);
   const plusVal = Number(opts.priceRange?.plus?.value);
   const minusType = opts.priceRange?.minus?.type === '$' ? '$' : '%';
@@ -459,8 +463,16 @@ export function computeQuoteAndIntent(input: BuildQuoteFromContextInput): QuoteA
   // existing ServicePricing.priceRange field that powers the legacy
   // buildPriceRangeInstruction path). Without that fallback, every
   // call site would need to dig into pricing.priceRange itself.
+  //
+  // Resolve priceQuoteMode the same way: explicit input wins, otherwise
+  // read from the pricing JSON (the new ServicePricing.priceQuoteMode
+  // field set by ServicePricingForm). Falls back to 'range' as the
+  // default per computeQuoteRange semantics. This makes pricing-side
+  // configuration the source of truth — Conversation.tsx no longer
+  // gates quote shape on goal=Price.
   const shape: QuoteShapeOptions = {
-    priceQuoteMode: input.priceQuoteMode,
+    priceQuoteMode:
+      input.priceQuoteMode ?? (input.pricing as any)?.priceQuoteMode ?? undefined,
     priceRange: input.priceRange ?? (input.pricing as any)?.priceRange ?? null,
   };
   const quoteBlock = buildQuoteBlock(result, {

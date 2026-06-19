@@ -196,6 +196,73 @@ function UnifiedSectionBadge({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Quote shape picker — two-button segmented control matching the
+ * sqft-toggle card chrome. Lets the operator decide whether AI quotes
+ * a calculated range ($L–$H) or a single number for THIS pricing JSON.
+ * Default 'range'. Replaces the picker that used to live under
+ * Settings → Automation → Conversation when Goal=Price (2026-06-18).
+ */
+function QuoteShapePicker({
+  mode,
+  onChange,
+}: {
+  mode: 'range' | 'exact';
+  onChange: (next: 'range' | 'exact') => void;
+}) {
+  const optStyle = (selected: boolean): CSSProperties => ({
+    flex: 1,
+    padding: '10px 14px',
+    border: selected ? '1.5px solid var(--lb-accent)' : '1.5px solid var(--lb-line)',
+    borderRadius: 12,
+    background: selected ? 'var(--lb-accent-10, #eef2ff)' : 'var(--lb-surface)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    fontSize: 13,
+    fontWeight: 600,
+    color: selected ? 'var(--lb-accent)' : 'var(--lb-ink-2)',
+    textAlign: 'left',
+    transition: 'border-color 120ms, background 120ms',
+  });
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        background: 'var(--lb-surface)',
+        border: '1.5px solid var(--lb-line)',
+        borderRadius: 14,
+        boxShadow: 'var(--lb-shadow-sm)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          Quote shape
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+          How AI quotes the calculated price to the customer. Range uses the ±gap configured on this pricing JSON (default ±10%).
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button type="button" style={optStyle(mode === 'range')} onClick={() => onChange('range')}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Range</div>
+          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+            e.g. $270–$330
+          </div>
+        </button>
+        <button type="button" style={optStyle(mode === 'exact')} onClick={() => onChange('exact')}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Exact</div>
+          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+            single number from the table
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ServicePricingForm({ accountId, accountName, saveToAll, serviceProfileId }: ServicePricingFormProps) {
   const [pricing, setPricing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -447,6 +514,16 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           </div>
         </div>
       </label>
+
+      {/* Quote shape — Range (default) vs Exact. Moved here from
+          Settings → Automation → Conversation (Goal=Price) 2026-06-18
+          so the user adjusts it while reviewing prices, independent
+          of the Conversation Goal. Backend reads pricing.priceQuoteMode
+          via the hydrator (priceQuoteMode → defaultPricing.ts). */}
+      <QuoteShapePicker
+        mode={pricing.priceQuoteMode === 'exact' ? 'exact' : 'range'}
+        onChange={(mode) => setPricing((p: any) => ({ ...p, priceQuoteMode: mode }))}
+      />
 
       {/* Price Table — unified collapsible chrome shared with item_quantity pricing. */}
       <CollapsibleSection

@@ -176,7 +176,7 @@ describe('computeQuoteAndIntent (facade)', () => {
   // something to say) AND the PRICE INTENT ENFORCEMENT block (only
   // emitted when the customer just asked about price).
 
-  it('Peter Pidochev case — 5BR/4BA standard + baseboards + "send me a price estimate" → both blocks fire with $284', () => {
+  it('Peter Pidochev case — 5BR/4BA standard + baseboards + "send me a price estimate" → both blocks fire (range default)', () => {
     const out = computeQuoteAndIntent({
       pricing,
       leadDetails: {
@@ -188,9 +188,12 @@ describe('computeQuoteAndIntent (facade)', () => {
       customerMessage: 'Can you send me a price estimate for the job? Also, baseboards please.',
     });
     expect(out.quoteBlock).toBeTruthy();
-    expect(out.quoteBlock).toContain('Calculated total: $284'); // 269 + 15 baseboard
+    // Hydrated default pricing carries priceQuoteMode='range'. $284 ±10%
+    // → snap to $5 → $255–$310. Both blocks now render the bracket
+    // form; the single-number $284 is reserved for explicit 'exact'.
+    expect(out.quoteBlock).toContain('Calculated range: $255–$310');
     expect(out.priceIntentBlock).toBeTruthy();
-    expect(out.priceIntentBlock).toContain('$284');
+    expect(out.priceIntentBlock).toContain('$255–$310');
     expect(out.priceIntentBlock).toMatch(/lead this reply with the calculated quote/i);
   });
 

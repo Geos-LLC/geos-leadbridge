@@ -78,6 +78,14 @@ export interface ServicePricing {
   orderDiscounts: PricingOrderDiscount[];
   recurringDiscount: number;
   priceRange: PricingRange;
+  /**
+   * Quote shape — 'range' renders the AI's deterministic quote as a
+   * $low–$high bracket using `priceRange`; 'exact' renders a single
+   * total. Default: 'range'. Lives on the pricing JSON because the
+   * user adjusts it while reviewing the price table; the legacy
+   * Conversation → Goal=Price gate was removed 2026-06-18.
+   */
+  priceQuoteMode: 'range' | 'exact';
 }
 
 export const DEFAULT_CLEANING_PRICING: ServicePricing = {
@@ -143,6 +151,7 @@ export const DEFAULT_CLEANING_PRICING: ServicePricing = {
     minus: { type: '%', value: 10 },
     plus: { type: '%', value: 10 },
   },
+  priceQuoteMode: 'range',
 };
 
 function hasValue(v: unknown): boolean {
@@ -251,6 +260,7 @@ export function hydratePricing(pricing: any): ServicePricing {
       pricing.priceRange && typeof pricing.priceRange === 'object'
         ? pricing.priceRange
         : { ...DEFAULT_CLEANING_PRICING.priceRange },
+    priceQuoteMode: pricing.priceQuoteMode === 'exact' ? 'exact' : 'range',
   };
 }
 

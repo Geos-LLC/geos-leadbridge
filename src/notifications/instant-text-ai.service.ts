@@ -250,13 +250,10 @@ export class InstantTextAiService {
         const p = hydratePricing(JSON.parse(effectivePricingJson));
         const allTypes = p.cleaningTypes;
         if (p.priceTable.length > 0 && allTypes.length > 0) {
-          let priceQuoteMode: 'range' | 'exact' | undefined;
-          if (account.followUpSettingsJson) {
-            try {
-              const s = JSON.parse(account.followUpSettingsJson);
-              if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
-            } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
-          }
+          // Quote shape lives on pricing JSON (since 2026-06-18 — picker
+          // moved from Conversation goal=Price to the pricing table
+          // editor). Hydrator default is 'range'.
+          const priceQuoteMode: 'range' | 'exact' = p.priceQuoteMode;
           const sqftAdjustEnabled = p.sqftAdjustEnabled !== false;
           const priceParts: string[] = [];
           for (const row of p.priceTable.slice(0, 10)) {
@@ -307,7 +304,6 @@ export class InstantTextAiService {
       pricingJson: effectivePricingJson,
       leadRawJson: opts.leadRawJson,
       customerMessage: opts.customerMessage,
-      followUpSettingsJson: account.followUpSettingsJson ?? null,
     });
 
     const accountName = opts.accountName ?? account.businessName ?? undefined;
@@ -347,10 +343,6 @@ export class InstantTextAiService {
     pricingJson: string | null;
     leadRawJson: string | null | undefined;
     customerMessage: string;
-    /** 2026-06-18 — flips the engine between single-total ("exact")
-     *  and "Calculated range" output. Passed from buildBody where
-     *  the account's followUpSettingsJson is in scope. */
-    followUpSettingsJson?: string | null;
   }): { quoteBlock: string; priceIntentBlock: string } {
     const empty = { quoteBlock: '', priceIntentBlock: '' };
     if (!opts.pricingJson) return empty;
@@ -368,23 +360,15 @@ export class InstantTextAiService {
         if (raw?.project?.additional_info) additionalInfo = String(raw.project.additional_info);
       } catch {}
     }
-    let priceQuoteMode: 'range' | 'exact' | undefined;
-    if (opts.followUpSettingsJson) {
-      try {
-        const s = JSON.parse(opts.followUpSettingsJson);
-        if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') {
-          priceQuoteMode = s.priceQuoteMode;
-        }
-      } catch { /* ignore */ }
-    }
     try {
+      // priceQuoteMode is resolved from pricing.priceQuoteMode inside the
+      // engine (default 'range' since 2026-06-18 picker move).
       const built = computeQuoteAndIntent({
         pricing,
         leadDetails,
         customerMessage: opts.customerMessage,
         conversationHistory: null,
         additionalInfo,
-        priceQuoteMode,
       });
       return {
         quoteBlock: built.quoteBlock ?? '',

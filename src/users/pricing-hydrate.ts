@@ -48,6 +48,12 @@ export interface ServicePricing {
   // Storage layer may persist arbitrary strings; the hydrator coerces to
   // these two literals (defaulting to '%' for anything else).
   priceRange: { minus: { type: '%' | '$'; value: number }; plus: { type: '%' | '$'; value: number } };
+  // How the deterministic quote is rendered to the customer.
+  // 'range' (default) → "Calculated range: $L–$H" using priceRange gap.
+  // 'exact'           → "Calculated total: $X" (single number, legacy).
+  // Lives next to priceRange because the user adjusts both while reviewing
+  // the pricing table; goal=Price/Hybrid no longer gates it.
+  priceQuoteMode: 'range' | 'exact';
 }
 
 export const DEFAULT_CLEANING_PRICING: ServicePricing = {
@@ -113,6 +119,7 @@ export const DEFAULT_CLEANING_PRICING: ServicePricing = {
     minus: { type: '%', value: 10 },
     plus: { type: '%', value: 10 },
   },
+  priceQuoteMode: 'range',
 };
 
 function hasValue(v: unknown): boolean {
@@ -218,6 +225,7 @@ export function hydratePricing(pricing: any): ServicePricing {
       ? Number(pricing.recurringDiscount) || 0
       : DEFAULT_CLEANING_PRICING.recurringDiscount,
     priceRange: coercePriceRange(pricing.priceRange),
+    priceQuoteMode: pricing.priceQuoteMode === 'exact' ? 'exact' : 'range',
   };
 }
 

@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
-  SectionCard, OptionCard, ToggleRow,
+  SectionCard, ToggleRow,
   Radio, IconTile, ActionLink, AutoBadge, StatusPill,
   PlanOffEmptyState,
   type IconTone,
@@ -58,7 +58,6 @@ function makeCustomFieldId(): string {
 
 type CachedConvSettings = {
   strategy: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone' | 'booking';
-  priceMode: 'range' | 'exact';
   availability: 'always' | 'hours';
   // V2 Review Mode (2026-06-12). 'suggest' parks AI replies as pending
   // drafts; 'auto_send' dispatches them according to `availability`.
@@ -211,7 +210,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [aiOn, setAiOn] = useState<boolean>(!!authUser?.aiConversationEnabled);
 
   const [strategy, setStrategy] = useState<StrategyKey>('auto');
-  const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
   const [availability, setAvailability] = useState<'always' | 'hours'>('always');
   const [aiConversationDeliveryMode, setAiConversationDeliveryMode] = useState<'suggest' | 'auto_send'>('auto_send');
   const [stopRules, setStopRules] = useState({
@@ -264,7 +262,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // toggle in All-Accounts mode would fan out the WHOLE local state to every
   // account, wiping out per-account values the user never touched.
   type DirtyField =
-    | 'strategy' | 'priceMode' | 'availability'
+    | 'strategy' | 'availability'
     | 'aiConversationDeliveryMode'
     | 'stopRules.not_contacted' | 'stopRules.booked' | 'stopRules.price_agreed' | 'stopRules.done'
     | 'takeover.ready' | 'takeover.live' | 'takeover.phone' | 'takeover.sqft' | 'takeover.qualified'
@@ -352,7 +350,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
     return {
       strategy: displayStrategy,
-      priceMode: (s?.priceQuoteMode === 'exact' || s?.priceQuoteMode === 'range') ? s.priceQuoteMode : 'range',
       availability: s?.followUpAvailability === 'active_hours' ? 'hours' : 'always',
       // Default to 'auto_send' when missing so pre-V2 tenants keep firing
       // AI replies automatically. Only explicit 'suggest' parks them.
@@ -390,7 +387,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       if (cached.length > 0 && !dirtyRef.current) {
         const first = cached[0];
         setStrategy(first.strategy);
-        setPriceMode(first.priceMode);
         setAvailability(first.availability);
         setAiConversationDeliveryMode(first.aiConversationDeliveryMode);
         setStopRules(first.stopRules);
@@ -405,7 +401,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       const cached = convCache.get(accountId);
       if (cached && !dirtyRef.current) {
         setStrategy(cached.strategy);
-        setPriceMode(cached.priceMode);
         setAvailability(cached.availability);
         setAiConversationDeliveryMode(cached.aiConversationDeliveryMode);
         setStopRules(cached.stopRules);
@@ -438,7 +433,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           if (first) {
             const parsed = parseSettings((first as any).settings);
             setStrategy(parsed.strategy);
-            setPriceMode(parsed.priceMode);
             setAvailability(parsed.availability);
             setAiConversationDeliveryMode(parsed.aiConversationDeliveryMode);
             setStopRules(parsed.stopRules);
@@ -462,7 +456,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             convCache.set(accountId, parsed);
             if (!dirtyRef.current) {
               setStrategy(parsed.strategy);
-              setPriceMode(parsed.priceMode);
               setAvailability(parsed.availability);
               setAiConversationDeliveryMode(parsed.aiConversationDeliveryMode);
               setStopRules(parsed.stopRules);
@@ -491,7 +484,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     if (fields.size === 0) return;
     const payload: Record<string, unknown> = {};
     if (fields.has('strategy'))     payload.followUpStrategy     = strategy;
-    if (fields.has('priceMode'))    payload.priceQuoteMode       = priceMode;
     if (fields.has('availability')) payload.followUpAvailability = availability === 'hours' ? 'active_hours' : 'always';
     if (fields.has('aiConversationDeliveryMode')) payload.aiConversationDeliveryMode = aiConversationDeliveryMode;
     if (fields.has('stopRules.not_contacted')) payload.aiStopOnOptOut      = stopRules.not_contacted;
@@ -533,7 +525,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       const prev = convCache.get(id);
       if (!prev) {
         convCache.set(id, {
-          strategy, priceMode, availability, aiConversationDeliveryMode,
+          strategy, availability, aiConversationDeliveryMode,
           stopRules, takeover,
           qualificationRequiredFields, qualificationCustomFields,
           qualifyStopOnComplete, phoneStopOnComplete,
@@ -543,7 +535,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       }
       const next: CachedConvSettings = { ...prev };
       if (fields.has('strategy'))     next.strategy     = strategy;
-      if (fields.has('priceMode'))    next.priceMode    = priceMode;
       if (fields.has('availability')) next.availability = availability;
       if (fields.has('aiConversationDeliveryMode')) next.aiConversationDeliveryMode = aiConversationDeliveryMode;
       const nextStop = { ...prev.stopRules };
@@ -610,7 +601,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     return { mixed: true, tooltip };
   }
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
-  const mixedPriceMode    = getMixed('priceMode', v => v === 'range' ? 'Range' : 'Exact');
   const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
   // Goal Completion Behavior mixed-state detection removed 2026-06-18 —
   // the underlying per-goal Continue/Stop choice no longer exists.
@@ -664,13 +654,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     setSavedAt(Date.now());
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, priceMode, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete, bookingAvailability]);
+  }, [strategy, availability, aiConversationDeliveryMode, stopRules, takeover, qualificationRequiredFields, qualificationCustomFields, qualifyStopOnComplete, phoneStopOnComplete, bookingAvailability]);
 
   // markDirty-wrapped setters used by JSX. Each setter records BOTH the
   // dirty flag (gates the save effect) AND the specific field name(s) so we
   // only write what the user actually changed.
   const onStrategy     = (v: StrategyKey)            => { dirtyRef.current = true; dirtyFieldsRef.current.add('strategy');     setStrategy(v); };
-  const onPriceMode    = (v: 'range' | 'exact')      => { dirtyRef.current = true; dirtyFieldsRef.current.add('priceMode');    setPriceMode(v); };
   // AI Response Mode picker. Three tiles map to two underlying fields:
   //   Review before sending → deliveryMode='suggest' (availability irrelevant
   //                            in runtime; we leave it untouched so existing
@@ -861,9 +850,6 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
       {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
       <GoalSetupCard
         strategy={strategy}
-        priceMode={priceMode}
-        onPriceMode={onPriceMode}
-        mixedPriceMode={mixedPriceMode}
         qualificationRequiredFields={qualificationRequiredFields}
         toggleQualificationField={toggleQualificationField}
         qualificationCustomFields={qualificationCustomFields}
@@ -1182,15 +1168,12 @@ function FlowArrow() {
 // account, not per goal — see the new card in the parent JSX.
 
 function GoalSetupCard({
-  strategy, priceMode, onPriceMode, mixedPriceMode,
+  strategy,
   qualificationRequiredFields, toggleQualificationField,
   qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
   bookingAvailability, toggleBookingDayPeriod,
 }: {
   strategy: StrategyKey;
-  priceMode: 'range' | 'exact';
-  onPriceMode: (v: 'range' | 'exact') => void;
-  mixedPriceMode: { mixed: boolean; tooltip?: string };
   qualificationRequiredFields: string[];
   toggleQualificationField: (key: string) => void;
   qualificationCustomFields: QualificationCustomField[];
@@ -1254,41 +1237,12 @@ function GoalSetupCard({
     );
   }
 
-  if (strategy !== 'price' && strategy !== 'qualify') return null;
-
-  // ─── Price goal setup ────────────────────────────────────────────────
-  if (strategy === 'price') {
-    return (
-      <SectionCard padding="22px 24px 22px">
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            Price goal setup
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4 }}>
-            How AI quotes when a customer asks about price.
-          </div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <OptionCard
-            selected={priceMode === 'range'}
-            onClick={() => onPriceMode('range')}
-            title="Price range"
-            body="Give a typical range (e.g. $1,200–$1,800)."
-            mixed={mixedPriceMode.mixed && priceMode === 'range'}
-            mixedTooltip={mixedPriceMode.tooltip}
-          />
-          <OptionCard
-            selected={priceMode === 'exact'}
-            onClick={() => onPriceMode('exact')}
-            title="Exact quote"
-            body="Quote a single number from your pricing table."
-            mixed={mixedPriceMode.mixed && priceMode === 'exact'}
-            mixedTooltip={mixedPriceMode.tooltip}
-          />
-        </div>
-      </SectionCard>
-    );
-  }
+  // Price goal no longer has a per-goal setup card. The range/exact
+  // picker that used to live here moved to AI Playbook → Pricing
+  // Guidance → ServicePricingForm on 2026-06-18 so it lives next to
+  // the price table the operator is reviewing and applies independent
+  // of the Conversation Goal.
+  if (strategy !== 'qualify') return null;
 
   // ─── Qualify goal: Required information ──────────────────────────────
   return (
