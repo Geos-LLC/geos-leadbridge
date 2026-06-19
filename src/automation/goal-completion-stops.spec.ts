@@ -194,8 +194,12 @@ describe('wants_live_contact split — system event, unchanged by simplification
     // opt_out is a customer-protection signal (unsubscribe wording) that
     // remains independently togglable via aiStopOnOptOut. Untouched by
     // the goal-completion simplification.
+    // 2c flipped the runtime check from `!== false` to `=== true` —
+    // semantically identical post-backfill (every SavedAccount now has
+    // the key explicitly set), but the assertion needs to track the
+    // current literal form.
     expect(source).toMatch(
-      /if\s*\(\s*intent\s*===\s*['"]opt_out['"]\s*&&\s*aiRules\.aiStopOnOptOut\s*!==\s*false\s*\)/,
+      /if\s*\(\s*intent\s*===\s*['"]opt_out['"]\s*&&\s*aiRules\.aiStopOnOptOut\s*===\s*true\s*\)/,
     );
   });
 });
