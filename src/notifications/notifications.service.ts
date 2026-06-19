@@ -1390,7 +1390,8 @@ export class NotificationsService {
         where: { id: savedAccountId },
         select: { firstMsgDuringBusinessHours: true },
       });
-      if (acct?.firstMsgDuringBusinessHours !== false) {
+      const respectBizHours = acct?.firstMsgDuringBusinessHours ?? true;
+      if (respectBizHours) {
         const inHours = await this.businessHours.isInBusinessHours(userId, savedAccountId);
         if (!inHours) {
           this.logger.log(`[sendNotificationWithRule] SKIPPED customer SMS — outside business hours (rule=${rule?.name}, account=${savedAccountId})`);

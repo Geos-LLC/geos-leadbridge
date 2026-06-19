@@ -851,7 +851,8 @@ export class CallConnectService {
       where: { id: params.savedAccountId },
       select: { callDuringBusinessHours: true },
     });
-    if (acct?.callDuringBusinessHours !== false) {
+    const respectBizHours = acct?.callDuringBusinessHours ?? true;
+    if (respectBizHours) {
       const inHours = await this.businessHours.isInBusinessHours(params.userId, params.savedAccountId);
       if (!inHours) {
         this.logger.log(`[triggerForLead] Skipping — outside business hours for user ${params.userId} (lead ${params.leadId})`);
