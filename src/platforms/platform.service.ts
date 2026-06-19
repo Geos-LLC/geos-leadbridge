@@ -1257,9 +1257,19 @@ export class PlatformService {
 
     // Auto-provision Sigcore workspace for this account (idempotent, non-blocking).
     // After provisioning, seed default notification settings (first account) or
-    // inherit them from the user's existing config (additional accounts).
+    // inherit them from the user's existing config (additional accounts), then
+    // emit a `provisioned` event so Call Connect can seed its settings row too
+    // (otherwise reconnects that cascade-delete CC end up with no row at all
+    // and triggerForLead silently no-ops — Spotless 2026-06-16 / Natasha 2026-06-18).
     this.autoProvisionSigcore(savedAccount.id, businessName)
       .then(() => this.seedOrInheritNotificationSettings(savedAccount.id, userId, businessName))
+      .then(() => {
+        this.eventEmitter.emit('platform.account.provisioned', {
+          userId,
+          savedAccountId: savedAccount.id,
+          platform,
+        });
+      })
       .catch((err) => {
         this.logger.warn(`[saveAccount] Sigcore auto-provision / settings seed failed for ${savedAccount.id}: ${err.message}`);
       });

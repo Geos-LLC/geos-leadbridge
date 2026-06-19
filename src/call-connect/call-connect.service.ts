@@ -6,6 +6,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
+import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
 import { TrialService } from '../trial/trial.service';
@@ -210,6 +211,156 @@ export class CallConnectService {
     }
 
     return settings;
+  }
+
+  // ─── Reconnect / first-onboarding CC seed ───────────────────────────────────
+
+  /**
+   * On `platform.account.provisioned` (emitted after PlatformsService finishes
+   * autoProvisionSigcore + seedOrInheritNotificationSettings), make sure this
+   * account has a CallConnectSettings row.
+   *
+   * Why this exists: when a user disconnects + reconnects (or hits Remove +
+   * re-Connect via the OAuth callback), the old SavedAccount row is hard-deleted
+   * and the FK cascade kills its CallConnectSettings. The reconnect upsert
+   * re-creates SavedAccount and `seedOrInheritNotificationSettings` re-seeds
+   * NotificationSettings — but there was no CC equivalent, so Call Connect just
+   * vanished. triggerForLead then returns silently at `if (!settings?.enabled) return;`
+   * and the next lead gets SMS but no call.
+   *
+   * Two incidents this fix covers (2026-06-19):
+   *  - Spotless Homes Florida: 3 TT accounts lost CC during a 06-16 reconnect spree
+   *    (cloned from sibling-CC path below).
+   *  - NatashaHome Cleaning: 06-18 23:56 Remove+Reconnect cascade-killed CC
+   *    (first-account-defaults path below).
+   */
+  @OnEvent('platform.account.provisioned', { async: true })
+  async onPlatformAccountProvisioned(payload: { userId: string; savedAccountId: string; platform: string }) {
+    const { userId, savedAccountId } = payload;
+    try {
+      await this.seedOrInheritCallConnectSettings(userId, savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`[onProvisioned] CC seed failed for ${savedAccountId}: ${err?.message ?? err}`);
+    }
+  }
+
+  private async seedOrInheritCallConnectSettings(userId: string, savedAccountId: string): Promise<void> {
+    // Idempotent — if CC row already exists, no-op (covers UPDATE-branch reconnects
+    // where SavedAccount wasn't recreated and the existing CC row is intact).
+    const existing = await this.prisma.callConnectSettings.findUnique({
+      where: { savedAccountId },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    // Prefer a sibling on the same platform (per-platform settings can differ);
+    // fall back to any sibling. orderBy updatedAt so we pick the most recently-touched one.
+    const acct = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { platform: true, agentPhoneOverride: true },
+    });
+
+    const sameSibling = acct?.platform
+      ? await this.prisma.callConnectSettings.findFirst({
+          where: {
+            userId,
+            NOT: { savedAccountId },
+            savedAccount: { platform: acct.platform },
+          },
+          orderBy: { updatedAt: 'desc' },
+        })
+      : null;
+    const sibling = sameSibling
+      ?? (await this.prisma.callConnectSettings.findFirst({
+        where: { userId, NOT: { savedAccountId } },
+        orderBy: { updatedAt: 'desc' },
+      }));
+
+    if (sibling) {
+      // Clone sibling settings. Fresh webhook secret, sigcoreWebhookId left null
+      // so ensureWebhookSubscription creates a per-account subscription on push.
+      const newSecret = crypto.randomBytes(32).toString('hex');
+      const created = await this.prisma.callConnectSettings.create({
+        data: {
+          savedAccountId,
+          userId,
+          enabled: sibling.enabled,
+          mode: sibling.mode,
+          agentStrategy: sibling.agentStrategy,
+          agentPhoneE164: sibling.agentPhoneE164,
+          botNumberE164: sibling.botNumberE164,
+          maxAgentAttempts: sibling.maxAgentAttempts,
+          quietHoursEnabled: sibling.quietHoursEnabled,
+          quietHoursTimezone: sibling.quietHoursTimezone,
+          quietHoursStart: sibling.quietHoursStart,
+          quietHoursEnd: sibling.quietHoursEnd,
+          agentAcceptDigits: sibling.agentAcceptDigits,
+          agentWhisperMessage: sibling.agentWhisperMessage,
+          leadGreetingMessage: sibling.leadGreetingMessage,
+          leadVoicemailEnabled: sibling.leadVoicemailEnabled,
+          leadVoicemailMessage: sibling.leadVoicemailMessage,
+          sigcoreWebhookSecret: newSecret,
+        },
+      });
+
+      // Carry the sibling's agentPhoneOverride onto the new SavedAccount when it has
+      // none. This survives the Remove+Reconnect cascade that otherwise resets the
+      // SavedAccount.agentPhoneOverride to null on the new row.
+      if (!acct?.agentPhoneOverride) {
+        const sourceAcct = await this.prisma.savedAccount.findUnique({
+          where: { id: sibling.savedAccountId },
+          select: { agentPhoneOverride: true },
+        });
+        if (sourceAcct?.agentPhoneOverride) {
+          await this.prisma.savedAccount.update({
+            where: { id: savedAccountId },
+            data: { agentPhoneOverride: sourceAcct.agentPhoneOverride },
+          });
+        }
+      }
+
+      this.logger.log(
+        `[seedOrInheritCC] Cloned CC from sibling ${sibling.savedAccountId} → ${savedAccountId} ` +
+        `(agent=${sibling.agentPhoneE164} bot=${sibling.botNumberE164} enabled=${sibling.enabled})`,
+      );
+
+      // Best-effort: push settings + register webhook subscription with Sigcore.
+      // Both already log on failure; we swallow here so a Sigcore blip doesn't
+      // break the listener and orphan the DB row.
+      try {
+        await this.pushSettingsToSigcore(savedAccountId, created);
+      } catch (err: any) {
+        this.logger.warn(`[seedOrInheritCC] pushSettingsToSigcore failed: ${err?.message ?? err}`);
+      }
+      try {
+        await this.ensureWebhookSubscription(savedAccountId, created.id);
+      } catch (err: any) {
+        this.logger.warn(`[seedOrInheritCC] ensureWebhookSubscription failed: ${err?.message ?? err}`);
+      }
+      return;
+    }
+
+    // No sibling — first CC row for this user. Insert a disabled row with sane
+    // defaults so the Settings page renders the config form. Owner must enable
+    // explicitly (we don't pick a phone for them).
+    await this.prisma.callConnectSettings.create({
+      data: {
+        savedAccountId,
+        userId,
+        enabled: false,
+        mode: 'AGENT_FIRST',
+        agentStrategy: 'owner',
+        maxAgentAttempts: 2,
+        agentAcceptDigits: '0123456789*#',
+        agentWhisperMessage:
+          'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.',
+        leadGreetingMessage:
+          'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.',
+        leadVoicemailEnabled: false,
+        sigcoreWebhookSecret: crypto.randomBytes(32).toString('hex'),
+      },
+    });
+    this.logger.log(`[seedOrInheritCC] Seeded first-account CC defaults (disabled) for ${savedAccountId}`);
   }
 
   // ─── Sigcore API ─────────────────────────────────────────────────────────────

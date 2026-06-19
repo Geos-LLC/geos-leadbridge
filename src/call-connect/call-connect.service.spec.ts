@@ -8,12 +8,15 @@ function buildPrismaMock() {
   return {
     callConnectSettings: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       upsert: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
     savedAccount: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     tenantPhoneNumber: {
       findFirst: jest.fn(),
@@ -332,5 +335,102 @@ describe('CallConnectService – saveSettings bot number resolution', () => {
         enabled: true,
       }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onPlatformAccountProvisioned — reconnect-cascade safety net
+// ---------------------------------------------------------------------------
+describe('CallConnectService – onPlatformAccountProvisioned (CC seed on reconnect)', () => {
+  let service: CallConnectService;
+  let prisma: ReturnType<typeof buildPrismaMock>;
+
+  beforeEach(() => {
+    ({ service, prisma } = buildService());
+    jest.spyOn(service as any, 'pushSettingsToSigcore').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'ensureWebhookSubscription').mockResolvedValue(undefined);
+  });
+
+  it('no-op when CC row already exists (idempotent)', async () => {
+    prisma.callConnectSettings.findUnique.mockResolvedValueOnce({ id: 'existing-cc' });
+
+    await service.onPlatformAccountProvisioned({ userId: USER_ID, savedAccountId: ACCOUNT_ID, platform: 'thumbtack' });
+
+    expect(prisma.callConnectSettings.create).not.toHaveBeenCalled();
+    expect(prisma.callConnectSettings.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('clones CC from a same-platform sibling and carries agentPhoneOverride', async () => {
+    prisma.callConnectSettings.findUnique.mockResolvedValueOnce(null); // existing
+    prisma.savedAccount.findUnique
+      .mockResolvedValueOnce({ platform: 'thumbtack', agentPhoneOverride: null }) // new acct
+      .mockResolvedValueOnce({ agentPhoneOverride: AGENT_PHONE });                // sibling acct
+    prisma.callConnectSettings.findFirst.mockResolvedValueOnce({
+      id: 'sibling-cc',
+      savedAccountId: 'sibling-sa',
+      userId: USER_ID,
+      enabled: true,
+      mode: 'AGENT_FIRST',
+      agentStrategy: 'owner',
+      agentPhoneE164: AGENT_PHONE,
+      botNumberE164: BOT_NUMBER,
+      maxAgentAttempts: 2,
+      quietHoursEnabled: false,
+      quietHoursTimezone: null,
+      quietHoursStart: null,
+      quietHoursEnd: null,
+      agentAcceptDigits: '0123456789*#',
+      agentWhisperMessage: 'whisper',
+      leadGreetingMessage: 'greeting',
+      leadVoicemailEnabled: false,
+      leadVoicemailMessage: null,
+    });
+    prisma.callConnectSettings.create.mockResolvedValueOnce({ id: 'new-cc', savedAccountId: ACCOUNT_ID });
+
+    await service.onPlatformAccountProvisioned({ userId: USER_ID, savedAccountId: ACCOUNT_ID, platform: 'thumbtack' });
+
+    expect(prisma.callConnectSettings.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          savedAccountId: ACCOUNT_ID,
+          userId: USER_ID,
+          enabled: true,
+          agentPhoneE164: AGENT_PHONE,
+          botNumberE164: BOT_NUMBER,
+        }),
+      }),
+    );
+    // Sibling override carried onto the new SavedAccount
+    expect(prisma.savedAccount.update).toHaveBeenCalledWith({
+      where: { id: ACCOUNT_ID },
+      data: { agentPhoneOverride: AGENT_PHONE },
+    });
+    expect((service as any).pushSettingsToSigcore).toHaveBeenCalled();
+    expect((service as any).ensureWebhookSubscription).toHaveBeenCalled();
+  });
+
+  it('seeds disabled first-account defaults when no sibling exists', async () => {
+    prisma.callConnectSettings.findUnique.mockResolvedValueOnce(null);
+    prisma.savedAccount.findUnique.mockResolvedValueOnce({ platform: 'thumbtack', agentPhoneOverride: null });
+    prisma.callConnectSettings.findFirst.mockResolvedValue(null); // neither same-platform nor any-sibling
+    prisma.callConnectSettings.create.mockResolvedValueOnce({ id: 'new-cc', savedAccountId: ACCOUNT_ID });
+
+    await service.onPlatformAccountProvisioned({ userId: USER_ID, savedAccountId: ACCOUNT_ID, platform: 'thumbtack' });
+
+    expect(prisma.callConnectSettings.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          savedAccountId: ACCOUNT_ID,
+          userId: USER_ID,
+          enabled: false,
+          mode: 'AGENT_FIRST',
+          agentStrategy: 'owner',
+        }),
+      }),
+    );
+    // First-account path skips Sigcore push (nothing meaningful to push) and
+    // skips SavedAccount.agentPhoneOverride update.
+    expect((service as any).pushSettingsToSigcore).not.toHaveBeenCalled();
+    expect(prisma.savedAccount.update).not.toHaveBeenCalled();
   });
 });
