@@ -936,12 +936,20 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <ResponseModeOption
-            selected={aiConversationDeliveryMode === 'suggest'}
-            onClick={() => onResponseMode('review')}
-            title="Review before sending"
-            body="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
-          />
+          {/* "Review before sending" hidden by default 2026-06-18. New
+              users skip suggest mode entirely — they want AI to start
+              replying ASAP, not park drafts for review. Visible only when
+              (a) ?advanced=1 is set, OR (b) the tenant is already on
+              suggest (so they aren't locked out of changing it). The
+              runtime still honors suggest end-to-end. */}
+          {(advancedMode || aiConversationDeliveryMode === 'suggest') && (
+            <ResponseModeOption
+              selected={aiConversationDeliveryMode === 'suggest'}
+              onClick={() => onResponseMode('review')}
+              title="Review before sending"
+              body="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
+            />
+          )}
           <ResponseModeOption
             selected={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
             onClick={() => onResponseMode('assist')}

@@ -837,13 +837,20 @@ const CONVERSATION_GOAL_OPTIONS: Array<{
   { value: 'phone',   icon: Phone,            title: 'Call Handoff', body: "Get the customer's number so your team can call." },
 ];
 
+// AI Response Mode options shown in the wizard. "Review before sending"
+// (suggest mode) is intentionally NOT in this list as of 2026-06-18 —
+// new users land on Full autopilot and stay there. The mode is still
+// supported at runtime; existing tenants on suggest keep working, and
+// power users can flip back via Settings → Automation → Conversation
+// with `?advanced=1`. The wizard is the new-user surface, and new users
+// want AI to start replying immediately; "park for review" friction was
+// causing setup abandonment without a single AI reply.
 const AI_RESPONSE_MODE_OPTIONS: Array<{
   value: AiResponseMode;
   title: string;
   body: string;
   icon: typeof Sparkles;
 }> = [
-  { value: 'suggest',   icon: MessageSquare, title: 'Review before sending',  body: 'AI drafts replies and parks them for your approval. Nothing sends until you tap Send.' },
   { value: 'assist',    icon: Moon,          title: 'Assist when unavailable', body: 'AI responds automatically outside your business hours.' },
   { value: 'autopilot', icon: Sparkles,      title: 'Full autopilot',         body: 'AI responds automatically at any time.' },
 ];
