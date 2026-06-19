@@ -2213,6 +2213,83 @@ export class WebhooksService {
             data: { lastMessageAt: echoSentAt },
           }).catch(() => {});
         }
+
+        // Distinguish a true echo (LB sent it; webhook replays our outbound)
+        // from a manager-on-platform reply (owner typed in biz.yelp.com). The
+        // classifier picks `outcome='echo'` whenever the latest event is BIZ —
+        // that conflates both. Without separating them, manager-on-platform
+        // Yelp messages bypass handleProReply + the re-arm path, leaving the
+        // active enrollment stale (Sam @ Lavanda → Mary T. 2026-06-19: the
+        // owner's reply didn't reset the 24h timer).
+        //
+        // The full-thread persist loop above already upserted the BIZ row.
+        // LB-originated sends carry senderType ∈ {'ai','user'} (set by
+        // leads.service.sendMessage before the webhook fires); manager rows
+        // come through with senderType=null (the persist call passes
+        // senderType=undefined for non-customer events).
+        const bizEventId = classification.rawEvent?.id || null;
+        let isManagerOnPlatform = false;
+        if (bizEventId) {
+          const persistedBizRow = await this.prisma.message
+            .findUnique({
+              where: { platform_externalMessageId: { platform: 'yelp', externalMessageId: bizEventId } },
+              select: { senderType: true },
+            })
+            .catch(() => null);
+          const senderType = persistedBizRow?.senderType ?? null;
+          isManagerOnPlatform = senderType !== 'ai' && senderType !== 'user';
+        }
+
+        if (isManagerOnPlatform) {
+          // Resolve the account's fuReEnrollDelay so the fresh first step
+          // honors the user's "Resume follow-ups after conversation" setting.
+          // Mirrors the recordMessage external-pro path at ~line 932.
+          let reEnrollDelayMinutes: number | undefined = 360;
+          let optedOut = false;
+          if (savedAccount.followUpSettingsJson) {
+            try {
+              const s = JSON.parse(savedAccount.followUpSettingsJson);
+              if (s.fuReEnrollOnSilence === false) {
+                optedOut = true;
+              } else if (s.fuReEnrollDelay) {
+                reEnrollDelayMinutes = parseDuration(s.fuReEnrollDelay, 360);
+              }
+            } catch {}
+          }
+
+          try {
+            await this.followUpEngine.handleProReply(conversation.id, {
+              sourceEventId: `external-pro:yelp:${bizEventId ?? eventId ?? 'unknown'}`,
+              actorType: 'webhook',
+              actorId: `manual-pro:${bizEventId ?? eventId ?? 'unknown'}`,
+            });
+          } catch (err: any) {
+            this.logger.warn(
+              `[manual-pro-yelp] handleProReply failed for ${conversation.id}: ${err.message}`,
+            );
+          }
+
+          if (!optedOut) {
+            try {
+              await this.followUpEngine.evaluateThread(
+                conversation.id,
+                'yelp',
+                undefined,
+                reEnrollDelayMinutes,
+              );
+            } catch (err: any) {
+              this.logger.warn(
+                `[manual-pro-yelp] evaluateThread failed for ${conversation.id}: ${err.message}`,
+              );
+            }
+          }
+
+          this.logger.log(
+            `[manual-pro-yelp] lead=${leadId} eventId=${eventId ?? 'n/a'} bizEventId=${bizEventId ?? 'n/a'} reEnrollDelayMin=${optedOut ? 'opted_out' : reEnrollDelayMinutes}`,
+          );
+          return;
+        }
+
         this.logger.log(`[echo_confirmed] yelp lead=${leadId} eventId=${eventId ?? 'n/a'}`);
         return;
       }

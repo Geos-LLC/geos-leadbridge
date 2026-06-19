@@ -402,6 +402,7 @@ function buildYelpHarness(opts: {
     },
     message: {
       count: jest.fn().mockResolvedValue(2),
+      findUnique: jest.fn().mockResolvedValue({ senderType: 'ai' }),
     },
     systemErrorLog: { create: jest.fn().mockResolvedValue({}) },
     webhookEvent: {
