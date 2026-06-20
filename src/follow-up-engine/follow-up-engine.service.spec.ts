@@ -250,6 +250,39 @@ describe('FollowUpEngineService', () => {
       jest.useRealTimers();
     });
 
+    it('resumeDelayMinutesOverride forces step 0 even when prior follow-ups exist (Kristian / Lavanda case)', async () => {
+      // Pro-reply resume path: a human took over the thread on the platform
+      // (Yelp/Thumbtack web UI), webhook resolves account fuReEnrollDelay and
+      // calls enrollInSequence with it as resumeDelayMinutesOverride. The new
+      // enrollment must restart at step 0 — NOT skip ahead based on prior
+      // sends — and the first step must fire at now + resumeDelay, not the
+      // template's own step-0 delay.
+      const now = new Date('2026-06-20T00:00:00Z');
+      jest.useFakeTimers({ now });
+
+      prisma.message.findFirst.mockResolvedValue({ sentAt: now });
+      // 3 prior follow-ups would normally bump startStepIndex to 3 (max of
+      // messageBasedIndex=3 and delayBasedIndex). With the resume override
+      // that bump is skipped entirely.
+      prisma.followUpStepExecution.count.mockResolvedValue(3);
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        followUpMode: 'auto_send',
+        followUpSettingsJson: JSON.stringify({ fuReEnrollDelay: '1 hour' }),
+      });
+
+      // resumeDelayMinutesOverride = 60 (Lavanda's 1 hour)
+      await service.enrollInSequence(
+        CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID,
+        undefined, 60,
+      );
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      expect(createCall.data.currentStepIndex).toBe(0);
+      const expected = new Date(now.getTime() + 60 * 60_000);
+      expect(createCall.data.nextStepDueAt.getTime()).toBe(expected.getTime());
+      jest.useRealTimers();
+    });
+
     it('firstStepDelayMinutesOverride is ignored on re-enrollment (startStepIndex > 0)', async () => {
       // If prior follow-ups have been sent, the customer's stale "in 2 weeks"
       // would mis-anchor a fresh enrollment. Keep the configured cadence.

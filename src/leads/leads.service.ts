@@ -9,6 +9,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
+import { parseDuration } from '../common/utils/parse-duration';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -1185,7 +1186,12 @@ export class LeadsService {
             });
             if (activeEnrollment) return; // Already enrolled
 
-            // Check if re-enroll on silence is enabled for this account
+            // Check if re-enroll on silence is enabled for this account,
+            // and resolve fuReEnrollDelay so the fresh enrollment honors
+            // "Resume follow-ups after conversation: X" — without it the
+            // new sequence's first step would fire on the template's
+            // default delay (often 2 min), undercutting the user's setting.
+            let resumeDelayMinutes: number | undefined;
             if (lead.businessId) {
               const acct = await this.prisma.savedAccount.findFirst({
                 where: { userId, businessId: lead.businessId },
@@ -1195,6 +1201,9 @@ export class LeadsService {
                 try {
                   const s = JSON.parse(acct.followUpSettingsJson);
                   if (s.fuReEnrollOnSilence === false) return; // User disabled re-enrollment
+                  if (s.fuReEnrollDelay) {
+                    resumeDelayMinutes = parseDuration(s.fuReEnrollDelay, 360);
+                  }
                 } catch {}
               }
             }
@@ -1211,7 +1220,16 @@ export class LeadsService {
             });
             if (!template) return;
 
-            await this.followUpEngine!.enrollInSequence(conversation!.id, template.id, lead.platform, leadId);
+            // Pass resumeDelayMinutes as 6th positional (resumeDelayMinutesOverride).
+            // When set this also forces startStepIndex=0 in enrollInSequence.
+            await this.followUpEngine!.enrollInSequence(
+              conversation!.id,
+              template.id,
+              lead.platform,
+              leadId,
+              undefined,
+              resumeDelayMinutes,
+            );
           } catch (err: any) {
             // Surfacing the error instead of silently swallowing — we had
             // an incident where a missing column silently broke every enrollment.

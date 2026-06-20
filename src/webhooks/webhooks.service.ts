@@ -985,13 +985,23 @@ export class WebhooksService {
       if (reEnrollDelayMinutes !== -1) {
         try {
           // evaluateThread is idempotent: returns early if an active enrollment
-          // already exists or if the thread isn't eligible. The override is
-          // only honored when there are no prior follow-ups on this thread
-          // (startStepIndex === 0); otherwise the template's normal cadence
-          // wins. Safe for both isExternalProMessage and our own AI sends.
+          // already exists or if the thread isn't eligible.
+          //
+          // For isExternalProMessage we pass reEnrollDelayMinutes as the 4th
+          // positional (resumeDelayMinutesOverride), NOT the 3rd. The 3rd
+          // (firstStepDelayMinutesOverride) only fires on fresh threads with
+          // startStepIndex === 0, so re-enrolls on threads with prior FUs
+          // would silently fall back to the template's step delay. The 4th
+          // forces startStepIndex=0 AND uses the value as the first-step
+          // delay — which is what "Resume follow-ups after conversation" means.
+          //
+          // For our own AI echo (sender='pro' && !isExternalProMessage)
+          // reEnrollDelayMinutes is undefined → both overrides are no-ops
+          // and evaluateThread runs the normal cadence.
           await this.followUpEngine.evaluateThread(
             conversation.id,
             platform,
+            undefined,
             reEnrollDelayMinutes,
           );
         } catch (err: any) {

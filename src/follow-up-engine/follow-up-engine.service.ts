@@ -242,11 +242,10 @@ export class FollowUpEngineService {
    *   === 0) so a stale window from an old message can't reset progress.
    * @param resumeDelayMinutesOverride
    *   Account's `fuReEnrollDelay` ("Resume follow-ups after conversation").
-   *   Applies regardless of startStepIndex — the user-configured resume gap
-   *   is the SOLE delay before the next step after any conversation event
-   *   (customer reply, AI reply, manager-on-platform reply). This overrides
-   *   the template's step delay so "resume in 1 hour" means literally that,
-   *   not "wait at least 1 hour, then jump to whatever step's delay applies".
+   *   Forces the new enrollment to step 0 AND sets the first-step delay to
+   *   this value. After a pro reply / manager-on-platform reply the prior
+   *   cadence is dead — the user's expectation is a fresh sequence after the
+   *   configured delay, not pick-up-at-step-N where the old run left off.
    */
   async evaluateThread(
     conversationId: string,
@@ -373,9 +372,12 @@ export class FollowUpEngineService {
    *   in-flight sequence. Bounded by the classifier service to [1, 180] days.
    * @param resumeDelayMinutesOverride
    *   Account's `fuReEnrollDelay` ("Resume follow-ups after conversation").
-   *   Always wins regardless of startStepIndex — this is the user's literal
-   *   "after a conversation event, wait X then resume" knob and the only
-   *   way for the setting to apply on threads that already have prior FUs.
+   *   When set, the new enrollment ALWAYS starts at step 0 — the smart-
+   *   position bump that preserves message-based / delay-based progress is
+   *   skipped, because once a human has taken over the thread the prior
+   *   cadence is dead and the user expects a fresh sequence. Override value
+   *   becomes the first-step delay regardless of what the template's step 0
+   *   would otherwise be.
    */
   async enrollInSequence(
     conversationId: string,
@@ -473,8 +475,18 @@ export class FollowUpEngineService {
     // that have actually been sent (FollowUpStepExecution, status='sent') —
     // not all pro messages, since the initial AI auto-reply is NOT a follow-up
     // and should not bump the start index.
+    //
+    // Exception: pro-reply resume paths (`resumeDelayMinutesOverride` set)
+    // always restart at step 0. The "don't repeat 'just checking in'" rule
+    // was written for a sequence that drifted off-track; once a human takes
+    // over and types on the platform, the prior cadence is dead and the
+    // user's expectation is "Resume follow-ups after conversation" = a fresh
+    // sequence after the configured delay, not "pick up at step N where the
+    // old enrollment left off."
     let startStepIndex = 0;
     let lastMessageSentAt: Date | null = null;
+    const isProResumePath = typeof resumeDelayMinutesOverride === 'number'
+      && resumeDelayMinutesOverride > 0;
     if (leadId) {
       const lead = await this.prisma.lead.findUnique({
         where: { id: leadId },
@@ -488,44 +500,50 @@ export class FollowUpEngineService {
         });
         if (lastProMsg) lastMessageSentAt = lastProMsg.sentAt;
 
-        const priorFollowUps = await this.prisma.followUpStepExecution.count({
-          where: {
-            status: 'sent',
-            enrollment: { conversationId: lead.threadId },
-          },
-        });
+        if (!isProResumePath) {
+          const priorFollowUps = await this.prisma.followUpStepExecution.count({
+            where: {
+              status: 'sent',
+              enrollment: { conversationId: lead.threadId },
+            },
+          });
 
-        if (priorFollowUps > 0) {
-          // Past follow-ups exist on this conversation — skip ahead so we
-          // don't repeat "just checking in" after already sending it.
-          const messageBasedIndex = Math.min(priorFollowUps, steps.length - 1);
+          if (priorFollowUps > 0) {
+            // Past follow-ups exist on this conversation — skip ahead so we
+            // don't repeat "just checking in" after already sending it.
+            const messageBasedIndex = Math.min(priorFollowUps, steps.length - 1);
 
-          // Also honor the user's fuReEnrollDelay as a lower bound on the
-          // next step's delay (e.g. "don't send anything shorter than 24h").
-          const acct = lead.businessId
-            ? await this.prisma.savedAccount.findFirst({
-                where: { userId: lead.userId, businessId: lead.businessId },
-                select: { followUpSettingsJson: true },
-              }).catch(() => null)
-            : null;
-          let reEnrollDelayMinutes = 1440;
-          if (acct?.followUpSettingsJson) {
-            try {
-              const s = JSON.parse(acct.followUpSettingsJson);
-              if (s.fuReEnrollDelay) {
-                // Shared parser handles compact ("24h", "1w") + long form
-                // ("1 hour", "3 days") + bare numbers (minutes). Default
-                // fallback 1440 (1 day) matches the prior behavior.
-                reEnrollDelayMinutes = parseDuration(s.fuReEnrollDelay, 1440);
-              }
-            } catch {}
+            // Also honor the user's fuReEnrollDelay as a lower bound on the
+            // next step's delay (e.g. "don't send anything shorter than 24h").
+            const acct = lead.businessId
+              ? await this.prisma.savedAccount.findFirst({
+                  where: { userId: lead.userId, businessId: lead.businessId },
+                  select: { followUpSettingsJson: true },
+                }).catch(() => null)
+              : null;
+            let reEnrollDelayMinutes = 1440;
+            if (acct?.followUpSettingsJson) {
+              try {
+                const s = JSON.parse(acct.followUpSettingsJson);
+                if (s.fuReEnrollDelay) {
+                  // Shared parser handles compact ("24h", "1w") + long form
+                  // ("1 hour", "3 days") + bare numbers (minutes). Default
+                  // fallback 1440 (1 day) matches the prior behavior.
+                  reEnrollDelayMinutes = parseDuration(s.fuReEnrollDelay, 1440);
+                }
+              } catch {}
+            }
+            const delayBasedIndex = steps.findIndex((s: any) => (s.delayMinutes || 0) >= reEnrollDelayMinutes);
+            const delayIndex = delayBasedIndex > 0 ? delayBasedIndex : 0;
+            startStepIndex = Math.max(messageBasedIndex, delayIndex);
+
+            this.logger.log(
+              `[FollowUp] ${priorFollowUps} prior follow-up sends on ${lead.threadId} — messageBasedIndex=${messageBasedIndex}, delayBasedIndex=${delayIndex}, startStepIndex=${startStepIndex}`,
+            );
           }
-          const delayBasedIndex = steps.findIndex((s: any) => (s.delayMinutes || 0) >= reEnrollDelayMinutes);
-          const delayIndex = delayBasedIndex > 0 ? delayBasedIndex : 0;
-          startStepIndex = Math.max(messageBasedIndex, delayIndex);
-
+        } else {
           this.logger.log(
-            `[FollowUp] ${priorFollowUps} prior follow-up sends on ${lead.threadId} — messageBasedIndex=${messageBasedIndex}, delayBasedIndex=${delayIndex}, startStepIndex=${startStepIndex}`,
+            `[FollowUp] Pro-reply resume on ${lead.threadId} — startStepIndex forced to 0 (resumeDelayMinutesOverride=${resumeDelayMinutesOverride}m)`,
           );
         }
       }
