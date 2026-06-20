@@ -3,10 +3,18 @@ import { Link } from 'react-router-dom';
 import { billingApi } from '../services/api';
 import { X, AlertCircle, Zap } from 'lucide-react';
 import type { SubscriptionDetails } from '../types';
+import { useAuthStore } from '../store/authStore';
 
 type Trial = SubscriptionDetails['trial'];
 
+// Height of the ImpersonationBanner (px-6 py-2.5 text-sm row).
+// When admin is previewing a tenant, shift the trial banner down so it
+// doesn't cover the impersonation banner's Exit button.
+const IMPERSONATION_OFFSET_PX = 44;
+
 export default function TrialBanner() {
+  const impersonatingUser = useAuthStore((s) => s.impersonatingUser);
+  const topOffset = impersonatingUser ? IMPERSONATION_OFFSET_PX : 0;
   const [trial, setTrial] = useState<Trial | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -57,7 +65,10 @@ export default function TrialBanner() {
           : `Trial ended (${trial.leadsHandled}/${trial.leadsLimit} leads used)`;
 
     return (
-      <div className="fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
+      <div
+        className="fixed left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg"
+        style={{ top: topOffset }}
+      >
         <div className="flex items-center gap-4 max-w-7xl mx-auto">
           <div className="flex items-center justify-center w-8 h-8 bg-white/20 rounded-xl shrink-0">
             <AlertCircle className="w-4 h-4 text-white" />
@@ -104,9 +115,10 @@ export default function TrialBanner() {
 
   return (
     <div
-      className={`fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 ${bgColor} border-b ${borderColor} shadow-lg transition-all duration-300 ${
+      className={`fixed left-0 lg:left-72 right-0 z-40 px-6 py-3 ${bgColor} border-b ${borderColor} shadow-lg transition-all duration-300 ${
         isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
+      style={{ top: topOffset }}
     >
       <div className="flex items-center gap-4 max-w-7xl mx-auto">
         <button
