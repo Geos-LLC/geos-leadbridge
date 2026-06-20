@@ -51,12 +51,17 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* Lock the wrapper to one viewport height so the bottom tab bar
-     stays pinned to the screen edge while content scrolls inside the
-     middle region. `dvh` accounts for iOS Safari's collapsing address
-     bar; `vh` is the fallback for older browsers. */
-  height: 100vh;
-  height: 100dvh;
+  /* Pin to the viewport so the bottom tab bar sits on the screen edge
+     and content scrolls inside the middle region. Fixed positioning
+     (not just `height: 100dvh`) is what makes the shell viewport-anchored
+     regardless of what sibling elements — banners, toasts, the desktop
+     route tree mid-transition — exist in #root above it. Works the same
+     in PWA standalone mode and a regular browser tab. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: hidden;
 }
 
