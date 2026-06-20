@@ -4,9 +4,28 @@ import { StripeService } from '../stripe/stripe.service';
 import { TrialService } from '../trial/trial.service';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
-import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
+import { Prisma, SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+
+// Synthetic/internal accounts that must not inflate revenue or subscriber
+// metrics. Captures (a) Geos staff (role=ADMIN) and (b) accounts created by
+// our test/canary tooling, identified by email suffix. Listed here rather
+// than via a User column because the set is small, stable, and code-owned.
+const TEST_ACCOUNT_EMAIL_SUFFIXES = [
+  '@leadbridge.test',           // UI/overlay paywall test users
+  '@leadbridge-test.local',     // SF commhub canary
+  '@claude-test.com',           // onboarding debug seeds
+  '@staging.local',             // SF provisioning smoke tests
+];
+const EXCLUDE_TEST_ACCOUNTS_WHERE: Prisma.UserWhereInput = {
+  AND: [
+    { role: { not: 'ADMIN' } },
+    ...TEST_ACCOUNT_EMAIL_SUFFIXES.map((s) => ({
+      NOT: { email: { endsWith: s } },
+    })),
+  ],
+};
 
 @Injectable()
 export class AdminService {
@@ -271,34 +290,37 @@ export class AdminService {
   }
 
   async getStats() {
-    // Get total users
+    // Get total users (platform-wide signal; includes test accounts)
     const totalUsers = await this.prisma.user.count();
 
-    // Get users by subscription tier
+    // Get users by subscription tier — revenue-adjacent, excludes test accounts
     const usersByTier = await this.prisma.user.groupBy({
       by: ['subscriptionTier'],
       _count: true,
       where: {
         subscriptionTier: { not: null },
+        ...EXCLUDE_TEST_ACCOUNTS_WHERE,
       },
     });
 
-    // Get active subscriptions
+    // Get active subscriptions (revenue-adjacent, excludes test accounts)
     const activeSubscriptions = await this.prisma.user.count({
       where: {
         subscriptionStatus: {
           in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
         },
+        ...EXCLUDE_TEST_ACCOUNTS_WHERE,
       },
     });
 
-    // Calculate MRR (Monthly Recurring Revenue)
+    // Calculate MRR (Monthly Recurring Revenue) — excludes test accounts
     const subscriptions = await this.prisma.user.findMany({
       where: {
         subscriptionStatus: {
           in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
         },
         subscriptionTier: { not: null },
+        ...EXCLUDE_TEST_ACCOUNTS_WHERE,
       },
       select: {
         subscriptionTier: true,
@@ -378,7 +400,7 @@ export class AdminService {
     const { status = 'all', search, limit = 50, offset = 0 } = query;
     const now = new Date();
 
-    const where: any = { role: 'USER' };
+    const where: any = { role: 'USER', ...EXCLUDE_TEST_ACCOUNTS_WHERE };
     if (search) {
       where.OR = [
         { email: { contains: search, mode: 'insensitive' } },
