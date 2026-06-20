@@ -1370,7 +1370,7 @@ describe('LeadStatusService', () => {
   describe('guard: SF-link protection (archive/lost on linked lead)', () => {
     const ARCHIVED_EVENT_ID = 'yelp_scrape_archive_evt_1';
 
-    it('1. Yelp archived + no SF link → lost / no hire (lostReason=hired_someone)', async () => {
+    it('1. Yelp archived + no SF link → lost (lostReason=archived; Yelp closed the thread, cause unknown)', async () => {
       const prisma = buildPrismaMock({
         platform: 'yelp',
         status: 'engaged',
@@ -1386,7 +1386,7 @@ describe('LeadStatusService', () => {
         source: 'platform_sync',
         newStatus: 'lost',
         platformStatus: 'Archived',
-        lostReason: 'hired_someone',
+        lostReason: 'archived',
         sourceEventId: ARCHIVED_EVENT_ID,
       });
 
@@ -1394,10 +1394,12 @@ describe('LeadStatusService', () => {
       expect(res.skipReason).toBeUndefined();
       expect(prisma._state.lead.status).toBe('lost');
       expect(prisma._state.lead.platformStatus).toBe('Archived');
-      expect(prisma._state.lead.lostReason).toBe('hired_someone');
+      // Distinct from 'hired_someone' — Yelp closing the thread does NOT
+      // tell us the customer hired anyone. Re-engage path keys on
+      // 'hired_someone' so 'archived' won't trigger speculative follow-ups.
+      expect(prisma._state.lead.lostReason).toBe('archived');
       expect(prisma._state.lead.statusSource).toBe('platform_sync');
-      // Audit row carries the reason for greppability.
-      expect(prisma._state.audits[0].reason).toBe('hired_someone');
+      expect(prisma._state.audits[0].reason).toBe('archived');
       expect(prisma._state.audits[0].source).toBe('platform_sync');
       expect(prisma._state.audits[0].newStatus).toBe('lost');
     });
@@ -1942,6 +1944,26 @@ describe('LeadStatusService', () => {
       expect(res.applied).toBe(false);
       expect(res.skipReason).toBe('automation_terminal');
       expect(prisma._state.lead.status).toBe('lost');
+    });
+
+    // 2026-06-20 extension: lostReason='archived' (Yelp closed the thread —
+    // see yelp-status-map.ts) is treated identically to 'hired_someone' by
+    // the recovery carve-out. If a Yelp customer un-archives and replies,
+    // lb_automation must be able to promote them back into the active funnel.
+    it('lb_automation engaged on lost+archived → APPLIES (Yelp un-archive recovery)', async () => {
+      const prisma = buildPrismaMock({ status: 'lost', lostReason: 'archived' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+        reason: 'reengagement_customer_replied',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('engaged');
+      expect(prisma._state.lead.lostReason).toBeNull();
     });
   });
 });

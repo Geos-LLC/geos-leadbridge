@@ -912,12 +912,18 @@ export class LeadsService {
         // makes retries idempotent.
         if (lead.platform === 'yelp') {
           try {
+            // lostReason='archived' is the honest cause — the customer archived
+            // the conversation on Yelp. We have no signal about WHY (hired
+            // elsewhere vs phone-only contact vs frustration vs Yelp auto-aging),
+            // so claiming 'hired_someone' would be a fabricated cause that then
+            // feeds the customer_hired_competitor re-engage path and embarrasses
+            // the operator (Hannah/Sophie/Minh 2026-06-20 false positives).
             await this.leadStatusService.writeStatus({
               leadId,
               source: 'platform_sync',
               newStatus: 'lost',
               platformStatus: 'Archived',
-              lostReason: 'hired_someone',
+              lostReason: 'archived',
               actorType: 'system',
               actorName: 'yelp-send-403-archived',
               sourceEventId: `yelp_send_403_archived_${lead.externalRequestId}`,

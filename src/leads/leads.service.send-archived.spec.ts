@@ -98,7 +98,12 @@ function buildService(opts: { platform: 'yelp' | 'thumbtack' }) {
 }
 
 describe('LeadsService.sendMessage — Yelp archived-on-send', () => {
-  it('Yelp 403 archived → writeStatus(lost, hired_someone, Archived) + BadRequestException', async () => {
+  it('Yelp 403 archived → writeStatus(lost, archived, Archived) + BadRequestException', async () => {
+    // 2026-06-20: lostReason changed from 'hired_someone' to 'archived'.
+    // Yelp 403-archived tells us the customer closed the thread; it does NOT
+    // tell us they hired anyone. Writing 'hired_someone' previously fed the
+    // customer_hired_competitor re-engage path and sent "How did your
+    // cleaning service work out?" to live customers (Hannah/Sophie/Minh).
     const { svc, leadStatusService } = buildService({ platform: 'yelp' });
 
     await expect(
@@ -112,7 +117,7 @@ describe('LeadsService.sendMessage — Yelp archived-on-send', () => {
         source: 'platform_sync',
         newStatus: 'lost',
         platformStatus: 'Archived',
-        lostReason: 'hired_someone',
+        lostReason: 'archived',
         actorType: 'system',
         actorName: 'yelp-send-403-archived',
         reason: 'yelp_send_403_archived',

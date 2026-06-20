@@ -69,8 +69,8 @@ describe('yelp-status-map', () => {
       ['NOT HIRED'],
       ['Closed'],
       ['  closed  '],
-    ])('returns hired_someone for %s', (raw) => {
-      expect(getYelpLostReason(raw)).toBe('hired_someone');
+    ])('returns archived for %s (Yelp closed the thread; cause unknown so not hired_someone)', (raw) => {
+      expect(getYelpLostReason(raw)).toBe('archived');
     });
 
     it.each([

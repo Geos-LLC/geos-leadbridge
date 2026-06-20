@@ -340,7 +340,13 @@ model Lead {
   // Pipeline: new -> contacted -> engaged -> quoted -> booked -> scheduled -> in_progress -> completed
   // Terminals: lost, cancelled, no_show, archived
   status                  String    @default("new")
-  // Set when status='lost'. Values: 'opt_out' | 'hired_someone' | 'no_response' | 'manual'
+  // Set when status='lost'. Values: 'opt_out' | 'hired_someone' | 'no_response' | 'manual' | 'archived'
+  // 'archived' is the Yelp-archive-on-customer-side cause (yelp-status-map +
+  // leads.service.ts:920 yelp-send-403-archived). Distinct from 'hired_someone'
+  // because we have no signal that the customer actually hired anyone — they
+  // just closed the thread on Yelp's side. The customer_hired_competitor
+  // re-engage path keys on 'hired_someone' specifically and so won't fire
+  // speculative follow-ups on 'archived'.
   lostReason              String?
   // When this lead becomes a re-engage candidate (e.g. lost+hired_someone -> +75d).
   reengageAt              DateTime?

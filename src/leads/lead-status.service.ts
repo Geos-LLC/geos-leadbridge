@@ -496,17 +496,22 @@ export class LeadStatusService {
     // any other lostReason continues to require manual / service_flow to
     // reactivate. `completed` / `cancelled` / `no_show` stay strict — these
     // are real outcomes, not AI guesses.
+    //
+    // Extended 2026-06-20: lostReason='archived' (Yelp closed the thread —
+    // see yelp-status-map.ts) is treated the same way. If a Yelp customer
+    // un-archives and replies, lb_automation must be able to promote them
+    // back into `engaged`/`quoted`, identically to the hired_someone case.
     if (AUTOMATION_TERMINAL.has(oldStatus) && input.source === 'lb_automation') {
-      const isHiredReengage =
+      const isReengageRecoverable =
         oldStatus === 'lost' &&
-        lead.lostReason === 'hired_someone' &&
+        (lead.lostReason === 'hired_someone' || lead.lostReason === 'archived') &&
         (newStatus === 'engaged' || newStatus === 'quoted');
-      if (!isHiredReengage) {
+      if (!isReengageRecoverable) {
         this.logSkip(input, lead.id, oldStatus, newStatus, 'automation_terminal', lead.platformStatus);
         return this.skipped(lead, 'automation_terminal');
       }
       this.logger.log(
-        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=lb_automation result=carve_out_reengage status=${oldStatus} lost_reason=hired_someone attempted=${newStatus}`,
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=lb_automation result=carve_out_reengage status=${oldStatus} lost_reason=${lead.lostReason} attempted=${newStatus}`,
       );
     }
 
@@ -810,8 +815,8 @@ export class LeadStatusService {
         data.statusUpdatedAt = occurredAt;
         // Project lostReason / reengageAt the same way the manual-source
         // path does: caller-supplied on entering `lost`, cleared on exit.
-        // Yelp-archive callers pass lostReason='hired_someone'; other
-        // platform_sync writes that land in `lost` may pass null.
+        // Yelp-archive callers pass lostReason='archived' (yelp-status-map);
+        // other platform_sync writes that land in `lost` may pass null.
         if (input.newStatus === 'lost') {
           data.lostReason = input.lostReason ?? null;
           if (input.reengageAt !== undefined) {

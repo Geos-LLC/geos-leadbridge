@@ -14,9 +14,9 @@
  * | Scheduled                   | booked       | post-simplification — was 'scheduled' |
  * | In progress                 | in_progress  |                        |
  * | Done                        | completed    |                        |
- * | Not hired                   | lost         | lostReason=hired_someone |
- * | Closed                      | lost         | lostReason=hired_someone |
- * | Archived                    | lost         | lostReason=hired_someone — Yelp "archived" is "the lead didn't pan out"; surfaces as "No hire" in the UI |
+ * | Not hired                   | lost         | lostReason=archived    |
+ * | Closed                      | lost         | lostReason=archived    |
+ * | Archived                    | lost         | lostReason=archived — Yelp closed the thread on the customer's side; we don't know WHY, so we don't claim hired_someone. The customer_hired_competitor re-engage path only fires on lostReason='hired_someone' so these no longer trigger speculative re-engages (Hannah/Sophie/Minh 2026-06-20). |
  * | Cancelled / Canceled        | cancelled    |                        |
  *
  * Status simplification (2026-06-08): `contacted` collapsed into `engaged`,
@@ -69,11 +69,21 @@ export function mapYelpToLbStatus(raw: string | null | undefined): YelpLbStatus 
 
 /**
  * For raw values that map to LB `lost`, return the canonical lostReason that
- * LeadStatusService.writeStatus should persist on Lead.lostReason. Yelp
- * vocabulary collapses three different end-states ("Not hired", "Closed",
- * "Archived") into LB `lost` — they all mean the same thing to the operator:
- * the customer ended up hiring someone else (or stopped engaging entirely),
- * so the lead is no longer actionable. The UI groups `lost` under "No hire".
+ * LeadStatusService.writeStatus should persist on Lead.lostReason.
+ *
+ * Yelp closes a thread in three ways: "Not hired", "Closed", "Archived". All
+ * three mean "this conversation is over on Yelp's side" — but Yelp does NOT
+ * tell us WHY (hired someone else? phone-only contact established? customer
+ * frustrated? Yelp auto-aged it?). Previously we wrote 'hired_someone' for
+ * all three, which then fed the customer_hired_competitor re-engage path and
+ * sent "How did your cleaning service work out?" follow-ups to live customers
+ * (Hannah/Sophie/Minh 2026-06-20 false positives).
+ *
+ * Now we write 'archived' — terminal but honest. The re-engage path keys on
+ * 'hired_someone' specifically and so will no longer fire speculatively. If a
+ * customer un-archives and replies, the existing isHiredReengage carve-out
+ * in lead-status.service.ts allows lb_automation to re-promote
+ * lost+archived -> engaged, same as it does for lost+hired_someone.
  *
  * Returns null for raw values that don't map to `lost`.
  */
@@ -84,7 +94,7 @@ export function getYelpLostReason(raw: string | null | undefined): string | null
     case 'not hired':
     case 'closed':
     case 'archived':
-      return 'hired_someone';
+      return 'archived';
     default:
       return null;
   }
