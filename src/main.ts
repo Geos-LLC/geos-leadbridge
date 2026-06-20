@@ -60,6 +60,14 @@ async function bootstrap() {
     optionsSuccessStatus: 204,
   });
 
+  // Graceful shutdown: on SIGTERM/SIGINT (Railway sends SIGTERM during
+  // deploy cut-over), let Nest finish in-flight requests and run
+  // onApplicationShutdown hooks instead of dropping connections mid-flight.
+  // Without this the old container dies abruptly, which compounds the
+  // browser's brief OPTIONS-preflight cache and surfaces as CORS errors
+  // on the first reload after a deploy.
+  app.enableShutdownHooks();
+
   // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
