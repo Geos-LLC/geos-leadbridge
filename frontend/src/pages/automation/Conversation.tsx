@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
@@ -15,11 +15,12 @@ import {
   PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
-import { followUpApi, usersApi } from '../../services/api';
+import { followUpApi, serviceProfilesApi, usersApi, type ServiceProfile } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { UpgradeOverlay } from '../../components/UpgradeOverlay';
 import { formatBusinessHoursSummary, type BusinessHoursSchedule } from '../../lib/businessHours';
+import { deriveRecommendedFields } from '../../lib/qualificationRecommend';
 
 // Module-level cache that survives mount/unmount AND tab switches, so toggling
 // account tabs feels instant and so the mixed-state detection has data to read
@@ -67,6 +68,11 @@ type CachedConvSettings = {
   stopRules: { not_contacted: boolean; booked: boolean; price_agreed: boolean; done: boolean };
   takeover: { ready: boolean; live: boolean; phone: boolean; sqft: boolean; qualified: boolean };
   qualificationRequiredFields: string[];
+  // True when followUpSettingsJson.qualificationV2.requiredFields was a
+  // saved array on the wire. False = no save present → hydration should
+  // fall back to the recommended-defaults set (which is service-derived
+  // when ServiceProfiles are loaded, otherwise just zip + phone).
+  qualificationRequiredFieldsWasSaved: boolean;
   qualificationCustomFields: QualificationCustomField[];
   // Per-account booking-availability (Booking goal). 7 weekdays × 2
   // periods (morning / afternoon). Missing in older saves → defaulted
@@ -213,10 +219,36 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // Qualification required fields — stored as a flat array of snake_case
   // keys at `followUpSettingsJson.qualificationV2.requiredFields`. Used by
   // Price + Qualify goals; ignored otherwise. When an account has nothing
-  // saved (existing tenants), the runtime falls back to the historical
-  // hardcoded behavior and the UI pre-checks the 3 cleaning defaults.
+  // saved (existing tenants), the UI pre-checks the recommended-defaults
+  // set: zip + phone (universal) + whatever the configured ServiceProfiles
+  // imply (bedrooms/bathrooms/sqft/frequency).
   const [qualificationRequiredFields, setQualificationRequiredFields] =
     useState<string[]>(QUALIFICATION_DEFAULT_FIELDS);
+
+  // ServiceProfile-derived recommendation set. Fetched once on mount, used
+  // (a) to badge matching tiles as "Recommended" and (b) as the pre-tick
+  // default when an account has no saved qualificationV2.requiredFields.
+  // Per-account scope still derives across ALL of the user's active
+  // profiles — runtime resolver picks the matching profile by category, so
+  // we conservatively recommend the union here rather than gambling on
+  // a single profile.
+  const [serviceProfiles, setServiceProfiles] = useState<ServiceProfile[]>([]);
+  const recommendedKeys = useMemo(
+    () => deriveRecommendedFields(serviceProfiles),
+    [serviceProfiles],
+  );
+  // parseSettings is invoked from many useEffect callsites that close over
+  // stale `recommendedKeys` values; keep a ref so the most recent set is
+  // always reachable from inside the parser.
+  const recommendedKeysRef = useRef<Set<string>>(recommendedKeys);
+  useEffect(() => { recommendedKeysRef.current = recommendedKeys; }, [recommendedKeys]);
+  useEffect(() => {
+    let alive = true;
+    serviceProfilesApi.list()
+      .then(res => { if (alive) setServiceProfiles(res.profiles ?? []); })
+      .catch(() => { /* leave recommendedKeys at zip+phone defaults */ });
+    return () => { alive = false; };
+  }, []);
 
   // Custom Qualify fields (Pets, Gate code, Move-in date, etc). Tenant-
   // defined alongside the built-in catalog. Stored at
@@ -255,6 +287,21 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     | 'qualificationRequiredFields' | 'qualificationCustomFields'
     | 'bookingAvailability';
   const dirtyFieldsRef = useRef<Set<DirtyField>>(new Set());
+
+  // Whether the currently-loaded scope had a saved qualificationV2.requiredFields
+  // value. False = the displayed checkboxes are the recommended-defaults
+  // fallback, so a later recommendedKeys arrival should refresh them.
+  const currentScopeWasSavedRef = useRef<boolean>(false);
+
+  // When ServiceProfiles arrive AFTER settings have hydrated, refresh the
+  // recommended-defaults fallback so the matching boxes pre-tick on the
+  // current scope. Guarded against (a) saved values, which always win, and
+  // (b) user edits since load — we never overwrite a dirty draft.
+  useEffect(() => {
+    if (currentScopeWasSavedRef.current) return;
+    if (dirtyFieldsRef.current.has('qualificationRequiredFields')) return;
+    setQualificationRequiredFields(Array.from(recommendedKeys));
+  }, [recommendedKeys]);
 
   useEffect(() => {
     if (!savedAt) return;
@@ -295,10 +342,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     // state — but the RUNTIME still treats "no saved value" as legacy
     // behavior (no qualificationBlock injected at all).
     const savedFields: unknown = s?.qualificationV2?.requiredFields;
-    const requiredFields = Array.isArray(savedFields)
+    const wasSaved = Array.isArray(savedFields);
+    const requiredFields = wasSaved
       ? (savedFields as unknown[])
           .filter((k): k is string => typeof k === 'string')
-      : QUALIFICATION_DEFAULT_FIELDS;
+      : Array.from(recommendedKeysRef.current);
 
     // Custom fields — defensive parsing. Drops malformed rows so a bad
     // save from an older UI version doesn't poison the editor. Each row
@@ -353,6 +401,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         qualified: s?.handoffTriggerQualificationComplete !== undefined ? !!s.handoffTriggerQualificationComplete : true,
       },
       qualificationRequiredFields: requiredFields,
+      qualificationRequiredFieldsWasSaved: wasSaved,
       qualificationCustomFields: customFields,
       // Defensive parsing — older saves without this key fall through to
       // the Mon–Fri morning/afternoon default via normalizeBookingAvailability.
@@ -372,6 +421,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(first.stopRules);
         setTakeover(first.takeover);
         setQualificationRequiredFields(first.qualificationRequiredFields);
+        currentScopeWasSavedRef.current = first.qualificationRequiredFieldsWasSaved;
         setQualificationCustomFields(first.qualificationCustomFields);
         setBookingAvailability(first.bookingAvailability);
       }
@@ -384,6 +434,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         setStopRules(cached.stopRules);
         setTakeover(cached.takeover);
         setQualificationRequiredFields(cached.qualificationRequiredFields);
+        currentScopeWasSavedRef.current = cached.qualificationRequiredFieldsWasSaved;
         setQualificationCustomFields(cached.qualificationCustomFields);
         setBookingAvailability(cached.bookingAvailability);
       }
@@ -414,6 +465,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             setStopRules(parsed.stopRules);
             setTakeover(parsed.takeover);
             setQualificationRequiredFields(parsed.qualificationRequiredFields);
+            currentScopeWasSavedRef.current = parsed.qualificationRequiredFieldsWasSaved;
             setQualificationCustomFields(parsed.qualificationCustomFields);
             setBookingAvailability(parsed.bookingAvailability);
           }
@@ -435,6 +487,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               setStopRules(parsed.stopRules);
               setTakeover(parsed.takeover);
               setQualificationRequiredFields(parsed.qualificationRequiredFields);
+              currentScopeWasSavedRef.current = parsed.qualificationRequiredFieldsWasSaved;
               setQualificationCustomFields(parsed.qualificationCustomFields);
               setBookingAvailability(parsed.bookingAvailability);
             }
@@ -492,7 +545,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         convCache.set(id, {
           strategy, availability, aiConversationDeliveryMode,
           stopRules, takeover,
-          qualificationRequiredFields, qualificationCustomFields,
+          qualificationRequiredFields,
+          qualificationRequiredFieldsWasSaved: true,
+          qualificationCustomFields,
           bookingAvailability,
         });
         return;
@@ -809,6 +864,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         strategy={strategy}
         qualificationRequiredFields={qualificationRequiredFields}
         toggleQualificationField={toggleQualificationField}
+        recommendedKeys={recommendedKeys}
         qualificationCustomFields={qualificationCustomFields}
         addCustomField={addCustomField}
         updateCustomField={updateCustomField}
@@ -1120,12 +1176,14 @@ function FlowArrow() {
 function GoalSetupCard({
   strategy,
   qualificationRequiredFields, toggleQualificationField,
+  recommendedKeys,
   qualificationCustomFields, addCustomField, updateCustomField, removeCustomField,
   bookingAvailability, toggleBookingDayPeriod,
 }: {
   strategy: StrategyKey;
   qualificationRequiredFields: string[];
   toggleQualificationField: (key: string) => void;
+  recommendedKeys: Set<string>;
   qualificationCustomFields: QualificationCustomField[];
   addCustomField: () => void;
   updateCustomField: (id: string, patch: Partial<Omit<QualificationCustomField, 'id'>>) => void;
@@ -1217,11 +1275,13 @@ function GoalSetupCard({
       >
         {QUALIFICATION_FIELDS.map(field => {
           const checked = qualificationRequiredFields.includes(field.key);
+          const recommended = recommendedKeys.has(field.key);
           return (
             <RequiredInfoCheckbox
               key={field.key}
               checked={checked}
               label={field.label}
+              recommended={recommended}
               onToggle={() => toggleQualificationField(field.key)}
             />
           );
@@ -1264,16 +1324,18 @@ function GoalSetupCard({
 // Card-style checkbox row per the Qualify-goal screenshot: rounded border,
 // blue check icon when on, full-width clickable area.
 function RequiredInfoCheckbox({
-  checked, label, onToggle,
+  checked, label, recommended, onToggle,
 }: {
   checked: boolean;
   label: string;
+  recommended?: boolean;
   onToggle: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onToggle}
+      title={recommended ? 'Recommended for your configured services' : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '12px 14px',
@@ -1300,7 +1362,22 @@ function RequiredInfoCheckbox({
           </svg>
         )}
       </span>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{label}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)', flex: 1 }}>{label}</span>
+      {recommended && (
+        <span
+          style={{
+            fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+            color: '#0369a1',
+            background: '#e0f2fe',
+            border: '1px solid #bae6fd',
+            padding: '2px 7px', borderRadius: 999,
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Recommended
+        </span>
+      )}
     </button>
   );
 }

@@ -1,10 +1,10 @@
 import { ArrowRight, Check, Loader2, Settings as SettingsIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authApi, thumbtackApi } from '../../../services/api';
+import { authApi, onboardingApi, thumbtackApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
 import { useAuthStore } from '../../../store/authStore';
-import type { WizardChecklist, WizardStep } from '../../../types';
+import type { OnboardingConfigSummary, WizardChecklist, WizardStep } from '../../../types';
 import { deriveDisplayChecklist } from '../SetupProgressCard';
 import { WizardStepActions } from '../WizardStepActions';
 
@@ -47,13 +47,21 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
   // so a return visit to /overview reads the same state.
   const [liveWebsite, setLiveWebsite] = useState<string | null>(user?.website ?? null);
   const [liveAccountCount, setLiveAccountCount] = useState<number>(storeAccounts.length);
+  // Backend rollup for ai / pricing / automation / ai_rules. Without
+  // this, the summary tick for "Automation enabled" would only flip
+  // when a wizard-checklist row got written — but saving settings
+  // outside the wizard (Automation > Followups) updates the data, not
+  // the checklist. SetupProgressCard fetches the same summary; mirror
+  // it here so Done agrees with the rest of the app.
+  const [configSummary, setConfigSummary] = useState<OnboardingConfigSummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       authApi.getProfile().catch(() => null),
       thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as any[] })),
-    ]).then(([freshUser, accountsRes]) => {
+      onboardingApi.getConfigSummary().catch(() => null),
+    ]).then(([freshUser, accountsRes, summaryRes]) => {
       if (cancelled) return;
       if (freshUser) {
         setLiveWebsite(freshUser.website ?? null);
@@ -73,6 +81,7 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
       const accounts = (accountsRes as any)?.accounts ?? [];
       setLiveAccountCount(accounts.length);
       if (accounts.length > 0) setSavedAccounts(accounts);
+      if (summaryRes?.summary) setConfigSummary(summaryRes.summary);
     });
     return () => { cancelled = true; };
     // Intentionally fire-once on mount.
@@ -87,8 +96,9 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
     () => deriveDisplayChecklist(checklist, {
       accountCount: liveAccountCount,
       hasWebsite: !!liveWebsite && liveWebsite.trim().length > 0,
+      configSummary,
     }),
-    [checklist, liveAccountCount, liveWebsite],
+    [checklist, liveAccountCount, liveWebsite, configSummary],
   );
 
   return (

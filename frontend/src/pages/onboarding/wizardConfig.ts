@@ -30,7 +30,18 @@ export interface WizardStepMeta {
 // step covers create-from-template + create-custom + per-service
 // pricing/FAQ/rules editing.
 //
-// Step list:  connect → business → services → automation → done
+// 2026-06-19 — services moved ahead of business; the tenant cannot
+// advance past `services` without at least one active ServiceProfile,
+// because Automation's qualification block is derived from each
+// service's pricing model.
+//
+// Step list:  connect → services → business → automation → done
+//
+// Services precedes Business so the tenant must define at least one
+// service before any downstream step (Business / Automation) can rely
+// on it. Qualification questions in Automation are derived from each
+// service's pricing model — without a service, the AI has no schema
+// to qualify against.
 export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'connect',
@@ -40,17 +51,17 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     countsTowardChecklist: true,
   },
   {
-    slug: 'business',
-    label: 'Business',
-    title: 'Your business website',
-    description: "We'll use this to help AI understand your business.",
-    countsTowardChecklist: true,
-  },
-  {
     slug: 'services',
     label: 'Services',
     title: 'Set up the services you offer',
     description: 'Add services from a template or create your own. For each one set pricing, customer answers, and any service rules.',
+    countsTowardChecklist: true,
+  },
+  {
+    slug: 'business',
+    label: 'Business',
+    title: 'Your business website',
+    description: "We'll use this to help AI understand your business.",
     countsTowardChecklist: true,
   },
   {

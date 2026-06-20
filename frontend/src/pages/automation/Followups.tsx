@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
@@ -6,7 +6,7 @@ import {
   Plus, Trash2, X, RotateCcw,
 } from 'lucide-react';
 import {
-  SectionCard, FieldRow, OptionCard,
+  SectionCard,
   Dropdown, IconTile, FooterBanner, StatusPill, MixedBadge,
   PlanOffEmptyState, TimingRow, MessageGenerationRow,
   type IconTone,
@@ -448,7 +448,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   // to the shell PlanSwitcher in the 2026-06-13 design refresh. Kept the
   // helper call shape inline-deleted; the mixed-state badge for the master
   // toggle now belongs on the shell (Phase 4 follow-up).
-  const mixedDelivery = getMixedF('deliveryMode', v => v === 'active' ? 'Active (auto-send)' : 'Suggest');
   const mixedMessage  = getMixedF('messageMode', v => v === 'ai' ? 'AI (auto)' : 'Custom template');
   const mixedQuiet    = getMixedF('quietOn', v => v ? 'On' : 'Off');
   const mixedResume   = getMixedF('resumeDelay', v => String(v));
@@ -511,7 +510,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     }
     setFollowUpsOn(v);
   };
-  const onDeliveryMode  = (v: 'suggest' | 'active') => { dirtyRef.current = true; dirtyFieldsRef.current.add('deliveryMode');  setDeliveryMode(v); };
   const onMessageMode   = (v: 'template' | 'ai')    => { dirtyRef.current = true; dirtyFieldsRef.current.add('messageMode');   setMessageMode(v); };
   const onQuietOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('quietOn');       setQuietOn(v); };
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
@@ -576,35 +574,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onEditHours={goQuietSettings}
           mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
         />
-
-        {/* Delivery mode picker. Suggest card hidden by default
-            2026-06-18 — new users always send follow-ups actively. The
-            opt-in toggle for suggest mode now lives on Settings → AI
-            Playbook → Delivery mode (advanced). The card still renders
-            here when the saved value IS suggest so users currently on
-            it can switch off without hunting through Playbook. */}
-        <FieldRow label="Delivery mode" sublabel="How follow-ups are sent." align="top">
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {deliveryMode === 'suggest' && (
-              <OptionCard
-                selected={deliveryMode === 'suggest'}
-                onClick={() => onDeliveryMode('suggest')}
-                title="Suggest"
-                body="Draft follow-ups for you to review and approve."
-                mixed={mixedDelivery.mixed && deliveryMode === 'suggest'}
-                mixedTooltip={mixedDelivery.tooltip}
-              />
-            )}
-            <OptionCard
-              selected={deliveryMode === 'active'}
-              onClick={() => onDeliveryMode('active')}
-              title="Active"
-              body="Send follow-ups automatically without approval."
-              mixed={mixedDelivery.mixed && deliveryMode === 'active'}
-              mixedTooltip={mixedDelivery.tooltip}
-            />
-          </div>
-        </FieldRow>
 
         {/* Unified Message generation row (spec 2e) bound to messageMode.
             Backend wiring unchanged — saveWizardSettings still reads
@@ -761,36 +730,23 @@ function longestStepLabel(plan: PlanStepData[]): string {
   return planUnitLabel(bestVal, bestUnit);
 }
 
-// Choose up to six nodes to render from the live plan. For plans of >6
-// steps we show steps 1-5 + the final node with a dashed connector to
-// signal the gap. Smaller plans render every step linearly.
+// Render every real step from the live plan. The stepper is the user's
+// source of truth for what's configured, so collapsing long plans to
+// head-5 + last (which we did before) misrepresented the cadence — users
+// saw "1...5, 11" instead of all 11 saved steps. The cadence container
+// is horizontally scrollable, so longer plans just extend rightward.
 function nodesForPlan(plan: PlanStepData[]): PlanNode[] {
   if (plan.length === 0) return [];
-  const styleFor = (idx: number, total: number): PlanNodeStyle => {
+  const styleFor = (idx: number): PlanNodeStyle => {
     if (idx === 0) return 'solid-accent';
     if (idx === 1) return 'outline-accent';
-    if (idx === total - 1 && total > 6) return 'outline-dashed';
     return 'outline-gray';
   };
-  if (plan.length <= 6) {
-    return plan.map((s, i) => ({
-      n: i + 1,
-      time: planUnitLabel(s.val, s.unit),
-      style: styleFor(i, plan.length),
-    }));
-  }
-  const head = plan.slice(0, 5).map((s, i) => ({
+  return plan.map((s, i) => ({
     n: i + 1,
     time: planUnitLabel(s.val, s.unit),
-    style: styleFor(i, plan.length),
+    style: styleFor(i),
   }));
-  const last = plan[plan.length - 1];
-  head.push({
-    n: plan.length,
-    time: planUnitLabel(last.val, last.unit),
-    style: 'outline-dashed',
-  });
-  return head;
 }
 
 function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
@@ -819,12 +775,34 @@ function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
   return <div style={{ ...base, background: '#fff', color: 'var(--lb-ink-3)', border: '2px solid var(--lb-ink-8)' }}>{n}</div>;
 }
 
+// Match the cadence stepper's container width to its parent. The
+// breakpoint at 560px flips from a horizontal flex stepper (connectors
+// stretch to fill available width) to a vertical list view tuned for
+// mobile — short rows with a connector spine on the left.
+function useContainerNarrow(ref: RefObject<HTMLElement | null>, breakpoint = 560) {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setNarrow(entry.contentRect.width < breakpoint);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, breakpoint]);
+  return narrow;
+}
+
 function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () => void }) {
   const nodes = nodesForPlan(plan);
+  const stepperRef = useRef<HTMLDivElement>(null);
+  const narrow = useContainerNarrow(stepperRef);
   return (
     <SectionCard padding="20px 24px 22px">
       {/* Header — violet History tile + title + description + Edit cadence button */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
         <IconTile icon={History} tone="purple" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
@@ -855,54 +833,112 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
         </button>
       </div>
 
-      {/* Cadence stepper */}
+      {/* Cadence stepper — horizontal on wide containers, vertical list on narrow */}
       <div
+        ref={stepperRef}
         style={{
           background: '#f8fafc',
           border: '1px solid var(--lb-line-soft)',
           borderRadius: 12,
-          padding: '20px 18px',
-          overflowX: 'auto',
+          padding: narrow ? '14px 14px 6px' : '20px 18px',
           marginBottom: 14,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, minWidth: 'fit-content' }}>
-          {nodes.map((node, i) => {
-            const isLast = i === nodes.length - 1;
-            const next = nodes[i + 1];
-            // Dashed connector when the visualized gap skips intermediate
-            // steps (head-summary mode shows 1-5 then jumps to the last).
-            const dashedConnector = next && (next.n - node.n) > 1;
-            return (
-              <div key={`${node.n}-${i}`} style={{ display: 'flex', alignItems: 'flex-start', flexShrink: 0 }}>
-                {/* Node + labels */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 90 }}>
-                  <PlanCircle n={node.n} style={node.style} />
+        {narrow ? (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {nodes.map((node, i) => {
+              const isLast = i === nodes.length - 1;
+              const next = nodes[i + 1];
+              const dashedConnector = next && (next.n - node.n) > 1;
+              return (
+                <div key={`${node.n}-${i}`} style={{ display: 'flex', alignItems: 'stretch', gap: 12 }}>
+                  {/* Spine: circle + vertical connector */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                    <PlanCircle n={node.n} style={node.style} />
+                    {!isLast && (
+                      <div
+                        style={{
+                          flex: 1,
+                          width: 0,
+                          marginTop: 4,
+                          marginBottom: 4,
+                          borderLeft: dashedConnector
+                            ? '2px dashed var(--lb-ink-7)'
+                            : '2px solid var(--lb-ink-8)',
+                        }}
+                      />
+                    )}
+                  </div>
+                  {/* Label */}
                   <div style={{
-                    fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
+                    paddingTop: 4,
+                    paddingBottom: isLast ? 0 : 14,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    color: 'var(--lb-ink-1)',
                     fontFamily: 'var(--lb-font-mono)',
                     letterSpacing: '-0.01em',
                   }}>
                     {node.time}
                   </div>
                 </div>
-                {/* Connector line */}
-                {!isLast && (
-                  <div
-                    style={{
-                      flex: '0 0 auto',
-                      width: 80,
-                      marginTop: 12,
-                      borderTop: dashedConnector
-                        ? '2px dashed var(--lb-ink-7)'
-                        : '2px solid var(--lb-ink-8)',
-                    }}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, width: '100%' }}>
+            {nodes.map((node, i) => {
+              const isLast = i === nodes.length - 1;
+              const next = nodes[i + 1];
+              // Dashed connector when the visualized gap skips intermediate
+              // steps (head-summary mode shows 1-5 then jumps to the last).
+              const dashedConnector = next && (next.n - node.n) > 1;
+              return (
+                <div
+                  key={`${node.n}-${i}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    // First/last segment shouldn't grow — only the inner
+                    // node+connector pairs stretch so labels stay centered
+                    // under their circles. The connector inside stretches.
+                    flex: isLast ? '0 0 auto' : '1 1 0',
+                    minWidth: 0,
+                  }}
+                >
+                  {/* Node + labels */}
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    gap: 6, flexShrink: 0, minWidth: 56,
+                  }}>
+                    <PlanCircle n={node.n} style={node.style} />
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
+                      fontFamily: 'var(--lb-font-mono)',
+                      letterSpacing: '-0.01em',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {node.time}
+                    </div>
+                  </div>
+                  {/* Connector line — flex-1 so the stepper fills the card */}
+                  {!isLast && (
+                    <div
+                      style={{
+                        flex: '1 1 auto',
+                        minWidth: 16,
+                        marginTop: 12,
+                        borderTop: dashedConnector
+                          ? '2px dashed var(--lb-ink-7)'
+                          : '2px solid var(--lb-ink-8)',
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Stat strip — 3 cells, bordered + divided */}
