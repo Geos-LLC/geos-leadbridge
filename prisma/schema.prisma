@@ -2391,6 +2391,16 @@ model ServiceTemplatePreset {
   // does NOT produce instructions on its own; admin writes them.
   additionalInstructions String? @db.Text
 
+  // v1 ServicePreset fields — populated only on seeded code presets
+  // (upholstery_furniture_cleaning, generic_custom_service). Nullable
+  // because admin-generated rows author the v2 keys above and leave
+  // these blank. listPublished() surfaces both shapes so the picker
+  // can render either.
+  qualificationSchemaJson String? @db.Text
+  faqJson                 String? @db.Text
+  serviceRules            String? @db.Text
+  aliases                 String? @db.Text
+
   // Raw audit trail — { rawOptionsText, rawPricingText, generatedAt,
   // generatorVersion } so we can re-run the parser if the algorithm
   // ever changes. Nullable for hand-authored rows.

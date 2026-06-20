@@ -1,26 +1,21 @@
 /**
- * ServiceProfile preset registry — v1.
+ * ServiceProfile preset data — internal seed + fallback only.
  *
- * Curated bundles of pricing / FAQ / qualification schema for one
- * platform service category. Tenants opt in by creating a
- * ServiceProfile from a preset; the bundle is copied into the
- * corresponding columns verbatim. After that copy the preset is no
- * longer referenced — the runtime resolver reads the ServiceProfile
- * row directly.
+ * The customer-facing preset picker and admin Templates page both read
+ * from the `service_template_presets` table (see
+ * AdminServiceTemplatesService). The two constants in this file
+ * (`UPHOLSTERY_FURNITURE_CLEANING_PRESET`, `GENERIC_CUSTOM_SERVICE_PRESET`)
+ * are:
+ *   1. seeded into that table at boot, so the DB stays the single
+ *      source of truth for what tenants see, and
+ *   2. used directly by `ServiceProfileService.createBlank` as the
+ *      starting shape for "Create custom service" — a fixed shape
+ *      that should NOT change when an admin edits the seeded row.
  *
- * Inert by default: this module exports data + pure helpers only. It
- * touches no Prisma, no DI, no runtime services. Consumers (future
- * UI + a creation endpoint) will import this registry explicitly.
- *
- * Scope: one preset (`upholstery_furniture_cleaning`). The
- * architecture is built to take many more, but we wire only one in
- * v1 so we can validate the shape end-to-end before expanding.
+ * Pure data + one factory helper. No Prisma, no DI.
  */
 
-import {
-  PresetPricing,
-  ServicePreset,
-} from './service-presets.types';
+import { ServicePreset } from './service-presets.types';
 
 /**
  * Upholstery and Furniture Cleaning — derived from Thumbtack's setup
@@ -283,41 +278,6 @@ export const GENERIC_CUSTOM_SERVICE_PRESET: ServicePreset = {
   },
 };
 
-export const SERVICE_PRESETS: readonly ServicePreset[] = [
-  UPHOLSTERY_FURNITURE_CLEANING_PRESET,
-  GENERIC_CUSTOM_SERVICE_PRESET,
-];
-
-/**
- * Lookup by stable key. Returns null when the key is unknown — the
- * caller (a future creation endpoint) should validate input before
- * trying to create a profile from it.
- */
-export function lookupPresetByKey(key: string): ServicePreset | null {
-  return SERVICE_PRESETS.find((p) => p.key === key) ?? null;
-}
-
-/**
- * Suggest a preset for a provider-side category name. Case-insensitive
- * exact match against providerCategoryName OR any alias. Returns null
- * when nothing matches — the UI should fall through to "create blank".
- *
- * Matching policy: equality on the trimmed lowercase string, not
- * substring. "Furniture Cleaning" matches the upholstery preset
- * because it's in the aliases list; "Wood Furniture Repair" does NOT
- * match (different category — would need its own preset).
- */
-export function suggestPresetForCategory(categoryName: string | null | undefined): ServicePreset | null {
-  if (!categoryName) return null;
-  const normalized = categoryName.trim().toLowerCase();
-  if (normalized.length === 0) return null;
-  for (const preset of SERVICE_PRESETS) {
-    if (preset.providerCategoryName.trim().toLowerCase() === normalized) return preset;
-    if (preset.aliases.some((a) => a.trim().toLowerCase() === normalized)) return preset;
-  }
-  return null;
-}
-
 /**
  * Inputs the factory needs to build a ServiceProfile create payload.
  * Kept narrow so callers don't have to construct the whole Prisma
@@ -390,13 +350,3 @@ export function buildServiceProfileFromPreset(
   };
 }
 
-/**
- * Convenience accessor for the price of a specific item key. Returns
- * null when the preset has no `items[]` (e.g. bed_bath_grid presets)
- * or when the key is absent.
- */
-export function getItemPrice(pricing: PresetPricing, itemKey: string): number | null {
-  if (!pricing.items) return null;
-  const item = pricing.items.find((i) => i.key === itemKey);
-  return item ? item.price : null;
-}

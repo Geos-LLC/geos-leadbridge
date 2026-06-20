@@ -107,22 +107,21 @@ export default function ServicesStep({
     [profiles],
   );
 
-  // Group presets the same way Settings does: Generic on top, curated
-  // code presets in the middle, published admin templates at the bottom.
+  // Pull the seeded "Custom Service" to the top of the picker; everything
+  // else lands in the main list. Both groups read from the same DB-backed
+  // presets list — what used to be hardcoded "code presets" are now
+  // seeded admin templates with stable keys.
   const groupedPresets = useMemo(() => {
     const generic: typeof presets = [];
-    const curated: typeof presets = [];
-    const admin: typeof presets = [];
+    const others: typeof presets = [];
     for (const p of presets) {
-      if (p.source === 'admin_template') admin.push(p);
-      else if (p.key === 'generic_custom_service' || p.presetKey === 'generic_custom_service') generic.push(p);
-      else curated.push(p);
+      if (p.key === 'generic_custom_service') generic.push(p);
+      else others.push(p);
     }
     const byLabel = (a: typeof presets[number], b: typeof presets[number]) => a.label.localeCompare(b.label);
     return {
       generic,
-      curated: curated.sort(byLabel),
-      admin: admin.sort(byLabel),
+      others: others.sort(byLabel),
     };
   }, [presets]);
 
@@ -130,8 +129,7 @@ export default function ServicesStep({
   // input creates the always-works starter.
   useEffect(() => {
     if (!showAddPanel || selectedPresetKey || groupedPresets.generic.length === 0) return;
-    const g = groupedPresets.generic[0];
-    setSelectedPresetKey(g.source === 'code_preset' ? g.presetKey! : g.templateId!);
+    setSelectedPresetKey(groupedPresets.generic[0].templateId);
   }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
 
   function ensureAiDraft(profile: ServiceProfile) {
@@ -212,21 +210,16 @@ export default function ServicesStep({
 
   async function handleCreateFromPreset() {
     if (!selectedPresetKey || creating) return;
-    const preset = presets.find(p =>
-      (p.source === 'code_preset' && p.presetKey === selectedPresetKey)
-      || (p.source === 'admin_template' && p.templateId === selectedPresetKey),
-    );
+    const preset = presets.find(p => p.templateId === selectedPresetKey);
     if (!preset) {
       notify.error('Pick a service template', 'Select one from the dropdown first.');
       return;
     }
     setCreating(true);
     try {
-      const created = await serviceProfilePresetsApi.createFromPreset(
-        preset.source === 'code_preset'
-          ? { presetKey: preset.presetKey!, status: 'active' }
-          : { templateId: preset.templateId! },
-      );
+      const created = await serviceProfilePresetsApi.createFromPreset({
+        templateId: preset.templateId,
+      });
       setSelectedPresetKey('');
       await refreshAll();
       setOpenId(created.profileId);
@@ -349,32 +342,17 @@ export default function ServicesStep({
                   <option value="">Pick a template…</option>
                   {groupedPresets.generic.length > 0 && (
                     <optgroup label="Recommended starter">
-                      {groupedPresets.generic.map(p => {
-                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
-                        return (
-                          <option key={`${p.source}-${key}`} value={key}>
-                            {p.label} — works for any service
-                          </option>
-                        );
-                      })}
+                      {groupedPresets.generic.map(p => (
+                        <option key={p.templateId} value={p.templateId}>
+                          {p.label} — works for any service
+                        </option>
+                      ))}
                     </optgroup>
                   )}
-                  {groupedPresets.curated.length > 0 && (
-                    <optgroup label="Curated templates">
-                      {groupedPresets.curated.map(p => {
-                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
-                        return (
-                          <option key={`${p.source}-${key}`} value={key}>
-                            {p.label}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
-                  )}
-                  {groupedPresets.admin.length > 0 && (
-                    <optgroup label="Published custom templates">
-                      {groupedPresets.admin.map(p => (
-                        <option key={`admin-${p.templateId}`} value={p.templateId!}>
+                  {groupedPresets.others.length > 0 && (
+                    <optgroup label="Service templates">
+                      {groupedPresets.others.map(p => (
+                        <option key={p.templateId} value={p.templateId}>
                           {p.label}
                         </option>
                       ))}
@@ -391,11 +369,6 @@ export default function ServicesStep({
                   Add
                 </button>
               </div>
-              {groupedPresets.admin.length === 0 && (
-                <p className="mt-1.5 text-[11px] text-slate-400">
-                  More templates will appear here when admins publish them.
-                </p>
-              )}
             </div>
 
             <div>

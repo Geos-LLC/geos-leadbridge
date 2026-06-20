@@ -19,13 +19,18 @@
  *   GET /v1/service-profile-presets response.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../../common/utils/prisma.service';
 import {
   GeneratedTemplate,
   PublicTemplatePreset,
 } from './admin-service-templates.types';
 import { generateTemplate, GenerateInput } from './template-generator';
+import {
+  UPHOLSTERY_FURNITURE_CLEANING_PRESET,
+  GENERIC_CUSTOM_SERVICE_PRESET,
+} from '../../service-profile/presets/service-presets';
+import type { ServicePreset } from '../../service-profile/presets/service-presets.types';
 
 /** What `POST /v1/admin/service-templates` accepts as the body. */
 export type CreateTemplateInput = GeneratedTemplate & {
@@ -76,10 +81,75 @@ function safeParse<T>(value: string | null | undefined): T | null {
 }
 
 @Injectable()
-export class AdminServiceTemplatesService {
+export class AdminServiceTemplatesService implements OnApplicationBootstrap {
   private readonly logger = new Logger(AdminServiceTemplatesService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Boot-time seed: ensures the two historical code-side presets exist
+   * as published rows in `service_template_presets`. Idempotent via
+   * `upsert({ update: {} })` — admin edits to seeded rows are never
+   * clobbered on subsequent boots.
+   *
+   * Together with Phase 2 (removing the merge branch in
+   * service-profile.controller.ts), this makes the DB the single source
+   * of truth for both the admin Templates page and the customer-facing
+   * preset picker.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    const presets: ServicePreset[] = [
+      UPHOLSTERY_FURNITURE_CLEANING_PRESET,
+      GENERIC_CUSTOM_SERVICE_PRESET,
+    ];
+    for (const p of presets) {
+      try {
+        const row = await this.prisma.serviceTemplatePreset.upsert({
+          where: { key: p.key },
+          create: {
+            key: p.key,
+            label: p.label,
+            provider: p.provider,
+            providerCategoryName: p.providerCategoryName,
+            providerCategoryId: null,
+            description: p.description ?? null,
+            // v2 fields. serviceOptionsJson defaults to empty groups —
+            // these seeded rows carry their structured questions on
+            // qualificationSchemaJson (v1) instead. customerAnswersJson
+            // mirrors the v1 FAQ entries so the admin editor renders the
+            // QA pairs even before the v1-editor work lands.
+            serviceOptionsJson: JSON.stringify({ groups: [] }),
+            pricingJson: JSON.stringify(p.pricingJson),
+            customerAnswersJson: JSON.stringify({
+              entries: (p.faqJson?.customQA ?? []).map((qa) => ({
+                question: qa.question,
+                answer: qa.answer,
+              })),
+            }),
+            additionalInstructions: null,
+            // v1 fields — verbatim from the code preset.
+            qualificationSchemaJson: JSON.stringify(p.qualificationSchemaJson),
+            faqJson: p.faqJson ? JSON.stringify(p.faqJson) : null,
+            serviceRules: p.serviceRules ? JSON.stringify(p.serviceRules) : null,
+            aliases: JSON.stringify(p.aliases ?? []),
+            status: 'published',
+            sourceJson: JSON.stringify({
+              kind: 'code_preset_seed',
+              seededAt: new Date().toISOString(),
+            }),
+          },
+          update: {},
+        });
+        this.logger.log(
+          `[admin-service-templates] seed key=${row.key} status=${row.status} id=${row.id}`,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[admin-service-templates] failed to seed code preset key=${p.key}: ${err?.message}`,
+        );
+      }
+    }
+  }
 
   /** Pure compute. Returns the generated shape for admin review. */
   generate(input: GenerateInput): GeneratedTemplate {
@@ -263,6 +333,10 @@ export class AdminServiceTemplatesService {
         },
       customerAnswersJson: safeParse(row.customerAnswersJson) ?? { entries: [] },
       additionalInstructions: row.additionalInstructions,
+      qualificationSchemaJson: safeParse(row.qualificationSchemaJson),
+      faqJson: safeParse(row.faqJson),
+      serviceRules: safeParse(row.serviceRules),
+      aliases: safeParse<string[]>(row.aliases) ?? [],
     }));
   }
 

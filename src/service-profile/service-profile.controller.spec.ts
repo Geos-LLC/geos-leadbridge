@@ -1,38 +1,38 @@
 /**
- * Tests for ServiceProfileController — preset consumer v1.
+ * Tests for ServiceProfileController — preset consumer.
  *
  * Covers:
- *   - GET /v1/service-profile-presets shape
- *   - POST /v1/service-profiles/from-preset success path
- *   - 400 on missing presetKey
- *   - 400 on unknown presetKey
- *   - 400 on invalid status
+ *   - GET /v1/service-profile-presets returns rows from
+ *     AdminServiceTemplatesService.listPublished()
+ *   - POST /v1/service-profiles/from-preset success path (templateId-only)
+ *   - 400 on missing templateId / no auth
+ *   - 404 when the templateId is unknown
  *   - 409 on (userId, slug) collision (P2002)
  */
 
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ServiceProfileController } from './service-profile.controller';
 import { ServiceProfileService } from './service-profile.service';
 
-/** Stub for the AdminServiceTemplatesService dep — these tests don't
- *  exercise the admin-template path. listPublished returns an empty
- *  array so the merged listing still works. */
+/** Stub for the AdminServiceTemplatesService dep. listPublished returns an
+ *  empty array by default; individual tests pass an override stub when
+ *  they need to assert merge behavior. */
 const ADMIN_TEMPLATES_STUB: any = {
   listPublished: jest.fn(async () => []),
   getPublishedById: jest.fn(async () => null),
 };
 
 function buildSvcMock(opts: {
-  createReturn?: any;
-  createThrows?: any;
+  createFromAdminTemplateReturn?: any;
+  createFromAdminTemplateThrows?: any;
   createBlankReturn?: any;
   createBlankThrows?: any;
 } = {}) {
   return {
-    createFromPreset: jest.fn().mockImplementation(async () => {
-      if (opts.createThrows) throw opts.createThrows;
+    createFromAdminTemplate: jest.fn().mockImplementation(async () => {
+      if (opts.createFromAdminTemplateThrows) throw opts.createFromAdminTemplateThrows;
       return (
-        opts.createReturn ?? {
+        opts.createFromAdminTemplateReturn ?? {
           id: 'profile-1',
           name: 'Upholstery and Furniture Cleaning',
           slug: 'upholstery-furniture-cleaning',
@@ -57,24 +57,7 @@ function buildSvcMock(opts: {
 const USER_REQ = { user: { id: 'user-1' } } as any;
 
 describe('ServiceProfileController.list', () => {
-  it('returns the curated registry with full preset shape', async () => {
-    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
-    const out = await c.list();
-    expect(Array.isArray(out.presets)).toBe(true);
-    expect(out.presets.length).toBeGreaterThan(0);
-    const upholstery = out.presets.find((p: any) => p.key === 'upholstery_furniture_cleaning') as any;
-    expect(upholstery).toBeDefined();
-    expect(upholstery.source).toBe('code_preset');
-    expect(upholstery.presetKey).toBe('upholstery_furniture_cleaning');
-    expect(upholstery.label).toBe('Upholstery and Furniture Cleaning');
-    expect(upholstery.providerCategoryName).toBe('Upholstery and Furniture Cleaning');
-    expect(upholstery.aliases).toContain('furniture cleaning');
-    expect(upholstery.pricingJson.pricingModel).toBe('item_quantity');
-    expect(upholstery.qualificationSchemaJson.questions).toHaveLength(4);
-    expect(upholstery.faqJson.customQA).toHaveLength(4);
-  });
-
-  it('merges published admin templates into the listing', async () => {
+  it('returns the published admin templates verbatim', async () => {
     const adminStub: any = {
       listPublished: jest.fn(async () => [
         {
@@ -95,94 +78,90 @@ describe('ServiceProfileController.list', () => {
           },
           customerAnswersJson: { entries: [] },
           additionalInstructions: null,
+          qualificationSchemaJson: null,
+          faqJson: null,
+          serviceRules: null,
+          aliases: [],
         },
       ]),
       getPublishedById: jest.fn(),
     };
     const c = new ServiceProfileController(buildSvcMock(), adminStub);
     const out = await c.list();
-    const admin = out.presets.find((p: any) => p.source === 'admin_template') as any;
-    expect(admin).toBeDefined();
-    expect(admin.templateId).toBe('t-1');
-    expect(admin.label).toBe('Admin Template');
+    expect(Array.isArray(out.presets)).toBe(true);
+    expect(out.presets).toHaveLength(1);
+    const row = out.presets[0] as any;
+    expect(row.source).toBe('admin_template');
+    expect(row.templateId).toBe('t-1');
+    expect(row.label).toBe('Admin Template');
+  });
+
+  it('returns an empty array when no templates are published', async () => {
+    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
+    const out = await c.list();
+    expect(out.presets).toEqual([]);
   });
 });
 
 describe('ServiceProfileController.createFromPreset', () => {
-  it('creates a draft profile by default and returns the slim record', async () => {
+  it('creates a draft profile from a templateId and returns the slim record', async () => {
     const svc = buildSvcMock();
     const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
-    const out = await c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' });
+    const out = await c.createFromPreset(USER_REQ, { templateId: 't-1' });
     expect(out).toEqual({
       profileId: 'profile-1',
       slug: 'upholstery-furniture-cleaning',
       status: 'draft',
       name: 'Upholstery and Furniture Cleaning',
     });
-    expect(svc.createFromPreset).toHaveBeenCalledTimes(1);
-    const call = (svc.createFromPreset as jest.Mock).mock.calls[0][0];
+    expect(svc.createFromAdminTemplate).toHaveBeenCalledTimes(1);
+    const call = (svc.createFromAdminTemplate as jest.Mock).mock.calls[0][0];
     expect(call.userId).toBe('user-1');
-    expect(call.preset.key).toBe('upholstery_furniture_cleaning');
-    expect(call.status).toBe('draft');
+    expect(call.templateId).toBe('t-1');
   });
 
-  it('honors explicit status="active" override', async () => {
-    const svc = buildSvcMock({
-      createReturn: { id: 'p', name: 'X', slug: 'x', status: 'active' },
-    });
-    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
-    const out = await c.createFromPreset(USER_REQ, {
-      presetKey: 'upholstery_furniture_cleaning',
-      status: 'active',
-    });
-    expect(out.status).toBe('active');
-    expect((svc.createFromPreset as jest.Mock).mock.calls[0][0].status).toBe('active');
-  });
-
-  it('throws 400 when presetKey is missing', async () => {
+  it('throws 400 when templateId is missing', async () => {
     const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(c.createFromPreset(USER_REQ, {} as any)).rejects.toThrow(BadRequestException);
   });
 
-  it('throws 400 when presetKey is unknown', async () => {
+  it('throws 400 when templateId is empty', async () => {
     const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
-    await expect(
-      c.createFromPreset(USER_REQ, { presetKey: 'does_not_exist' }),
-    ).rejects.toThrow(/Unknown preset key/);
-  });
-
-  it('throws 400 when status is invalid', async () => {
-    const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
-    await expect(
-      c.createFromPreset(USER_REQ, {
-        presetKey: 'upholstery_furniture_cleaning',
-        status: 'archived' as any,
-      }),
-    ).rejects.toThrow(/Invalid status/);
+    await expect(c.createFromPreset(USER_REQ, { templateId: '' })).rejects.toThrow(BadRequestException);
   });
 
   it('throws 400 when no authenticated user', async () => {
     const c = new ServiceProfileController(buildSvcMock(), ADMIN_TEMPLATES_STUB);
     await expect(
-      c.createFromPreset({ user: null } as any, {
-        presetKey: 'upholstery_furniture_cleaning',
-      }),
+      c.createFromPreset({ user: null } as any, { templateId: 't-1' }),
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('converts Prisma P2002 into a 409 ConflictException', async () => {
-    const svc = buildSvcMock({ createThrows: Object.assign(new Error('unique'), { code: 'P2002' }) });
+  it('throws 404 when the service surfaces NOT_FOUND', async () => {
+    const svc = buildSvcMock({
+      createFromAdminTemplateThrows: Object.assign(new Error('Template not found'), { code: 'NOT_FOUND' }),
+    });
     const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
-      c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' }),
+      c.createFromPreset(USER_REQ, { templateId: 'missing' }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('converts Prisma P2002 into a 409 ConflictException', async () => {
+    const svc = buildSvcMock({
+      createFromAdminTemplateThrows: Object.assign(new Error('unique'), { code: 'P2002' }),
+    });
+    const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
+    await expect(
+      c.createFromPreset(USER_REQ, { templateId: 't-1' }),
     ).rejects.toThrow(ConflictException);
   });
 
   it('propagates non-P2002 errors unchanged', async () => {
-    const svc = buildSvcMock({ createThrows: new Error('db down') });
+    const svc = buildSvcMock({ createFromAdminTemplateThrows: new Error('db down') });
     const c = new ServiceProfileController(svc, ADMIN_TEMPLATES_STUB);
     await expect(
-      c.createFromPreset(USER_REQ, { presetKey: 'upholstery_furniture_cleaning' }),
+      c.createFromPreset(USER_REQ, { templateId: 't-1' }),
     ).rejects.toThrow(/db down/);
   });
 });
@@ -254,51 +233,6 @@ describe('ServiceProfileController.createBlankService', () => {
     await expect(
       c.createBlankService(USER_REQ, { name: 'Roof inspection' }),
     ).rejects.toThrow(/db down/);
-  });
-});
-
-describe('ServiceProfileService.createFromPreset — integration with build helper', () => {
-  // This block uses a minimal prisma stub that captures the create
-  // payload — that's enough to verify what would land in the DB
-  // without spinning up Prisma. The buildServiceProfileFromPreset
-  // helper is already covered exhaustively in
-  // src/service-profile/presets/service-presets.spec.ts.
-
-  it('passes a payload with status="draft" + isDefault=false + the preset slug', async () => {
-    const { ServiceProfileService } = await import('./service-profile.service');
-    const { UPHOLSTERY_FURNITURE_CLEANING_PRESET } = await import('./presets/service-presets');
-    let captured: any = null;
-    const prisma: any = {
-      serviceProfile: {
-        create: jest.fn().mockImplementation(async ({ data }: any) => {
-          captured = data;
-          return { id: 'p-1', name: data.name, slug: data.slug, status: data.status };
-        }),
-      },
-    };
-    const monitoring: any = { captureError: jest.fn(async () => undefined) };
-    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, monitoring);
-    const out = await svc.createFromPreset({
-      userId: 'user-1',
-      preset: UPHOLSTERY_FURNITURE_CLEANING_PRESET,
-    });
-    expect(out).toEqual({
-      id: 'p-1',
-      name: 'Upholstery and Furniture Cleaning',
-      slug: 'upholstery-furniture-cleaning',
-      status: 'draft',
-    });
-    expect(captured.status).toBe('draft');
-    expect(captured.isDefault).toBe(false);
-    expect(captured.userId).toBe('user-1');
-    expect(captured.slug).toBe('upholstery-furniture-cleaning');
-    // mappings should be the parsed array (Prisma JSON field accepts arrays directly)
-    expect(Array.isArray(captured.providerCategoryMappingsJson)).toBe(true);
-    expect(captured.providerCategoryMappingsJson[0].provider).toBe('thumbtack');
-    // JSON fields stored as strings on the model (db.Text)
-    const pricing = JSON.parse(captured.pricingJson);
-    expect(pricing.pricingModel).toBe('item_quantity');
-    expect(pricing.items).toHaveLength(7);
   });
 });
 

@@ -35,7 +35,6 @@ import {
   type ServiceGroup,
 } from './service-group-classifier';
 import { buildServiceProfileFromPreset, GENERIC_CUSTOM_SERVICE_PRESET } from './presets/service-presets';
-import type { ServicePreset } from './presets/service-presets.types';
 import { AdminServiceTemplatesService } from '../admin/service-templates/admin-service-templates.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 
@@ -266,57 +265,6 @@ export class ServiceProfileService {
       source: 'none',
       fieldSources: { pricing: 'none', faq: 'none', aiInstructions: 'none' },
     };
-  }
-
-  /**
-   * Create a new ServiceProfile row from a preset. Pure write path
-   * — no resolver / runtime invocation.
-   *
-   * Defaults match the v1 brief:
-   *   - status='draft'   → resolver's aiPaused short-circuit gates AI
-   *                       replies for matched leads until the operator
-   *                       promotes the profile to 'active'
-   *   - isDefault=false  → never collides with the tenant's existing
-   *                       default profile (which keeps the partial
-   *                       unique index from PR #244 happy)
-   *
-   * Throws Prisma P2002 on (userId, slug) collision — caller maps to
-   * a 409 in the controller so the operator sees "preset already used"
-   * rather than a generic 500.
-   */
-  async createFromPreset(args: {
-    userId: string;
-    preset: ServicePreset;
-    status?: 'draft' | 'active';
-  }) {
-    const payload = buildServiceProfileFromPreset(args.preset, {
-      userId: args.userId,
-      status: args.status ?? 'draft',
-    });
-    this.logger.log(
-      `[service-profile] createFromPreset userId=${args.userId} preset=${args.preset.key} ` +
-      `slug=${payload.slug} status=${payload.status}`,
-    );
-    return this.prisma.serviceProfile.create({
-      data: {
-        userId: payload.userId,
-        name: payload.name,
-        slug: payload.slug,
-        status: payload.status,
-        isDefault: payload.isDefault,
-        providerCategoryMappingsJson: payload.providerCategoryMappingsJson as any,
-        pricingJson: payload.pricingJson,
-        faqJson: payload.faqJson,
-        qualificationSchemaJson: payload.qualificationSchemaJson,
-        aiInstructionsJson: payload.aiInstructionsJson,
-      },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        status: true,
-      },
-    });
   }
 
   /**

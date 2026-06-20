@@ -1,9 +1,10 @@
 /**
  * ServiceProfileService — createFromAdminTemplate cross-module test.
  *
- * Covers spec cases:
- *   #6 Create Service Profile from a published admin template
- *   #7 Existing code presets still work (createFromPreset path)
+ * Covers spec case #6 (Create Service Profile from a published admin
+ * template). The legacy code-preset creation path was retired when the
+ * SERVICE_PRESETS registry collapsed onto the DB-backed
+ * service_template_presets table.
  *
  * Bypasses NestJS DI with Object.create + prototype injection. We stub
  * the AdminServiceTemplatesService dependency directly so the test
@@ -12,9 +13,6 @@
 
 import { Logger } from '@nestjs/common';
 import { ServiceProfileService } from './service-profile.service';
-import {
-  UPHOLSTERY_FURNITURE_CLEANING_PRESET,
-} from './presets/service-presets';
 
 function buildPrismaStub() {
   const profiles: any[] = [];
@@ -271,20 +269,3 @@ describe('ServiceProfileService.createFromAdminTemplate (spec #6)', () => {
   });
 });
 
-describe('ServiceProfileService.createFromPreset (spec #7 — code presets still work)', () => {
-  it('creates a draft profile from a curated code preset', async () => {
-    const { svc, prisma } = buildService();
-    const profile = await svc.createFromPreset({
-      userId: 'u-1',
-      preset: UPHOLSTERY_FURNITURE_CLEANING_PRESET,
-      status: 'draft',
-    });
-    expect(profile.status).toBe('draft');
-    expect(profile.name).toBe(UPHOLSTERY_FURNITURE_CLEANING_PRESET.label);
-    expect(prisma.profiles).toHaveLength(1);
-    const written = prisma.profiles[0];
-    expect(written.pricingJson).toBeTruthy();
-    expect(written.faqJson).toBeTruthy();
-    expect(written.qualificationSchemaJson).toBeTruthy();
-  });
-});

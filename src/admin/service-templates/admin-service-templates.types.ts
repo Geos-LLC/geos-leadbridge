@@ -182,10 +182,13 @@ export type GeneratedTemplate = {
 
 /**
  * Shape `GET /v1/service-profile-presets` returns for DB-sourced rows.
- * The picker can ignore the discriminator and read whichever JSON
- * shape it understands (admin templates use the v2 keys, code presets
- * use the v1 keys — the picker stayed forward-compatible because all
- * are JSON blobs).
+ *
+ * Carries both v2 keys (serviceOptionsJson / customerAnswersJson /
+ * additionalInstructions — what the admin builder authors) and v1 keys
+ * (qualificationSchemaJson / faqJson / serviceRules / aliases — what
+ * the boot-time seeder writes for the two historical code presets).
+ * Admin-generated rows leave the v1 keys null; seeded rows populate
+ * both shapes so the customer-facing picker can render either.
  */
 export type PublicTemplatePreset = {
   source: 'admin_template';
@@ -197,7 +200,11 @@ export type PublicTemplatePreset = {
   providerCategoryId: string | null;
   description: string | null;
   serviceOptionsJson: ServiceOptionsJson;
-  pricingJson: AdminPricingJson;
+  pricingJson: AdminPricingJson | unknown;
   customerAnswersJson: CustomerAnswersJson;
   additionalInstructions: string | null;
+  qualificationSchemaJson: unknown | null;
+  faqJson: unknown | null;
+  serviceRules: unknown | null;
+  aliases: string[];
 };
