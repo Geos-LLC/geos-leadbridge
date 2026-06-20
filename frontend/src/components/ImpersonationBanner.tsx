@@ -17,7 +17,10 @@ export default function ImpersonationBanner() {
     setDashboardStats(null as any);
     setAnalyticsCache(null as any);
     setAccountDiagnostics({});
-    window.location.reload();
+    // Return admin to the admin dashboard, not whatever tenant page they
+    // were previewing — that page (e.g. /pricing in trial-ended state) may
+    // not even be valid for the admin's own account.
+    window.location.href = '/admin';
   };
 
   return (
