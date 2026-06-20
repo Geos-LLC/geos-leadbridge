@@ -56,10 +56,10 @@ export function SettingsHours() {
   const [quietTz, setQuietTz] = useState('America/New_York');
 
   const [loading, setLoading] = useState(true);
-  // Preserved for potential busy-state UI later.
-  const [_saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (!savedAt) return;
@@ -108,42 +108,42 @@ export function SettingsHours() {
   const setDayField = (d: Day, patch: Partial<DayState>) =>
     setHours(h => ({ ...h, [d]: { ...h[d], ...patch } }));
 
-  // Auto-save (debounced ~800ms) — fires on every state change once the
-  // initial load has hydrated. Both business-hours and quiet-hours endpoints
-  // are written in parallel.
+  // Mark dirty on any field change post-hydration. Save is explicit (button
+  // below) — the prior debounced autosave silently dropped pending writes
+  // when the component unmounted within the debounce window (tab switch,
+  // route change), leaving the user thinking their change had persisted.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    const t = setTimeout(() => {
-      (async () => {
-        setSaving(true); setError(null);
-        try {
-          const schedule: Record<string, { start: string; end: string } | null> = {};
-          (DAYS as readonly Day[]).forEach(d => {
-            const key = DAY_TO_API[d];
-            schedule[key] = hours[d].on
-              ? { start: display24(hours[d].start), end: display24(hours[d].end) }
-              : null;
-          });
-          await Promise.all([
-            usersApi.updateBusinessHours({ timezone: tz, schedule }),
-            usersApi.updateQuietHours({
-              enabled: quietOn,
-              start: display24(quietStart),
-              end: display24(quietEnd),
-              timezone: quietTz,
-            }),
-          ]);
-          setSavedAt(Date.now());
-        } catch (e: any) {
-          setError(e?.response?.data?.message || e?.message || 'Failed to save');
-        } finally {
-          setSaving(false);
-        }
-      })();
-    }, 800);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDirty(true);
   }, [hours, tz, quietOn, quietStart, quietEnd, quietTz]);
+
+  const handleSave = async () => {
+    setSaving(true); setError(null);
+    try {
+      const schedule: Record<string, { start: string; end: string } | null> = {};
+      (DAYS as readonly Day[]).forEach(d => {
+        const key = DAY_TO_API[d];
+        schedule[key] = hours[d].on
+          ? { start: display24(hours[d].start), end: display24(hours[d].end) }
+          : null;
+      });
+      await Promise.all([
+        usersApi.updateBusinessHours({ timezone: tz, schedule }),
+        usersApi.updateQuietHours({
+          enabled: quietOn,
+          start: display24(quietStart),
+          end: display24(quietEnd),
+          timezone: quietTz,
+        }),
+      ]);
+      setSavedAt(Date.now());
+      setDirty(false);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -153,21 +153,40 @@ export function SettingsHours() {
     );
   }
 
+  const saveDisabled = saving || !dirty;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+        {savedAt && !error && !dirty && (
+          <span style={{ color: 'var(--lb-success, #059669)', fontSize: 12, fontWeight: 600 }}>Saved</span>
+        )}
+        {dirty && !saving && (
+          <span style={{ color: 'var(--lb-ink-5, #64748b)', fontSize: 12, fontWeight: 600 }}>Unsaved changes</span>
+        )}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveDisabled}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '9px 14px', borderRadius: 8,
+            border: 'none',
+            background: saveDisabled ? 'var(--lb-ink-tint, #e2e8f0)' : '#2563eb',
+            color: saveDisabled ? 'var(--lb-ink-5, #64748b)' : 'white',
+            fontSize: 13, fontWeight: 600,
+            cursor: saving ? 'not-allowed' : (dirty ? 'pointer' : 'not-allowed'),
+          }}
+        >
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
       {error && (
         <div style={{
           padding: '10px 14px', borderRadius: 10,
           background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
           fontSize: 13, fontWeight: 600,
         }}>{error}</div>
-      )}
-      {savedAt && !error && (
-        <div style={{
-          padding: '10px 14px', borderRadius: 10,
-          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-          fontSize: 13, fontWeight: 600,
-        }}>Hours saved.</div>
       )}
 
       <SettingCard
