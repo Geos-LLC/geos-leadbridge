@@ -2,7 +2,6 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { ResponsiveRedirect } from './components/ResponsiveRedirect';
 import { ToastNotifications } from './components/ToastNotifications';
 import { UpdateAvailableBanner } from './components/UpdateAvailableBanner';
 import { PageSkeleton } from './components/PageSkeleton';
@@ -89,11 +88,6 @@ function App() {
 
   return (
     <BrowserRouter>
-      {/* Narrow-viewport handoff: hands users on desktop routes off to the
-          /m/* mobile shell when window width < 768px. One-way (no bounce
-          on resize-up). Routes without a mobile twin (admin, partner-
-          network, templates, etc.) stay on desktop. */}
-      <ResponsiveRedirect />
       {/* Global toast notifications */}
       <ToastNotifications />
       {/* Notifies open tabs when a new deploy ships so stale UIs (missing
