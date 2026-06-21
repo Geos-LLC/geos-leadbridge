@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
-  CheckCircle2,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   Circle,
   ExternalLink,
+  Layers,
   Loader2,
   Plus,
   ShieldAlert,
@@ -464,28 +464,57 @@ export default function ServicesStep({
                         void refreshOne(profile.id);
                       }
                     }}
-                    className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
+                    className="w-full hover:bg-slate-50 transition-colors"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 13,
+                      padding: '16px', textAlign: 'left',
+                    }}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      {open ? (
-                        <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-                      )}
-                      <div className="text-left min-w-0">
-                        <div className="text-sm font-bold text-slate-900 truncate">
+                    {/* Leading layers icon tile — accent-tint per bundle */}
+                    <span style={{
+                      width: 38, height: 38, borderRadius: 9,
+                      background: 'var(--lb-accent-tint)', color: 'var(--lb-accent)',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <Layers className="w-[18px] h-[18px]" />
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
                           {profile.name}
-                          {profile.isDefault && (
-                            <span className="ml-2 text-xs font-semibold text-slate-400">
-                              default
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs">
-                          <StatusPill status={profile.status} configured={configured} />
-                        </div>
-                      </div>
-                    </div>
+                        </span>
+                        {profile.status === 'active' && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700,
+                            padding: '2px 7px', borderRadius: 99,
+                            background: 'var(--lb-success-tint)', color: '#15803d',
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                          }}>Active</span>
+                        )}
+                        {profile.isDefault && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700,
+                            padding: '2px 7px', borderRadius: 99,
+                            background: 'var(--lb-ink-10)', color: 'var(--lb-ink-5)',
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                          }}>Default</span>
+                        )}
+                      </span>
+                      <span style={{
+                        display: 'block', fontSize: 12,
+                        color: 'var(--lb-ink-5)', marginTop: 3,
+                      }}>
+                        {configured
+                          ? 'Pricing, FAQ and qualification configured.'
+                          : 'Add pricing and customer answers to activate.'}
+                      </span>
+                    </span>
+                    {open ? (
+                      <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                    )}
                   </button>
 
                   {open && (
@@ -635,36 +664,6 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       </div>
       {children}
     </div>
-  );
-}
-
-function StatusPill({
-  status,
-  configured,
-}: {
-  status: 'active' | 'draft' | 'archived';
-  configured: boolean;
-}) {
-  if (status === 'draft') {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-        Draft · AI paused
-      </span>
-    );
-  }
-  if (configured) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-        <CheckCircle2 className="w-3 h-3" />
-        Ready
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-      <ShieldAlert className="w-3 h-3" />
-      Needs pricing + answers
-    </span>
   );
 }
 

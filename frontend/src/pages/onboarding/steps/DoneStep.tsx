@@ -125,8 +125,15 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
       </WizardStepActions>
 
       <div className="text-center">
-      <div className="w-16 h-16 mx-auto mb-6 rounded-2xl inline-flex items-center justify-center bg-emerald-100 text-emerald-600 shadow-sm">
-        <Check className="w-9 h-9" />
+      <div
+        style={{
+          width: 64, height: 64, borderRadius: 999,
+          margin: '8px auto 18px',
+          background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <Check className="w-8 h-8" strokeWidth={2.4} />
       </div>
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
