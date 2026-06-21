@@ -121,7 +121,7 @@ export function AutoPageHeader({
   backLink?: { label: string; onClick: () => void };
 }) {
   return (
-    <div style={{
+    <div className="lb-page-header" style={{
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
       gap: 16, marginBottom: 22,
     }}>
@@ -136,7 +136,7 @@ export function AutoPageHeader({
         </div>
         {subtitle && <p style={{ margin: 0, fontSize: 13.5, color: 'var(--lb-ink-5)' }}>{subtitle}</p>}
       </div>
-      <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+      <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
         {headerActions}
         <button title="More" style={{
           width: 38, height: 38, borderRadius: 10,
@@ -418,17 +418,17 @@ export function FieldRow({
   noBorder?: boolean;
 }) {
   return (
-    <div style={{
+    <div className="lb-row" style={{
       display: 'flex', gap: 16, alignItems: align === 'top' ? 'flex-start' : 'center',
       padding: '16px 0',
       borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
     }}>
-      {icon && <IconTile icon={icon} tone={iconTone} size="sm" />}
-      <div style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
+      {icon && <span className="lb-row-icon"><IconTile icon={icon} tone={iconTone} size="sm" /></span>}
+      <div className="lb-row-label" style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)' }}>{label}</div>
         {sublabel && <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>{sublabel}</div>}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      <div className="lb-row-control" style={{ flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   );
 }

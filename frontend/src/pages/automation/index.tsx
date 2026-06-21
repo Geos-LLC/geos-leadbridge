@@ -76,7 +76,7 @@ export function AutomationPage() {
   const showNoServiceOverlay = activeServiceCount === 0 && !isAdmin;
 
   return (
-    <div style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
+    <div className="lb-pad" style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
       <AutoPageHeader
         title={meta.title}
         badge={meta.badge}
