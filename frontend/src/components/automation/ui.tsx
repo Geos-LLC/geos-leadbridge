@@ -944,7 +944,7 @@ export function TimingRow({
       }
       sublabel={sublabel}
     >
-      <div style={{
+      <div className="lb-hoursrow" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 12, flexWrap: 'wrap',
       }}>

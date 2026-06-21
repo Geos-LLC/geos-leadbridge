@@ -363,6 +363,35 @@ h1, h2, h3, h4 {
   }
   /* Hide the AI tip column on the right of each rule row at mobile */
   .lb-rule > div:nth-child(3) { display: none !important; }
+
+  /* Timing rows: keep checkbox + Edit Hours on one line; bundle hides
+     the trailing Edit Hours link at mobile so the checkbox text gets
+     full row width without wrapping. */
+  .lb-hoursrow {
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+  .lb-hoursrow > button:first-child {
+    min-width: 0 !important;
+    flex: 0 1 auto !important;
+  }
+  .lb-hoursrow > button:first-child > span:last-child {
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-size: 12.5px !important;
+  }
+  .lb-hoursrow > button:last-child {
+    display: none !important;
+  }
+
+  /* AutoPageHeader actions cluster (Saved pill + More) takes the full
+     mobile row width per bundle. The first row (title block) already
+     stacks via .lb-page-header { flex-direction: column }. */
+  .lb-page-header-actions {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
 }
 
 /* Tiny phones (<=430px) shrink icon tiles further so card rows stay
