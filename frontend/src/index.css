@@ -80,10 +80,21 @@ h1, h2, h3, h4 {
   font-weight: 700;
 }
 
-/* Setup button stays full-text at every width — the design treats it as
-   a primary call-to-action that must read clearly on phones too. (The
-   earlier `≤640px` icon-only collapse was a holdover from a denser
-   topbar layout and didn't survive the redesign review.) */
+/* Setup button stays full-text down to small phones. Only at very
+   narrow widths (<=420px), where even the LeadBridge logo + a full
+   "Setup" pill can't co-fit a long page name, does it collapse to a
+   36px icon-only circle. Above 420 the label stays visible per design. */
+@media (max-width: 420px) {
+  .lb-setup-btn {
+    padding: 0 !important;
+    width: 36px;
+    height: 36px;
+    gap: 0 !important;
+  }
+  .lb-setup-btn .lb-setup-label {
+    display: none;
+  }
+}
 
 /* ─── Responsive: AI launcher tucks down ≤560px ─── */
 @media (max-width: 560px) {
@@ -105,6 +116,13 @@ h1, h2, h3, h4 {
    mobile pane has its own eyebrow that takes over when the rail is
    hidden. Default-hidden here so it never paints on desktop. */
 .lb-wizard-step-indicator { display: none; }
+
+/* Lead Activity status-filter row hides its scrollbar across browsers.
+   The row is horizontally scrollable so every tab stays reachable at
+   any width; the scrollbar would otherwise eat 8–12px of vertical
+   space below the tabs on Windows / Chrome on Linux. */
+.lb-status-filters::-webkit-scrollbar { display: none; }
+.lb-status-filters { scrollbar-width: none; }
 
 /* ─── Responsive: horizontal-scroll tab bars at ≤760px ───
    Settings tabs, Account tabs, status filters, Follow-up cadence stepper
@@ -175,10 +193,18 @@ h1, h2, h3, h4 {
 
   /* Dashboard / Overview hero — bumps the eyebrow + title + subtitle to
      hero scale on phones. Desktop keeps its compact greeting block
-     because the Layout topbar carries the page name visibly there. */
+     because the Layout topbar carries the page name visibly there.
+     `overflow-wrap: break-word` is the load-bearing rule for very long
+     tenant names (e.g. "SPOTLESS HOMES FLORIDA LLC") so the eyebrow
+     soft-wraps onto a second line instead of forcing horizontal scroll. */
+  .lb-hero {
+    overflow: hidden;
+  }
   .lb-hero-eyebrow {
     font-size: 12px !important;
     letter-spacing: 0.12em !important;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
   .lb-hero-title {
     font-size: 30px !important;
@@ -186,27 +212,26 @@ h1, h2, h3, h4 {
     letter-spacing: -0.03em !important;
     line-height: 1.1 !important;
     margin: 8px 0 6px !important;
+    overflow-wrap: break-word;
   }
   .lb-hero-sub {
     font-size: 14px !important;
     line-height: 1.5 !important;
     color: var(--lb-ink-5) !important;
+    overflow-wrap: break-word;
   }
 
-  /* AutoPageHeader title block (h1 + badge + subtitle) is hidden at
-     mobile widths — the global topbar already carries the page name +
-     section label, so repeating it inside the body is redundant on a
-     phone. Only the actions cluster (Saved pill, More button, optional
-     Save button) survives as a compact left-aligned row above the
-     page content. */
+  /* AutoPageHeader stacks: title block on top, actions cluster below.
+     The Settings phone mock shows the in-page title + Settings badge +
+     subtitle visible above the Saved / More row — we don't hide it
+     globally because the topbar doesn't always echo the sub-section.
+     Long titles wrap naturally; long subtitles soft-wrap so the actions
+     row stays anchored to the left edge. */
   .lb-page-header {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: 10px !important;
     margin-bottom: 14px !important;
-  }
-  .lb-page-header > :first-child {
-    display: none !important;
   }
   .lb-page-header-actions {
     justify-content: flex-start;

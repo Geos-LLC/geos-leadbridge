@@ -1838,24 +1838,46 @@ export function Messages() {
           </div>
         </div>
 
-        {/* Status Filter */}
-        <div className="px-4 py-2 border-b border-slate-100">
-          <div className="relative">
-            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | StatusGroupId)}
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Statuses</option>
-              {STATUS_FILTER_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-          </div>
+        {/* Status Filter — inline text tabs per design. Renders the
+            status groups + pseudo-groups (Refunded, Eligible) as a
+            single horizontal row; at narrow widths the row scrolls so
+            every option stays reachable without breaking onto a second
+            line. Active tab: accent color + 2px underline rule. */}
+        <div className="lb-status-filters px-4 py-1.5 border-b border-slate-100"
+          style={{
+            display: 'flex',
+            gap: 18,
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {[{ id: 'all' as const, label: 'All' }, ...STATUS_FILTER_OPTIONS].map((opt) => {
+            const active = statusFilter === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setStatusFilter(opt.id as 'all' | StatusGroupId)}
+                style={{
+                  background: 'transparent',
+                  border: 0,
+                  padding: '6px 0',
+                  fontFamily: 'inherit',
+                  fontSize: 13.5,
+                  fontWeight: active ? 700 : 500,
+                  color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  borderBottom: active ? '2px solid var(--lb-ink-1)' : '2px solid transparent',
+                  whiteSpace: 'nowrap',
+                  transition: 'color 120ms',
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Service Filter — shown only when the user has at least one
