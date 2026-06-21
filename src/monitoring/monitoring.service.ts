@@ -383,6 +383,106 @@ export class MonitoringService implements OnModuleInit {
   }
 
   /**
+   * Dev SMS alert — pages the on-call dev's phone via Sigcore for cross-tenant
+   * critical incidents (silent-failure classes that the per-tenant email path
+   * doesn't catch). Dedup window is shorter than the email path (1h vs 24h)
+   * because these are critical and we want a fresh page after a quiet hour.
+   *
+   * Required env to actually send:
+   *   - DEV_ALERT_SMS_TO            (defaults to +12483462681 if unset)
+   *   - DEV_ALERT_SMS_FROM          (E.164 sender; must be a Sigcore-resolvable number)
+   *   - DEV_ALERT_SIGCORE_API_KEY   (tenant key Sigcore uses to authorize the send)
+   *
+   * When SMS env is incomplete we fall back to notifyDevAlert (email).
+   * Dedup row stored as SystemErrorLog(category='other', code='dev_sms_<kind>').
+   */
+  async notifyDevSms(opts: {
+    kind: string;
+    message: string;
+    context?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      const to = this.configService.get<string>('DEV_ALERT_SMS_TO') || process.env.DEV_ALERT_SMS_TO || '+12483462681';
+      const fromPhone = this.configService.get<string>('DEV_ALERT_SMS_FROM') || process.env.DEV_ALERT_SMS_FROM || '';
+      const apiKey = this.configService.get<string>('DEV_ALERT_SIGCORE_API_KEY') || process.env.DEV_ALERT_SIGCORE_API_KEY || '';
+
+      // Without a sender + key we can't reach Sigcore. Fall back to email
+      // so the alert isn't lost — the dev will see it in their inbox.
+      if (!fromPhone || !apiKey) {
+        this.logger.warn(`[DevSms] env incomplete (from=${!!fromPhone} key=${!!apiKey}) — falling back to email for ${opts.kind}`);
+        await this.notifyDevAlert({
+          kind: opts.kind,
+          subject: `LeadBridge: ${opts.kind}`,
+          message: opts.message,
+          context: opts.context,
+        });
+        return;
+      }
+
+      const code = `dev_sms_${opts.kind}`;
+      const DEDUP_WINDOW_MS = 60 * 60 * 1000; // 1h — critical paths should re-page after an hour
+      const existing = await this.prisma.systemErrorLog.findFirst({
+        where: { category: 'other', code, accountId: null, userId: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing?.emailedAt && Date.now() - existing.emailedAt.getTime() < DEDUP_WINDOW_MS) {
+        this.logger.debug(`[DevSms] suppressed (sent ${Math.round((Date.now() - existing.emailedAt.getTime()) / 60000)}m ago): ${opts.kind}`);
+        return;
+      }
+
+      // Truncate to a single SMS segment — operator reads details on the dashboard.
+      const body = `LB: ${opts.message}`.slice(0, 320);
+
+      const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+      const response = await fetch(`${sigcoreUrl}/v1/messages`, {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toNumber: to,
+          fromNumber: fromPhone,
+          body,
+          channel: 'sms',
+          metadata: { purpose: 'dev_alert', kind: opts.kind },
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        this.logger.error(`[DevSms] Sigcore ${response.status} ${text.slice(0, 200)} — falling back to email for ${opts.kind}`);
+        await this.notifyDevAlert({
+          kind: opts.kind,
+          subject: `LeadBridge: ${opts.kind} (SMS failed ${response.status})`,
+          message: opts.message,
+          context: { ...opts.context, smsError: text.slice(0, 200) },
+        });
+        return;
+      }
+
+      const ctxJson = opts.context ? JSON.stringify(opts.context, null, 2) : null;
+      if (existing) {
+        await this.prisma.systemErrorLog.update({
+          where: { id: existing.id },
+          data: { emailedAt: new Date(), message: opts.message },
+        });
+      } else {
+        await this.prisma.systemErrorLog.create({
+          data: {
+            category: 'other',
+            code,
+            severity: 'error',
+            message: opts.message,
+            context: ctxJson,
+            emailedAt: new Date(),
+          },
+        });
+      }
+      this.logger.warn(`[DevSms] sent: ${opts.kind} → ${to}`);
+    } catch (err: any) {
+      this.logger.error(`[DevSms] internal failure (${opts.kind}): ${err.message}`);
+    }
+  }
+
+  /**
    * Cron: every hour, probe OpenAI to detect a broken key even when no leads
    * are coming in. Catches outages on quiet days.
    */
@@ -427,7 +527,7 @@ export class MonitoringService implements OnModuleInit {
         // Pipeline health checks run BEFORE the per-account work and BEFORE
         // the no-accounts short-circuit, so SF↔LB pipeline alerts fire on a
         // fresh staging tenant with zero saved accounts too.
-        await this.runPipelineHealthChecks(tx);
+        const pipelineCounts = await this.runPipelineHealthChecks(tx);
 
         const accounts = await tx.savedAccount.findMany({
           select: {
@@ -437,7 +537,7 @@ export class MonitoringService implements OnModuleInit {
         });
 
         if (accounts.length === 0) {
-          return { accountCount: 0, newIssues: [], recoveries: [] };
+          return { accountCount: 0, newIssues: [], recoveries: [], pipelineCounts };
         }
 
         const now = new Date();
@@ -517,7 +617,7 @@ export class MonitoringService implements OnModuleInit {
           }
         }
 
-        return { accountCount: accounts.length, newIssues, recoveries };
+        return { accountCount: accounts.length, newIssues, recoveries, pipelineCounts };
       });
 
       if (isSkipped(outcome)) return;
@@ -543,6 +643,11 @@ export class MonitoringService implements OnModuleInit {
           await this.sendAlertEmail(userId, issues);
         }
       }
+
+      // Cross-tenant dev SMS — aggregate this sweep's new critical issues into a
+      // single page. Per-tenant emails already went out above; this is the on-call
+      // dev's signal that something needs a human, deduped at 1h via notifyDevSms.
+      await this.maybeSendCrossTenantDevAlert(outcome.newIssues, outcome.pipelineCounts);
 
       await this.sendReminders();
 
@@ -942,6 +1047,56 @@ export class MonitoringService implements OnModuleInit {
       }
     }
 
+    // Sigcore outbound chain incomplete (FargiPro/Globus/SheNe 2026-06-17 class).
+    // The Sigcore ensureOutboundReady chain (purchase → business → profile → PPA)
+    // is supposed to run inside purchaseNumber, but historically didn't — a TPN
+    // row was created with sigcoreAllocationId=NULL and every outbound /v1/messages
+    // returned 422 INVALID_PROFILE_PHONE. We wait 1h after purchase before flagging
+    // so a freshly-running provisioner doesn't trip the alert.
+    const incompleteTpn = await db.tenantPhoneNumber.findFirst({
+      where: {
+        savedAccountId: account.id,
+        sigcoreAllocationId: null,
+        status: 'ACTIVE',
+        purchasedAt: { lt: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+      select: { phoneNumber: true, purchasedAt: true },
+    });
+    if (incompleteTpn) {
+      issues.push({
+        accountId: account.id, accountName: account.businessName || account.businessId,
+        platform: account.platform, issueCode: 'sigcore_chain_incomplete', status: 'critical',
+        message: `Phone ${incompleteTpn.phoneNumber} has no Sigcore PPA — outbound will 422 INVALID_PROFILE_PHONE`,
+        firstDetectedAt: now, lastDetectedAt: now,
+      });
+    }
+
+    // Outbound send-failure streak — 3+ NotificationLog rows with status='failed'
+    // in the last hour for this account. Catches silent feature failures where
+    // the routing chain or the sender-auth path broke for this tenant but
+    // automation/token_refresh buckets don't see it.
+    const settingsRow = await db.notificationSettings.findUnique({
+      where: { savedAccountId: account.id },
+      select: { id: true },
+    });
+    if (settingsRow) {
+      const recentFailures = await db.notificationLog.count({
+        where: {
+          notificationSettingsId: settingsRow.id,
+          status: 'failed',
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+      });
+      if (recentFailures >= 3) {
+        issues.push({
+          accountId: account.id, accountName: account.businessName || account.businessId,
+          platform: account.platform, issueCode: 'send_failure_streak', status: 'critical',
+          message: `${recentFailures} outbound SMS sends failed in the last hour`,
+          firstDetectedAt: now, lastDetectedAt: now,
+        });
+      }
+    }
+
     // 5. Associate-phone sync failure (Thumbtack only). LB pushes owner phone +
     // LB dedicated number + custom associates to TT after every OAuth and on
     // demand. When that fails, proxy calls won't honor LB-side senders — leads
@@ -983,15 +1138,64 @@ export class MonitoringService implements OnModuleInit {
     outboundFailures: number;
     crm5xx: number;
     staleSubscriptions: number;
+    stuckEnrollments: number;
   }> {
     const since = new Date(Date.now() - 60 * 60 * 1000);
-    const [inboundErrors, outboundFailures, crm5xx, staleSubscriptions] = await Promise.all([
+    const [inboundErrors, outboundFailures, crm5xx, staleSubscriptions, stuckEnrollments] = await Promise.all([
       this.checkInboundProcessingErrors(since, db),
       this.checkOutboundFailures(since, db),
       this.checkOutbound5xx(since, db),
       this.checkStaleTraffic(db),
+      this.checkStuckFollowUpEnrollments(db),
     ]);
-    return { inboundErrors, outboundFailures, crm5xx, staleSubscriptions };
+    return { inboundErrors, outboundFailures, crm5xx, staleSubscriptions, stuckEnrollments };
+  }
+
+  /**
+   * Stuck follow-up enrollments — active enrollments whose `nextStepDueAt` is
+   * >1h in the past with no recent `FollowUpStepExecution`. This is the
+   * silent-failure class that bit Kristian Anthony 2026-06-20 (resume restarts
+   * at step 0, then never moves) and the Padma 2026-05-12 evaluateThread gap.
+   *
+   * Threshold of 5 across all tenants suppresses single-account hiccups —
+   * a real regression in the scheduler shows up as dozens of rows.
+   */
+  private async checkStuckFollowUpEnrollments(db: Db = this.prisma): Promise<number> {
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+    const stuck = await db.followUpEnrollment.findMany({
+      where: {
+        status: 'active',
+        nextStepDueAt: { lt: cutoff, not: null },
+      },
+      select: { id: true, conversationId: true, platform: true, lastExecutedAt: true },
+      take: 100,
+    });
+    // Filter out ones that DID execute recently (lastExecutedAt is the
+    // authoritative "moved forward" signal — nextStepDueAt can lag the
+    // actual scheduler write by a tick).
+    const actuallyStuck = stuck.filter(e => !e.lastExecutedAt || e.lastExecutedAt < cutoff);
+    if (actuallyStuck.length < 5) {
+      this.logger.log(`[PipelineHealth] check=follow_up_stuck result=ok count=${actuallyStuck.length}`);
+      return 0;
+    }
+    const byPlatform = actuallyStuck.reduce<Record<string, number>>((acc, e) => {
+      acc[e.platform] = (acc[e.platform] ?? 0) + 1;
+      return acc;
+    }, {});
+    const sample = actuallyStuck.slice(0, 3).map(e => e.conversationId).join(', ');
+    await this.captureError(
+      {
+        category: 'webhook',
+        code: 'follow_up_stuck',
+        severity: 'error',
+        message:
+          `${actuallyStuck.length} follow-up enrollments are stuck (nextStepDueAt >1h past, no recent execution). ` +
+          `By platform: ${JSON.stringify(byPlatform)}. Sample conversation ids: ${sample}`,
+      },
+      db,
+    );
+    this.logger.error(`[PipelineHealth] check=follow_up_stuck result=error count=${actuallyStuck.length}`);
+    return actuallyStuck.length;
   }
 
   /** Any sf_inbound_events.processingError in last 1h → captureError per affected user. */
@@ -1442,6 +1646,193 @@ export class MonitoringService implements OnModuleInit {
       }));
       await this.sendAlertEmail(userId, mapped);
     }
+  }
+
+  // ==========================================
+  // Cross-tenant dev alert + admin summary
+  // ==========================================
+
+  /**
+   * Fire ONE aggregated SMS at end of a sweep when the sweep produced new
+   * critical issues — across tenants. Per-tenant emails already went out to the
+   * affected tenants; this is the dev's wake-up call. Dedup is on the inner
+   * notifyDevSms (1h window per `kind`), so a sustained outage pages at most
+   * once an hour even if the sweep keeps finding new rows.
+   *
+   * Pipeline-level criticals (the `pipelineCounts` numbers from
+   * runPipelineHealthChecks) also drive a page when they're non-zero — those
+   * don't show up in `newIssues` because they're written to SystemErrorLog
+   * directly, not to AccountHealthStatus.
+   */
+  private async maybeSendCrossTenantDevAlert(
+    newIssues: { userId: string; issue: SystemHealthIssue }[],
+    pipelineCounts: {
+      inboundErrors: number;
+      outboundFailures: number;
+      crm5xx: number;
+      staleSubscriptions: number;
+      stuckEnrollments: number;
+    },
+  ): Promise<void> {
+    const newCritical = newIssues.filter(n => n.issue.status === 'critical');
+    const pipelineCritical =
+      pipelineCounts.inboundErrors +
+      pipelineCounts.outboundFailures +
+      pipelineCounts.crm5xx +
+      pipelineCounts.stuckEnrollments;
+
+    if (newCritical.length === 0 && pipelineCritical === 0) return;
+
+    const tenantIds = new Set(newCritical.map(n => n.userId));
+    const codeCounts: Record<string, number> = {};
+    for (const n of newCritical) {
+      codeCounts[n.issue.issueCode] = (codeCounts[n.issue.issueCode] ?? 0) + 1;
+    }
+    const topCodes = Object.entries(codeCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([code, count]) => `${code}×${count}`)
+      .join(', ');
+
+    const pipelineBits: string[] = [];
+    if (pipelineCounts.inboundErrors) pipelineBits.push(`sf_inbound×${pipelineCounts.inboundErrors}`);
+    if (pipelineCounts.outboundFailures) pipelineBits.push(`crm_out_failed×${pipelineCounts.outboundFailures}`);
+    if (pipelineCounts.crm5xx) pipelineBits.push(`crm_5xx×${pipelineCounts.crm5xx}`);
+    if (pipelineCounts.stuckEnrollments) pipelineBits.push(`fu_stuck×${pipelineCounts.stuckEnrollments}`);
+
+    const summary = [
+      newCritical.length > 0
+        ? `${newCritical.length} new critical issue${newCritical.length > 1 ? 's' : ''} across ${tenantIds.size} tenant${tenantIds.size > 1 ? 's' : ''} (${topCodes})`
+        : null,
+      pipelineBits.length > 0 ? `pipeline: ${pipelineBits.join(', ')}` : null,
+      'See /admin/tenant-health',
+    ]
+      .filter(Boolean)
+      .join('. ');
+
+    await this.notifyDevSms({
+      kind: 'health_sweep_critical',
+      message: summary,
+      context: {
+        newCriticalCount: newCritical.length,
+        tenantCount: tenantIds.size,
+        codeCounts,
+        pipelineCounts,
+      },
+    });
+  }
+
+  /**
+   * Cross-tenant health summary for the admin /admin/tenant-health page.
+   * Returns active issues across ALL tenants — admin-only consumer.
+   *
+   * Caller is responsible for admin guard. This method does NOT filter by
+   * caller userId — that's the whole point.
+   */
+  async getCrossTenantHealthSummary(): Promise<{
+    summary: {
+      totalActive: number;
+      critical: number;
+      warning: number;
+      tenantsAffected: number;
+      lastCheckedAt: Date | null;
+    };
+    byCode: Array<{ issueCode: string; count: number; status: string }>;
+    activeIssues: Array<{
+      id: string;
+      userId: string;
+      userEmail: string | null;
+      userName: string | null;
+      accountId: string;
+      accountName: string;
+      platform: string;
+      issueCode: string;
+      issueMessage: string;
+      status: string;
+      firstDetectedAt: Date;
+      lastDetectedAt: Date;
+      notificationCount: number;
+    }>;
+    recentDevAlerts: Array<{
+      id: string;
+      code: string | null;
+      message: string;
+      emailedAt: Date | null;
+      createdAt: Date;
+    }>;
+  }> {
+    const activeRows = await this.prisma.accountHealthStatus.findMany({
+      where: { isActive: true },
+      include: {
+        user: { select: { email: true, name: true } },
+        savedAccount: { select: { businessName: true } },
+      },
+      orderBy: [{ status: 'asc' }, { lastDetectedAt: 'desc' }],
+      take: 500,
+    });
+
+    const lastCheck = await this.prisma.accountHealthStatus.findFirst({
+      orderBy: { lastCheckedAt: 'desc' },
+      select: { lastCheckedAt: true },
+    });
+
+    const critical = activeRows.filter(r => r.status === 'critical').length;
+    const warning = activeRows.filter(r => r.status === 'warning').length;
+    const tenantsAffected = new Set(activeRows.map(r => r.userId)).size;
+
+    const codeMap = new Map<string, { count: number; status: string }>();
+    for (const r of activeRows) {
+      const cur = codeMap.get(r.issueCode);
+      if (cur) {
+        cur.count += 1;
+        if (r.status === 'critical') cur.status = 'critical';
+      } else {
+        codeMap.set(r.issueCode, { count: 1, status: r.status });
+      }
+    }
+    const byCode = Array.from(codeMap.entries())
+      .map(([issueCode, v]) => ({ issueCode, ...v }))
+      .sort((a, b) => b.count - a.count);
+
+    // Recent dev alerts — pull SystemErrorLog rows the dev SMS / email path
+    // wrote, so operator can see what's been paged about recently. Both
+    // category='other' code='dev_sms_*' and platform-level dev alerts qualify.
+    const recentDevAlerts = await this.prisma.systemErrorLog.findMany({
+      where: {
+        category: 'other',
+        emailedAt: { not: null },
+      },
+      orderBy: { emailedAt: 'desc' },
+      take: 20,
+      select: { id: true, code: true, message: true, emailedAt: true, createdAt: true },
+    });
+
+    return {
+      summary: {
+        totalActive: activeRows.length,
+        critical,
+        warning,
+        tenantsAffected,
+        lastCheckedAt: lastCheck?.lastCheckedAt ?? null,
+      },
+      byCode,
+      activeIssues: activeRows.map(r => ({
+        id: r.id,
+        userId: r.userId,
+        userEmail: (r as any).user?.email ?? null,
+        userName: (r as any).user?.name ?? null,
+        accountId: r.accountId,
+        accountName: (r as any).savedAccount?.businessName ?? r.platform,
+        platform: r.platform,
+        issueCode: r.issueCode,
+        issueMessage: r.issueMessage,
+        status: r.status,
+        firstDetectedAt: r.firstDetectedAt,
+        lastDetectedAt: r.lastDetectedAt,
+        notificationCount: r.notificationCount,
+      })),
+      recentDevAlerts,
+    };
   }
 
   // ==========================================

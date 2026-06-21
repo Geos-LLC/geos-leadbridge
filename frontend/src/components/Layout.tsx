@@ -5,7 +5,7 @@ import {
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
   DollarSign, Sparkles, Paperclip, Send, X, MessageSquare,
-  FileText,
+  FileText, Activity,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -415,6 +415,7 @@ export function Layout() {
     if (path === '/admin/billing') return 'Subscriptions & Billing';
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/admin/service-templates') return 'Service Templates';
+    if (path === '/admin/tenant-health') return 'Cross-Tenant Health';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
     if (path.startsWith('/partner-network')) return 'Partner Network Beta';
@@ -675,6 +676,7 @@ export function Layout() {
                 {renderNavItem({ icon: <DollarSign size={15} />, label: 'Subscriptions', path: '/admin/billing' })}
                 {renderNavItem({ icon: <Smartphone size={15} />, label: 'Tenant Numbers', path: '/admin/tenant-numbers' })}
                 {renderNavItem({ icon: <FileText size={15} />, label: 'Service Templates', path: '/admin/service-templates' })}
+                {renderNavItem({ icon: <Activity size={15} />, label: 'Tenant Health', path: '/admin/tenant-health' })}
                 {renderNavItem({ icon: <Inbox size={15} />, label: 'SMS History', path: '/sms-history' })}
                 {renderNavItem({ icon: <FlaskConical size={15} />, label: 'API Test', path: '/api-test' })}
               </>
@@ -769,12 +771,52 @@ export function Layout() {
                   >
                     <Menu size={20} />
                   </button>
-                  <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
-                    <BrandMark size={22} />
-                    <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>
-                      LeadBridge
-                    </span>
-                  </RouterLink>
+                  {/* Mobile topbar primary label. On /overview (home) we
+                      show the LeadBridge brand; everywhere else the page
+                      name + section gives the user spatial context per
+                      the design (e.g. "Settings Workspace", "Automation
+                      First Reply"). */}
+                  {location.pathname === '/overview' || location.pathname === '/' ? (
+                    <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
+                      <BrandMark size={22} />
+                      <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>
+                        LeadBridge
+                      </span>
+                    </RouterLink>
+                  ) : (
+                    <div className="lg:hidden flex items-baseline gap-2 min-w-0">
+                      <h1 style={{
+                        margin: 0, fontSize: 17, fontWeight: 800,
+                        letterSpacing: '-0.02em', color: 'var(--lb-ink-1)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{getPageName()}</h1>
+                      {(() => {
+                        const path = location.pathname;
+                        let sub = '';
+                        if (path === '/automation/respond')       sub = 'First Reply';
+                        else if (path === '/automation/engage')   sub = 'Follow-ups';
+                        else if (path === '/automation/convert')  sub = 'AI Conversation';
+                        else if (path === '/lead-activity')       sub = 'All sources';
+                        else if (path === '/settings') {
+                          const t = new URLSearchParams(location.search).get('tab') || 'general';
+                          const labels: Record<string,string> = {
+                            general: 'General', communication: 'Communication',
+                            hours: 'Business Hours', 'ai-playbook': 'AI Playbook',
+                            templates: 'Templates', team: 'Team',
+                            accounts: 'Connected Sources', billing: 'Billing',
+                            'partner-network': 'Partner Network',
+                          };
+                          sub = labels[t] || '';
+                        }
+                        return sub ? (
+                          <span style={{
+                            fontSize: 13, fontWeight: 500, color: 'var(--lb-ink-5)',
+                            whiteSpace: 'nowrap',
+                          }}>{sub}</span>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
                   {showBack ? (
                     <button
                       type="button"

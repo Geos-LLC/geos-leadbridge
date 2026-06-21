@@ -21,6 +21,7 @@ import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { PrismaService } from '../common/utils/prisma.service';
 import { YelpBackfillService, BackfillDryRunInput } from './yelp-backfill.service';
 import { AuditService } from '../common/audit/audit.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 import { RequiresSupportGrant } from './support-grants/decorators/requires-support-grant.decorator';
 import { PLATFORM_BULK_TENANT_ID } from './support-grants/support-grants.service';
 
@@ -34,6 +35,7 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly yelpBackfill: YelpBackfillService,
     private readonly auditService: AuditService,
+    private readonly monitoring: MonitoringService,
   ) {}
 
   @Get('users')
@@ -337,6 +339,54 @@ export class AdminController {
     }
     await this.leadCache.invalidateLeadMessagesAndList(lead.userId, leadId);
     return { success: true, leadId, userId: lead.userId };
+  }
+
+  // ==========================================================================
+  // Cross-tenant health (admin/tenant-health page) — feeds the cross-tenant
+  // warning system. Per-tenant emails already go to tenants from the hourly
+  // sweep; this surface is for the on-call dev to see what's still open.
+  // ==========================================================================
+
+  @Get('tenant-health')
+  @RequiresSupportGrant('errors:read')
+  async getTenantHealth(@Req() req: any) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'AccountHealthStatus',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
+    const data = await this.monitoring.getCrossTenantHealthSummary();
+    return { success: true, data };
+  }
+
+  @Post('tenant-health/run')
+  @RequiresSupportGrant('errors:read')
+  async runTenantHealthSweep(@Req() req: any) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'execute',
+      resourceType: 'AccountHealthStatus',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
+    // Don't await — the cron grabs an advisory lock so this returns fast even
+    // if it actually runs. Caller can refetch the summary after a few seconds.
+    this.monitoring.systemHealthCheck().catch(() => {});
+    return { success: true, triggered: true };
   }
 
   // ==========================================================================
