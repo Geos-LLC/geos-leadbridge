@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Loader2, Sparkles, X } from 'lucide-react';
+import { Check, Loader2, Sparkles, X } from 'lucide-react';
 import { createContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WizardChecklist, WizardStep } from '../../types';
@@ -271,7 +271,7 @@ export default function WizardShell({
               background: 'var(--lb-surface)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
-              color: 'var(--lb-ink-4)',
+              color: 'var(--lb-ink-5)',
               flexShrink: 0,
               fontFamily: 'inherit',
             }}
@@ -326,10 +326,10 @@ export default function WizardShell({
               onClick={onBack}
               disabled={saving}
               style={{
-                padding: '10px 16px',
+                padding: '10px 18px',
                 borderRadius: 10,
                 border: '1px solid var(--lb-line)',
-                background: 'var(--lb-surface)',
+                background: '#fff',
                 color: 'var(--lb-ink-3)',
                 fontSize: 13, fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer',
@@ -372,29 +372,36 @@ export default function WizardShell({
                   Skip this step
                 </button>
               )}
-              {onContinue && (
-                <button
-                  type="button"
-                  onClick={onContinue}
-                  disabled={continueDisabled || saving}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '10px 22px',
-                    borderRadius: 10,
-                    border: 0,
-                    background: 'var(--lb-accent)',
-                    color: 'var(--lb-accent-fg)',
-                    fontSize: 13, fontWeight: 700,
-                    cursor: (continueDisabled || saving) ? 'not-allowed' : 'pointer',
-                    fontFamily: 'inherit',
-                    opacity: (continueDisabled || saving) ? 0.5 : 1,
-                  }}
-                >
-                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                  {saving ? 'Saving…' : continueLabel}
-                  {!saving && <ArrowRight size={14} />}
-                </button>
-              )}
+              {onContinue && (() => {
+                // Bundle uses green for the final "Finish" button, accent
+                // blue for the intermediate "Continue". Detect by label so
+                // existing callers (SetupWizard passes "Finish" on the last
+                // step) get the right color without a new prop.
+                const isFinish = /finish/i.test(continueLabel);
+                const bg = isFinish ? 'var(--lb-success)' : 'var(--lb-accent)';
+                return (
+                  <button
+                    type="button"
+                    onClick={onContinue}
+                    disabled={continueDisabled || saving}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '10px 22px',
+                      borderRadius: 10,
+                      border: 0,
+                      background: bg,
+                      color: '#fff',
+                      fontSize: 13, fontWeight: 700,
+                      cursor: (continueDisabled || saving) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit',
+                      opacity: (continueDisabled || saving) ? 0.5 : 1,
+                    }}
+                  >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {saving ? 'Saving…' : continueLabel}
+                  </button>
+                );
+              })()}
             </>
           )}
         </div>
