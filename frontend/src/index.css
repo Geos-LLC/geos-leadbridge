@@ -257,18 +257,25 @@ h1, h2, h3, h4 {
     flex-direction: column !important;
   }
 
-  /* ─── Setup wizard mobile pass — matches LeadBridge Wizard Bundle ───
+  /* ─── Setup wizard mobile pass ──────────────────────────────────────
      The 248px navy rail is already hidden on small screens via the
-     `hidden md:flex` Tailwind class on the <aside>. The bundle keeps
-     the right pane's 28px gutters + 19px title size unchanged on
-     phones — only the rail visibility flips and the footer gets extra
-     bottom padding to clear the iOS home-bar safe area. The header
-     border, the title typography, and the body padding all stay at
-     their desktop values. */
+     `hidden md:flex` Tailwind class on the <aside>. Side gutters in
+     the right pane drop from 28px (desktop) to 16px on phones —
+     28px left ~337px of usable content on a 393px viewport which
+     felt too narrow in practice. Vertical paddings stay close to
+     desktop so the chrome rhythm doesn't change. Footer adds extra
+     bottom padding to clear iOS / Android safe areas. */
   .lb-wizard-step-indicator {
     display: block !important;
   }
+  .lb-wizard-pane-header {
+    padding: 18px 16px 14px !important;
+  }
+  .lb-wizard-body {
+    padding: 18px 16px !important;
+  }
   .lb-wizard-footer {
-    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 24px) !important;
+    padding: 14px 16px !important;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 14px) !important;
   }
 }
