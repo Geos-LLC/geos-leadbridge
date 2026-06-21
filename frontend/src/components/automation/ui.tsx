@@ -227,7 +227,7 @@ export function BigToggle({
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
-  mixed, mixedTooltip,
+  mixed, mixedTooltip, compact,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -240,34 +240,51 @@ export function SettingCard({
   contentPad?: CSSProperties['padding'];
   mixed?: boolean;
   mixedTooltip?: string;
+  /** Tightens chrome for in-wizard usage — smaller padding, lighter
+      border, 14px title — matches the LeadBridge Wizard Bundle's
+      compact card design. Settings pages keep the full-size default. */
+  compact?: boolean;
 }) {
   return (
     <div style={{
       background: 'white',
-      border: '1.5px solid var(--lb-line)',
-      borderRadius: 14,
-      boxShadow: '0 1px 2px rgba(10,21,48,0.03)',
+      border: compact ? '1px solid var(--lb-line)' : '1.5px solid var(--lb-line)',
+      borderRadius: compact ? 12 : 14,
+      boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
-        display: 'flex', alignItems: 'flex-start', gap: 14,
-        padding: '20px 24px',
+        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
+        padding: compact ? '15px 16px' : '20px 24px',
       }}>
-        <IconTile icon={icon} tone={iconTone} size="lg" />
+        <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
+            <div style={{
+              fontSize: compact ? 14 : 17,
+              fontWeight: 700, color: 'var(--lb-ink-1)',
+              letterSpacing: '-0.01em',
+            }}>{title}</div>
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
-          {subtitle && <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>{subtitle}</div>}
+          {subtitle && <div style={{
+            fontSize: compact ? 12 : 13.5,
+            color: 'var(--lb-ink-5)', marginTop: 2,
+          }}>{subtitle}</div>}
         </div>
         {headerRight}
         {onToggle && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            gap: compact ? 0 : 10,
+            paddingTop: compact ? 0 : 2,
+          }}>
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
-              {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
-            </span>
+            {!compact && (
+              <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
+                {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
+              </span>
+            )}
           </div>
         )}
       </div>

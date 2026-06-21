@@ -106,6 +106,16 @@ h1, h2, h3, h4 {
    hidden. Default-hidden here so it never paints on desktop. */
 .lb-wizard-step-indicator { display: none; }
 
+/* Generic wizard section card — matches the LeadBridge Wizard Bundle's
+   plain white card chrome. Used by step bodies that previously rendered
+   on a slate-50/50 wash; the new look is a flat white card with a
+   single `--lb-line` border. Tailwind's `border` utility supplies the
+   1px stroke; the color hop happens here so callers don't need an
+   inline `style={{borderColor}}` workaround. */
+.lb-wiz-card {
+  border-color: var(--lb-line) !important;
+}
+
 /* Lead Activity status-filter row hides its scrollbar across browsers.
    The row is horizontally scrollable so every tab stays reachable at
    any width; the scrollbar would otherwise eat 8–12px of vertical

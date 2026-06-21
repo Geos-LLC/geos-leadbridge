@@ -432,6 +432,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             below deep-links there. */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <SettingCard
+            compact
             icon={MessageSquareText}
             iconTone="blue"
             title="Instant Reply"
@@ -442,6 +443,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           />
 
           <SettingCard
+            compact
             icon={MessageCircle}
             iconTone="green"
             title="Instant Text"
@@ -452,6 +454,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           />
 
           <SettingCard
+            compact
             icon={Phone}
             iconTone="purple"
             title="Instant Call"
@@ -494,6 +497,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                 the wizard (still editable later on Automation) so users
                 aren't asked about it during a fast first-run setup. */}
             <SettingCard
+              compact
               icon={Clock}
               iconTone="blue"
               title="Timing"
@@ -527,6 +531,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.fuReEnrollOnSilence}
               onToggle={v => setOpts(o => ({ ...o, fuReEnrollOnSilence: v }))}
               contentPad="0 24px 16px"
+              compact
             >
               <FieldRow
                 label="Wait before resuming"
@@ -551,6 +556,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.aiDeferralCheckIn}
               onToggle={v => setOpts(o => ({ ...o, aiDeferralCheckIn: v }))}
               contentPad="0 24px 16px"
+              compact
             >
               <FieldRow
                 label="Send check-in after"
@@ -575,6 +581,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.aiHiredCompetitorReengage}
               onToggle={v => setOpts(o => ({ ...o, aiHiredCompetitorReengage: v }))}
               contentPad="0 24px 16px"
+              compact
             >
               <FieldRow
                 label="Send re-engage after"

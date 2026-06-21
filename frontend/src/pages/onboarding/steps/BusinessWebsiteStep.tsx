@@ -499,7 +499,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
-      <section className="mt-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+      <section className="mt-2 rounded-xl border bg-white p-5 lb-wiz-card">
         <div className="flex items-center gap-2 mb-1">
           <Phone className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">Business phone</h2>
@@ -597,7 +597,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
       </section>
 
       {/* ─── 2. LeadBridge phone (TenantPhoneNumber) ─────────────── */}
-      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
         <div className="flex items-center gap-2 mb-1">
           <Phone className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
@@ -749,7 +749,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, savin
               Playbook + FAQ.
           Replaces the two prior sections (Website URL + Thumbtack
           profile URLs). */}
-      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
+      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
         <div className="flex items-center gap-2 mb-1">
           <Globe className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">Business profile or website</h2>
