@@ -278,4 +278,100 @@ h1, h2, h3, h4 {
     padding: 14px 16px !important;
     padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 14px) !important;
   }
+
+  /* ─── LeadBridge Automation Bundle — mobile pass ────────────────────
+     Ported verbatim from the bundle's <=760px @media block. The
+     attribute selectors (`[style*="padding: 20px 24px"]` etc.) target
+     SettingCard / FieldRow / SectionCard inline styles directly, so
+     the existing components compress without per-component prop work.
+     Together they replicate the bundle's full-bleed mobile feel:
+     14/12 page gutters, 13/16 card insets, smaller section headers,
+     stacked option pairs + qualifier grids, scrollable account tabs,
+     1-col rule cards. */
+  .lb-pad {
+    padding: 14px 12px 96px !important;
+  }
+  .lb-pagehead h1,
+  .lb-pagehead h2,
+  .lb-page-header h1,
+  .lb-page-header h2 {
+    font-size: 21px !important;
+  }
+  /* SettingCard / SectionCard inner paddings */
+  .lb-pad [style*="padding: 20px 24px"] { padding: 13px 16px !important; }
+  .lb-pad [style*="padding: 18px 24px"] { padding: 13px 16px !important; }
+  .lb-pad [style*="padding: 18px 20px"] { padding: 13px 16px !important; }
+  .lb-pad [style*="padding: 16px 20px"] { padding: 12px 16px !important; }
+  .lb-pad [style*="padding: 8px 24px 24px"] { padding: 2px 16px 13px !important; }
+  .lb-pad [style*="padding: 6px 24px 18px"] { padding: 2px 16px 12px !important; }
+  .lb-pad [style*="padding: 20px 24px 8px"] { padding: 13px 16px 6px !important; }
+  .lb-pad [style*="padding: 20px 24px 24px"] { padding: 13px 16px 14px !important; }
+  .lb-pad [style*="padding: 22px 24px 24px"] { padding: 14px 16px 14px !important; }
+  .lb-pad [style*="padding: 40px 24px"] { padding: 26px 16px !important; }
+  /* Inner card gaps tighten */
+  .lb-pad [style*="gap: 20px"] { gap: 12px !important; }
+  .lb-pad [style*="gap: 18px"] { gap: 12px !important; }
+  .lb-pad [style*="gap: 16px"] { gap: 11px !important; }
+  /* Card section sub-headers smaller */
+  .lb-pad [style*="font-size: 17px"] { font-size: 15px !important; }
+  /* Group-header margins collapse */
+  .lb-pad [style*="margin-top: 22px"] { margin-top: 13px !important; }
+  .lb-pad [style*="margin-top: 18px"] { margin-top: 12px !important; }
+  .lb-pad [style*="margin: 22px 0 12px"] { margin-top: 13px !important; margin-bottom: 9px !important; }
+  .lb-pad [style*="margin-bottom: 14px"] { margin-bottom: 10px !important; }
+  /* Field rows: tighter vertical insets */
+  .lb-row {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+  /* Account tabs: horizontal scroll (in addition to the existing
+     lb-settings-tabs / lb-account-tabs rules above). */
+  .lb-tabscroll {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .lb-tabscroll::-webkit-scrollbar { display: none; }
+  .lb-tabscroll > * { flex: 0 0 auto !important; }
+  /* Conversation Goal / Qualify grids reflow to 1-col on phone */
+  .lb-strat { grid-template-columns: 1fr !important; }
+  .lb-strat > button {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 9px !important;
+    padding: 11px 13px !important;
+  }
+  .lb-qual { grid-template-columns: 1fr !important; }
+  /* Rule cards (Resume / Deferral / Hired competitor) collapse 3-col -> 1-col */
+  .lb-rule {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+  .lb-rule > div:nth-child(2) {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+  .lb-rule > div:nth-child(2) > div:first-child {
+    margin-bottom: 0 !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+  .lb-rule > div:nth-child(2) > select {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+  /* Hide the AI tip column on the right of each rule row at mobile */
+  .lb-rule > div:nth-child(3) { display: none !important; }
+}
+
+/* Tiny phones (<=430px) shrink icon tiles further so card rows stay
+   single-line. Targets the bundle's recurring tile sizes. */
+@media (max-width: 430px) {
+  .lb-pad [style*="width: 46px"][style*="height: 46px"] { width: 38px !important; height: 38px !important; }
+  .lb-pad [style*="width: 44px"][style*="height: 44px"] { width: 36px !important; height: 36px !important; }
+  .lb-pad [style*="width: 42px"][style*="height: 42px"] { width: 34px !important; height: 34px !important; }
+  .lb-pad [style*="width: 38px"][style*="height: 38px"] { width: 32px !important; height: 32px !important; }
+  .lb-pad [style*="width: 36px"][style*="height: 36px"] { width: 32px !important; height: 32px !important; }
+  .lb-pad [style*="width: 34px"][style*="height: 34px"] { width: 30px !important; height: 30px !important; }
 }
