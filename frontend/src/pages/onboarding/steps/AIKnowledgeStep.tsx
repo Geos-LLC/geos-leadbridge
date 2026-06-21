@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ExternalLink, Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
 import { thumbtackApi } from '../../../services/api';
@@ -83,20 +83,16 @@ export default function AIKnowledgeStep({ onSaveContinue, saving, setSaving }: P
           type="button"
           onClick={() => void handleContinue()}
           disabled={saving}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+          style={{
+            padding: '10px 22px', borderRadius: 10,
+            border: 0, background: 'var(--lb-accent)', color: '#fff',
+            fontSize: 13, fontWeight: 700,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            opacity: saving ? 0.5 : 1,
+            fontFamily: 'inherit',
+          }}
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? 'Continuing…' : 'Save & Continue'}
-          {!saving && <ArrowRight className="w-4 h-4" />}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/settings?tab=ai-playbook')}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
-        >
-          Advanced FAQ &amp; AI settings
-          <ExternalLink className="w-3.5 h-3.5" />
+          {saving ? 'Continuing…' : 'Continue'}
         </button>
       </WizardStepActions>
 

@@ -358,25 +358,16 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           onClick={() => void apply()}
           disabled={saving}
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '10px 20px', fontSize: 13.5, fontWeight: 700,
-            background: 'var(--lb-accent)', color: 'white',
-            border: 0, borderRadius: 10,
+            padding: '10px 22px', borderRadius: 10,
+            border: 0, background: 'var(--lb-accent)', color: '#fff',
+            fontSize: 13, fontWeight: 700,
             cursor: saving ? 'not-allowed' : 'pointer',
-            opacity: saving ? 0.6 : 1,
+            opacity: saving ? 0.5 : 1,
             fontFamily: 'inherit',
-            transition: 'background 120ms',
           }}
         >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-          {saving ? 'Saving…' : 'Save & Continue'}
-          {!saving && <ArrowRight size={14} />}
+          {saving ? 'Saving…' : 'Continue'}
         </button>
-        {cascadeNote && (
-          <span style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>
-            Applies to all connected accounts.
-          </span>
-        )}
       </WizardStepActions>
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}

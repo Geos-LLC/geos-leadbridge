@@ -1,6 +1,5 @@
-import { ArrowRight, Check, Loader2, Settings as SettingsIcon } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { authApi, onboardingApi, thumbtackApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
 import { useAuthStore } from '../../../store/authStore';
@@ -26,7 +25,6 @@ const COMPLETION_ITEMS: { step: WizardStep; label: string }[] = [
 ];
 
 export default function DoneStep({ checklist, onFinish, saving }: Props) {
-  const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   const storeAccounts = useAppStore(s => s.savedAccounts);
@@ -108,19 +106,16 @@ export default function DoneStep({ checklist, onFinish, saving }: Props) {
           type="button"
           onClick={onFinish}
           disabled={saving}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+          style={{
+            padding: '10px 22px', borderRadius: 10,
+            border: 0, background: 'var(--lb-success)', color: '#fff',
+            fontSize: 13, fontWeight: 700,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            opacity: saving ? 0.5 : 1,
+            fontFamily: 'inherit',
+          }}
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? 'Finishing…' : 'Go to Dashboard'}
-          {!saving && <ArrowRight className="w-4 h-4" />}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
-        >
-          <SettingsIcon className="w-4 h-4" />
-          Explore settings
+          {saving ? 'Finishing…' : 'Finish'}
         </button>
       </WizardStepActions>
 
