@@ -66,6 +66,17 @@ html, body {
   letter-spacing: -0.005em;
 }
 
+/* Defensive overflow guard — any in-page element that exceeds the
+   viewport width (long unbreakable text in a flex child without
+   min-width:0, a wide table, etc.) would otherwise drag the whole
+   document into horizontal scroll on mobile. Clipping at <html> hides
+   the scrollbar without affecting vertical scroll. The Lead Activity
+   composer / wizard scrim use their own `position: fixed` overlays so
+   they're unaffected by this clip. */
+html {
+  overflow-x: hidden;
+}
+
 h1, h2, h3, h4 {
   font-family: var(--lb-font-sans);
   font-weight: 700;
