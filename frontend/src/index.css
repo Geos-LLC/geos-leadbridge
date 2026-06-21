@@ -247,34 +247,18 @@ h1, h2, h3, h4 {
     flex-direction: column !important;
   }
 
-  /* ─── Setup wizard mobile pass ──────────────────────────────────────
+  /* ─── Setup wizard mobile pass — matches LeadBridge Wizard Bundle ───
      The 248px navy rail is already hidden on small screens via the
-     `hidden md:flex` Tailwind class on the <aside>. Mobile chrome
-     matches the design: STEP eyebrow takes the rail's role, the title
-     gets a touch larger, and the header drops its bottom border so the
-     thin progress bar reads as a continuation of the header instead of
-     a separate strip. */
-  .lb-wizard-pane-header {
-    padding: 16px 16px 14px !important;
-    gap: 12px !important;
-    border-bottom: 0 !important;
-  }
+     `hidden md:flex` Tailwind class on the <aside>. The bundle keeps
+     the right pane's 28px gutters + 19px title size unchanged on
+     phones — only the rail visibility flips and the footer gets extra
+     bottom padding to clear the iOS home-bar safe area. The header
+     border, the title typography, and the body padding all stay at
+     their desktop values. */
   .lb-wizard-step-indicator {
     display: block !important;
   }
-  .lb-wizard-title {
-    font-size: 24px !important;
-    line-height: 1.2 !important;
-    letter-spacing: -0.025em !important;
-  }
-  .lb-wizard-subtitle {
-    font-size: 13px !important;
-    margin-top: 6px !important;
-  }
-  .lb-wizard-body {
-    padding: 18px 16px !important;
-  }
   .lb-wizard-footer {
-    padding: 12px 16px !important;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 24px) !important;
   }
 }

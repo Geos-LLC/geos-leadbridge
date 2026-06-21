@@ -237,25 +237,25 @@ export default function WizardShell({
                 the title. CSS toggles visibility (display:none until the
                 breakpoint hits) — see `.lb-wizard-step-indicator`. */}
             <div className="lb-wizard-step-indicator" style={{
-              fontSize: 11, fontWeight: 700,
+              fontSize: 10, fontWeight: 700,
               color: 'var(--lb-accent)',
               fontFamily: 'var(--lb-font-mono)',
               textTransform: 'uppercase',
-              letterSpacing: '0.12em',
-              marginBottom: 8,
+              letterSpacing: '0.1em',
+              marginBottom: 4,
             }}>
               Step {currentIndex + 1} of {totalSteps}
             </div>
             <h2 className="lb-wizard-title" style={{
               margin: 0,
-              fontSize: 21, fontWeight: 700, color: 'var(--lb-ink-1)',
+              fontSize: 19, fontWeight: 800, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.02em',
             }}>
               {currentMeta.title}
             </h2>
             <p className="lb-wizard-subtitle" style={{
-              margin: '5px 0 0',
-              fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+              margin: '4px 0 0',
+              fontSize: 13, color: 'var(--lb-ink-5)', lineHeight: 1.5,
             }}>
               {currentMeta.description}
             </p>
@@ -313,9 +313,9 @@ export default function WizardShell({
         <div
           className="lb-wizard-footer"
           style={{
-            padding: '14px 28px',
+            padding: '16px 28px',
             borderTop: '1px solid var(--lb-line-soft)',
-            display: 'flex', alignItems: 'center', gap: 10,
+            display: 'flex', alignItems: 'center', gap: 12,
             flexShrink: 0,
             background: 'var(--lb-surface)',
           }}

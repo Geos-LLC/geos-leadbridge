@@ -917,7 +917,7 @@ export function Layout() {
                 className="fixed inset-0"
                 style={{
                   background: 'rgba(10,21,48,0.45)',
-                  backdropFilter: 'blur(2px)',
+                  backdropFilter: 'blur(3px)',
                   zIndex: 70,
                 }}
                 aria-hidden
