@@ -461,9 +461,12 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Greeting */}
-      <div>
+      {/* Greeting — at mobile widths this renders as a hero (large bold
+          "Overview" title under a mono eyebrow + subtitle), per the
+          design. Desktop keeps the compact greeting block it had before. */}
+      <div className="lb-hero">
         <p
+          className="lb-hero-eyebrow"
           style={{
             fontSize: 11,
             color: 'var(--lb-accent)',
@@ -476,10 +479,10 @@ export function Dashboard() {
         >
           Good {greeting}, {user?.name || 'User'}
         </p>
-        <h2 style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+        <h2 className="lb-hero-title" style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
           Overview
         </h2>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+        <p className="lb-hero-sub" style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
           Leadbridge captured {stats.yelp.leadsToday + stats.thumbtack.leadsToday} new lead{(stats.yelp.leadsToday + stats.thumbtack.leadsToday) !== 1 ? 's' : ''} today.
         </p>
       </div>
