@@ -435,7 +435,7 @@ export function Dashboard() {
   });
 
   return (
-    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
+    <div className="lb-pad" style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
       {/* OAuth error banner */}
       {oauthError && (
         <div

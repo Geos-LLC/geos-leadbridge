@@ -80,21 +80,10 @@ h1, h2, h3, h4 {
   font-weight: 700;
 }
 
-/* Setup button stays full-text down to small phones. Only at very
-   narrow widths (<=420px), where even the LeadBridge logo + a full
-   "Setup" pill can't co-fit a long page name, does it collapse to a
-   36px icon-only circle. Above 420 the label stays visible per design. */
-@media (max-width: 420px) {
-  .lb-setup-btn {
-    padding: 0 !important;
-    width: 36px;
-    height: 36px;
-    gap: 0 !important;
-  }
-  .lb-setup-btn .lb-setup-label {
-    display: none;
-  }
-}
+/* Setup button keeps the full "✦ Setup" pill at every width. The
+   topbar only carries the hamburger + LeadBridge logo on mobile (no
+   page-title h1 below `lg:`), so a 380px viewport fits the pill with
+   room to spare — no need to collapse it to an icon. */
 
 /* ─── Responsive: AI launcher tucks down ≤560px ─── */
 @media (max-width: 560px) {
