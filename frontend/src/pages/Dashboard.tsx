@@ -574,7 +574,7 @@ export function Dashboard() {
               <Kpi
                 label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
                 value={loading ? '—' : splitValue(p => `${stats[p].conversionRate}%`)}
-                delta={loading ? undefined : 'all-time · of leads replied'}
+                delta={loading ? undefined : 'all-time'}
                 deltaDir="up"
                 loading={loading}
                 muted
