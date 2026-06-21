@@ -243,13 +243,23 @@ export function Dashboard() {
         notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as any[] })),
       ]);
 
+      // Compact response-time formatter — keeps the metric to a 2-digit
+      // integer at most so the stats grid never wraps on a narrow screen:
+      //   < 1 min  -> "Xs"
+      //   < 1 hour -> "Xm"
+      //   1–10 hr  -> "X,Yh" with European decimal comma (one digit after)
+      //               but drops the ",0" for clean whole hours
+      //   >= 10 hr -> "Xh" (rounded — no fractional component)
       const formatDuration = (minutes: number): string => {
         if (!minutes || minutes <= 0) return '—';
         if (minutes < 1) return `${Math.round(minutes * 60)}s`;
         if (minutes < 60) return `${Math.round(minutes)}m`;
-        const hours = Math.floor(minutes / 60);
-        const mins = Math.round(minutes % 60);
-        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        const hours = minutes / 60;
+        if (hours >= 10) return `${Math.round(hours)}h`;
+        const oneDecimal = Math.round(hours * 10) / 10;
+        return Number.isInteger(oneDecimal)
+          ? `${oneDecimal}h`
+          : `${oneDecimal.toFixed(1).replace('.', ',')}h`;
       };
 
       // Build account-id → platform lookup so we can split notification-rule
