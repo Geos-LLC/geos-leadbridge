@@ -41,7 +41,10 @@ export type CreateTemplateInput = GeneratedTemplate & {
 };
 
 /** What `PATCH /v1/admin/service-templates/:id` accepts. All fields
- *  optional so admins can edit just the slices they reviewed. */
+ *  optional so admins can edit just the slices they reviewed.
+ *  The four v1 fields at the bottom were silently dropped by the
+ *  PATCH handler before — admins could see them in code-seeded rows
+ *  but couldn't edit them via API. */
 export type PatchTemplateInput = {
   label?: string;
   provider?: string;
@@ -51,6 +54,12 @@ export type PatchTemplateInput = {
   serviceOptionsJson?: unknown;
   pricingJson?: unknown;
   customerAnswersJson?: unknown;
+  // v1 fields used by the runtime ServiceProfile reader. Accepted here
+  // so a future v1-aware admin editor can write them too.
+  qualificationSchemaJson?: unknown;
+  faqJson?: unknown;
+  serviceRules?: unknown;
+  aliases?: unknown;
 };
 
 /** Coerce admin-provided JSON to a string for storage. We accept either
@@ -216,6 +225,15 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
     if (patch.customerAnswersJson !== undefined) {
       data.customerAnswersJson = toJsonString(patch.customerAnswersJson);
     }
+    // v1 fields — silently dropped before this fix. Same toJsonString
+    // coercion as the v2 fields so storage stays uniform whether the
+    // admin sent a parsed object or a pre-stringified blob.
+    if (patch.qualificationSchemaJson !== undefined) {
+      data.qualificationSchemaJson = toJsonString(patch.qualificationSchemaJson);
+    }
+    if (patch.faqJson !== undefined) data.faqJson = toJsonString(patch.faqJson);
+    if (patch.serviceRules !== undefined) data.serviceRules = toJsonString(patch.serviceRules);
+    if (patch.aliases !== undefined) data.aliases = toJsonString(patch.aliases);
     return this.prisma.serviceTemplatePreset.update({
       where: { id: templateId },
       data,

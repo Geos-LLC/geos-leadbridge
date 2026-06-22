@@ -171,9 +171,16 @@ export default function AdminServiceTemplates() {
   };
 
   const handleSaveDraft = async () => {
-    if (!draft.sourceJson) {
-      notify.error('Generate first', 'Click "Generate Template" before saving.');
-      return;
+    // Creating a new template requires going through Generate first so
+    // there's something to save. When editing, the JSON textareas are
+    // already populated from the loaded template — sourceJson stays
+    // whatever it was (code_preset_seed or admin_generated) and we
+    // don't gate Save on it.
+    if (!editingId) {
+      if (!draft.sourceJson) {
+        notify.error('Generate first', 'Click "Generate Template" before saving.');
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -200,7 +207,7 @@ export default function AdminServiceTemplates() {
           serviceOptionsJson: safeParse(draft.serviceOptionsJson),
           pricingJson: safeParse(draft.pricingJson),
           customerAnswersJson: safeParse(draft.customerAnswersJson),
-          sourceJson: draft.sourceJson,
+          sourceJson: draft.sourceJson!,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
       }
@@ -362,49 +369,75 @@ export default function AdminServiceTemplates() {
           </Field>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
-          <Field label="Service Options (paste)">
-            <textarea
-              value={draft.rawOptionsText}
-              onChange={(e) => setDraft({ ...draft, rawOptionsText: e.target.value })}
-              rows={10}
-              style={textareaStyle}
-              placeholder={'Which types of stains do you clean?\n- Pet stains\n- Food stains\n- Drink stains\n\nHow many rooms?\n- 1 room\n- 2 rooms\n- 3 rooms'}
-            />
-          </Field>
-          <Field label="Pricing (paste)">
-            <textarea
-              value={draft.rawPricingText}
-              onChange={(e) => setDraft({ ...draft, rawPricingText: e.target.value })}
-              rows={10}
-              style={textareaStyle}
-              placeholder={'1 room Avg. $79\n2 rooms Avg. $103\n3 rooms Avg. $132\n\nAdd-ons:\nCleaning 1 flight of stairs\nCleaning stains'}
-            />
-          </Field>
-        </div>
+        {/* Paste + Generate workflow is for CREATING templates only.
+            When editing an existing template, the JSON textareas below
+            are the source of truth — showing the paste fields here lets
+            admins type into them and click Save without realising
+            their changes never get translated into the JSON (Save only
+            sends the JSON textareas, not raw text). Hide entirely on
+            edit so the only path is editing the JSON directly. */}
+        {!editingId && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
+              <Field label="Service Options (paste)">
+                <textarea
+                  value={draft.rawOptionsText}
+                  onChange={(e) => setDraft({ ...draft, rawOptionsText: e.target.value })}
+                  rows={10}
+                  style={textareaStyle}
+                  placeholder={'Which types of stains do you clean?\n- Pet stains\n- Food stains\n- Drink stains\n\nHow many rooms?\n- 1 room\n- 2 rooms\n- 3 rooms'}
+                />
+              </Field>
+              <Field label="Pricing (paste)">
+                <textarea
+                  value={draft.rawPricingText}
+                  onChange={(e) => setDraft({ ...draft, rawPricingText: e.target.value })}
+                  rows={10}
+                  style={textareaStyle}
+                  placeholder={'1 room Avg. $79\n2 rooms Avg. $103\n3 rooms Avg. $132\n\nAdd-ons:\nCleaning 1 flight of stairs\nCleaning stains'}
+                />
+              </Field>
+            </div>
 
-        <Field label="Notes (optional, stored in sourceJson)">
-          <textarea
-            value={draft.notes}
-            onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-            rows={2}
-            style={textareaStyle}
-            placeholder="Anything to remember about how this template was built"
-          />
-        </Field>
+            <Field label="Notes (optional, stored in sourceJson)">
+              <textarea
+                value={draft.notes}
+                onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                rows={2}
+                style={textareaStyle}
+                placeholder="Anything to remember about how this template was built"
+              />
+            </Field>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={!canGenerate || generating}
-            style={primaryBtn(!canGenerate || generating)}
-          >
-            {generating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={14} />}
-            {' '}
-            Generate Template
-          </button>
-        </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={!canGenerate || generating}
+                style={primaryBtn(!canGenerate || generating)}
+              >
+                {generating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={14} />}
+                {' '}
+                Generate Template
+              </button>
+            </div>
+          </>
+        )}
+
+        {editingId && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 12px',
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: 8,
+            fontSize: 13,
+            color: '#1e40af',
+          }}>
+            Editing an existing template — make changes to the JSON below and click <strong>Save changes</strong>.
+            To start over from a fresh Thumbtack paste, click <strong>Cancel edit</strong>.
+          </div>
+        )}
 
         {/* Generated JSON preview */}
         {draft.sourceJson && (
