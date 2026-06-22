@@ -478,7 +478,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
           Your primary owner/company number. Used for owner alerts and auto-registered
           as the primary associate phone on connected Thumbtack businesses.
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 lb-wiz-inline-save">
           <input
             type="tel"
             inputMode="tel"
@@ -743,7 +743,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
           location, insurance, pricing, and more into your AI Playbook + FAQ.
         </p>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 lb-wiz-inline-save">
           <div className="relative flex-1 min-w-0">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
               <Globe className="w-4 h-4" />

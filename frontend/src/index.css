@@ -289,6 +289,50 @@ h1, h2, h3, h4 {
   .lb-wizard-footer {
     padding: 14px 16px !important;
     padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 14px) !important;
+    /* When Back + Skip + portal Continue all land in the footer at
+       393px the row can crowd. Allow wrap so the right cluster falls
+       to a second line cleanly instead of clipping the Continue CTA. */
+    flex-wrap: wrap !important;
+  }
+
+  /* Wizard Automation step — section headers ("First reply", "Timing &
+     follow-ups") drop from 18/700 to the bundle's 16/800 on phones so
+     the wizard's section rhythm matches the bundle mock at 393px. */
+  .lb-wiz-section-h2 {
+    font-size: 16px !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+  }
+  .lb-wiz-section-sub {
+    font-size: 12.5px !important;
+  }
+
+  /* RadioCardSection grids — bundle keeps Conversation Goal as 2-col
+     even at 393px (auto-fit minmax 220 would collapse to 1-col below
+     ~440px). Force 1fr 1fr on phones for 2-col, and 1-col for the
+     single-column lists (AI Response Mode). */
+  .lb-wiz-strat-2 {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .lb-wiz-strat-1 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* BusinessWebsiteStep input + Save button rows — the `flex
+     items-center gap-2` rows squeeze the Save button at 393px. Let
+     them wrap so the button drops to its own row when needed.
+     Targets BOTH bare inputs and inputs wrapped in `<div class="relative">`
+     (the iconified profile URL field). */
+  .lb-wiz-inline-save {
+    flex-wrap: wrap !important;
+  }
+  .lb-wiz-inline-save > input,
+  .lb-wiz-inline-save > div {
+    min-width: 0 !important;
+    flex: 1 1 100% !important;
+  }
+  .lb-wiz-inline-save > button {
+    flex: 0 0 auto !important;
   }
 
   /* ─── LeadBridge Automation Bundle — mobile pass ────────────────────

@@ -406,13 +406,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           settings page; the wizard's footer banner points there. */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ marginBottom: 14 }}>
-          <h2 style={{
+          <h2 className="lb-wiz-section-h2" style={{
             margin: 0, fontSize: 18, fontWeight: 700,
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>
             First reply
           </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
+          <p className="lb-wiz-section-sub" style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
             What happens automatically when a new lead arrives.
           </p>
         </div>
@@ -460,13 +460,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
       {/* ─── Fine-tune section ──────────────────────────────────────────── */}
       <div>
         <div style={{ marginBottom: 18 }}>
-          <h2 style={{
+          <h2 className="lb-wiz-section-h2" style={{
             margin: 0, fontSize: 18, fontWeight: 700,
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>
             Timing &amp; follow-ups
           </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
+          <p className="lb-wiz-section-sub" style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
             All of these are editable later on Automation. Defaults are tuned for the trial.
           </p>
         </div>
@@ -909,6 +909,12 @@ function RadioCardSection<T extends string>({
     onClick: () => void;
   };
 }) {
+  // Class hook drives the phone-width column count. Bundle keeps the
+  // 2-up grid (Conversation Goal) at 393px instead of letting the
+  // auto-fit minmax collapse to 1-col below ~440px; the `.lb-wiz-strat-2`
+  // rule in index.css forces `1fr 1fr` at <=760px. Single-col sections
+  // (AI Response Mode) get `.lb-wiz-strat-1` for symmetry.
+  const gridClass = columns === 1 ? 'lb-wiz-strat-1' : 'lb-wiz-strat-2';
   const gridStyle: CSSProperties = columns === 1
     ? { display: 'grid', gridTemplateColumns: '1fr', gap: 10 }
     : { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 };
@@ -938,7 +944,7 @@ function RadioCardSection<T extends string>({
           </div>
         </div>
       </div>
-      <div style={gridStyle}>
+      <div className={gridClass} style={gridStyle}>
         {options.map(opt => {
           const selected = opt.value === value;
           const Icon2 = opt.icon;
