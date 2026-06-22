@@ -39,6 +39,7 @@ import {
   type ServiceProfile,
 } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
+import { useSelectedAccount } from '../../hooks/useSelectedAccount';
 import { notify } from '../../store/notificationStore';
 // PR-D.3 — Service tab branches the pricing/FAQ form by the stored
 // shape, so each service template renders its own UI:
@@ -682,8 +683,13 @@ function safeParse(value: string): unknown {
 //     fallback for any service with no preset.
 
 function useConnectedAccountsForPane() {
-  const accounts = useAppStore((s) => s.savedAccounts);
-  const primary = accounts[0];
+  const { accounts, selectedAccount } = useSelectedAccount();
+  // When a specific account is pinned via the upper-left switcher, scope
+  // per-account cards (CustomInstructionsAllCard, ServiceScopedInfoCard) to
+  // that account. Otherwise fall back to the first connected account —
+  // status quo for "All accounts" since this surface has historically
+  // mirrored the primary.
+  const primary = selectedAccount ?? accounts[0];
   const allIds = useMemo(() => accounts.map((a) => a.id), [accounts]);
   return { primary, allIds };
 }
@@ -1899,6 +1905,11 @@ function DeleteServiceConfirmModal({
 
 function GlobalPlaybookEditor() {
   const accounts = useAppStore(s => s.savedAccounts);
+  const { selectedAccount } = useSelectedAccount();
+  // Load from the pinned account when the upper-left switcher has one
+  // selected; otherwise the first account is the source of truth (Playbook
+  // is shared across accounts via the save fan-out below).
+  const sourceAccountId = selectedAccount?.id ?? accounts[0]?.id ?? null;
 
   // Advanced/legacy mode (?advanced=1 or ?debug=1) — exposes the 5 legacy
   // sections (Qualification, Booking, Handoff, Objection Handling,
@@ -1923,13 +1934,14 @@ function GlobalPlaybookEditor() {
     return () => clearTimeout(t);
   }, [savedAt]);
 
-  // Load aiPlaybookV2 from the first connected account (Playbook is shared
-  // across all accounts in V1 — save fans out to every account below).
+  // Load aiPlaybookV2 from the source account picked by the switcher (or the
+  // first connected account when "All accounts" is selected). Playbook is
+  // shared across accounts in V1 — save fans out to every account below.
   useEffect(() => {
     let alive = true;
-    if (accounts.length === 0) { setLoading(false); return; }
+    if (!sourceAccountId) { setLoading(false); return; }
     setLoading(true); setError(null);
-    followUpApi.getSettings(accounts[0].id).then((res: { settings?: Record<string, unknown> | null }) => {
+    followUpApi.getSettings(sourceAccountId).then((res: { settings?: Record<string, unknown> | null }) => {
       if (!alive) return;
       const settings = res?.settings;
       const raw = settings && typeof settings === 'object'
@@ -1945,7 +1957,7 @@ function GlobalPlaybookEditor() {
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts]);
+  }, [sourceAccountId]);
 
   const onSectionChange = (section: PlaybookSectionKey, value: string) => {
     dirtyRef.current.add(section);
@@ -2024,9 +2036,9 @@ function GlobalPlaybookEditor() {
             tenants never used the override. Admin who really needs to
             hand-tune can PATCH the JSON via API. */}
 
-      {accounts.length > 0 && <>
+      {accounts.length > 0 && sourceAccountId && <>
         {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
-        <CustomInstructionsAllCard savedAccountId={accounts[0].id} />
+        <CustomInstructionsAllCard savedAccountId={sourceAccountId} />
 
         {/* 1. Business Information (company-wide) */}
         <HowSectionCard
