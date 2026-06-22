@@ -218,13 +218,10 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
     return parts.join(' · ');
   }, [businessHours]);
 
-  // ── Unified profile URL state ──────────────────────────────────────
-  // Detected platform from the LAST successful apply — drives the badge
-  // next to the section header. Null when the user hasn't yet applied
-  // anything (or when the URL was cleared).
-  const [detectedPlatform, setDetectedPlatform] = useState<'thumbtack' | 'yelp' | 'website' | null>(
-    user?.website ? 'website' : null,
-  );
+  // detectedPlatform state removed 2026-06-22 — the only reader was
+  // the platform badge in Section 3's header, which the target screen
+  // doesn't show. The save-side detection still happens server-side
+  // for routing the scrape; the wizard just doesn't surface it.
 
   const ttAccounts = useMemo(
     () => savedAccounts.filter(a => a.platform === 'thumbtack'),
@@ -241,7 +238,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
       .then(res => {
         if (cancelled) return;
         if (res.url && !value.trim()) setValue(res.url);
-        if (res.platform) setDetectedPlatform(res.platform);
       })
       .catch(() => { /* non-fatal — leave empty and let the user type */ });
     return () => { cancelled = true; };
@@ -433,7 +429,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
         setVerifyState({ kind: 'invalid', outcome });
         return outcome;
       }
-      setDetectedPlatform(res.platform);
       // Generic website path also updates the cached User.website so the
       // preview card renders. TT / Yelp paths store on SavedAccount.
       if (res.platform === 'website' && user) {
@@ -1435,9 +1430,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               setAuth(u, token);
             }
           } catch { /* non-fatal */ }
-          if (platform === 'thumbtack' || platform === 'yelp' || platform === 'website') {
-            setDetectedPlatform(platform);
-          }
+          // platform argument intentionally ignored — detectedPlatform
+          // state was removed when the platform badge in Section 3 was
+          // dropped to match the canonical layout. void it so the
+          // unused-parameter check stays quiet.
+          void platform;
           // Modal succeeded → the low-yield warning no longer applies
           // (we just landed real data through the fallback).
           setLowYieldScrape(false);
