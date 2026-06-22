@@ -117,10 +117,10 @@ export default function ServicesStep({
     [profiles],
   );
 
-  // Pull the seeded "Custom Service" to the top of the picker; everything
-  // else lands in the main list. Both groups read from the same DB-backed
-  // presets list — what used to be hardcoded "code presets" are now
-  // seeded admin templates with stable keys.
+  // Curated service templates first; generic "Custom Service" lives in
+  // its own group at the bottom and is marked as not-recommended /
+  // manual-setup-only — picking it leaves the tenant with hourly defaults
+  // that need to be edited by hand before activation.
   const groupedPresets = useMemo(() => {
     const generic: typeof presets = [];
     const others: typeof presets = [];
@@ -134,13 +134,6 @@ export default function ServicesStep({
       others: others.sort(byLabel),
     };
   }, [presets]);
-
-  // Pre-select Generic when the panel opens so "Add" with no other
-  // input creates the always-works starter.
-  useEffect(() => {
-    if (!showAddPanel || selectedPresetKey || groupedPresets.generic.length === 0) return;
-    setSelectedPresetKey(groupedPresets.generic[0].templateId);
-  }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
 
   // Additional AI instructions removed from the wizard (2026-06-22).
   // Field was inert at runtime — no AI consumer reads it. Tenants who
@@ -295,20 +288,20 @@ export default function ServicesStep({
                   className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
                 >
                   <option value="">Pick a template…</option>
-                  {groupedPresets.generic.length > 0 && (
-                    <optgroup label="Recommended starter">
-                      {groupedPresets.generic.map(p => (
-                        <option key={p.templateId} value={p.templateId}>
-                          {p.label} — works for any service
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
                   {groupedPresets.others.length > 0 && (
                     <optgroup label="Service templates">
                       {groupedPresets.others.map(p => (
                         <option key={p.templateId} value={p.templateId}>
                           {p.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {groupedPresets.generic.length > 0 && (
+                    <optgroup label="Manual setup (not recommended)">
+                      {groupedPresets.generic.map(p => (
+                        <option key={p.templateId} value={p.templateId}>
+                          {p.label} — requires manual setup
                         </option>
                       ))}
                     </optgroup>
@@ -324,6 +317,11 @@ export default function ServicesStep({
                   Add
                 </button>
               </div>
+              {selectedPresetKey && groupedPresets.generic.some(g => g.templateId === selectedPresetKey) && (
+                <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                  ⚠ Manual setup required — not recommended
+                </div>
+              )}
             </div>
 
             <div>
