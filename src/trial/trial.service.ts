@@ -5,15 +5,11 @@ import { TrialType, SubscriptionStatus } from '../../generated/prisma';
 
 export const TRIAL_ENDED_EVENT = 'trial.ended';
 
-const TT = 'thumbtack';
-const YELP = 'yelp';
-
-const LEAD_BASED_LIMIT = 10;
-const LEAD_BASED_SAFETY_DAYS = 7;
-const TIME_BASED_DAYS = 14;
-const TIME_BASED_LEAD_FALLBACK = 999;
-const HYBRID_DAYS = 14;
-const HYBRID_LEAD_LIMIT = 15;
+const TRIAL_DAYS = 7;
+// Lead caps were removed — trials are time-only. We keep the column populated
+// with a sentinel so any legacy code that reads trialLeadsLimit for display or
+// safety checks doesn't see 0/null. Sized to fit Prisma Int32.
+const TRIAL_LEAD_LIMIT_SENTINEL = 1_000_000;
 
 const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 
@@ -218,20 +214,13 @@ export class TrialService {
       return { justExhausted: false, nowEnded: false, counted: false };
     }
 
-    const exhaustedByLeads =
-      (updated.trialType === TrialType.LEAD_BASED || updated.trialType === TrialType.HYBRID) &&
-      updated.trialLeadsHandled >= updated.trialLeadsLimit;
-
-    if (!exhaustedByLeads || updated.trialEndedAt) {
-      return {
-        justExhausted: false,
-        nowEnded: !!updated.trialEndedAt,
-        counted: true,
-      };
-    }
-
-    const ended = await this.markEnded(userId);
-    return { justExhausted: ended.justExhausted, nowEnded: ended.nowEnded, counted: true };
+    // Lead-based trial exhaustion removed — trials are time-only (7 days).
+    // The counter still ticks for analytics / admin visibility.
+    return {
+      justExhausted: false,
+      nowEnded: !!updated.trialEndedAt,
+      counted: true,
+    };
   }
 
   /**
@@ -264,25 +253,9 @@ export class TrialService {
       : null;
     const leadsRemaining = Math.max(0, user.trialLeadsLimit - user.trialLeadsHandled);
 
-    let label = '';
-    let progress = '';
-    switch (user.trialType) {
-      case TrialType.LEAD_BASED:
-        label = `Free trial: ${user.trialLeadsLimit} leads`;
-        progress = `${user.trialLeadsHandled} / ${user.trialLeadsLimit} leads used`;
-        break;
-      case TrialType.TIME_BASED:
-        label = `Free trial: ${TIME_BASED_DAYS} days`;
-        progress = daysRemaining !== null ? `${daysRemaining} days remaining` : '';
-        break;
-      case TrialType.HYBRID:
-        label = `Free trial: ${HYBRID_DAYS} days or ${user.trialLeadsLimit} leads`;
-        progress =
-          daysRemaining !== null
-            ? `${daysRemaining} days left • ${user.trialLeadsHandled} / ${user.trialLeadsLimit} leads used`
-            : `${user.trialLeadsHandled} / ${user.trialLeadsLimit} leads used`;
-        break;
-    }
+    const label = user.trialType ? `Free trial: ${TRIAL_DAYS} days` : '';
+    const progress =
+      user.trialType && daysRemaining !== null ? `${daysRemaining} days remaining` : '';
 
     return {
       trialType: user.trialType,
@@ -317,48 +290,16 @@ export class TrialService {
     if (user.trialEndedAt) return false;
 
     const now = new Date();
-    const timeOk = !user.trialEndDate || now < user.trialEndDate;
-    const leadsOk = user.trialLeadsHandled < user.trialLeadsLimit;
-
-    switch (user.trialType) {
-      case TrialType.LEAD_BASED:
-        return leadsOk;
-      case TrialType.TIME_BASED:
-        return timeOk;
-      case TrialType.HYBRID:
-        return timeOk && leadsOk;
-      default:
-        return false;
-    }
+    return !user.trialEndDate || now < user.trialEndDate;
   }
 
   private computeTrialConfig(
-    platforms: string[],
+    _platforms: string[],
   ): { type: TrialType; endDate: Date | null; leadLimit: number } {
-    const has = (p: string) => platforms.includes(p);
-    const hasTT = has(TT);
-    const hasYelp = has(YELP);
-    const now = new Date();
-
-    if (hasTT && hasYelp) {
-      return {
-        type: TrialType.HYBRID,
-        endDate: addDays(now, HYBRID_DAYS),
-        leadLimit: HYBRID_LEAD_LIMIT,
-      };
-    }
-    if (hasYelp) {
-      return {
-        type: TrialType.TIME_BASED,
-        endDate: addDays(now, TIME_BASED_DAYS),
-        leadLimit: TIME_BASED_LEAD_FALLBACK,
-      };
-    }
-    // Default: TT-only (or any other platform we don't yet specialize)
     return {
-      type: TrialType.LEAD_BASED,
-      endDate: addDays(now, LEAD_BASED_SAFETY_DAYS),
-      leadLimit: LEAD_BASED_LIMIT,
+      type: TrialType.TIME_BASED,
+      endDate: addDays(new Date(), TRIAL_DAYS),
+      leadLimit: TRIAL_LEAD_LIMIT_SENTINEL,
     };
   }
 }

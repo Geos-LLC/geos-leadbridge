@@ -191,7 +191,7 @@ export function DemoLayout() {
                 to="/register"
                 className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md whitespace-nowrap"
               >
-                Start Free Trial — First 10 Leads Free
+                Start Free Trial — 7 Days Free
               </RouterLink>
               <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
                 <Bell className="w-6 h-6" />
