@@ -135,9 +135,10 @@ export function ScopeBanner({
       borderRadius: 12,
       fontSize: 12.5,
       color: palette.fg,
+      minWidth: 0,
     }}>
       <Layers size={15} style={{ color: palette.icon, flexShrink: 0 }} />
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
         {isAll
           ? <>Editing <strong style={{ color: 'var(--lb-ink-1)' }}>all {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</strong>. Changes apply to every connected source. Switch a tab above to edit one account.</>
           : <>Editing <strong style={{ color: 'var(--lb-ink-1)' }}>{acct?.businessName || 'this account'}</strong> only. Other accounts keep their own values.</>
