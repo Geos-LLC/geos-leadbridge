@@ -561,7 +561,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                   row keeps a heavier bottom border to separate it
                   visually from the body. */}
               <div>
-                {/* Header */}
+                {/* Header — column labels wrap to multiple lines if
+                    needed so "Moving / Move-out" and "Airbnb / Turnover"
+                    aren't truncated at the cramped wizard width. */}
                 <div
                   style={{
                     display: 'flex',
@@ -571,9 +573,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                 >
                   <div
                     style={{
-                      flex: 1.5,
+                      flex: 2,
                       minWidth: 0,
-                      padding: '9px 14px',
+                      padding: '9px 4px 9px 0',
                       fontSize: 10,
                       fontWeight: 700,
                       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -590,7 +592,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                       style={{
                         flex: 1,
                         minWidth: 0,
-                        padding: '9px 8px',
+                        padding: '9px 6px',
                         textAlign: 'right',
                         fontSize: 9.5,
                         fontWeight: 700,
@@ -598,9 +600,8 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                         textTransform: 'uppercase',
                         letterSpacing: '0.02em',
                         color: 'var(--lb-ink-6, #8b94ab)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                        lineHeight: 1.2,
+                        wordBreak: 'break-word',
                       }}
                       title={t.label}
                     >
@@ -625,20 +626,20 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                     >
                       <div
                         style={{
-                          flex: 1.5,
+                          flex: 2,
                           minWidth: 0,
-                          padding: '8px 14px',
+                          padding: '8px 4px 8px 0',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: 1,
+                          gap: 2,
                         }}
                       >
                         <div
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 4,
-                            fontSize: 13,
+                            gap: 3,
+                            fontSize: 12.5,
                             fontWeight: 600,
                             color: 'var(--lb-ink-1, #0a1530)',
                           }}
@@ -651,9 +652,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             onChange={(e) =>
                               updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
                             }
-                            style={INLINE_BED_BATH_INPUT}
+                            style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
                           />
-                          <span style={INLINE_UNIT_LABEL}>bed</span>
+                          <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bed</span>
                           <span style={INLINE_DOT}>·</span>
                           <input
                             type="number"
@@ -663,21 +664,36 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             onChange={(e) =>
                               updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
                             }
-                            style={INLINE_BED_BATH_INPUT}
+                            style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
                           />
-                          <span style={INLINE_UNIT_LABEL}>bath</span>
+                          <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bath</span>
+                          <button
+                            type="button"
+                            onClick={() => removePriceRow(i)}
+                            title="Remove row"
+                            style={{
+                              marginLeft: 'auto',
+                              background: 'transparent',
+                              border: 0,
+                              padding: '0 2px',
+                              cursor: 'pointer',
+                              color: 'var(--lb-ink-6, #8b94ab)',
+                              fontFamily: 'inherit',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Trash2 size={11} />
+                          </button>
                         </div>
                         <div
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 3,
+                            gap: 2,
                             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                             fontSize: 10.5,
                             color: 'var(--lb-ink-6, #8b94ab)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
                           }}
                         >
                           <input
@@ -688,7 +704,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             onChange={(e) =>
                               updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
                             }
-                            style={INLINE_SQFT_INPUT}
+                            style={{ ...INLINE_SQFT_INPUT, width: 40 }}
                           />
                           <span>–</span>
                           <input
@@ -699,28 +715,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             onChange={(e) =>
                               updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
                             }
-                            style={INLINE_SQFT_INPUT}
+                            style={{ ...INLINE_SQFT_INPUT, width: 40 }}
                           />
                           <span style={{ marginLeft: 2 }}>sqft</span>
-                          {sqftMin > 0 && sqftMax > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => removePriceRow(i)}
-                              title="Remove row"
-                              style={{
-                                marginLeft: 'auto',
-                                background: 'transparent',
-                                border: 0,
-                                padding: '0 4px',
-                                cursor: 'pointer',
-                                color: 'var(--lb-ink-6, #8b94ab)',
-                                fontSize: 11,
-                                fontFamily: 'inherit',
-                              }}
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          )}
                         </div>
                       </div>
                       {allTypes.map((t: any) => (
