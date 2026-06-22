@@ -3,9 +3,9 @@
  *
  * The customer-facing preset picker and admin Templates page both read
  * from the `service_template_presets` table (see
- * AdminServiceTemplatesService). The two constants in this file
- * (`UPHOLSTERY_FURNITURE_CLEANING_PRESET`, `GENERIC_CUSTOM_SERVICE_PRESET`)
- * are:
+ * AdminServiceTemplatesService). The three constants in this file
+ * (`HOUSE_CLEANING_PRESET`, `UPHOLSTERY_FURNITURE_CLEANING_PRESET`,
+ * `GENERIC_CUSTOM_SERVICE_PRESET`) are:
  *   1. seeded into that table at boot, so the DB stays the single
  *      source of truth for what tenants see, and
  *   2. used directly by `ServiceProfileService.createBlank` as the
@@ -151,6 +151,259 @@ export const UPHOLSTERY_FURNITURE_CLEANING_PRESET: ServicePreset = {
         question: 'Are cleaning supplies included?',
         answer: 'Yes, standard cleaning supplies are included.',
       },
+    ],
+  },
+};
+
+/**
+ * House Cleaning — the canonical residential cleaning preset. Uses the
+ * `bed_bath_grid` pricing model that the existing deterministic engine
+ * (src/pricing/) and AI prompt builders already understand.
+ *
+ * Shape mirrors `DEFAULT_CLEANING_PRICING` in src/users/pricing-hydrate.ts
+ * so a tenant who picks this preset gets a profile that hydratePricing
+ * treats as a fully-shaped grid (no missing-column backfill warnings).
+ *
+ * Aliases cover Thumbtack ("House Cleaning"), Yelp ("Home Cleaning"),
+ * and common synonyms so suggestPresetForCategory matches whichever
+ * label the connected platform uses.
+ */
+export const HOUSE_CLEANING_PRESET: ServicePreset = {
+  key: 'house_cleaning',
+  provider: 'thumbtack',
+  providerCategoryName: 'House Cleaning',
+  aliases: [
+    'house cleaning',
+    'home cleaning',
+    'residential cleaning',
+    'maid service',
+    'house cleaners',
+    'home cleaners',
+    'recurring house cleaning',
+  ],
+  label: 'House Cleaning',
+  description:
+    'Residential house cleaning — regular, deep, and turnover. Bed/bath grid pricing with sqft, extras, frequency discounts, and condition surcharges.',
+  qualificationSchemaJson: {
+    questions: [
+      {
+        key: 'cleaning_type',
+        label: 'What type of cleaning do you need?',
+        type: 'single_select',
+        options: ['regular', 'deep', 'move_in_out', 'airbnb_turnover'],
+        required: true,
+      },
+      {
+        key: 'bedrooms',
+        label: 'How many bedrooms?',
+        type: 'single_select',
+        options: ['studio', '1', '2', '3', '4', '5', '6+'],
+        required: true,
+      },
+      {
+        key: 'bathrooms',
+        label: 'How many bathrooms?',
+        type: 'single_select',
+        options: ['1', '1.5', '2', '2.5', '3', '3.5', '4', '5+'],
+        required: true,
+      },
+      {
+        key: 'square_footage',
+        label: 'Approximate square footage',
+        type: 'number',
+      },
+      {
+        key: 'frequency',
+        label: 'How often do you need cleaning?',
+        type: 'single_select',
+        options: ['one_time', 'weekly', 'biweekly', 'monthly'],
+      },
+      {
+        key: 'pets',
+        label: 'Do you have any pets in the home?',
+        type: 'single_select',
+        options: ['none', 'cat', 'dog', 'multiple'],
+      },
+      {
+        key: 'home_condition',
+        label: 'How would you describe the home condition?',
+        type: 'single_select',
+        options: ['well_maintained', 'fair', 'needs_attention'],
+      },
+      {
+        key: 'extras',
+        label: 'Any extras needed?',
+        type: 'multi_select',
+        options: [
+          'inside_oven',
+          'inside_fridge',
+          'inside_cabinets',
+          'inside_windows',
+          'laundry',
+          'dishes',
+          'blinds',
+          'baseboards',
+          'patio',
+        ],
+      },
+      {
+        key: 'service_address',
+        label: 'Service address',
+        type: 'text',
+        required: true,
+      },
+      {
+        key: 'phone_number',
+        label: 'Phone number',
+        type: 'text',
+        required: true,
+      },
+      {
+        key: 'preferred_date',
+        label: 'Preferred service date',
+        type: 'date',
+      },
+    ],
+  },
+  pricingJson: {
+    pricingModel: 'bed_bath_grid',
+    currency: 'USD',
+    serviceType: 'cleaning',
+    cleaningTypes: [
+      { key: 'regular', label: 'Regular Cleaning', enabled: true },
+      { key: 'deep', label: 'Moving / Deep Cleaning', enabled: true },
+      { key: 'airbnb', label: 'Airbnb Turnaround', enabled: true },
+    ],
+    priceTable: [
+      { bed: 1, bath: 1, sqftMin: 600,  sqftMax: 800,  regular: 129, deep: 179, airbnb: 139 },
+      { bed: 1, bath: 2, sqftMin: 700,  sqftMax: 900,  regular: 129, deep: 179, airbnb: 139 },
+      { bed: 2, bath: 1, sqftMin: 800,  sqftMax: 1000, regular: 139, deep: 179, airbnb: 149 },
+      { bed: 2, bath: 2, sqftMin: 1000, sqftMax: 1200, regular: 139, deep: 189, airbnb: 159 },
+      { bed: 2, bath: 3, sqftMin: 1100, sqftMax: 1300, regular: 149, deep: 199, airbnb: 169 },
+      { bed: 3, bath: 1, sqftMin: 1000, sqftMax: 1200, regular: 149, deep: 209, airbnb: 169 },
+      { bed: 3, bath: 2, sqftMin: 1300, sqftMax: 1600, regular: 159, deep: 219, airbnb: 179 },
+      { bed: 3, bath: 3, sqftMin: 1500, sqftMax: 1800, regular: 169, deep: 229, airbnb: 189 },
+      { bed: 3, bath: 4, sqftMin: 1800, sqftMax: 2200, regular: 179, deep: 239, airbnb: 199 },
+      { bed: 4, bath: 2, sqftMin: 1800, sqftMax: 2200, regular: 189, deep: 259, airbnb: 209 },
+      { bed: 4, bath: 3, sqftMin: 2200, sqftMax: 2600, regular: 209, deep: 279, airbnb: 229 },
+      { bed: 4, bath: 4, sqftMin: 2600, sqftMax: 3000, regular: 229, deep: 309, airbnb: 249 },
+      { bed: 4, bath: 5, sqftMin: 3000, sqftMax: 3600, regular: 249, deep: 339, airbnb: 269 },
+      { bed: 5, bath: 2, sqftMin: 2400, sqftMax: 2800, regular: 239, deep: 319, airbnb: 259 },
+      { bed: 5, bath: 3, sqftMin: 2800, sqftMax: 3400, regular: 249, deep: 329, airbnb: 279 },
+      { bed: 5, bath: 4, sqftMin: 3200, sqftMax: 3800, regular: 269, deep: 349, airbnb: 299 },
+      { bed: 5, bath: 5, sqftMin: 3600, sqftMax: 4200, regular: 289, deep: 369, airbnb: 319 },
+      { bed: 6, bath: 3, sqftMin: 3000, sqftMax: 3600, regular: 289, deep: 379, airbnb: 329 },
+      { bed: 6, bath: 4, sqftMin: 3600, sqftMax: 4200, regular: 309, deep: 389, airbnb: 349 },
+      { bed: 6, bath: 5, sqftMin: 4000, sqftMax: 4800, regular: 329, deep: 409, airbnb: 369 },
+    ],
+    sqftAdjustEnabled: true,
+    frequencyDiscounts: [
+      { key: 'weekly', label: 'Weekly', discount: 15 },
+      { key: 'biweekly', label: 'Every 2 Weeks', discount: 10 },
+      { key: 'monthly', label: 'Monthly', discount: 10 },
+      { key: 'once', label: 'One Time', discount: 0 },
+    ],
+    extras: [
+      { key: 'oven', label: 'Inside Oven', price: 40 },
+      { key: 'fridge', label: 'Inside Fridge', price: 40 },
+      { key: 'cabinet', label: 'Inside Kitchen Cabinets', price: 30 },
+      { key: 'laundry', label: 'Laundry (per load)', price: 20 },
+      { key: 'dishes', label: 'Dishes (1 load included)', price: 20 },
+      { key: 'windows', label: 'Inside Windows (per window)', price: 20 },
+      { key: 'blinds', label: 'Blinds (per window)', price: 10 },
+      { key: 'baseboard', label: 'Baseboard Cleaning (per room)', price: 15 },
+      { key: 'patio_door', label: 'Patio Door', price: 50 },
+      { key: 'patio_garage', label: 'Patio / Garage', price: 50 },
+    ],
+    conditionSurcharges: [
+      { key: 'well_maintained', label: 'Well Maintained', surcharge: 0 },
+      { key: 'fair', label: 'Fair Condition', surcharge: 50 },
+      { key: 'needs_attention', label: 'Needs Attention', surcharge: 100 },
+    ],
+    petSurcharge: 20,
+    orderDiscounts: [
+      { minAmount: 200, discount: 10 },
+      { minAmount: 300, discount: 15 },
+    ],
+    recurringDiscount: 10,
+    priceRange: {
+      minus: { type: '%', value: 10 },
+      plus: { type: '%', value: 10 },
+    },
+    priceQuoteMode: 'range',
+  },
+  faqJson: {
+    customQA: [
+      {
+        question: 'What types of cleaning do you offer?',
+        answer:
+          'We offer regular maintenance cleaning, deep cleaning, move-in / move-out cleaning, and Airbnb turnover cleaning.',
+      },
+      {
+        question: 'How is pricing determined?',
+        answer:
+          'Pricing is based on bedrooms, bathrooms, square footage, cleaning type, condition of the home, pets, and any extras. We share an estimated range once we have those details.',
+      },
+      {
+        question: 'Do you offer recurring discounts?',
+        answer:
+          'Yes — weekly cleanings get the largest discount, then every-two-weeks and monthly. One-time cleanings are full price.',
+      },
+      {
+        question: 'Are cleaning supplies included?',
+        answer:
+          'Yes, standard cleaning supplies and equipment are included. Let us know if you have any product preferences or allergies.',
+      },
+      {
+        question: 'Do I need to be home during the cleaning?',
+        answer:
+          'No — many customers leave a key, code, or arrange access another way. We will confirm access during scheduling.',
+      },
+      {
+        question: 'Do you charge extra for pets?',
+        answer:
+          'A small pet surcharge applies to cover the added cleaning time. Let us know what pets you have so we can plan accordingly.',
+      },
+      {
+        question: 'Can you handle homes that need extra attention?',
+        answer:
+          'Yes. We add a condition surcharge for homes in fair or needs-attention shape so the team has enough time to do the job properly.',
+      },
+      {
+        question: 'Do you offer carpet or upholstery cleaning?',
+        answer:
+          'Carpet and upholstery cleaning are separate services. Let us know and we can confirm whether we can include them or refer you.',
+      },
+    ],
+  },
+  serviceRules: {
+    requiredDetails: [
+      'Number of bedrooms and bathrooms',
+      'Approximate square footage',
+      'Type of cleaning (regular / deep / move-in-out / Airbnb)',
+      'Service address',
+      'Phone number',
+      'Preferred date and time window',
+      'Pets in the home',
+      'Home condition',
+    ],
+    unsupportedServices: [
+      'Commercial / office cleaning',
+      'Post-construction cleaning',
+      'Carpet steam cleaning (separate service)',
+      'Upholstery cleaning (separate service)',
+      'Exterior pressure washing',
+    ],
+    workflowSteps: [
+      'Greet the customer and confirm they are looking for house cleaning',
+      'Ask the cleaning type — regular, deep, move-in/out, or Airbnb turnover',
+      'Ask for number of bedrooms and bathrooms, then approximate sqft',
+      'Ask about frequency — one-time or recurring (weekly/biweekly/monthly)',
+      'Ask about pets and home condition (well-maintained / fair / needs attention)',
+      'Ask if any extras are needed (inside oven, fridge, windows, laundry, etc.)',
+      'Quote from the bed/bath grid for the chosen cleaning type — apply extras, condition surcharge, pet surcharge, and frequency discount',
+      'Collect service address, phone number, and preferred date / time window',
+      'Confirm the quote range and hand off to the owner for scheduling',
     ],
   },
 };
