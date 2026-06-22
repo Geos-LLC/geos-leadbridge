@@ -608,6 +608,10 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                       {t.label}
                     </div>
                   ))}
+                  {/* Empty sentinel column lining up with the per-row
+                      trash icon below — keeps the price columns aligned
+                      with the header columns. */}
+                  <div style={{ width: 24, flexShrink: 0 }} />
                 </div>
 
                 {/* Body rows */}
@@ -664,24 +668,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
                           />
                           <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bath</span>
-                          <button
-                            type="button"
-                            onClick={() => removePriceRow(i)}
-                            title="Remove row"
-                            style={{
-                              marginLeft: 'auto',
-                              background: 'transparent',
-                              border: 0,
-                              padding: '0 2px',
-                              cursor: 'pointer',
-                              color: 'var(--lb-ink-6, #8b94ab)',
-                              fontFamily: 'inherit',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Trash2 size={11} />
-                          </button>
                         </div>
                         <div
                           style={{
@@ -757,6 +743,30 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                           </span>
                         </div>
                       ))}
+                      {/* Right-end trash sentinel — small fixed-width
+                          column holds the per-row delete icon at the
+                          far right of the row, aligned with the empty
+                          sentinel cell in the header. */}
+                      <div style={{ width: 24, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => removePriceRow(i)}
+                          title="Remove row"
+                          style={{
+                            background: 'transparent',
+                            border: 0,
+                            padding: 4,
+                            cursor: 'pointer',
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            fontFamily: 'inherit',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

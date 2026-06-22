@@ -471,11 +471,11 @@ export default function ServicesStep({
                   {open && (() => {
                     const editSection = editByProfile[profile.id] ?? null;
                     return (
-                    // Canonical accordion body: 0 top / 16 sides / 16
-                    // bottom padding, flat-white background (no slate
-                    // tint). Top border separates the body from the
-                    // header row above.
-                    <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--lb-line-soft)', background: '#fff' }}>
+                    // Accordion body: tighter 10px side gutter (was
+                    // 16) so the inline pricing table reads with less
+                    // left margin per the user's direction. Top border
+                    // separates the body from the header row above.
+                    <div style={{ padding: '0 10px 14px', borderTop: '1px solid var(--lb-line-soft)', background: '#fff' }}>
                       {/* Canonical wizard pattern: 2 summary nav rows
                           (Pricing / Customer answers) stacked with
                           `Edit →` links. Tapping a link expands the
