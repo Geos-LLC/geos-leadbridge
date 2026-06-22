@@ -546,14 +546,281 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         onToggle={() => toggleSection('priceTable')}
       >
         <div>
-          {/* Price Table — restyled to match the FinalDesign canonical
-              "Pricing Table (standalone)". Horizontal table layout:
-              label cell (bed·bath + sqft mono sub) at flex:1, then N
-              fixed-width 88px price-cell tiles for each cleaning type,
-              then a 50px dashed-border sentinel column carrying the
-              delete button. Header row mirrors the column structure.
-              Scrolls horizontally on narrow widths via `.pt-scroll`
-              wrapper. */}
+          {/* Two render paths:
+                wizardMode = compact flex-based table — bordered card,
+                  `flex:1.5` row label, `flex:1` per column, no
+                  horizontal scroll, no `+ col` sentinel, no per-row
+                  delete sentinel. Matches the FinalDesign "Service
+                  Setup (standalone)" inline editor where the table
+                  fits inside the service accordion and never needs to
+                  scroll because the wizard is bounded.
+                full editor = horizontal-scroll table from the
+                  "Pricing Table (standalone)" canonical — fixed 88px
+                  columns, `+ col` sentinel, 50px delete sentinel,
+                  right-edge fade. Optimized for unbounded width in
+                  Settings → AI Playbook.
+          */}
+          {wizardMode ? (
+            <div style={{ padding: '0 0 4px' }}>
+              <div style={{
+                border: '1px solid var(--lb-line, #e5e9f2)',
+                borderRadius: 11,
+                overflow: 'hidden',
+              }}>
+                {/* Header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid var(--lb-line, #e5e9f2)',
+                  }}
+                >
+                  <div
+                    style={{
+                      flex: 1.5,
+                      minWidth: 0,
+                      padding: '9px 14px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: 'var(--lb-ink-6, #8b94ab)',
+                    }}
+                  >
+                    Size band
+                  </div>
+                  {allTypes.map((t: any) => (
+                    <div
+                      key={t.key}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        padding: '9px 8px',
+                        textAlign: 'right',
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.02em',
+                        color: 'var(--lb-ink-6, #8b94ab)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={t.label}
+                    >
+                      {t.label}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Body rows */}
+                {pricing.priceTable?.map((row: any, i: number) => {
+                  const legacySqft = Number(row.sqft) || 0;
+                  const sqftMin = Number(row.sqftMin) || legacySqft;
+                  const sqftMax = Number(row.sqftMax) || legacySqft;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderBottom: '1px solid var(--lb-line-soft, #f3f5fa)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          flex: 1.5,
+                          minWidth: 0,
+                          padding: '8px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--lb-ink-1, #0a1530)',
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.bed}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
+                            }
+                            style={INLINE_BED_BATH_INPUT}
+                          />
+                          <span style={INLINE_UNIT_LABEL}>bed</span>
+                          <span style={INLINE_DOT}>·</span>
+                          <input
+                            type="number"
+                            value={row.bath}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
+                            }
+                            style={INLINE_BED_BATH_INPUT}
+                          />
+                          <span style={INLINE_UNIT_LABEL}>bath</span>
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 10.5,
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.sqftMin ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
+                            }
+                            style={INLINE_SQFT_INPUT}
+                          />
+                          <span>–</span>
+                          <input
+                            type="number"
+                            value={row.sqftMax ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
+                            }
+                            style={INLINE_SQFT_INPUT}
+                          />
+                          <span style={{ marginLeft: 2 }}>sqft</span>
+                          {sqftMin > 0 && sqftMax > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => removePriceRow(i)}
+                              title="Remove row"
+                              style={{
+                                marginLeft: 'auto',
+                                background: 'transparent',
+                                border: 0,
+                                padding: '0 4px',
+                                cursor: 'pointer',
+                                color: 'var(--lb-ink-6, #8b94ab)',
+                                fontSize: 11,
+                                fontFamily: 'inherit',
+                              }}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {allTypes.map((t: any) => (
+                        <div key={t.key} style={{ flex: 1, minWidth: 0, padding: '6px 5px' }}>
+                          <span style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: 2,
+                            padding: '7px 7px',
+                            border: '1px solid var(--lb-line, #e5e9f2)',
+                            borderRadius: 8,
+                            background: '#fff',
+                          }}>
+                            <span style={{
+                              fontSize: 10,
+                              color: 'var(--lb-ink-7, #b4bbcc)',
+                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            }}>$</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={Number(row[t.key]) || 0}
+                              onChange={(e) => updatePriceCell(i, t.key, parseInt(e.target.value) || 0)}
+                              style={{
+                                width: '100%',
+                                minWidth: 0,
+                                padding: 0,
+                                border: 0,
+                                background: 'transparent',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                fontSize: 12.5,
+                                fontWeight: 700,
+                                color: 'var(--lb-ink-1, #0a1530)',
+                                textAlign: 'right',
+                                outline: 'none',
+                              }}
+                            />
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add row / Add column dashed pills below */}
+              <div style={{ marginTop: 12, display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={addPriceRow}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 13px',
+                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                    borderRadius: 10,
+                    background: 'var(--lb-accent-tint, #e7efff)',
+                    color: 'var(--lb-accent, #2563eb)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <Plus size={13} /> Add row
+                </button>
+                <button
+                  type="button"
+                  onClick={addCleaningType}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 13px',
+                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                    borderRadius: 10,
+                    background: 'var(--lb-accent-tint, #e7efff)',
+                    color: 'var(--lb-accent, #2563eb)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <Plus size={13} /> Add column
+                </button>
+              </div>
+            </div>
+          ) : (
+          <>
           <div style={{ position: 'relative', borderTop: '1px solid var(--lb-line-soft, #eef1f7)' }}>
             <div className="pt-scroll" style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 'max-content' }}>
@@ -867,6 +1134,8 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
               <Plus size={14} /> Add column
             </button>
           </div>
+          </>
+          )}
         </div>
       </CollapsibleSection>
 

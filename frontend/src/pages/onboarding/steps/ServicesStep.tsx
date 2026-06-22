@@ -457,7 +457,7 @@ export default function ServicesStep({
                         color: 'var(--lb-ink-5)', marginTop: 3,
                       }}>
                         {configured
-                          ? 'Pricing, FAQ and qualification configured.'
+                          ? 'Pricing & FAQ configured.'
                           : 'Add pricing and FAQ to activate.'}
                       </span>
                     </span>
@@ -631,13 +631,21 @@ function SummaryNavRow({
 
 // One-line description of the pricing config for the summary nav row.
 // Reads pricingJson and reports the most informative facet: priceTable
-// rows, BookingKoala items count, or "set up pricing" placeholder.
+// rows + active cleaningType columns, BookingKoala items count, hourly
+// rate, or "set up pricing" placeholder. Copy mirrors the canonical
+// FinalDesign "Service Setup (standalone)" pattern: "N size bands ·
+// M service types." for the bed/bath grid case.
 function pricingSummary(p: ServiceProfile): string {
   const parsed = safeParse(p.pricingJson);
   if (!parsed || typeof parsed !== 'object') return 'No pricing set — add base rates or a price table.';
   if (parsed.quoteRequired === true) return 'Quote on request — no published rates.';
   if (Array.isArray(parsed.priceTable) && parsed.priceTable.length > 0) {
-    return `${parsed.priceTable.length} size band${parsed.priceTable.length === 1 ? '' : 's'} · regular & deep options.`;
+    const bands = parsed.priceTable.length;
+    const types = Array.isArray(parsed.cleaningTypes) ? parsed.cleaningTypes.length : 0;
+    if (types > 0) {
+      return `${bands} size band${bands === 1 ? '' : 's'} · ${types} service type${types === 1 ? '' : 's'}.`;
+    }
+    return `${bands} size band${bands === 1 ? '' : 's'}.`;
   }
   if (Array.isArray(parsed.items) && parsed.items.length > 0) {
     return `${parsed.items.length} priced item${parsed.items.length === 1 ? '' : 's'}.`;
@@ -651,12 +659,13 @@ function pricingSummary(p: ServiceProfile): string {
   return 'No pricing set — add base rates or a price table.';
 }
 
-// One-line description of the FAQ/customer-answers config. Counts the
-// configured quick answers + custom Q&A so the user sees progress
-// without opening the editor.
+// One-line description of the FAQ config. Mirrors the canonical
+// FinalDesign "Service Setup (standalone)" wording — "Quick answers
+// + N custom Q&A." when both are populated; otherwise reports only
+// the populated side; falls back to "No FAQ set yet." when empty.
 function faqSummary(p: ServiceProfile): string {
   const parsed = safeParse(p.faqJson);
-  if (!parsed || typeof parsed !== 'object') return 'No FAQ set — insured, supplies, payment, custom Q&A.';
+  if (!parsed || typeof parsed !== 'object') return 'No FAQ set yet.';
   const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
   let quick = 0;
   for (const k of valueKeys) {
@@ -666,11 +675,12 @@ function faqSummary(p: ServiceProfile): string {
   const custom =
     (Array.isArray(parsed.customQA) ? parsed.customQA.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0) +
     (Array.isArray(parsed.entries) ? parsed.entries.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0);
-  if (quick === 0 && custom === 0) return 'No answers set — insured, supplies, payment, custom Q&A.';
-  const parts: string[] = [];
-  if (quick > 0) parts.push(`${quick} quick answer${quick === 1 ? '' : 's'}`);
-  if (custom > 0) parts.push(`${custom} custom Q&A`);
-  return parts.join(' + ') + '.';
+  if (quick === 0 && custom === 0) return 'No FAQ set yet.';
+  if (quick > 0 && custom > 0) {
+    return `Quick answers + ${custom} custom Q&A.`;
+  }
+  if (quick > 0) return 'Quick answers configured.';
+  return `${custom} custom Q&A.`;
 }
 
 function looksConfigured(p: ServiceProfile): boolean {
