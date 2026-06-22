@@ -555,17 +555,17 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                 Settings → AI Playbook. */}
       {wizardMode ? (
         <>
-              <div style={{
-                border: '1px solid var(--lb-line, #e5e9f2)',
-                borderRadius: 11,
-                overflow: 'hidden',
-              }}>
+              {/* Flush table — no outer bordered card. The only card
+                  edge is the surrounding accordion's. Each row carries
+                  its own bottom border for row separation; the header
+                  row keeps a heavier bottom border to separate it
+                  visually from the body. */}
+              <div>
                 {/* Header */}
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'stretch',
-                    background: '#f8fafc',
                     borderBottom: '1px solid var(--lb-line, #e5e9f2)',
                   }}
                 >
