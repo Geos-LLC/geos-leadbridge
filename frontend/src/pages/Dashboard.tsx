@@ -547,7 +547,7 @@ export function Dashboard() {
           );
           return (
             <div
-              className="grid grid-cols-2 md:grid-cols-4"
+              className="lb-kpi4 grid grid-cols-2 md:grid-cols-4"
               style={{
                 background: 'var(--lb-surface)',
                 border: '1px solid var(--lb-line)',
@@ -584,10 +584,13 @@ export function Dashboard() {
         })()}
       </div>
 
-      {/* 2-col main grid */}
+      {/* 2-col main grid — `lb-grid-main` collapses to 1-col at ≤760px
+          (canonical breakpoint). Switched from `lg:` (1024) to `md:`
+          (768) so tablets between 760-1024px get the 2-col view
+          instead of being forced into single-column. */}
       <div
         style={{ gap: 20 }}
-        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+        className="lb-grid-main grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
       >
         {/* Left column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
@@ -804,7 +807,7 @@ export function Dashboard() {
                 </span>
               );
               return (
-                <div className="grid grid-cols-2 md:grid-cols-4">
+                <div className="lb-kpi4 grid grid-cols-2 md:grid-cols-4">
                   <Kpi label="Leads" value={loading ? '—' : splitValue(p => stats[p].weeklyLeads)} loading={loading} />
                   <Kpi label="Engagement" value={loading ? '—' : splitValue(p => `${stats[p].engagement}%`)} loading={loading} />
                   <Kpi label="Lifetime replies" value={loading ? '—' : splitValue(p => stats[p].lifetimeReplies)} loading={loading} />

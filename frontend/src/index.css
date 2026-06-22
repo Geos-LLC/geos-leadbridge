@@ -170,6 +170,46 @@ h1, h2, h3, h4 {
     width: 100% !important;
   }
 
+  /* ─── Overview / Dashboard mobile (Phase 1 from FinalDesign port) ───
+     The canonical design uses three layout primitives the Dashboard
+     hasn't fully adopted yet. Tailwind already handles the basic
+     column counts; these rules add the border fix-ups and the
+     correct breakpoint for the main grid.
+
+     `lb-kpi4` — 4-up KPI strip. At ≤760px it becomes a 2x2 grid; the
+     vertical divider between cells 1-2 stays, the right edge of cell
+     #2 needs its borderRight removed (it now sits at the row edge),
+     and cells 1+2 need a bottom-border to separate them from the
+     bottom row. Tailwind's `grid-cols-2 md:grid-cols-4` handles the
+     column count; this rule handles the border choreography. */
+  .lb-kpi4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .lb-kpi4 > div:nth-child(2) {
+    border-right: none !important;
+  }
+  .lb-kpi4 > div:nth-child(1),
+  .lb-kpi4 > div:nth-child(2) {
+    border-bottom: 1px solid var(--lb-line-soft) !important;
+  }
+
+  /* `lb-grid-main` — the Overview's left/right 2-col main grid
+     (1.5fr 1fr). Canonical collapses to a single column at ≤760px
+     (so tablets stay 2-col). Apply to the Dashboard's main grid
+     instead of Tailwind's `lg:` breakpoint (1024px) which forced
+     tablets into 1-col. */
+  .lb-grid-main {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* `lb-two` — generic 2-col helper for any side-by-side layout that
+     should collapse to 1-col on phone. Not used yet; available for
+     any future grid that wants the canonical behavior without naming
+     a bespoke class. */
+  .lb-two {
+    grid-template-columns: 1fr !important;
+  }
+
   /* Conversation Goal 4-up grid reflows to 2 columns per spec. */
   .lb-strategy-grid {
     grid-template-columns: repeat(2, 1fr) !important;
