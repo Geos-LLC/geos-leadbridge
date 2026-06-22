@@ -48,10 +48,6 @@ export function AutomationSettings() {
   const setSelectedAccountId = (value: string) => {
     setPinnedAccountId(value === 'all' ? null : value);
   };
-  // Temporary diagnostic — confirms in the user's DevTools that Automation
-  // is actually receiving the sidebar's pin updates. Remove once verified.
-  // eslint-disable-next-line no-console
-  console.log('[Automation] render — selectedAccountId =', selectedAccountId, 'pinnedAccountId =', pinnedAccountId);
 
   // Edit/create mode
   const [editingRule, setEditingRule] = useState<AutomationRule | null>(null);
