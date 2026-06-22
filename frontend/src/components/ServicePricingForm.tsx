@@ -612,9 +612,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
 
                 {/* Body rows */}
                 {pricing.priceTable?.map((row: any, i: number) => {
-                  const legacySqft = Number(row.sqft) || 0;
-                  const sqftMin = Number(row.sqftMin) || legacySqft;
-                  const sqftMax = Number(row.sqftMax) || legacySqft;
                   return (
                     <div
                       key={i}
