@@ -16,6 +16,16 @@ import { onboardingApi } from '../services/api';
 import type { SavedAccount } from '../types';
 import { Btn, Card, Kpi, PlatformBadge, StatusPill, EmptyState } from '../components/ui';
 
+// Strip the trailing unit characters off a formatted KPI value so the
+// per-platform value line stays compact (e.g. "2,5h" → "2,5", "71%" → "71").
+// The unit lives in the KPI label suffix instead — see the "Avg response · h"
+// and "Engagement · %" labels below. Keeps any leading sign, digits,
+// decimal comma/period.
+function stripUnitSuffix(value: string | number): string {
+  if (typeof value === 'number') return String(value);
+  return value.replace(/[a-zA-Z%]+$/, '');
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -250,6 +260,12 @@ export function Dashboard() {
       //   1–10 hr  -> "X,Yh" with European decimal comma (one digit after)
       //               but drops the ",0" for clean whole hours
       //   >= 10 hr -> "Xh" (rounded — no fractional component)
+      // Note: the KPI cells show the unit (h / m / s / %) in the LABEL
+      // suffix instead of repeating it on every platform value, so the
+      // two-platform value line stays compact and doesn't wrap at
+      // narrow widths. `stripUnitSuffix` (declared below the formatter
+      // closure for reuse) trims the trailing letters off the rendered
+      // value to match.
       const formatDuration = (minutes: number): string => {
         if (!minutes || minutes <= 0) return '—';
         if (minutes < 1) return `${Math.round(minutes * 60)}s`;
@@ -566,14 +582,14 @@ export function Dashboard() {
                 loading={loading}
               />
               <Kpi
-                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
-                value={loading ? '—' : splitValue(p => stats[p].avgResponseTime)}
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response · h</span>}
+                value={loading ? '—' : splitValue(p => stripUnitSuffix(stats[p].avgResponseTime))}
                 delta={loading ? undefined : 'all-time'}
                 loading={loading}
               />
               <Kpi
-                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
-                value={loading ? '—' : splitValue(p => `${stats[p].conversionRate}%`)}
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement · %</span>}
+                value={loading ? '—' : splitValue(p => stats[p].conversionRate)}
                 delta={loading ? undefined : 'all-time'}
                 deltaDir="up"
                 loading={loading}
@@ -809,7 +825,7 @@ export function Dashboard() {
               return (
                 <div className="lb-kpi4 grid grid-cols-2 md:grid-cols-4">
                   <Kpi label="Leads" value={loading ? '—' : splitValue(p => stats[p].weeklyLeads)} loading={loading} />
-                  <Kpi label="Engagement" value={loading ? '—' : splitValue(p => `${stats[p].engagement}%`)} loading={loading} />
+                  <Kpi label="Engagement · %" value={loading ? '—' : splitValue(p => stats[p].engagement)} loading={loading} />
                   <Kpi label="Lifetime replies" value={loading ? '—' : splitValue(p => stats[p].lifetimeReplies)} loading={loading} />
                   <Kpi label="Messages sent" value={loading ? '—' : splitValue(p => stats[p].messagesSent)} loading={loading} muted />
                 </div>
