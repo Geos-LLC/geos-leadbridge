@@ -554,7 +554,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                 right-edge fade. Optimized for unbounded width in
                 Settings → AI Playbook. */}
       {wizardMode ? (
-        <div style={{ padding: '0 0 4px' }}>
+        <>
               <div style={{
                 border: '1px solid var(--lb-line, #e5e9f2)',
                 borderRadius: 11,
@@ -811,7 +811,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                   <Plus size={13} /> Add column
                 </button>
               </div>
-            </div>
+            </>
           ) : (
           <CollapsibleSection
             title="Price table"
