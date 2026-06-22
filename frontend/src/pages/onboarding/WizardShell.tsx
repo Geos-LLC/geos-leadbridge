@@ -231,14 +231,29 @@ export default function WizardShell({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{
+            {/* Mobile-only step indicator. The desktop rail already shows
+                "Step N of N" — at <=760px the rail is hidden, so we
+                surface the same counter as a mono accent eyebrow above
+                the title. CSS toggles visibility (display:none until the
+                breakpoint hits) — see `.lb-wizard-step-indicator`. */}
+            <div className="lb-wizard-step-indicator" style={{
+              fontSize: 11, fontWeight: 700,
+              color: 'var(--lb-accent)',
+              fontFamily: 'var(--lb-font-mono)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              marginBottom: 8,
+            }}>
+              Step {currentIndex + 1} of {totalSteps}
+            </div>
+            <h2 className="lb-wizard-title" style={{
               margin: 0,
               fontSize: 21, fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.02em',
             }}>
               {currentMeta.title}
             </h2>
-            <p style={{
+            <p className="lb-wizard-subtitle" style={{
               margin: '5px 0 0',
               fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
             }}>
