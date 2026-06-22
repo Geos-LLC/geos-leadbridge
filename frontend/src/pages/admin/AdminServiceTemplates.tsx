@@ -70,6 +70,33 @@ function pretty(value: unknown): string {
   }
 }
 
+/**
+ * True when a generated/edited blob has no usable content — empty
+ * groups[], no items[], no basePrices[]. Used by handleSaveDraft to
+ * refuse a destructive save that would wipe a populated template
+ * down to nothing (the failure mode that nuked the carpet template).
+ */
+function looksEmpty(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === 'string') return value.trim().length === 0 || value.trim() === '""';
+  if (typeof value !== 'object') return false;
+  const o = value as any;
+  const groups = Array.isArray(o.groups) ? o.groups : null;
+  const items = Array.isArray(o.items) ? o.items : null;
+  const basePrices = Array.isArray(o.basePrices) ? o.basePrices : null;
+  const entries = Array.isArray(o.entries) ? o.entries : null;
+  // Any populated array of substance → not empty.
+  if (groups && groups.length > 0) return false;
+  if (items && items.length > 0) return false;
+  if (basePrices && basePrices.length > 0) return false;
+  if (entries && entries.length > 0) return false;
+  // Pricing models that don't use arrays (hourly, flat_rate) — treat
+  // as non-empty when they declare a model. Custom/empty defaults
+  // are caught by the array checks above returning all-falsy.
+  if (o.pricingModel === 'hourly' || o.pricingModel === 'flat_rate') return false;
+  return true;
+}
+
 /** Treat unparseable input as the raw text so admin can fix on next save attempt. */
 function safeParse<T>(raw: string): T | string {
   try {
@@ -171,66 +198,43 @@ export default function AdminServiceTemplates() {
   };
 
   const handleSaveDraft = async () => {
-    // If the admin pasted new raw text into the (paste) textareas but
-    // didn't click Generate first, run Generate inline now so the paste
-    // content actually flows into the saved payload. Without this,
-    // Save would silently send the unchanged JSON textareas and the
-    // paste content would be dropped on the floor — exactly the trap
-    // that bit the Cristal carpet template repair.
-    const hasUntranslatedPaste =
-      draft.rawOptionsText.trim().length > 0 || draft.rawPricingText.trim().length > 0;
-
-    // Generate is required for Create. For Edit, Generate is only
-    // needed when there's untranslated paste content (otherwise the
-    // JSON textareas are the source of truth and we Save them as-is).
+    // Creating a new template requires Generate first so there's
+    // something to save. When editing, the JSON textareas are loaded
+    // from the existing template by handleEdit.
     if (!editingId && !draft.sourceJson) {
       notify.error('Generate first', 'Click "Generate Template" before saving.');
       return;
     }
 
+    const opts: unknown = safeParse(draft.serviceOptionsJson);
+    const pricing: unknown = safeParse(draft.pricingJson);
+    const answers: unknown = safeParse(draft.customerAnswersJson);
+
+    // Defensive guard: refuse to save when the JSON textareas would
+    // wipe the template down to empty groups/no prices. This protects
+    // against the destructive case where an admin pasted raw text but
+    // clicked Generate before pasting anything substantial — the
+    // generator returns `{groups: []}` + minimal pricing, the JSON
+    // textareas get overwritten, and Save would persist the empty
+    // result over real data. The Cristal carpet template was nuked
+    // exactly this way.
+    if (editingId && looksEmpty(opts) && looksEmpty(pricing)) {
+      notify.error(
+        'Save blocked',
+        'The template would be saved with no question groups and no pricing. Paste fresh Thumbtack content + click Generate Template, or click Cancel edit to start over.',
+      );
+      return;
+    }
+
     setSaving(true);
     try {
-      // Inline Generate when raw text is present. We don't mutate
-      // draft directly here — the API response is consumed straight
-      // into the PATCH/POST below, and the cleared paste textareas
-      // come from handleReset() on success.
-      let opts: unknown = safeParse(draft.serviceOptionsJson);
-      let pricing: unknown = safeParse(draft.pricingJson);
-      let answers: unknown = safeParse(draft.customerAnswersJson);
-      let inlineSourceJson = draft.sourceJson;
-      let inlineKey = draft.keyOverride.trim();
-      let inlineDescription = draft.description.trim();
-
-      if (hasUntranslatedPaste) {
-        if (!canGenerate) {
-          notify.error('Missing fields', 'Service name, provider, and category are required to translate the pasted content.');
-          setSaving(false);
-          return;
-        }
-        const { generated } = await adminServiceTemplatesApi.generate({
-          serviceName: draft.serviceName.trim(),
-          provider: draft.provider,
-          providerCategoryName: draft.providerCategoryName.trim(),
-          providerCategoryId: draft.providerCategoryId.trim() || null,
-          notes: draft.notes.trim() || null,
-          rawOptionsText: draft.rawOptionsText,
-          rawPricingText: draft.rawPricingText,
-        });
-        opts = generated.serviceOptionsJson;
-        pricing = generated.pricingJson;
-        answers = generated.customerAnswersJson;
-        inlineSourceJson = generated.sourceJson;
-        if (!inlineKey) inlineKey = generated.key;
-        if (!inlineDescription) inlineDescription = generated.description ?? '';
-      }
-
       if (editingId) {
         const res = await adminServiceTemplatesApi.patch(editingId, {
           label: draft.serviceName.trim(),
           provider: draft.provider,
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
-          description: inlineDescription || null,
+          description: draft.description.trim() || null,
           serviceOptionsJson: opts,
           pricingJson: pricing,
           customerAnswersJson: answers,
@@ -239,24 +243,19 @@ export default function AdminServiceTemplates() {
         const stamp = ts
           ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           : 'just now';
-        notify.success(
-          'Saved',
-          hasUntranslatedPaste
-            ? `Template "${draft.serviceName}" updated at ${stamp} (paste translated automatically).`
-            : `Template "${draft.serviceName}" updated at ${stamp}.`,
-        );
+        notify.success('Saved', `Template "${draft.serviceName}" updated at ${stamp}.`);
       } else {
         await adminServiceTemplatesApi.create({
-          key: inlineKey || `${draft.provider}_template`,
+          key: draft.keyOverride.trim() || `${draft.provider}_template`,
           label: draft.serviceName.trim(),
           provider: draft.provider,
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
-          description: inlineDescription || null,
+          description: draft.description.trim() || null,
           serviceOptionsJson: opts,
           pricingJson: pricing,
           customerAnswersJson: answers,
-          sourceJson: inlineSourceJson!,
+          sourceJson: draft.sourceJson!,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
       }
