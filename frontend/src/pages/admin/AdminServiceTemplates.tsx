@@ -171,47 +171,92 @@ export default function AdminServiceTemplates() {
   };
 
   const handleSaveDraft = async () => {
-    // Creating a new template requires going through Generate first so
-    // there's something to save. When editing, the JSON textareas are
-    // already populated from the loaded template — sourceJson stays
-    // whatever it was (code_preset_seed or admin_generated) and we
-    // don't gate Save on it.
-    if (!editingId) {
-      if (!draft.sourceJson) {
-        notify.error('Generate first', 'Click "Generate Template" before saving.');
-        return;
-      }
+    // If the admin pasted new raw text into the (paste) textareas but
+    // didn't click Generate first, run Generate inline now so the paste
+    // content actually flows into the saved payload. Without this,
+    // Save would silently send the unchanged JSON textareas and the
+    // paste content would be dropped on the floor — exactly the trap
+    // that bit the Cristal carpet template repair.
+    const hasUntranslatedPaste =
+      draft.rawOptionsText.trim().length > 0 || draft.rawPricingText.trim().length > 0;
+
+    // Generate is required for Create. For Edit, Generate is only
+    // needed when there's untranslated paste content (otherwise the
+    // JSON textareas are the source of truth and we Save them as-is).
+    if (!editingId && !draft.sourceJson) {
+      notify.error('Generate first', 'Click "Generate Template" before saving.');
+      return;
     }
+
     setSaving(true);
     try {
+      // Inline Generate when raw text is present. We don't mutate
+      // draft directly here — the API response is consumed straight
+      // into the PATCH/POST below, and the cleared paste textareas
+      // come from handleReset() on success.
+      let opts: unknown = safeParse(draft.serviceOptionsJson);
+      let pricing: unknown = safeParse(draft.pricingJson);
+      let answers: unknown = safeParse(draft.customerAnswersJson);
+      let inlineSourceJson = draft.sourceJson;
+      let inlineKey = draft.keyOverride.trim();
+      let inlineDescription = draft.description.trim();
+
+      if (hasUntranslatedPaste) {
+        if (!canGenerate) {
+          notify.error('Missing fields', 'Service name, provider, and category are required to translate the pasted content.');
+          setSaving(false);
+          return;
+        }
+        const { generated } = await adminServiceTemplatesApi.generate({
+          serviceName: draft.serviceName.trim(),
+          provider: draft.provider,
+          providerCategoryName: draft.providerCategoryName.trim(),
+          providerCategoryId: draft.providerCategoryId.trim() || null,
+          notes: draft.notes.trim() || null,
+          rawOptionsText: draft.rawOptionsText,
+          rawPricingText: draft.rawPricingText,
+        });
+        opts = generated.serviceOptionsJson;
+        pricing = generated.pricingJson;
+        answers = generated.customerAnswersJson;
+        inlineSourceJson = generated.sourceJson;
+        if (!inlineKey) inlineKey = generated.key;
+        if (!inlineDescription) inlineDescription = generated.description ?? '';
+      }
+
       if (editingId) {
         const res = await adminServiceTemplatesApi.patch(editingId, {
           label: draft.serviceName.trim(),
           provider: draft.provider,
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
-          description: draft.description.trim() || null,
-          serviceOptionsJson: safeParse(draft.serviceOptionsJson),
-          pricingJson: safeParse(draft.pricingJson),
-          customerAnswersJson: safeParse(draft.customerAnswersJson),
+          description: inlineDescription || null,
+          serviceOptionsJson: opts,
+          pricingJson: pricing,
+          customerAnswersJson: answers,
         });
         const ts = res?.template?.updatedAt;
         const stamp = ts
           ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           : 'just now';
-        notify.success('Saved', `Template "${draft.serviceName}" updated at ${stamp}.`);
+        notify.success(
+          'Saved',
+          hasUntranslatedPaste
+            ? `Template "${draft.serviceName}" updated at ${stamp} (paste translated automatically).`
+            : `Template "${draft.serviceName}" updated at ${stamp}.`,
+        );
       } else {
         await adminServiceTemplatesApi.create({
-          key: draft.keyOverride.trim() || `${draft.provider}_template`,
+          key: inlineKey || `${draft.provider}_template`,
           label: draft.serviceName.trim(),
           provider: draft.provider,
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
-          description: draft.description.trim() || null,
-          serviceOptionsJson: safeParse(draft.serviceOptionsJson),
-          pricingJson: safeParse(draft.pricingJson),
-          customerAnswersJson: safeParse(draft.customerAnswersJson),
-          sourceJson: draft.sourceJson!,
+          description: inlineDescription || null,
+          serviceOptionsJson: opts,
+          pricingJson: pricing,
+          customerAnswersJson: answers,
+          sourceJson: inlineSourceJson!,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
       }
@@ -417,13 +462,11 @@ export default function AdminServiceTemplates() {
           >
             {generating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={14} />}
             {' '}
-            Generate Template
+            Generate Template (preview)
           </button>
-          {(draft.rawOptionsText.trim().length > 0 || draft.rawPricingText.trim().length > 0) && (
-            <span style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>
-              ⚠ You pasted new content — click Generate Template to translate it into JSON, then click Save.
-            </span>
-          )}
+          <span style={{ fontSize: 12, color: '#6b7280' }}>
+            Optional — Save will auto-translate any pasted content if you skip this.
+          </span>
         </div>
 
         {/* Generated JSON preview */}
