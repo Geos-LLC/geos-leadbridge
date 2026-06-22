@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowRight, Bot, CircleDollarSign, Eye, Loader2, MoonStar, Phone, Sparkles, UserCheck, Zap,
+  Bot, CircleDollarSign, Eye, Loader2, MoonStar, Phone, Sparkles, UserCheck, Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '../../../store/appStore';
@@ -196,17 +196,17 @@ export default function AIRulesStep({ onSaveContinue, saving, setSaving }: Props
           type="button"
           onClick={() => void apply()}
           disabled={saving || loading}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
+          style={{
+            padding: '10px 22px', borderRadius: 10,
+            border: 0, background: 'var(--lb-accent)', color: '#fff',
+            fontSize: 13, fontWeight: 700,
+            cursor: (saving || loading) ? 'not-allowed' : 'pointer',
+            opacity: (saving || loading) ? 0.5 : 1,
+            fontFamily: 'inherit',
+          }}
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? 'Saving…' : 'Save & Continue'}
-          {!saving && <ArrowRight className="w-4 h-4" />}
+          {saving ? 'Saving…' : 'Continue'}
         </button>
-        {savedAccounts.length > 1 && (
-          <span className="text-[11px] text-slate-500">
-            Applies to all connected accounts.
-          </span>
-        )}
       </WizardStepActions>
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}

@@ -1,4 +1,4 @@
-import { Layers, MapPin, type LucideIcon } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import type { SavedAccount } from '../../types';
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -8,11 +8,16 @@ const PLATFORM_LABEL: Record<string, string> = {
   google:    'Google',
 };
 
-export const ALL_ACCOUNTS = 'all' as const;
+// Each platform gets a 18px brand-color tile with a short mono code
+// ("TT" / "Y" / etc.) per the LeadBridge Automation Bundle.
+const PLATFORM_BRAND: Record<string, { bg: string; short: string }> = {
+  thumbtack: { bg: 'var(--lb-thumbtack)', short: 'TT' },
+  yelp:      { bg: 'var(--lb-yelp)',      short: 'Y' },
+  angi:      { bg: 'var(--lb-angi)',      short: 'A' },
+  google:    { bg: 'var(--lb-google)',    short: 'G' },
+};
 
-function getShortName(a: SavedAccount): string {
-  return PLATFORM_LABEL[a.platform] || a.platform;
-}
+export const ALL_ACCOUNTS = 'all' as const;
 
 export function AccountTabs({
   value, onChange, accounts,
@@ -23,76 +28,78 @@ export function AccountTabs({
 }) {
   return (
     <div
-      className="lb-account-tabs"
+      className="lb-account-tabs lb-tabscroll"
       style={{
         display: 'flex',
-        gap: 6,
-        background: 'var(--lb-surface)',
-        border: '1px solid var(--lb-line)',
-        borderRadius: 12,
-        padding: 5,
-        boxShadow: 'var(--lb-shadow-sm)',
-        marginBottom: 18,
+        gap: 4,
+        borderBottom: '1px solid var(--lb-line)',
         overflowX: 'auto',
+        paddingBottom: 0,
       }}
     >
-      <PillAccountTab
+      <UnderlineTab
         active={value === ALL_ACCOUNTS}
         onClick={() => onChange(ALL_ACCOUNTS)}
-        icon={Layers}
         label="All accounts"
-        sublabel={`${accounts.length} ${accounts.length === 1 ? 'source' : 'sources'}`}
-        applyHint
+        leading={<Layers size={14} />}
       />
-      {accounts.map(a => (
-        <PillAccountTab
-          key={a.id}
-          active={value === a.id}
-          onClick={() => onChange(a.id)}
-          icon={MapPin}
-          label={getShortName(a)}
-          sublabel={a.businessName || PLATFORM_LABEL[a.platform] || a.platform}
-          warning={!!a.tokenDead}
-        />
-      ))}
+      {accounts.map(a => {
+        const brand = PLATFORM_BRAND[a.platform] || { bg: 'var(--lb-ink-6)', short: '?' };
+        const label = a.businessName || PLATFORM_LABEL[a.platform] || a.platform;
+        return (
+          <UnderlineTab
+            key={a.id}
+            active={value === a.id}
+            onClick={() => onChange(a.id)}
+            label={label}
+            leading={
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 18, height: 18, borderRadius: 4,
+                background: brand.bg, color: '#fff',
+                fontFamily: 'var(--lb-font-mono)', fontWeight: 600, fontSize: 9,
+              }}>{brand.short}</span>
+            }
+            warning={!!a.tokenDead}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function PillAccountTab({
-  active, onClick, icon: Icon, label, sublabel, applyHint, warning,
+function UnderlineTab({
+  active, onClick, leading, label, warning,
 }: {
   active: boolean;
   onClick: () => void;
-  icon: LucideIcon;
+  leading?: React.ReactNode;
   label: string;
-  sublabel?: string;
-  applyHint?: boolean;
   warning?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title={sublabel + (applyHint ? ' — applies to all' : '')}
+      title={label}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 8,
-        padding: '8px 12px',
-        borderRadius: 8,
-        background: active ? 'var(--lb-accent-tint)' : 'transparent',
+        gap: 7,
+        padding: '9px 14px 11px',
+        background: 'transparent',
         border: 0,
+        borderBottom: '2px solid ' + (active ? 'var(--lb-accent)' : 'transparent'),
+        marginBottom: -1,
         cursor: 'pointer',
         fontFamily: 'inherit',
         fontSize: 13,
-        fontWeight: active ? 700 : 600,
-        color: active ? 'var(--lb-accent)' : 'var(--lb-ink-4)',
-        transition: 'background 120ms, color 120ms',
+        fontWeight: active ? 700 : 500,
+        color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
         flexShrink: 0,
       }}
     >
-      <Icon size={14} />
+      {leading}
       <span>{label}</span>
       {warning && (
         <span
@@ -113,27 +120,27 @@ export function ScopeBanner({
 }) {
   const isAll = accountId === ALL_ACCOUNTS;
   const acct = accounts.find(a => a.id === accountId);
+  // Per LeadBridge Automation Bundle: single flat accent-tint card,
+  // 12-radius, no left stripe. The per-account amber variant is kept
+  // for visibility but uses the same chrome (just warn-tint colors).
+  const palette = isAll
+    ? { bg: 'var(--lb-accent-tint)', border: 'var(--lb-accent-line)', fg: 'var(--lb-ink-3)', icon: 'var(--lb-accent)' }
+    : { bg: 'var(--lb-warn-tint)',   border: '#fcd34d',                 fg: '#92400e',         icon: '#f59e0b' };
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
-      padding: '12px 16px',
-      // Single-account scope deserves a strong visual cue — when the user is
-      // editing per-account values, the banner is amber-tinted with a left
-      // accent stripe so it stands out from the All-accounts blue banner.
-      background: isAll ? '#eff6ff' : '#fffbeb',
-      border: '1.5px solid ' + (isAll ? '#c3d4ff' : '#fcd34d'),
-      borderLeft: '5px solid ' + (isAll ? 'var(--lb-accent)' : '#f59e0b'),
-      borderRadius: 10,
-      fontSize: 13.5, fontWeight: 500,
-      color: isAll ? 'var(--lb-accent)' : '#92400e',
-      marginBottom: 18,
-      boxShadow: isAll ? 'none' : '0 1px 2px rgba(245,158,11,0.15)',
+      padding: '11px 16px',
+      background: palette.bg,
+      border: '1px solid ' + palette.border,
+      borderRadius: 12,
+      fontSize: 12.5,
+      color: palette.fg,
     }}>
-      {isAll ? <Layers size={14} /> : <MapPin size={14} />}
+      <Layers size={15} style={{ color: palette.icon, flexShrink: 0 }} />
       <div style={{ flex: 1 }}>
         {isAll
-          ? <>Editing settings for <strong>all {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</strong>. Changes apply everywhere.</>
-          : <>Editing settings for <strong>{acct?.businessName || 'this account'}</strong> only. Other accounts keep their own values.</>
+          ? <>Editing <strong style={{ color: 'var(--lb-ink-1)' }}>all {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</strong>. Changes apply to every connected source. Switch a tab above to edit one account.</>
+          : <>Editing <strong style={{ color: 'var(--lb-ink-1)' }}>{acct?.businessName || 'this account'}</strong> only. Other accounts keep their own values.</>
         }
       </div>
       {!isAll && onCopyFrom && (

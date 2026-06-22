@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Plus, Facebook, Globe, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Plus } from 'lucide-react';
 import ConnectionModal from '../../../components/ConnectionModal';
 import { useAppStore } from '../../../store/appStore';
 import { thumbtackApi } from '../../../services/api';
-import { PlatformBadge } from '../../../components/ui';
 import type { SavedAccount } from '../../../types';
 
 // Sentinel checked by Dashboard after an OAuth callback to decide
@@ -91,82 +90,33 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
     return groups;
   }, [savedAccounts]);
 
+  // Bundle layout: a single vertical list with one row per platform
+  // (always shown, "Connected" or "Connect") + a dashed "Add another
+  // source" row underneath. Per-platform connection state collapses
+  // multi-account tenants into a single status row — the actual
+  // per-business list lives in /settings/accounts.
+  const ttCount = byPlatform.thumbtack?.length ?? 0;
+  const yelpCount = byPlatform.yelp?.length ?? 0;
+
   return (
     <div className="pt-2">
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
-
-      {/* Connected accounts — only render the section when we have data */}
-      {!loading && savedAccounts.length > 0 && (
-        <div className="mb-6">
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-            Connected
-          </div>
-          <ul className="space-y-2">
-            {savedAccounts.map(acct => (
-              <li
-                key={acct.id}
-                className="flex flex-col gap-3 px-4 py-3 rounded-2xl border"
-                style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line-soft)' }}
-              >
-                <div className="flex items-center gap-3">
-                  <PlatformBadge platform={acct.platform} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">
-                      {acct.businessName || 'Untitled business'}
-                    </div>
-                    <div className="text-xs text-slate-400 capitalize">{acct.platform}</div>
-                  </div>
-                  {acct.webhookId ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      Needs attention
-                    </span>
-                  )}
-                </div>
-                {/* Thumbtack profile URL input moved to the Business
-                    Website step — it's a data-source input, not an OAuth
-                    setting. Connect this step intentionally keeps just
-                    the OAuth list. */}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Add a source */}
-      <div className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
-        {savedAccounts.length > 0 ? 'Add another source' : 'Connect a source'}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <PlatformTile
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <PlatformRow
           name="Thumbtack"
-          dotColor="rgb(37,99,235)"
-          subtitle={byPlatform.thumbtack?.length ? `${byPlatform.thumbtack.length} connected` : 'OAuth login'}
-          onClick={openConnectionModal}
+          short="TT"
+          color="#009fd9"
+          connectedCount={ttCount}
+          onConnect={openConnectionModal}
         />
-        <PlatformTile
+        <PlatformRow
           name="Yelp"
-          dotColor="rgb(220,38,38)"
-          subtitle={byPlatform.yelp?.length ? `${byPlatform.yelp.length} connected` : 'OAuth login'}
-          onClick={openConnectionModal}
+          short="Y"
+          color="#c4302b"
+          connectedCount={yelpCount}
+          onConnect={openConnectionModal}
         />
-        <PlatformTile
-          name="Website form"
-          icon={<Globe className="w-4 h-4" />}
-          subtitle="Coming soon"
-          disabled
-        />
-        <PlatformTile
-          name="Facebook / Ads"
-          icon={<Facebook className="w-4 h-4" />}
-          subtitle="Coming soon"
-          disabled
-        />
+        <AddSourceRow onClick={openConnectionModal} />
       </div>
 
       {savedAccounts.length === 0 && !loading && (
@@ -191,46 +141,97 @@ export default function ConnectStep({ alreadyDone, onMarkDone }: Props) {
   );
 }
 
-interface PlatformTileProps {
+// Single per-platform row matching the LeadBridge Wizard Bundle —
+// 38px brand-color badge + name + status / Connect button. When the
+// tenant has 2+ accounts on the platform we surface the count in the
+// status line so the row still reflects what's connected.
+function PlatformRow({
+  name, short, color, connectedCount, onConnect,
+}: {
   name: string;
-  subtitle: string;
-  dotColor?: string;
-  icon?: React.ReactNode;
-  disabled?: boolean;
-  onClick?: () => void;
+  short: string;
+  color: string;
+  connectedCount: number;
+  onConnect: () => void;
+}) {
+  const connected = connectedCount > 0;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 13,
+      padding: 16, background: '#fff',
+      border: '1px solid var(--lb-line)',
+      borderRadius: 12,
+    }}>
+      <span style={{
+        width: 38, height: 38, borderRadius: 9,
+        background: color, color: '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'var(--lb-font-mono)', fontWeight: 700, fontSize: 13,
+        flexShrink: 0,
+      }}>{short}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{name}</div>
+        <div style={{
+          fontSize: 12, fontWeight: 600,
+          color: connected ? 'var(--lb-success)' : 'var(--lb-ink-5)',
+        }}>
+          {connected
+            ? (connectedCount > 1 ? `${connectedCount} connected` : 'Connected')
+            : 'Not connected'}
+        </div>
+      </div>
+      {connected ? (
+        <CheckCircle2 size={18} strokeWidth={2.5} style={{ color: 'var(--lb-success)' }} />
+      ) : (
+        <button
+          type="button"
+          onClick={onConnect}
+          style={{
+            padding: '7px 14px', borderRadius: 8, border: 0,
+            background: 'var(--lb-accent)', color: '#fff',
+            fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Connect
+        </button>
+      )}
+    </div>
+  );
 }
 
-function PlatformTile({ name, subtitle, dotColor, icon, disabled, onClick }: PlatformTileProps) {
+// "Add another source" row — dashed border, gray tile + plus icon, two
+// text lines. Opens the ConnectionModal so Angi / Google / etc. can be
+// added without leaving the wizard.
+function AddSourceRow({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
-      className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border text-left transition-all ${
-        disabled
-          ? 'opacity-50 cursor-not-allowed'
-          : 'hover:border-blue-300 hover:shadow-sm cursor-pointer'
-      }`}
-      style={{ background: 'var(--lb-surface)', borderColor: 'var(--lb-line-soft)' }}
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 13,
+        padding: 16, background: '#fff',
+        border: '1px dashed var(--lb-line)',
+        borderRadius: 12,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        textAlign: 'left',
+        width: '100%',
+      }}
     >
-      {icon ? (
-        <span className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 inline-flex items-center justify-center shrink-0">
-          {icon}
-        </span>
-      ) : (
-        <span
-          className="w-3 h-3 rounded-full shrink-0"
-          style={{ background: dotColor ?? 'var(--lb-accent)' }}
-          aria-hidden
-        />
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-slate-900">{name}</div>
-        <div className="text-xs text-slate-500">{subtitle}</div>
+      <span style={{
+        width: 38, height: 38, borderRadius: 9,
+        background: 'var(--lb-ink-10)', color: 'var(--lb-ink-5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Plus size={18} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>Add another source</div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>Angi, Google, and more</div>
       </div>
-      {!disabled && (
-        <Plus className="w-4 h-4 text-slate-400 shrink-0" />
-      )}
     </button>
   );
 }
+

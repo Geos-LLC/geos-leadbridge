@@ -1049,7 +1049,7 @@ function RuleCardRow({
     onFieldChange(stepToDelayString({ val: customStep.val, unit: u }));
   };
   return (
-    <div style={{
+    <div className="lb-rule" style={{
       display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
       padding: '20px 24px',
       borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',

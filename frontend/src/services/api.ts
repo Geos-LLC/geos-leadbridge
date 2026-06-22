@@ -2342,7 +2342,50 @@ export const adminApi = {
     const { data } = await api.patch(`/v1/admin/phone-pool/tenant/${tenantPhoneId}/reassign`, { userId });
     return data.data;
   },
+  getTenantHealth: async (): Promise<TenantHealthSummary> => {
+    const { data } = await api.get('/v1/admin/tenant-health');
+    return data.data;
+  },
+  runTenantHealthSweep: async (): Promise<{ success: boolean; triggered: boolean }> => {
+    const { data } = await api.post('/v1/admin/tenant-health/run');
+    return data;
+  },
 };
+
+export interface TenantHealthIssue {
+  id: string;
+  userId: string;
+  userEmail: string | null;
+  userName: string | null;
+  accountId: string;
+  accountName: string;
+  platform: string;
+  issueCode: string;
+  issueMessage: string;
+  status: string;
+  firstDetectedAt: string;
+  lastDetectedAt: string;
+  notificationCount: number;
+}
+
+export interface TenantHealthSummary {
+  summary: {
+    totalActive: number;
+    critical: number;
+    warning: number;
+    tenantsAffected: number;
+    lastCheckedAt: string | null;
+  };
+  byCode: Array<{ issueCode: string; count: number; status: string }>;
+  activeIssues: TenantHealthIssue[];
+  recentDevAlerts: Array<{
+    id: string;
+    code: string | null;
+    message: string;
+    emailedAt: string | null;
+    createdAt: string;
+  }>;
+}
 
 // SupportGrant — admins issue grants to themselves so they can access guarded
 // admin endpoints. Backend route: POST /v1/me/support-grants. Required scope is
