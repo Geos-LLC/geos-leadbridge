@@ -630,7 +630,10 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             connected Thumbtack businesses.
           </div>
         )}
-        <div className="lb-wiz-inline-save" style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Phone input + Save stay inline on one row at every width
+            — no .lb-wiz-inline-save wrap class here. The canonical
+            shows them side-by-side; wrapping would break the layout. */}
+        <div style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="tel"
             inputMode="tel"
@@ -1000,33 +1003,24 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             <Info size={15} />
           </button>
           <span style={{ flex: 1, minWidth: 0 }} />
-          <span style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {detectedPlatform && (
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                fontSize: 9.5, fontWeight: 700,
-                fontFamily: 'var(--lb-font-mono)',
-                textTransform: 'uppercase', letterSpacing: '.04em',
-                padding: '3px 8px', borderRadius: 99,
-                background: '#dbeafe', color: '#1d4ed8',
-              }}>
-                {platformLabel(detectedPlatform)}
-              </span>
-            )}
-            {savedAndVerified && (
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                fontSize: 9.5, fontWeight: 700,
-                fontFamily: 'var(--lb-font-mono)',
-                textTransform: 'uppercase', letterSpacing: '.04em',
-                padding: '3px 8px', borderRadius: 99,
-                background: '#dcfce7', color: '#15803d',
-              }}>
-                <CheckCircle2 size={10} />
-                Verified
-              </span>
-            )}
-          </span>
+          {/* Only the Verified pill per the target screenshot. The
+              "Thumbtack profile" / "Yelp business page" platform
+              badge was dropped — the URL itself + Verified pill are
+              enough signal. */}
+          {savedAndVerified && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              fontSize: 9.5, fontWeight: 700,
+              fontFamily: 'var(--lb-font-mono)',
+              textTransform: 'uppercase', letterSpacing: '.04em',
+              padding: '3px 8px', borderRadius: 99,
+              background: '#dcfce7', color: '#15803d',
+              flexShrink: 0,
+            }}>
+              <CheckCircle2 size={10} />
+              Verified
+            </span>
+          )}
         </div>
         {infoWebsiteOpen && (
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 9, lineHeight: 1.55 }}>
