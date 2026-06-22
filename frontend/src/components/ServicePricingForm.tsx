@@ -73,72 +73,65 @@ const textInputStyle: CSSProperties = {
  * pricing), so the shared PriceChip's onChange signature would force
  * an awkward double-bind here.
  */
-function BedBathPriceChip({
-  tag,
+/**
+ * Single price cell in the Price Table — matches the FinalDesign
+ * "Pricing Table (standalone)" canonical: a 88px-wide bordered tile
+ * with a faint $ prefix in mono grey + the value in mono dark right-
+ * aligned. Editable inline — focus reveals the input border. Used in
+ * a horizontal table layout where each cleaning-type column gets one
+ * cell per row.
+ */
+function PriceCell({
   amount,
   onChange,
 }: {
-  tag: string;
   amount: number;
   onChange: (next: number) => void;
 }) {
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '4px 8px',
-        borderRadius: 999,
-        background: 'var(--lb-ink-10, #f3f5fa)',
-        color: 'var(--lb-ink-2, #1f2a44)',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: 12.5,
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-        minWidth: 96,
-        justifyContent: 'flex-end',
-      }}
-    >
+    <div style={{ width: 88, flexShrink: 0, padding: '7px 10px' }}>
       <span
         style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.05em',
-          color: 'var(--lb-ink-5, #64748b)',
-          textTransform: 'uppercase',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 4,
+          padding: '7px 9px',
+          border: '1px solid var(--lb-line, #e5e9f2)',
+          borderRadius: 8,
+          background: '#fff',
+          boxShadow: '0 1px 1px rgba(10,21,48,0.02)',
         }}
       >
-        {tag}
+        <span
+          style={{
+            fontSize: 10.5,
+            color: 'var(--lb-ink-7, #b4bbcc)',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          }}
+        >
+          $
+        </span>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={Number.isFinite(amount) ? amount : 0}
+          onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+          style={{
+            width: 48,
+            padding: '0 2px',
+            border: 0,
+            background: 'transparent',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'var(--lb-ink-1, #0a1530)',
+            textAlign: 'right',
+            outline: 'none',
+          }}
+        />
       </span>
-      <span style={{ color: 'var(--lb-ink-3, #334155)' }}>$</span>
-      <input
-        type="number"
-        min={0}
-        step={1}
-        value={Number.isFinite(amount) ? amount : 0}
-        onChange={(e) => onChange(parseInt(e.target.value) || 0)}
-        style={{
-          width: 48,
-          padding: '2px 4px',
-          border: '1px solid transparent',
-          borderRadius: 6,
-          background: 'transparent',
-          fontFamily: 'inherit',
-          fontSize: 12.5,
-          fontWeight: 700,
-          color: 'var(--lb-ink-1, #0a1530)',
-          textAlign: 'right',
-        }}
-        onFocus={(e) => {
-          e.currentTarget.style.background = 'white';
-          e.currentTarget.style.borderColor = 'var(--lb-line, #e5e9f2)';
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.borderColor = 'transparent';
-        }}
-      />
     </div>
   );
 }
@@ -553,257 +546,325 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         onToggle={() => toggleSection('priceTable')}
       >
         <div>
-          {/* Header row — matches the item_quantity Price table header
-              chrome: uppercase grey labels above the row list. */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '6px 14px',
-              borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
-              fontSize: 10.5,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              color: 'var(--lb-ink-5, #64748b)',
-              textTransform: 'uppercase',
-            }}
-          >
-            <span style={{ flex: 1 }}>Size band</span>
-            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-              {allTypes.map((t: any) => (
-                <span
-                  key={t.key}
+          {/* Price Table — restyled to match the FinalDesign canonical
+              "Pricing Table (standalone)". Horizontal table layout:
+              label cell (bed·bath + sqft mono sub) at flex:1, then N
+              fixed-width 88px price-cell tiles for each cleaning type,
+              then a 50px dashed-border sentinel column carrying the
+              delete button. Header row mirrors the column structure.
+              Scrolls horizontally on narrow widths via `.pt-scroll`
+              wrapper. */}
+          <div style={{ position: 'relative', borderTop: '1px solid var(--lb-line-soft, #eef1f7)' }}>
+            <div className="pt-scroll" style={{ overflowX: 'auto' }}>
+              <div style={{ minWidth: 'max-content' }}>
+                {/* Header row — row-axis label + per-cleaning-type
+                    column headers + + col sentinel. */}
+                <div
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    minWidth: 96,
-                    justifyContent: 'flex-end',
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid var(--lb-line, #e5e9f2)',
                   }}
                 >
-                  {t.label}
+                  <div
+                    style={{
+                      flex: '1 1 220px',
+                      minWidth: 220,
+                      padding: '10px 14px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.03em',
+                      color: 'var(--lb-ink-6, #8b94ab)',
+                    }}
+                  >
+                    Size band
+                  </div>
+                  {allTypes.map((t: any) => (
+                    <div
+                      key={t.key}
+                      style={{
+                        width: 88,
+                        flexShrink: 0,
+                        padding: '10px 12px',
+                        textAlign: 'right',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.03em',
+                        color: 'var(--lb-ink-6, #8b94ab)',
+                        position: 'relative',
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {t.label}
+                        <button
+                          type="button"
+                          onClick={() => removeCleaningType(t.key)}
+                          title={`Remove ${t.label} column`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 14,
+                            height: 14,
+                            borderRadius: 999,
+                            border: 0,
+                            background: 'transparent',
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    </div>
+                  ))}
                   <button
                     type="button"
-                    onClick={() => removeCleaningType(t.key)}
-                    title={`Remove ${t.label} column`}
+                    onClick={addCleaningType}
+                    title="Add column"
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 16,
-                      height: 16,
-                      borderRadius: 999,
-                      border: 0,
-                      background: 'transparent',
-                      color: 'var(--lb-ink-5, #64748b)',
-                      cursor: 'pointer',
-                      padding: 0,
-                    }}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </span>
-            <span style={{ width: 28 }} />
-          </div>
-          {pricing.priceTable?.map((row: any, i: number) => {
-            // Back-compat: rows saved before the min/max split carried
-            // a single `sqft` field.
-            const legacySqft = Number(row.sqft) || 0;
-            const sqftMin = Number(row.sqftMin) || legacySqft;
-            const sqftMax = Number(row.sqftMax) || legacySqft;
-            const midpoint =
-              sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : sqftMin || sqftMax;
-            return (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  // flexWrap lets the chip group + delete button drop
-                  // to a new line on narrow containers (wizard modal,
-                  // mobile). Without it the chips overlapped the
-                  // per-sqft fallback labels at <= 940px modal width.
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  rowGap: 8,
-                  padding: '10px 14px',
-                  borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
-                }}
-              >
-                <div
-                  style={{
-                    // Switch from flex:1 to a min-width-controlled
-                    // flex-basis so the column can shrink AND wrap
-                    // its content rather than push siblings off-row.
-                    flex: '1 1 220px',
-                    minWidth: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      color: 'var(--lb-ink-1, #0a1530)',
-                    }}
-                  >
-                    <input
-                      type="number"
-                      value={row.bed}
-                      min={1}
-                      max={10}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
-                      }
-                      style={INLINE_BED_BATH_INPUT}
-                    />
-                    <span style={INLINE_UNIT_LABEL}>bed</span>
-                    <span style={INLINE_DOT}>·</span>
-                    <input
-                      type="number"
-                      value={row.bath}
-                      min={1}
-                      max={10}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
-                      }
-                      style={INLINE_BED_BATH_INPUT}
-                    />
-                    <span style={INLINE_UNIT_LABEL}>bath</span>
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      // flexWrap so the per-sqft fallback labels drop
-                      // below the sqft inputs on narrow widths instead
-                      // of overflowing into the chip column.
-                      flexWrap: 'wrap',
-                      gap: 4,
-                      rowGap: 4,
+                      width: 50,
+                      flexShrink: 0,
+                      padding: '10px 6px',
+                      textAlign: 'center',
+                      fontSize: 10,
+                      fontWeight: 700,
                       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                      fontSize: 11.5,
-                      color: 'var(--lb-ink-5, #64748b)',
+                      color: 'var(--lb-accent, #2563eb)',
+                      border: 0,
+                      borderLeft: '1px dashed #d7e0f5',
+                      background: 'transparent',
+                      cursor: 'pointer',
                     }}
                   >
-                    <input
-                      type="number"
-                      value={row.sqftMin ?? ''}
-                      min={0}
-                      step={50}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
-                      }
-                      style={INLINE_SQFT_INPUT}
-                    />
-                    <span>–</span>
-                    <input
-                      type="number"
-                      value={row.sqftMax ?? ''}
-                      min={0}
-                      step={50}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
-                      }
-                      style={INLINE_SQFT_INPUT}
-                    />
-                    <span style={{ marginLeft: 2 }}>sqft</span>
-                    {midpoint > 0 && (
-                      <span
+                    + col
+                  </button>
+                </div>
+
+                {/* Body rows */}
+                {pricing.priceTable?.map((row: any, i: number) => {
+                  const legacySqft = Number(row.sqft) || 0;
+                  const sqftMin = Number(row.sqftMin) || legacySqft;
+                  const sqftMax = Number(row.sqftMax) || legacySqft;
+                  const midpoint =
+                    sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : sqftMin || sqftMax;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+                      }}
+                    >
+                      <div
                         style={{
-                          marginLeft: 10,
-                          opacity: 0.7,
-                          // Allow this hint to wrap to a new line as a
-                          // unit on narrow widths — keeps the
-                          // dot-separated triplet readable.
-                          flex: '1 1 100%',
+                          flex: '1 1 220px',
+                          minWidth: 220,
+                          padding: '10px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
                         }}
                       >
-                        {allTypes
-                          .map((t: any) => {
-                            const p = Number(row[t.key]) || 0;
-                            return p > 0
-                              ? `$${(p / midpoint).toFixed(2)}/sqft ${t.label.split(' ')[0].toLowerCase()}`
-                              : '';
-                          })
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    // Wrap chips at narrow widths (mobile + modal) so
-                    // they stack instead of forcing horizontal overflow.
-                    flexWrap: 'wrap',
-                    gap: 8,
-                    rowGap: 6,
-                  }}
-                >
-                  {allTypes.map((t: any) => (
-                    <BedBathPriceChip
-                      key={t.key}
-                      tag={t.label.split(' ')[0]}
-                      amount={Number(row[t.key]) || 0}
-                      onChange={(v) => updatePriceCell(i, t.key, v)}
-                    />
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removePriceRow(i)}
-                  title="Remove row"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: '1px solid var(--lb-line, #e5e9f2)',
-                    background: 'white',
-                    color: 'var(--lb-ink-5, #64748b)',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontSize: 13.5,
+                            fontWeight: 600,
+                            color: 'var(--lb-ink-1, #0a1530)',
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.bed}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
+                            }
+                            style={INLINE_BED_BATH_INPUT}
+                          />
+                          <span style={INLINE_UNIT_LABEL}>bed</span>
+                          <span style={INLINE_DOT}>·</span>
+                          <input
+                            type="number"
+                            value={row.bath}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
+                            }
+                            style={INLINE_BED_BATH_INPUT}
+                          />
+                          <span style={INLINE_UNIT_LABEL}>bath</span>
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 4,
+                            rowGap: 4,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 11,
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            marginTop: 1,
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.sqftMin ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
+                            }
+                            style={INLINE_SQFT_INPUT}
+                          />
+                          <span>–</span>
+                          <input
+                            type="number"
+                            value={row.sqftMax ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
+                            }
+                            style={INLINE_SQFT_INPUT}
+                          />
+                          <span style={{ marginLeft: 2 }}>sqft</span>
+                          {midpoint > 0 && (
+                            <span style={{ marginLeft: 10, opacity: 0.7, flex: '1 1 100%' }}>
+                              {allTypes
+                                .map((t: any) => {
+                                  const p = Number(row[t.key]) || 0;
+                                  return p > 0
+                                    ? `$${(p / midpoint).toFixed(2)}/sqft ${t.label.split(' ')[0].toLowerCase()}`
+                                    : '';
+                                })
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {allTypes.map((t: any) => (
+                        <PriceCell
+                          key={t.key}
+                          amount={Number(row[t.key]) || 0}
+                          onChange={(v) => updatePriceCell(i, t.key, v)}
+                        />
+                      ))}
+                      <div
+                        style={{
+                          width: 50,
+                          flexShrink: 0,
+                          alignSelf: 'stretch',
+                          borderLeft: '1px dashed var(--lb-line-soft, #f3f5fa)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => removePriceRow(i)}
+                          title="Remove row"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: '1px solid var(--lb-line, #e5e9f2)',
+                            background: 'white',
+                            color: 'var(--lb-ink-5, #64748b)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+            {/* Right-edge gradient hint — appears when content overflows
+                so the scroll affordance is visible at a glance. */}
+            {allTypes.length > 2 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  width: 26,
+                  height: '100%',
+                  background: 'linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.92))',
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+          </div>
+
+          {/* Action row — dashed accent-tint pills per canonical. */}
           <div
             style={{
               display: 'flex',
-              gap: 8,
+              gap: 9,
               flexWrap: 'wrap',
-              padding: '12px 14px 4px',
+              padding: '14px 14px 4px',
             }}
           >
             <button
               type="button"
               onClick={addPriceRow}
-              style={{ ...UNIFIED_ADD_ROW_STYLE }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '9px 14px',
+                border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                borderRadius: 10,
+                background: 'var(--lb-accent-tint, #e7efff)',
+                color: 'var(--lb-accent, #2563eb)',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
             >
-              <Plus size={13} /> Add row
+              <Plus size={14} /> Add row
             </button>
             <button
               type="button"
               onClick={addCleaningType}
-              style={{ ...UNIFIED_ADD_ROW_STYLE }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '9px 14px',
+                border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                borderRadius: 10,
+                background: 'var(--lb-accent-tint, #e7efff)',
+                color: 'var(--lb-accent, #2563eb)',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
             >
-              <Plus size={13} /> Add column
+              <Plus size={14} /> Add column
             </button>
           </div>
         </div>

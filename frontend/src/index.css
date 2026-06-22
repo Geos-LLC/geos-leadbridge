@@ -118,6 +118,20 @@ h1, h2, h3, h4 {
    hidden. Default-hidden here so it never paints on desktop. */
 .lb-wizard-step-indicator { display: none; }
 
+/* Pricing Table horizontal-scroll scrollbar — matches the FinalDesign
+   "Pricing Table (standalone)" canonical: slimmer than the global
+   ::-webkit-scrollbar default (7px instead of 10px) with a softer
+   thumb that fades into the white card background. Used by the
+   ServicePricingForm Price Table wrapper (`<div class="pt-scroll">`)
+   so the in-card scroll affordance doesn't clash with the page-level
+   scrollbar visually. */
+.pt-scroll::-webkit-scrollbar { height: 7px; }
+.pt-scroll::-webkit-scrollbar-thumb {
+  background: var(--lb-ink-8, #d4d9e4);
+  border-radius: 99px;
+  border: 2px solid #fff;
+}
+
 /* Generic wizard section card — matches the LeadBridge Wizard Bundle's
    plain white card chrome. Used by step bodies that previously rendered
    on a slate-50/50 wash; the new look is a flat white card with a
