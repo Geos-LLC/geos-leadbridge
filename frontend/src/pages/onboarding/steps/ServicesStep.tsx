@@ -4,8 +4,6 @@ import {
   ChevronUp,
   Circle,
   CircleDollarSign,
-  ClipboardCheck,
-  ExternalLink,
   HelpCircle,
   Layers,
   Loader2,
@@ -14,7 +12,6 @@ import {
   Sparkles,
   Wrench,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import {
   serviceProfilePresetsApi,
   serviceProfilesApi,
@@ -58,7 +55,6 @@ export default function ServicesStep({
   saving,
   setSaving,
 }: Props) {
-  const navigate = useNavigate();
   const savedAccounts = useAppStore(s => s.savedAccounts);
   const primaryAccount = savedAccounts[0];
 
@@ -68,10 +64,12 @@ export default function ServicesStep({
   const [openId, setOpenId] = useState<string | null>(null);
   // Per-profile inline-editor selection (canonical wizard pattern —
   // summary nav rows on top, editor expands beneath the row when its
-  // Edit link is tapped). null = no editor open (all 3 rows show
-  // summary only); set to 'price' / 'ans' / 'rules' to expand. Keyed
-  // by profile id so each accordion has its own state.
-  type EditSection = 'price' | 'ans' | 'rules' | null;
+  // Edit link is tapped). null = no editor open; set to 'price' /
+  // 'ans' to expand. Keyed by profile id so each accordion has its
+  // own state. Service rules + Additional AI instructions were
+  // removed from the wizard (2026-06-22) — both were inert at runtime
+  // and added noise to the onboarding flow.
+  type EditSection = 'price' | 'ans' | null;
   const [editByProfile, setEditByProfile] = useState<Record<string, EditSection>>({});
   const toggleEdit = (profileId: string, section: Exclude<EditSection, null>) => {
     setEditByProfile(prev => ({
@@ -79,9 +77,6 @@ export default function ServicesStep({
       [profileId]: prev[profileId] === section ? null : section,
     }));
   };
-
-  // Per-profile AI draft state.
-  const [aiDraft, setAiDraft] = useState<Record<string, { value: string; dirty: boolean; saving: boolean }>>({});
 
   // Add-service panel state.
   const [showAddPanel, setShowAddPanel] = useState(false);
@@ -147,61 +142,10 @@ export default function ServicesStep({
     setSelectedPresetKey(groupedPresets.generic[0].templateId);
   }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
 
-  function ensureAiDraft(profile: ServiceProfile) {
-    if (aiDraft[profile.id]) return;
-    const existing = readAdditionalInstructions(profile.aiInstructionsJson);
-    setAiDraft(prev => ({
-      ...prev,
-      [profile.id]: { value: existing, dirty: false, saving: false },
-    }));
-  }
-
-  function updateAiDraft(profileId: string, value: string) {
-    setAiDraft(prev => ({
-      ...prev,
-      [profileId]: { ...(prev[profileId] ?? { value: '', dirty: false, saving: false }), value, dirty: true },
-    }));
-  }
-
-  async function saveAiInstructions(profile: ServiceProfile) {
-    const draft = aiDraft[profile.id];
-    if (!draft || draft.saving) return;
-    setAiDraft(prev => ({
-      ...prev,
-      [profile.id]: { ...prev[profile.id], saving: true },
-    }));
-    try {
-      let wrapper: any = {};
-      try {
-        wrapper = profile.aiInstructionsJson ? JSON.parse(profile.aiInstructionsJson) : {};
-      } catch { wrapper = {}; }
-      if (typeof wrapper !== 'object' || wrapper === null) wrapper = {};
-      wrapper.version = wrapper.version ?? 1;
-      const trimmed = draft.value.trim();
-      if (trimmed) wrapper.additionalInstructions = trimmed;
-      else delete wrapper.additionalInstructions;
-      const hasMeaning = Object.keys(wrapper).some(k => k !== 'version' && wrapper[k] !== undefined && wrapper[k] !== null);
-      const payload = hasMeaning ? JSON.stringify(wrapper) : null;
-      const updated = await serviceProfilesApi.update(profile.id, {
-        aiInstructionsJson: payload,
-      });
-      setProfiles(prev => prev.map(p => (p.id === profile.id ? updated : p)));
-      setAiDraft(prev => ({
-        ...prev,
-        [profile.id]: { value: trimmed, dirty: false, saving: false },
-      }));
-      notify.success('AI instructions saved', `${profile.name} updated.`);
-    } catch (err: any) {
-      setAiDraft(prev => ({
-        ...prev,
-        [profile.id]: { ...prev[profile.id], saving: false },
-      }));
-      notify.error(
-        'Could not save AI instructions',
-        err.response?.data?.message || 'Please try again.',
-      );
-    }
-  }
+  // Additional AI instructions removed from the wizard (2026-06-22).
+  // Field was inert at runtime — no AI consumer reads it. Tenants who
+  // need per-service free-text guidance can add it via Settings → AI
+  // Playbook after onboarding.
 
   async function activate(profile: ServiceProfile) {
     try {
@@ -459,7 +403,6 @@ export default function ServicesStep({
             {ordered.map(profile => {
               const open = openId === profile.id;
               const configured = looksConfigured(profile);
-              const serviceRules = readServiceRules(profile.aiInstructionsJson);
               return (
                 <div
                   key={profile.id}
@@ -471,7 +414,6 @@ export default function ServicesStep({
                       const next = open ? null : profile.id;
                       setOpenId(next);
                       if (next) {
-                        ensureAiDraft(profile);
                         void refreshOne(profile.id);
                       }
                     }}
@@ -532,14 +474,19 @@ export default function ServicesStep({
                     const editSection = editByProfile[profile.id] ?? null;
                     return (
                     <div className="p-4 pt-1 bg-slate-50/40" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
-                      {/* Canonical wizard pattern: 3 summary nav rows
-                          (Pricing / Customer answers / Service rules)
-                          stacked with `Edit →` links. Tapping a link
-                          expands the matching editor inline beneath
-                          that row; tapping again collapses it. Same
-                          forms as before — just hidden behind a row-
-                          tap so the accordion doesn't dump everything
-                          on the user at once. */}
+                      {/* Canonical wizard pattern: 2 summary nav rows
+                          (Pricing / Customer answers) stacked with
+                          `Edit →` links. Tapping a link expands the
+                          matching editor inline beneath that row;
+                          tapping again collapses it.
+
+                          Service rules + Additional AI instructions
+                          were removed from the wizard (2026-06-22) —
+                          both were inert at runtime (no AI consumer)
+                          and the canonical FinalDesign drops them.
+                          Service-rules data still seeds at profile
+                          creation from admin templates and can be
+                          viewed via Settings → AI Playbook. */}
                       <SummaryNavRow
                         icon={CircleDollarSign}
                         iconTone="green"
@@ -577,6 +524,7 @@ export default function ServicesStep({
                         body={faqSummary(profile)}
                         actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit answers →'}
                         onAction={() => toggleEdit(profile.id, 'ans')}
+                        noBorder
                       />
                       {editSection === 'ans' && (
                         <div className="mt-2 mb-3">
@@ -599,95 +547,8 @@ export default function ServicesStep({
                         </div>
                       )}
 
-                      <SummaryNavRow
-                        icon={ClipboardCheck}
-                        iconTone="amber"
-                        title="Service rules"
-                        body={
-                          serviceRules
-                            ? 'Imported from the service template.'
-                            : 'No rules yet — add them via AI Playbook.'
-                        }
-                        actionLabel={editSection === 'rules' ? 'Close ↑' : 'View →'}
-                        onAction={() => toggleEdit(profile.id, 'rules')}
-                        noBorder
-                      />
-                      {editSection === 'rules' && (
-                        <div className="mt-2 mb-3">
-                          {serviceRules ? (
-                            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
-                              <ServiceRulesRow
-                                title="Required details"
-                                items={serviceRules.requiredDetails}
-                              />
-                              <ServiceRulesRow
-                                title="Workflow steps"
-                                items={serviceRules.workflowSteps}
-                              />
-                              <ServiceRulesRow
-                                title="Unsupported services"
-                                items={serviceRules.unsupportedServices}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
-                                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
-                              >
-                                Edit service rules in AI Playbook
-                                <ExternalLink className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                              No rules yet — templates ship with required
-                              details, workflow steps, and unsupported
-                              services. Add them via the{' '}
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
-                                className="font-semibold text-blue-700 hover:underline inline-flex items-center gap-0.5"
-                              >
-                                full AI Playbook
-                                <ExternalLink className="w-3 h-3" />
-                              </button>.
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
-                      <Section label="Additional AI instructions">
-                        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
-                          <div className="flex items-start gap-2 text-xs text-slate-500">
-                            <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                            <span>
-                              Anything AI should remember when handling{' '}
-                              <strong>{profile.name}</strong> leads.
-                            </span>
-                          </div>
-                          <textarea
-                            value={aiDraft[profile.id]?.value ?? ''}
-                            onChange={e => updateAiDraft(profile.id, e.target.value)}
-                            placeholder="e.g., Always mention that insurance is included. Don't quote weekend rates."
-                            rows={3}
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void saveAiInstructions(profile)}
-                              disabled={aiDraft[profile.id]?.saving || !aiDraft[profile.id]?.dirty}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
-                            >
-                              {aiDraft[profile.id]?.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                              {aiDraft[profile.id]?.saving ? 'Saving…' : aiDraft[profile.id]?.dirty ? 'Save AI instructions' : 'Saved'}
-                            </button>
-                          </div>
-                        </div>
-                      </Section>
-
                       {profile.status === 'draft' && configured && (
-                        <div className="pt-2">
+                        <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
                           <button
                             type="button"
                             onClick={() => void activate(profile)}
@@ -697,7 +558,6 @@ export default function ServicesStep({
                           </button>
                         </div>
                       )}
-                      </div>
                     </div>
                     );
                   })()}
@@ -711,34 +571,22 @@ export default function ServicesStep({
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// Per-canonical wizard: each open service accordion shows 3 summary
-// nav rows (Pricing / Customer answers / Service rules) with an
-// `Edit X →` link. SummaryNavRow renders one such row — small icon
-// tile + title + 1-line body + right-aligned action button. The
-// existing editor forms remain unchanged; they're just hidden behind
-// the row-tap until the user opts into editing that section.
+// Per-canonical wizard: each open service accordion shows 2 summary
+// nav rows (Pricing / Customer answers) with an `Edit → ` link.
+// SummaryNavRow renders one such row — small icon tile + title +
+// 1-line body + right-aligned action button. The existing editor
+// forms remain unchanged; they're just hidden behind the row-tap
+// until the user opts into editing that section.
 const ROW_TONES: Record<string, { bg: string; fg: string }> = {
   green:  { bg: '#d1fae5', fg: '#059669' },
   purple: { bg: '#ede9fe', fg: '#7c3aed' },
-  amber:  { bg: '#fef3c7', fg: '#92400e' },
 };
 
 function SummaryNavRow({
   icon: Icon, iconTone, title, body, actionLabel, onAction, noBorder,
 }: {
   icon: React.ComponentType<{ className?: string; size?: number }>;
-  iconTone: 'green' | 'purple' | 'amber';
+  iconTone: 'green' | 'purple';
   title: string;
   body: string;
   actionLabel: string;
@@ -827,25 +675,6 @@ function faqSummary(p: ServiceProfile): string {
   return parts.join(' + ') + '.';
 }
 
-function ServiceRulesRow({ title, items }: { title: string; items: string[] | undefined }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div>
-      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
-        {title}
-      </div>
-      <ul className="space-y-1">
-        {items.map((item, i) => (
-          <li key={`${title}-${i}`} className="text-xs text-slate-700 leading-relaxed pl-3 relative">
-            <span className="absolute left-0 top-1.5 w-1 h-1 bg-slate-400 rounded-full" />
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function looksConfigured(p: ServiceProfile): boolean {
   return hasPricing(p.pricingJson) && hasCustomerAnswers(p.faqJson);
 }
@@ -880,29 +709,6 @@ function hasCustomerAnswers(json: string | null): boolean {
   if (typeof f.standardScope === 'string' && f.standardScope.trim()) return true;
   if (typeof f.deepScope === 'string' && f.deepScope.trim()) return true;
   return false;
-}
-
-function readAdditionalInstructions(json: string | null): string {
-  const obj = safeParse(json);
-  if (!obj || typeof obj !== 'object') return '';
-  return typeof obj.additionalInstructions === 'string' ? obj.additionalInstructions : '';
-}
-
-function readServiceRules(json: string | null): {
-  requiredDetails?: string[];
-  workflowSteps?: string[];
-  unsupportedServices?: string[];
-} | null {
-  const obj = safeParse(json);
-  if (!obj || typeof obj !== 'object') return null;
-  const rules = obj.serviceRules;
-  if (!rules || typeof rules !== 'object') return null;
-  const out: any = {};
-  if (Array.isArray(rules.requiredDetails)) out.requiredDetails = rules.requiredDetails.filter((x: any) => typeof x === 'string');
-  if (Array.isArray(rules.workflowSteps)) out.workflowSteps = rules.workflowSteps.filter((x: any) => typeof x === 'string');
-  if (Array.isArray(rules.unsupportedServices)) out.unsupportedServices = rules.unsupportedServices.filter((x: any) => typeof x === 'string');
-  if (Object.keys(out).length === 0) return null;
-  return out;
 }
 
 function safeParse(s: string | null | undefined): any {

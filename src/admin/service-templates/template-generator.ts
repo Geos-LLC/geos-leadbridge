@@ -82,7 +82,6 @@ export function generateTemplate(input: GenerateInput): GeneratedTemplate {
     serviceOptionsJson,
     pricingJson,
     customerAnswersJson,
-    additionalInstructions: null,
     sourceJson,
   };
 }

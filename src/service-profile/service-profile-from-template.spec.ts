@@ -69,7 +69,6 @@ describe('ServiceProfileService.createFromAdminTemplate (spec #6)', () => {
     providerCategoryName: 'House Cleaning',
     providerCategoryId: null,
     description: null,
-    additionalInstructions: 'Always ask square footage.',
     serviceOptionsJson: JSON.stringify({
       groups: [
         {
@@ -130,14 +129,10 @@ describe('ServiceProfileService.createFromAdminTemplate (spec #6)', () => {
     expect(faq.customQA[0].question).toBe('Are supplies included?');
   });
 
-  it('stores additionalInstructions in v1 wrapper', async () => {
-    const { svc, prisma } = buildService({ publishedTemplate: PUBLISHED_TEMPLATE });
-    await svc.createFromAdminTemplate({ userId: 'u-1', templateId: 't-1' });
-    const written = prisma.profiles[0];
-    const ai = JSON.parse(written.aiInstructionsJson);
-    expect(ai.version).toBe(1);
-    expect(ai.additionalInstructions).toBe('Always ask square footage.');
-  });
+  // `additionalInstructions` was removed 2026-06-22 — inert at
+  // runtime, never wired into the AI prompt. The bridge function +
+  // template field went with it. Test for "stores additionalInstructions
+  // in v1 wrapper" deleted in the same change.
 
   it('bridges v2 room_quantity pricing → v1 item_quantity shape for the PricingEditor', async () => {
     const { svc, prisma } = buildService({ publishedTemplate: PUBLISHED_TEMPLATE });

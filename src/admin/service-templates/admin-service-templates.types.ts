@@ -6,11 +6,10 @@
  * src/service-profile/presets/service-presets.types.ts.
  *
  * Why a separate type tree:
- *  - The V2 spec renames `faqJson` → `customerAnswersJson` and replaces
- *    the structured `serviceRules` with a single free-text
- *    `additionalInstructions` string. The code-side registry keeps the
- *    old shape (it backs already-published curated presets); the
- *    admin-DB shape is the new contract going forward.
+ *  - The V2 spec renames `faqJson` → `customerAnswersJson`. The
+ *    code-side registry keeps the old shape (it backs already-published
+ *    curated presets); the admin-DB shape is the new contract going
+ *    forward.
  *  - Source attribution (`thumbtack_average` | `admin_input` |
  *    `interpolated` | `missing`) differs slightly from the code-side
  *    `PricingSource` union (`thumbtack_average` | `interpolated` |
@@ -18,6 +17,11 @@
  *    legacy registry entries keep their tags, and admin-generated rows
  *    carry the new ones. Both convert to the same runtime pricing model
  *    when copied into a ServiceProfile.
+ *
+ * `additionalInstructions` (V2's free-text replacement for serviceRules)
+ * was removed 2026-06-22 — inert at runtime, never wired into the AI
+ * prompt builder. The Prisma column remains for now; a follow-up
+ * migration can drop it.
  *
  * Nothing here touches Prisma — pure data types. The service layer
  * (admin-service-templates.service.ts) is the only place that imports
@@ -174,7 +178,6 @@ export type GeneratedTemplate = {
   serviceOptionsJson: ServiceOptionsJson;
   pricingJson: AdminPricingJson;
   customerAnswersJson: CustomerAnswersJson;
-  additionalInstructions: string | null;
   sourceJson: GeneratorSourceJson;
 };
 
@@ -183,12 +186,14 @@ export type GeneratedTemplate = {
 /**
  * Shape `GET /v1/service-profile-presets` returns for DB-sourced rows.
  *
- * Carries both v2 keys (serviceOptionsJson / customerAnswersJson /
- * additionalInstructions — what the admin builder authors) and v1 keys
- * (qualificationSchemaJson / faqJson / serviceRules / aliases — what
- * the boot-time seeder writes for the two historical code presets).
- * Admin-generated rows leave the v1 keys null; seeded rows populate
- * both shapes so the customer-facing picker can render either.
+ * Carries both v2 keys (serviceOptionsJson / customerAnswersJson —
+ * what the admin builder authors) and v1 keys (qualificationSchemaJson
+ * / faqJson / serviceRules / aliases — what the boot-time seeder
+ * writes for the two historical code presets). Admin-generated rows
+ * leave the v1 keys null; seeded rows populate both shapes so the
+ * customer-facing picker can render either.
+ *
+ * `additionalInstructions` removed 2026-06-22.
  */
 export type PublicTemplatePreset = {
   source: 'admin_template';
@@ -202,7 +207,6 @@ export type PublicTemplatePreset = {
   serviceOptionsJson: ServiceOptionsJson;
   pricingJson: AdminPricingJson | unknown;
   customerAnswersJson: CustomerAnswersJson;
-  additionalInstructions: string | null;
   qualificationSchemaJson: unknown | null;
   faqJson: unknown | null;
   serviceRules: unknown | null;

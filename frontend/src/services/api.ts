@@ -852,9 +852,10 @@ export const aiSettingsAssistantApi = {
  * code presets are seeded into the same table at boot, so every row
  * carries `source: 'admin_template'` and `templateId`. Both v1 fields
  * (qualificationSchemaJson / faqJson / serviceRules / aliases, populated
- * on seeded rows) and v2 fields (serviceOptionsJson / customerAnswersJson
- * / additionalInstructions, populated on admin-authored rows) are
- * surfaced — the picker reads whichever side is populated.
+ * on seeded rows) and v2 fields (serviceOptionsJson / customerAnswersJson,
+ * populated on admin-authored rows) are surfaced — the picker reads
+ * whichever side is populated. `additionalInstructions` was removed
+ * 2026-06-22 — inert at runtime, never wired into AI prompt.
  */
 export type ServiceProfilePreset = {
   source: 'admin_template';
@@ -903,7 +904,6 @@ export type ServiceProfilePreset = {
     }>;
   } | null;
   customerAnswersJson: { entries: Array<{ question: string; answer: string }> } | null;
-  additionalInstructions: string | null;
 };
 
 export const serviceProfilePresetsApi = {
@@ -933,7 +933,6 @@ export type AdminServiceTemplate = {
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
-  additionalInstructions: string | null;
   sourceJson: string | null;
   status: 'draft' | 'published' | 'archived';
   createdByUserId: string | null;
@@ -951,7 +950,6 @@ export type AdminGeneratedTemplate = {
   serviceOptionsJson: unknown;
   pricingJson: unknown;
   customerAnswersJson: unknown;
-  additionalInstructions: string | null;
   sourceJson: {
     kind: 'admin_generated';
     provider: string;
@@ -1001,7 +999,6 @@ export const adminServiceTemplatesApi = {
       serviceOptionsJson: unknown;
       pricingJson: unknown;
       customerAnswersJson: unknown;
-      additionalInstructions: string | null;
     }>,
   ): Promise<{ template: AdminServiceTemplate }> => {
     const { data } = await api.patch(`/v1/admin/service-templates/${id}`, patch);

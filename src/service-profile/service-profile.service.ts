@@ -272,20 +272,23 @@ export class ServiceProfileService {
    *
    * The admin Service Template Builder stores rows in the v2 shape
    * (serviceOptionsJson with grouped options, customerAnswersJson with
-   * entries[], single-string additionalInstructions). The existing
-   * ServiceProfile reader expects the v1 shapes (qualificationSchemaJson
-   * with `questions[]`, faqJson with `customQA[]`, aiInstructionsJson
-   * with the `{ version: 1, ... }` wrapper).
+   * entries[]). The existing ServiceProfile reader expects the v1
+   * shapes (qualificationSchemaJson with `questions[]`, faqJson with
+   * `customQA[]`).
    *
    * We bridge at copy time so the runtime keeps working unchanged:
    *   serviceOptions.groups[].options[{key,label}]  →  qualification.questions[].options[label]
    *   customerAnswers.entries[]                     →  faq.customQA[]
-   *   additionalInstructions (string)               →  aiInstructionsJson { version: 1, additionalInstructions }
    *
    * pricingJson is bridged from the v2 admin shape (room_quantity /
    * item_quantity / hourly / flat_rate / custom with basePrices+addOns)
    * to the v1 ServiceProfile UI shape (item_quantity with items[], or
    * hourly with laborRate+minimumCharge). See bridgeAdminPricingToV1.
+   *
+   * `additionalInstructions` was removed 2026-06-22 — inert at runtime,
+   * never wired into the AI prompt builder. ServiceProfile.aiInstructionsJson
+   * is now left null at template-creation time (the wrapper format is
+   * still respected by future per-service playbook editors).
    *
    * Status forced to 'draft' per spec — never auto-activate.
    */
@@ -327,7 +330,6 @@ export class ServiceProfileService {
       template.serviceOptionsJson,
     );
     const faqJson = bridgeCustomerAnswersToFaq(template.customerAnswersJson);
-    const aiInstructionsJson = bridgeAdditionalInstructions(template.additionalInstructions);
     const pricingJson = bridgeAdminPricingToV1(template.pricingJson);
 
     this.logger.log(
@@ -352,7 +354,6 @@ export class ServiceProfileService {
         pricingJson,
         faqJson,
         qualificationSchemaJson,
-        aiInstructionsJson,
       },
       select: {
         id: true,
@@ -1059,17 +1060,6 @@ function bridgeCustomerAnswersToFaq(raw: string | null | undefined): string | nu
 }
 
 /**
- * Admin additionalInstructions (free-text) → ServiceProfile.aiInstructionsJson
- * wrapper:
- *   { version: 1, additionalInstructions: "..." }
- *
- * The existing wrapper already supports `serviceRules` under
- * `{ version: 1, ... }`; we add an `additionalInstructions` key alongside
- * (the playbook renderer ignores unknown keys today, which is exactly
- * the read-side we want for now). A future PR can teach the renderer
- * to inject this string into the AI prompt; until then it sits inert.
- */
-/**
  * Admin pricingJson (v2 shape) → ServiceProfile.pricingJson (v1 shape
  * the existing PricingEditor / pricing engine consume).
  *
@@ -1221,7 +1211,3 @@ function bridgeAdminPricingToV1(raw: string | null | undefined): string | null {
   });
 }
 
-function bridgeAdditionalInstructions(text: string | null | undefined): string | null {
-  if (!text || typeof text !== 'string' || text.trim().length === 0) return null;
-  return JSON.stringify({ version: 1, additionalInstructions: text.trim() });
-}

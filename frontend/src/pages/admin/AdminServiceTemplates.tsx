@@ -41,7 +41,6 @@ type EditableTemplate = {
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
-  additionalInstructions: string;
   keyOverride: string;
   description: string;
   sourceJson: AdminGeneratedTemplate['sourceJson'] | null;
@@ -58,7 +57,6 @@ const EMPTY: EditableTemplate = {
   serviceOptionsJson: '',
   pricingJson: '',
   customerAnswersJson: '',
-  additionalInstructions: '',
   keyOverride: '',
   description: '',
   sourceJson: null,
@@ -161,7 +159,6 @@ export default function AdminServiceTemplates() {
         serviceOptionsJson: pretty(generated.serviceOptionsJson),
         pricingJson: pretty(generated.pricingJson),
         customerAnswersJson: pretty(generated.customerAnswersJson),
-        additionalInstructions: generated.additionalInstructions ?? '',
         sourceJson: generated.sourceJson,
       }));
       notify.success('Generated', 'Review the JSON below, then Save Draft or Publish.');
@@ -190,7 +187,6 @@ export default function AdminServiceTemplates() {
           serviceOptionsJson: safeParse(draft.serviceOptionsJson),
           pricingJson: safeParse(draft.pricingJson),
           customerAnswersJson: safeParse(draft.customerAnswersJson),
-          additionalInstructions: draft.additionalInstructions.trim() || null,
         });
         notify.success('Saved', `Template "${draft.serviceName}" updated.`);
       } else {
@@ -204,7 +200,6 @@ export default function AdminServiceTemplates() {
           serviceOptionsJson: safeParse(draft.serviceOptionsJson),
           pricingJson: safeParse(draft.pricingJson),
           customerAnswersJson: safeParse(draft.customerAnswersJson),
-          additionalInstructions: draft.additionalInstructions.trim() || null,
           sourceJson: draft.sourceJson,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
@@ -277,7 +272,6 @@ export default function AdminServiceTemplates() {
       serviceOptionsJson: pretty(safeParse(template.serviceOptionsJson)),
       pricingJson: pretty(safeParse(template.pricingJson)),
       customerAnswersJson: pretty(safeParse(template.customerAnswersJson)),
-      additionalInstructions: template.additionalInstructions ?? '',
       keyOverride: template.key,
       description: template.description ?? '',
       sourceJson: (template.sourceJson
@@ -460,16 +454,6 @@ export default function AdminServiceTemplates() {
                 onChange={(e) => setDraft({ ...draft, customerAnswersJson: e.target.value })}
                 rows={10}
                 style={{ ...textareaStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
-              />
-            </Field>
-
-            <Field label="Additional Service Instructions (optional)">
-              <textarea
-                value={draft.additionalInstructions}
-                onChange={(e) => setDraft({ ...draft, additionalInstructions: e.target.value })}
-                rows={3}
-                style={textareaStyle}
-                placeholder="e.g. Never guarantee stain removal. Always ask mattress size."
               />
             </Field>
 

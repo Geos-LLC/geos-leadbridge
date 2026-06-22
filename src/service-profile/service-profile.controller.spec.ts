@@ -77,7 +77,6 @@ describe('ServiceProfileController.list', () => {
             addOns: [],
           },
           customerAnswersJson: { entries: [] },
-          additionalInstructions: null,
           qualificationSchemaJson: null,
           faqJson: null,
           serviceRules: null,

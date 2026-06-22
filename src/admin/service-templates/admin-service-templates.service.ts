@@ -50,7 +50,6 @@ export type PatchTemplateInput = {
   serviceOptionsJson?: unknown;
   pricingJson?: unknown;
   customerAnswersJson?: unknown;
-  additionalInstructions?: string | null;
 };
 
 /** Coerce admin-provided JSON to a string for storage. We accept either
@@ -126,7 +125,9 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
                 answer: qa.answer,
               })),
             }),
-            additionalInstructions: null,
+            // additionalInstructions removed 2026-06-22 (was always
+            // null on seeded rows anyway). Prisma column still exists
+            // but no longer written.
             // v1 fields — verbatim from the code preset.
             qualificationSchemaJson: JSON.stringify(p.qualificationSchemaJson),
             faqJson: p.faqJson ? JSON.stringify(p.faqJson) : null,
@@ -179,7 +180,6 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
         serviceOptionsJson: toJsonString(input.serviceOptionsJson),
         pricingJson: toJsonString(input.pricingJson),
         customerAnswersJson: toJsonString(input.customerAnswersJson),
-        additionalInstructions: input.additionalInstructions,
         sourceJson: input.sourceJson ? toJsonString(input.sourceJson) : null,
         status: 'draft',
         createdByUserId: adminUserId,
@@ -213,9 +213,6 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
     if (patch.pricingJson !== undefined) data.pricingJson = toJsonString(patch.pricingJson);
     if (patch.customerAnswersJson !== undefined) {
       data.customerAnswersJson = toJsonString(patch.customerAnswersJson);
-    }
-    if (patch.additionalInstructions !== undefined) {
-      data.additionalInstructions = patch.additionalInstructions;
     }
     return this.prisma.serviceTemplatePreset.update({
       where: { id: templateId },
@@ -332,7 +329,6 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
           quoteRequired: true,
         },
       customerAnswersJson: safeParse(row.customerAnswersJson) ?? { entries: [] },
-      additionalInstructions: row.additionalInstructions,
       qualificationSchemaJson: safeParse(row.qualificationSchemaJson),
       faqJson: safeParse(row.faqJson),
       serviceRules: safeParse(row.serviceRules),
