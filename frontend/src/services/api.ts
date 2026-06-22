@@ -2236,6 +2236,10 @@ export const adminApi = {
     const { data } = await api.patch(`/v1/admin/users/${userId}/trial-leads`, updates);
     return data.data;
   },
+  extendTrial: async (userId: string, days: number): Promise<any> => {
+    const { data } = await api.patch(`/v1/admin/users/${userId}/trial-extend`, { days });
+    return data.data;
+  },
   getStats: async (): Promise<AdminStats> => {
     const { data } = await api.get('/v1/admin/stats');
     return data.data;

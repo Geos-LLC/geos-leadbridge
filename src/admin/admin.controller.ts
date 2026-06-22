@@ -146,6 +146,18 @@ export class AdminController {
     return { success: true, data: result };
   }
 
+  @Patch('users/:userId/trial-extend')
+  @RequiresSupportGrant('user:write')
+  async extendTrial(
+    @Req() req: any,
+    @Param('userId') userId: string,
+    @Body() body: { days: number },
+  ) {
+    const adminId = req.user.id;
+    const result = await this.adminService.extendTrial(adminId, userId, body.days);
+    return { success: true, data: result };
+  }
+
   @Delete('users/:userId')
   @RequiresSupportGrant('user:delete')
   async deleteUser(@Req() req: any, @Param('userId') userId: string) {

@@ -305,6 +305,32 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleExtendTrial = async (u: AdminUser) => {
+    const raw = window.prompt(`Extend trial for ${u.email} by how many days?`, '7');
+    if (raw === null) return;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days <= 0 || days > 365) {
+      notify.error('Invalid', 'Days must be a positive integer up to 365');
+      return;
+    }
+    try {
+      await adminApi.extendTrial(u.id, days);
+      notify.success('Extended', `Trial extended by ${days} day${days === 1 ? '' : 's'}`);
+      loadData();
+    } catch (error: any) {
+      console.error('Failed to extend trial:', error);
+      if (isSupportAccessDenied(error)) {
+        setUsersAccessDenied(true);
+        notify.error(
+          'Support access expired',
+          'Your support grant lapsed. Refresh access and try again.',
+        );
+        return;
+      }
+      notify.error('Error', describeAdminError(error, 'Failed to extend trial'));
+    }
+  };
+
   const handleResetTrialLeads = async (u: AdminUser) => {
     try {
       await adminApi.updateTrialLeads(u.id, { trialLeadsHandled: 0 });
@@ -563,9 +589,16 @@ export default function AdminDashboard() {
                             <button
                               onClick={() => handleResetTrialLeads(u)}
                               className="px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all font-medium"
-                              title="Reset trial leads to 0"
+                              title="Reset trial leads to 0 + fresh 7-day window"
                             >
                               Reset
+                            </button>
+                            <button
+                              onClick={() => handleExtendTrial(u)}
+                              className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded-lg transition-all font-medium"
+                              title="Extend trial by N days (lead counter untouched)"
+                            >
+                              Extend
                             </button>
                           </>
                         )}
