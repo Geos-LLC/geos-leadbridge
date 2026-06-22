@@ -5,8 +5,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { AutoPageHeader } from '../../components/automation/ui';
-import { AccountSwitcherPill } from '../../components/AccountSwitcherPill';
-import { useSelectedAccount } from '../../hooks/useSelectedAccount';
 import { SettingsGeneral } from './General';
 import { SettingsCommunication } from './Communication';
 import { SettingsHours } from './Hours';
@@ -60,7 +58,6 @@ const SUBTITLES: Record<TabKey, string> = {
 
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { accounts, selectedAccountId, setSelectedAccountId } = useSelectedAccount();
   const tabParam = (searchParams.get('tab') as TabKey | null) ?? 'general';
   // `services` is no longer in TABS but the route stays accessible via
   // ?tab=services (legacy deep links + a "Manage services" link from
@@ -98,15 +95,6 @@ export default function SettingsPage() {
 
   return (
     <div className="lb-pad" style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
-      {accounts.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12 }}>
-          <AccountSwitcherPill
-            accounts={accounts}
-            selectedAccountId={selectedAccountId}
-            onSelect={setSelectedAccountId}
-          />
-        </div>
-      )}
       <AutoPageHeader
         title={meta.label}
         badge={{ label: 'Settings', tone: 'blue' }}

@@ -3,7 +3,6 @@ import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pa
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi, callConnectApi, notificationsApi } from '../services/api';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
-import { AccountSwitcherPill } from '../components/AccountSwitcherPill';
 import { useSelectedAccount } from '../hooks/useSelectedAccount';
 import { useAppStore } from '../store/appStore';
 import type { AutomationRule, SavedAccount, MessageTemplate, CallConnectMode, AgentStrategy } from '../types';
@@ -40,9 +39,9 @@ export function AutomationSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Selected account filter — backed by ?account= so the upper-left switcher
-  // and the inline "Filter by account" dropdown stay in sync, and the
-  // selection survives navigation.
+  // Selected account filter — backed by ?account= so the inline "Filter by
+  // account" dropdown stays in sync with the sidebar account switcher, and
+  // the selection survives navigation.
   const { selectedAccountId: pinnedAccountId, setSelectedAccountId: setPinnedAccountId } = useSelectedAccount();
   const setSavedAccountsGlobal = useAppStore((s) => s.setSavedAccounts);
   const selectedAccountId: string | 'all' = pinnedAccountId ?? 'all';
@@ -125,9 +124,9 @@ export function AutomationSettings() {
 
       setRules(rulesRes.rules);
       setAccounts(accountsRes.accounts);
-      // Mirror into the global store so the upper-left AccountSwitcherPill
-      // has the connected-accounts list available even on a fresh load
-      // that bypassed Dashboard/Analytics/Settings hydration.
+      // Mirror into the global store so the sidebar account switcher has
+      // the connected-accounts list available even on a fresh load that
+      // bypassed Dashboard/Analytics/Settings hydration.
       setSavedAccountsGlobal(accountsRes.accounts);
       setTemplates(templatesRes.templates);
       setPromptTemplates(promptsRes.templates);
@@ -540,15 +539,6 @@ export function AutomationSettings() {
   return (
     <div className="automation-settings">
       {accounts.length === 0 && <NoAccountsOverlay />}
-      {accounts.length > 0 && (
-        <div style={{ padding: '12px 16px 0', display: 'flex', justifyContent: 'flex-start' }}>
-          <AccountSwitcherPill
-            accounts={accounts}
-            selectedAccountId={pinnedAccountId}
-            onSelect={setPinnedAccountId}
-          />
-        </div>
-      )}
       <div className="settings-header">
         <button className="btn-icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />

@@ -5,10 +5,11 @@ import {
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
   DollarSign, Sparkles, Paperclip, Send, X, MessageSquare,
-  FileText, Activity,
+  FileText, Activity, Check,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
+import { useSelectedAccount } from '../hooks/useSelectedAccount';
 import { aiSettingsAssistantApi, type SignedProposal, type InterpretResponse, type ConflictResolutionOption, type ConflictResolution } from '../services/api';
 import TrialBanner from './TrialBanner';
 import TrialSidebarCard from './TrialSidebarCard';
@@ -90,6 +91,76 @@ function AssistantBubble({
   );
 }
 
+function SidebarAccountRow({
+  label,
+  sub,
+  active,
+  onClick,
+}: {
+  label: string;
+  sub?: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={active}
+      onClick={onClick}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 10px',
+        borderRadius: 8,
+        background: active ? 'var(--lb-accent-tint)' : 'transparent',
+        border: 0,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        textAlign: 'left',
+        color: active ? 'var(--lb-accent)' : 'var(--lb-ink-2)',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = 'var(--lb-ink-bg-soft, #f3f4f6)';
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 12.5,
+            fontWeight: active ? 700 : 600,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {label}
+        </div>
+        {sub && (
+          <div
+            style={{
+              fontSize: 10.5,
+              color: 'var(--lb-ink-5)',
+              marginTop: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {sub}
+          </div>
+        )}
+      </div>
+      {active && <Check size={13} />}
+    </button>
+  );
+}
+
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 256 256" fill="none" className="shrink-0" style={{ borderRadius: size * 0.25 }}>
@@ -111,7 +182,10 @@ export function Layout() {
   const location = useLocation();
   const { user, logout, impersonatingUser } = useAuthStore();
   const savedAccounts = useAppStore(state => state.savedAccounts);
+  const { selectedAccount, selectedAccountId, setSelectedAccountId } = useSelectedAccount();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [aiChatOpen, setAiChatOpen] = useState(false);
   // In-app Setup wizard modal. The /onboarding/setup route still works
   // for first-run / direct deep-links; this flag overlays the wizard on
@@ -448,6 +522,34 @@ export function Layout() {
   const businessName = (user as any)?.businessName || user?.name || 'Leadbridge';
   const connectedCount = savedAccounts?.length ?? 0;
 
+  // Sidebar account-switcher dropdown — close on outside click + Esc.
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(e.target as Node)) setAccountMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAccountMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [accountMenuOpen]);
+
+  // What the sidebar card displays. When a specific account is pinned via
+  // ?account=<id>, show its name + platform. Otherwise show the tenant's
+  // business name + connected-source count (legacy behavior).
+  const switcherTopLine = selectedAccount?.businessName || businessName;
+  const switcherSubLine = selectedAccount
+    ? (selectedAccount.platform
+        ? selectedAccount.platform.charAt(0).toUpperCase() + selectedAccount.platform.slice(1)
+        : 'Account')
+    : `${connectedCount} ${connectedCount === 1 ? 'source' : 'sources'}`;
+  const switcherInitial = ((selectedAccount?.businessName || businessName)[0] || '?').toUpperCase();
+
   // Shared nav-item renderer — rounded-pill active state with accent-tint + accent text
   const renderNavItem = (item: { icon: React.ReactNode; label: string; path: string }) => (
     <NavLink
@@ -607,51 +709,147 @@ export function Layout() {
             </div>
           </RouterLink>
 
-          {/* Account selector */}
-          <button
-            className="flex items-center gap-[10px] w-full text-left"
-            style={{
-              padding: '10px 12px',
-              margin: '8px 0',
-              background: 'var(--lb-surface)',
-              border: '1px solid var(--lb-line)',
-              borderRadius: 12,
-              cursor: 'pointer',
-              boxShadow: 'var(--lb-shadow-sm)',
-            }}
-            onClick={() => navigate('/settings')}
-            title="Account settings"
-          >
-            <div
+          {/* Account selector — click to switch which connected source
+              scopes the per-account screens (AI Playbook, Automation, etc.).
+              Falls back to opening Settings when there are no accounts yet
+              so first-run users still have a way in. */}
+          <div ref={accountMenuRef} style={{ position: 'relative', margin: '8px 0' }}>
+            <button
+              className="flex items-center gap-[10px] w-full text-left"
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                background: 'var(--lb-success-tint)',
-                color: '#0c4a2b',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 11,
-                fontWeight: 800,
-                flexShrink: 0,
+                padding: '10px 12px',
+                background: 'var(--lb-surface)',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 12,
+                cursor: 'pointer',
+                boxShadow: 'var(--lb-shadow-sm)',
               }}
+              onClick={() => {
+                if (connectedCount === 0) navigate('/settings');
+                else setAccountMenuOpen(v => !v);
+              }}
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              title={connectedCount === 0 ? 'Account settings' : 'Switch account'}
             >
-              {(businessName[0] || '?').toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
               <div
-                className="truncate"
-                style={{ fontSize: 12, fontWeight: 700, color: 'var(--lb-ink-1)' }}
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 6,
+                  background: 'var(--lb-success-tint)',
+                  color: '#0c4a2b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  flexShrink: 0,
+                }}
               >
-                {businessName}
+                {switcherInitial}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--lb-ink-5)' }}>
-                {connectedCount} {connectedCount === 1 ? 'source' : 'sources'}
+              <div className="flex-1 min-w-0">
+                <div
+                  className="truncate"
+                  style={{ fontSize: 12, fontWeight: 700, color: 'var(--lb-ink-1)' }}
+                >
+                  {switcherTopLine}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--lb-ink-5)' }}>
+                  {switcherSubLine}
+                </div>
               </div>
-            </div>
-            <ChevronsUpDown size={13} style={{ color: 'var(--lb-ink-5)' }} />
-          </button>
+              <ChevronsUpDown size={13} style={{ color: 'var(--lb-ink-5)' }} />
+            </button>
+
+            {accountMenuOpen && connectedCount > 0 && (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  right: 0,
+                  zIndex: 60,
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 12,
+                  boxShadow: '0 8px 24px rgba(16,24,40,0.16)',
+                  padding: 6,
+                  maxHeight: 360,
+                  overflowY: 'auto',
+                }}
+              >
+                <SidebarAccountRow
+                  label={`All accounts (${connectedCount})`}
+                  sub="Show every connected source"
+                  active={selectedAccountId === null}
+                  onClick={() => {
+                    setSelectedAccountId(null);
+                    setAccountMenuOpen(false);
+                  }}
+                />
+                <div
+                  style={{
+                    height: 1,
+                    background: 'var(--lb-line)',
+                    margin: '4px 6px',
+                  }}
+                />
+                {savedAccounts.map(a => (
+                  <SidebarAccountRow
+                    key={a.id}
+                    label={a.businessName || a.platform || a.id}
+                    sub={a.platform
+                      ? a.platform.charAt(0).toUpperCase() + a.platform.slice(1)
+                      : undefined}
+                    active={selectedAccountId === a.id}
+                    onClick={() => {
+                      setSelectedAccountId(a.id);
+                      setAccountMenuOpen(false);
+                    }}
+                  />
+                ))}
+                <div
+                  style={{
+                    height: 1,
+                    background: 'var(--lb-line)',
+                    margin: '4px 6px',
+                  }}
+                />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    navigate('/settings?tab=accounts');
+                  }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    border: 0,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--lb-ink-4)',
+                    textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--lb-ink-bg-soft, #f3f4f6)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Settings size={13} />
+                  Manage accounts
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Primary nav */}
           <nav className="flex-1 sidebar-scroll overflow-y-auto" style={{ marginTop: 4 }}>
