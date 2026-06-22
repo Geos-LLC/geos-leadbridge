@@ -29,6 +29,7 @@ import { generateTemplate, GenerateInput } from './template-generator';
 import {
   UPHOLSTERY_FURNITURE_CLEANING_PRESET,
   GENERIC_CUSTOM_SERVICE_PRESET,
+  HOUSE_CLEANING_PRESET,
 } from '../../service-profile/presets/service-presets';
 import type { ServicePreset } from '../../service-profile/presets/service-presets.types';
 
@@ -98,6 +99,7 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
    */
   async onApplicationBootstrap(): Promise<void> {
     const presets: ServicePreset[] = [
+      HOUSE_CLEANING_PRESET,
       UPHOLSTERY_FURNITURE_CLEANING_PRESET,
       GENERIC_CUSTOM_SERVICE_PRESET,
     ];

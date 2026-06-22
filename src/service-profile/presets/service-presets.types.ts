@@ -121,6 +121,26 @@ export type PresetPricing = {
   /** Free-text caveat shown alongside the rate ("Final pricing depends
    *  on scope, complexity, and location"). Used by the hourly model. */
   notes?: string;
+
+  // ----- bed_bath_grid fields (house cleaning) -----
+  // Shape mirrors ServicePricing in src/users/pricing-hydrate.ts so the
+  // preset can be stored verbatim and consumed by hydratePricing without
+  // a conversion layer.
+  /** Top-level routing for legacy frontend code paths. Always 'cleaning' for grid. */
+  serviceType?: string;
+  /** Cleaning type columns (regular, deep, airbnb, ...) shown on the grid. */
+  cleaningTypes?: Array<{ key: string; label: string; enabled?: boolean }>;
+  /** Bed/bath rows × cleaningType column prices. */
+  priceTable?: Array<Record<string, any>>;
+  sqftAdjustEnabled?: boolean;
+  frequencyDiscounts?: Array<{ key: string; label: string; discount: number }>;
+  extras?: Array<{ key: string; label: string; price: number }>;
+  conditionSurcharges?: Array<{ key: string; label: string; surcharge: number }>;
+  petSurcharge?: number;
+  orderDiscounts?: Array<{ minAmount: number; discount: number }>;
+  recurringDiscount?: number;
+  priceRange?: { minus: { type: '%' | '$'; value: number }; plus: { type: '%' | '$'; value: number } };
+  priceQuoteMode?: 'range' | 'exact';
 };
 
 /**
