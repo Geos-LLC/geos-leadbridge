@@ -559,6 +559,7 @@ export default function ServicesStep({
                                 accountId={primaryAccount.id}
                                 accountName={profile.name}
                                 serviceProfileId={profile.id}
+                                wizardMode
                               />
                             </div>
                           ) : (

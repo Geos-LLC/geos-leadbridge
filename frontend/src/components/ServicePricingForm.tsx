@@ -26,6 +26,17 @@ interface ServicePricingFormProps {
   // load/save layer. saveToAll is ignored in this mode — service pricing
   // is scoped to one profile, not fanned out across accounts.
   serviceProfileId?: string;
+  /**
+   * Wizard ("compact") rendering — hides every section except the Price
+   * Table + Save button. Used by the setup wizard's Services step where
+   * the "Edit pricing →" slot wants a slim editor matching the
+   * FinalDesign canonical (just the table, no Service Type dropdown,
+   * Sqft adjust, Quote shape picker, Frequency discounts, Add-ons,
+   * Surcharges, or Discounts). All hidden sections keep their default
+   * pricingJson values — the user can still edit them from
+   * Settings → AI Playbook after onboarding.
+   */
+  wizardMode?: boolean;
 }
 
 const MONO: CSSProperties = { fontFamily: 'var(--lb-font-mono)' };
@@ -263,7 +274,7 @@ function QuoteShapePicker({
   );
 }
 
-export default function ServicePricingForm({ accountId, accountName, saveToAll, serviceProfileId }: ServicePricingFormProps) {
+export default function ServicePricingForm({ accountId, accountName, saveToAll, serviceProfileId, wizardMode }: ServicePricingFormProps) {
   const [pricing, setPricing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -443,8 +454,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Service Type Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+      {/* Service Type Header — hidden in wizardMode (slim editor) */}
+      {!wizardMode && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{
             ...MONO,
@@ -480,7 +492,8 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             color: 'var(--lb-ink-5)', pointerEvents: 'none',
           }} />
         </div>
-      </div>
+        </div>
+      )}
 
       {/* Service Types row removed (2026-06-13). Hiding columns by toggle led
           to legacy accounts missing Deep Cleaning entirely from both the form
@@ -488,8 +501,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           to "disable" a service, the user enters 0 for every row of that
           column. See frontend/src/data/defaultPricing.ts. */}
 
-      {/* Square footage adjustment toggle */}
-      <label style={{
+      {/* Square footage adjustment toggle — hidden in wizardMode */}
+      {!wizardMode && (
+        <label style={{
         display: 'flex', alignItems: 'flex-start', gap: 10,
         padding: '12px 14px',
         background: 'var(--lb-surface)',
@@ -513,17 +527,22 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
           </div>
         </div>
-      </label>
+        </label>
+      )}
 
       {/* Quote shape — Range (default) vs Exact. Moved here from
           Settings → Automation → Conversation (Goal=Price) 2026-06-18
           so the user adjusts it while reviewing prices, independent
           of the Conversation Goal. Backend reads pricing.priceQuoteMode
-          via the hydrator (priceQuoteMode → defaultPricing.ts). */}
-      <QuoteShapePicker
-        mode={pricing.priceQuoteMode === 'exact' ? 'exact' : 'range'}
-        onChange={(mode) => setPricing((p: any) => ({ ...p, priceQuoteMode: mode }))}
-      />
+          via the hydrator (priceQuoteMode → defaultPricing.ts).
+          Hidden in wizardMode — Range/Exact lives in the full editor
+          (Settings → AI Playbook) after onboarding. */}
+      {!wizardMode && (
+        <QuoteShapePicker
+          mode={pricing.priceQuoteMode === 'exact' ? 'exact' : 'range'}
+          onChange={(mode) => setPricing((p: any) => ({ ...p, priceQuoteMode: mode }))}
+        />
+      )}
 
       {/* Price Table — unified collapsible chrome shared with item_quantity pricing. */}
       <CollapsibleSection
@@ -790,7 +809,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         </div>
       </CollapsibleSection>
 
-      {/* Frequency Discounts */}
+      {/* Frequency Discounts — hidden in wizardMode (lives in full
+          editor at Settings → AI Playbook after onboarding) */}
+      {!wizardMode && (
       <CollapsibleSection
         title="Frequency discounts"
         icon={<Repeat size={14} color="var(--lb-ink-5, #64748b)" />}
@@ -813,8 +834,10 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           ))}
         </div>
       </CollapsibleSection>
+      )}
 
-      {/* Add-ons / Extras */}
+      {/* Add-ons / Extras — hidden in wizardMode */}
+      {!wizardMode && (
       <CollapsibleSection
         title="Add-ons"
         icon={<PlusCircle size={14} color="var(--lb-ink-5, #64748b)" />}
@@ -857,8 +880,10 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           </button>
         </div>
       </CollapsibleSection>
+      )}
 
-      {/* Condition Surcharges + Pet Surcharge */}
+      {/* Condition Surcharges + Pet Surcharge — hidden in wizardMode */}
+      {!wizardMode && (
       <CollapsibleSection
         title="Surcharges"
         icon={<AlertCircle size={14} color="var(--lb-ink-5, #64748b)" />}
@@ -893,8 +918,10 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           </div>
         </div>
       </CollapsibleSection>
+      )}
 
-      {/* Discounts */}
+      {/* Discounts — hidden in wizardMode */}
+      {!wizardMode && (
       <CollapsibleSection
         title="Discounts"
         icon={<BadgePercent size={14} color="var(--lb-ink-5, #64748b)" />}
@@ -975,6 +1002,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           </div>
         </div>
       </CollapsibleSection>
+      )}
 
       {/* Save Button — unified pill across all playbook forms. The
           cleaning grid used to ship a full-width hero button; that
