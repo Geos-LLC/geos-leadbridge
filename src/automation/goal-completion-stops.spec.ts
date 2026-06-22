@@ -95,7 +95,11 @@ describe('Goal completion stop — unconditional gate wiring', () => {
   });
 
   it('Qualify gate sets AI_STATUS_REASONS.GOAL_QUALIFY_COMPLETE', () => {
-    const block = gateBlock(source, /const isQualifyComplete\s*=/, 1200);
+    // Window widened from 1200 to 1800 chars after the qualifyMissing
+    // suppression branch was added (Lawrence Parker fix 2026-06-22).
+    // The setState call now lives inside the else branch instead of at
+    // the top of the gate block.
+    const block = gateBlock(source, /const isQualifyComplete\s*=/, 1800);
     expect(block).toMatch(/AI_STATUS_REASONS\.GOAL_QUALIFY_COMPLETE/);
     expect(block).toMatch(/CONVERSATION_STATE_REASONS\.GOAL_QUALIFY_COMPLETE/);
   });
@@ -107,8 +111,20 @@ describe('Goal completion stop — unconditional gate wiring', () => {
   });
 
   it('Qualify gate sets conversationState=human_handling', () => {
-    const block = gateBlock(source, /const isQualifyComplete\s*=/, 1200);
+    const block = gateBlock(source, /const isQualifyComplete\s*=/, 1800);
     expect(block).toMatch(/conversationState:\s*['"]human_handling['"]/);
+  });
+
+  it('Qualify gate suppresses the stop when qualifyMissing has entries', () => {
+    // Lawrence Parker (Spotless JAX Yelp 2026-06-20) — classifier flagged
+    // qualification_complete even though sqft / bathrooms / phone were
+    // never collected. The gate now consults qualifyMissing (computed
+    // once per reply against the tenant's qualificationV2.requiredFields)
+    // and falls through to AI reply generation instead of silencing
+    // itself.
+    const block = gateBlock(source, /const isQualifyComplete\s*=/, 1800);
+    expect(block).toMatch(/qualifyMissing\.length\s*>\s*0/);
+    expect(block).toMatch(/qualification_complete suppressed/);
   });
 
   it('Phone gate sets conversationState=human_handling', () => {

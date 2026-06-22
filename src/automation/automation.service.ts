@@ -28,6 +28,11 @@ import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { buildPricingGuardRules } from '../ai/pricing-guards';
 import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
+import {
+  parseRequiredFields,
+  collectedFields,
+  missingRequiredFields,
+} from '../ai/qualification-completeness';
 import { hydratePricing } from '../users/pricing-hydrate';
 import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
@@ -337,11 +342,62 @@ export class AutomationService implements OnModuleInit {
    * "I want a human now" inside an active AI Conversation. The two are
    * complementary; both can fire on the same reply when both conditions hit.
    */
+  /**
+   * Cross-checks the classifier's `qualification_complete` signal against
+   * the tenant's `qualificationV2.requiredFields` contract. Returns the
+   * canonical field keys the customer has NOT provided yet (empty when
+   * everything required is in hand OR when the tenant has no required
+   * fields configured — both cases mean "no enforcement, honor the
+   * classifier"). Used by both the handoff-alert SMS and the AI-stop
+   * gate; prevents the dispatcher being paged / AI being silenced while
+   * sqft, phone, etc. are still outstanding. Lawrence Parker incident
+   * 2026-06-20 → see qualification-completeness.ts.
+   */
+  private async resolveQualificationGaps(opts: {
+    threadId?: string | null;
+    followUpSettingsJson: string | null;
+    currentMessage?: string | null;
+    classifierFacts?: any;
+    leadCustomerPhone?: string | null;
+  }): Promise<string[]> {
+    const required = parseRequiredFields(opts.followUpSettingsJson);
+    if (required.length === 0) return [];
+
+    // Pull customer-side history. 30 turns is generous for a qualification
+    // phase — covers the Yelp prefilled-form opening message even after
+    // several rounds of back-and-forth. AI replies are excluded because
+    // they paraphrase customer facts; counting them would mask cases
+    // where the AI summarized data the customer never actually supplied.
+    let customerMessages: string[] = [];
+    if (opts.threadId) {
+      try {
+        const rows = await this.prisma.message.findMany({
+          where: { conversationId: opts.threadId, sender: 'customer' },
+          orderBy: { sentAt: 'desc' },
+          take: 30,
+          select: { content: true },
+        });
+        customerMessages = rows.map(r => r.content || '').filter(Boolean);
+      } catch {
+        // history is best-effort — fall through with whatever we have
+      }
+    }
+
+    const collected = collectedFields({
+      customerMessages,
+      currentMessage: opts.currentMessage,
+      classifierFacts: opts.classifierFacts,
+      leadCustomerPhone: opts.leadCustomerPhone,
+    });
+    return missingRequiredFields(required, collected);
+  }
+
   private async maybeFireHandoffAlert(
     classification: IntentClassification | undefined,
     context: CustomerReplyContext,
     savedAccount: { id: string; followUpSettingsJson: string | null; businessName?: string | null },
     aiConversationEnabled: boolean,
+    qualifyMissing?: string[],
   ): Promise<void> {
     if (!classification || !classification.fromLlm) return;
     if (classification.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) return;
@@ -404,6 +460,15 @@ export class AutomationService implements OnModuleInit {
     }
     if (!triggers[reason]) {
       this.logger.log(`[Handoff] skipped — trigger '${reason}' disabled per-account`);
+      return;
+    }
+
+    // qualification_complete safety gate — the classifier's heuristic ignores
+    // the tenant's `qualificationV2.requiredFields` contract and can fire
+    // while sqft / phone / etc. are still missing. Caller computes the gap
+    // once per reply and passes it through here.
+    if (reason === 'qualification_complete' && qualifyMissing && qualifyMissing.length > 0) {
+      this.logger.log(`[Handoff] skipped — qualification_complete suppressed, required fields still missing: ${qualifyMissing.join(', ')}`);
       return;
     }
 
@@ -844,7 +909,7 @@ export class AutomationService implements OnModuleInit {
     // booked).
     const lead = await this.prisma.lead.findUnique({
       where: { id: context.leadId },
-      select: { threadId: true, status: true, thumbtackStatus: true, category: true },
+      select: { threadId: true, status: true, thumbtackStatus: true, category: true, customerPhone: true },
     });
     const allowed = await this.trialService.canProcessLead(context.userId, lead?.threadId ?? undefined);
     if (!allowed.allowed) {
@@ -918,6 +983,27 @@ export class AutomationService implements OnModuleInit {
       });
     }
 
+    // qualification_complete completeness check — computed once per reply
+    // and reused by both the handoff-alert SMS and the AI-stop gate below.
+    // Empty for any other handoff reason or when the tenant has no
+    // `qualificationV2.requiredFields` configured.
+    let qualifyMissing: string[] = [];
+    if (classification?.handoff?.shouldHandoff && classification.handoff.reason === 'qualification_complete') {
+      qualifyMissing = await this.resolveQualificationGaps({
+        threadId: lead?.threadId,
+        followUpSettingsJson: savedAccount.followUpSettingsJson,
+        currentMessage: context.customerMessage,
+        classifierFacts: classification.handoff.extracted,
+        leadCustomerPhone: lead?.customerPhone,
+      }).catch(err => {
+        this.logger.warn(`[AUTOMATION] qualification gap check failed: ${err?.message}`);
+        return [];
+      });
+      if (qualifyMissing.length > 0) {
+        this.logger.log(`[AUTOMATION] qualification_complete will be suppressed — missing: ${qualifyMissing.join(', ')}`);
+      }
+    }
+
     // ── Handoff Alert ────────────────────────────────────────────────────
     // Classifier-driven manager notification. Fires when the customer
     // signals high intent — ready to book ('agreed') OR wants a live
@@ -926,7 +1012,7 @@ export class AutomationService implements OnModuleInit {
     // conversation, the moment the customer says "I want a human now."
     // Re-engagement covers the AI-off / follow-up-running case; handoff
     // covers the AI-conversation-in-progress case.
-    await this.maybeFireHandoffAlert(classification, context, savedAccount, aiConversationEnabled).catch(err => {
+    await this.maybeFireHandoffAlert(classification, context, savedAccount, aiConversationEnabled, qualifyMissing).catch(err => {
       this.logger.warn(`[Handoff] alert failed: ${err.message}`);
     });
 
@@ -1251,16 +1337,26 @@ export class AutomationService implements OnModuleInit {
         const isQualifyComplete = classification.handoff?.shouldHandoff
           && classification.handoff.reason === 'qualification_complete';
         if (isQualifyComplete) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete (conf=${classification.confidence.toFixed(2)})`);
-          if (lead?.threadId) {
-            await this.conversationRuntime.setState(lead.threadId, {
-              aiStatus: 'stopped_booked',
-              aiStatusReason: AI_STATUS_REASONS.GOAL_QUALIFY_COMPLETE,
-              conversationState: 'human_handling',
-              conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_QUALIFY_COMPLETE,
-            });
+          // Same completeness contract as the handoff-alert SMS: if the
+          // tenant's `qualificationV2.requiredFields` still has gaps, the
+          // classifier's heuristic is over-firing. Fall through so the AI
+          // generates a normal reply asking for the missing fields instead
+          // of silencing itself. qualifyMissing was computed once at the
+          // top of handleCustomerReply and shared with the alert SMS gate.
+          if (qualifyMissing.length > 0) {
+            this.logger.log(`[AUTOMATION] qualification_complete suppressed — missing: ${qualifyMissing.join(', ')} (AI continues to collect)`);
+          } else {
+            this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — Qualify goal complete (conf=${classification.confidence.toFixed(2)})`);
+            if (lead?.threadId) {
+              await this.conversationRuntime.setState(lead.threadId, {
+                aiStatus: 'stopped_booked',
+                aiStatusReason: AI_STATUS_REASONS.GOAL_QUALIFY_COMPLETE,
+                conversationState: 'human_handling',
+                conversationStateReason: CONVERSATION_STATE_REASONS.GOAL_QUALIFY_COMPLETE,
+              });
+            }
+            return;
           }
-          return;
         }
         const isPhoneComplete = classification.handoff?.shouldHandoff
           && classification.handoff.reason === 'provided_phone_number';
