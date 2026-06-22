@@ -243,23 +243,13 @@ export function Dashboard() {
         notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as any[] })),
       ]);
 
-      // Compact response-time formatter — keeps the metric to a 2-digit
-      // integer at most so the stats grid never wraps on a narrow screen:
-      //   < 1 min  -> "Xs"
-      //   < 1 hour -> "Xm"
-      //   1–10 hr  -> "X,Yh" with European decimal comma (one digit after)
-      //               but drops the ",0" for clean whole hours
-      //   >= 10 hr -> "Xh" (rounded — no fractional component)
       const formatDuration = (minutes: number): string => {
         if (!minutes || minutes <= 0) return '—';
         if (minutes < 1) return `${Math.round(minutes * 60)}s`;
         if (minutes < 60) return `${Math.round(minutes)}m`;
-        const hours = minutes / 60;
-        if (hours >= 10) return `${Math.round(hours)}h`;
-        const oneDecimal = Math.round(hours * 10) / 10;
-        return Number.isInteger(oneDecimal)
-          ? `${oneDecimal}h`
-          : `${oneDecimal.toFixed(1).replace('.', ',')}h`;
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
       };
 
       // Build account-id → platform lookup so we can split notification-rule
@@ -445,7 +435,7 @@ export function Dashboard() {
   });
 
   return (
-    <div className="lb-pad" style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
+    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
       {/* OAuth error banner */}
       {oauthError && (
         <div
@@ -471,12 +461,9 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Greeting — at mobile widths this renders as a hero (large bold
-          "Overview" title under a mono eyebrow + subtitle), per the
-          design. Desktop keeps the compact greeting block it had before. */}
-      <div className="lb-hero">
+      {/* Greeting */}
+      <div>
         <p
-          className="lb-hero-eyebrow"
           style={{
             fontSize: 11,
             color: 'var(--lb-accent)',
@@ -489,10 +476,10 @@ export function Dashboard() {
         >
           Good {greeting}, {user?.name || 'User'}
         </p>
-        <h2 className="lb-hero-title" style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+        <h2 style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
           Overview
         </h2>
-        <p className="lb-hero-sub" style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
           Leadbridge captured {stats.yelp.leadsToday + stats.thumbtack.leadsToday} new lead{(stats.yelp.leadsToday + stats.thumbtack.leadsToday) !== 1 ? 's' : ''} today.
         </p>
       </div>
@@ -574,7 +561,7 @@ export function Dashboard() {
               <Kpi
                 label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
                 value={loading ? '—' : splitValue(p => `${stats[p].conversionRate}%`)}
-                delta={loading ? undefined : 'all-time'}
+                delta={loading ? undefined : 'all-time · of leads replied'}
                 deltaDir="up"
                 loading={loading}
                 muted

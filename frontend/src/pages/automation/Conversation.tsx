@@ -837,7 +837,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           </div>
         </div>
         <div
-          className="lb-strategy-grid lb-strat"
+          className="lb-strategy-grid"
           style={{
             display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10,
           }}
@@ -1265,7 +1265,7 @@ function GoalSetupCard({
       </div>
 
       <div
-        className="lb-required-info-grid lb-qual"
+        className="lb-required-info-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',

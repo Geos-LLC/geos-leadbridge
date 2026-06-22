@@ -94,7 +94,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="lb-pad" style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
+    <div style={{ padding: '20px 28px 60px', maxWidth: 1180, margin: '0 auto' }}>
       <AutoPageHeader
         title={meta.label}
         badge={{ label: 'Settings', tone: 'blue' }}

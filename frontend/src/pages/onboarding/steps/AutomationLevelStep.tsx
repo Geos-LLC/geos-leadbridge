@@ -358,16 +358,25 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           onClick={() => void apply()}
           disabled={saving}
           style={{
-            padding: '10px 22px', borderRadius: 10,
-            border: 0, background: 'var(--lb-accent)', color: '#fff',
-            fontSize: 13, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '10px 20px', fontSize: 13.5, fontWeight: 700,
+            background: 'var(--lb-accent)', color: 'white',
+            border: 0, borderRadius: 10,
             cursor: saving ? 'not-allowed' : 'pointer',
-            opacity: saving ? 0.5 : 1,
+            opacity: saving ? 0.6 : 1,
             fontFamily: 'inherit',
+            transition: 'background 120ms',
           }}
         >
-          {saving ? 'Saving…' : 'Continue'}
+          {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+          {saving ? 'Saving…' : 'Save & Continue'}
+          {!saving && <ArrowRight size={14} />}
         </button>
+        {cascadeNote && (
+          <span style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>
+            Applies to all connected accounts.
+          </span>
+        )}
       </WizardStepActions>
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
@@ -423,7 +432,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             below deep-links there. */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <SettingCard
-            compact
             icon={MessageSquareText}
             iconTone="blue"
             title="Instant Reply"
@@ -434,7 +442,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           />
 
           <SettingCard
-            compact
             icon={MessageCircle}
             iconTone="green"
             title="Instant Text"
@@ -445,7 +452,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           />
 
           <SettingCard
-            compact
             icon={Phone}
             iconTone="purple"
             title="Instant Call"
@@ -488,7 +494,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                 the wizard (still editable later on Automation) so users
                 aren't asked about it during a fast first-run setup. */}
             <SettingCard
-              compact
               icon={Clock}
               iconTone="blue"
               title="Timing"
@@ -522,7 +527,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.fuReEnrollOnSilence}
               onToggle={v => setOpts(o => ({ ...o, fuReEnrollOnSilence: v }))}
               contentPad="0 24px 16px"
-              compact
             >
               <FieldRow
                 label="Wait before resuming"
@@ -547,7 +551,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.aiDeferralCheckIn}
               onToggle={v => setOpts(o => ({ ...o, aiDeferralCheckIn: v }))}
               contentPad="0 24px 16px"
-              compact
             >
               <FieldRow
                 label="Send check-in after"
@@ -572,7 +575,6 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               enabled={opts.aiHiredCompetitorReengage}
               onToggle={v => setOpts(o => ({ ...o, aiHiredCompetitorReengage: v }))}
               contentPad="0 24px 16px"
-              compact
             >
               <FieldRow
                 label="Send re-engage after"

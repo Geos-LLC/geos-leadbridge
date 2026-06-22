@@ -847,18 +847,18 @@ export const aiSettingsAssistantApi = {
 };
 
 /**
- * Public preset shape — backend reads from a single source
- * (`service_template_presets` table). The two historically-hardcoded
- * code presets are seeded into the same table at boot, so every row
- * carries `source: 'admin_template'` and `templateId`. Both v1 fields
- * (qualificationSchemaJson / faqJson / serviceRules / aliases, populated
- * on seeded rows) and v2 fields (serviceOptionsJson / customerAnswersJson
- * / additionalInstructions, populated on admin-authored rows) are
- * surfaced — the picker reads whichever side is populated.
+ * Merged preset shape — backend returns both curated code presets and
+ * admin-authored published templates from a single endpoint. Discriminate
+ * on `source`. Each variant exposes the legacy v1 keys it natively
+ * carries (code presets) or the v2 keys (admin templates); the picker
+ * reads whatever's populated and ignores the rest.
  */
 export type ServiceProfilePreset = {
-  source: 'admin_template';
-  templateId: string;
+  source: 'code_preset' | 'admin_template';
+  /** Curated code presets only — used when calling createFromPreset. */
+  presetKey?: string;
+  /** Admin DB templates only — used when calling createFromPreset. */
+  templateId?: string;
   key: string;
   provider: 'thumbtack' | 'yelp' | 'manual' | string;
   providerCategoryName: string;
@@ -866,6 +866,7 @@ export type ServiceProfilePreset = {
   label: string;
   description: string | null;
   aliases: string[];
+  // Curated code presets (v1). Admin templates return nulls here.
   qualificationSchemaJson: {
     questions: Array<{
       key: string;
@@ -894,6 +895,7 @@ export type ServiceProfilePreset = {
     unsupportedServices: string[];
     workflowSteps: string[];
   } | null;
+  // Admin DB templates (v2). Code presets return nulls here.
   serviceOptionsJson: {
     groups: Array<{
       key: string;
@@ -911,9 +913,13 @@ export const serviceProfilePresetsApi = {
     const { data } = await api.get('/v1/service-profile-presets');
     return data;
   },
-  /** Create a ServiceProfile from a published admin template. */
+  /**
+   * Create a ServiceProfile from either a code preset or a published
+   * admin template. Pass `presetKey` for code presets, `templateId` for
+   * admin templates — backend rejects passing both.
+   */
   createFromPreset: async (
-    opts: { templateId: string },
+    opts: { presetKey?: string; templateId?: string; status?: 'draft' | 'active' },
   ): Promise<{ profileId: string; slug: string; status: string; name: string }> => {
     const { data } = await api.post('/v1/service-profiles/from-preset', opts);
     return data;

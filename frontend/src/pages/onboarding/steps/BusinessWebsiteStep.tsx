@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
   Loader2, Phone, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
@@ -56,7 +56,7 @@ interface VerifyOutcome {
  * flow, so users who just type a URL and hit the bottom CTA also get the
  * old behavior. The Fetch buttons are an upgrade, not a replacement.
  */
-export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving }: Props) {
+export default function BusinessWebsiteStep({ onSaveContinue, onNoWebsite, saving, setSaving }: Props) {
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   // Title + description live in WizardShell header (2026-06-13 redesign).
@@ -420,6 +420,33 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
     }
   }
 
+  async function skipNoWebsite() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const { user: updated } = await usersApi.updateProfile({
+        website: null,
+        websiteMetadata: null,
+      });
+      if (user) {
+        const token = localStorage.getItem('token') || '';
+        setAuth(
+          {
+            ...user,
+            website: updated.website ?? null,
+            websiteMetadataJson: updated.websiteMetadataJson ?? null,
+          },
+          token,
+        );
+      }
+      await onNoWebsite();
+    } catch (err: any) {
+      notify.error('Could not save', err.response?.data?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // ── Derived ───────────────────────────────────────────────────────
   const trimmed = value.trim();
   const isChecking = verifyState.kind === 'checking' || saving;
@@ -449,27 +476,30 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
           type="button"
           onClick={() => void verifyAndContinue()}
           disabled={!canSave}
-          style={{
-            padding: '10px 22px', borderRadius: 10,
-            border: 0, background: 'var(--lb-accent)', color: '#fff',
-            fontSize: 13, fontWeight: 700,
-            cursor: !canSave ? 'not-allowed' : 'pointer',
-            opacity: !canSave ? 0.5 : 1,
-            fontFamily: 'inherit',
-          }}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
+          {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
           {verifyState.kind === 'checking'
             ? 'Checking your site…'
             : verifyState.kind === 'applying'
               ? 'Applying to Playbook…'
-              : (saving ? 'Saving…' : 'Continue')}
+              : (saving ? 'Saving…' : 'Save & Continue')}
+          {!isBusy && <ArrowRight className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => void skipNoWebsite()}
+          disabled={isBusy}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+        >
+          I don't have one
         </button>
       </WizardStepActions>
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
       {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
-      <section className="mt-2 rounded-xl border bg-white p-5 lb-wiz-card">
+      <section className="mt-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
         <div className="flex items-center gap-2 mb-1">
           <Phone className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">Business phone</h2>
@@ -567,7 +597,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
       </section>
 
       {/* ─── 2. LeadBridge phone (TenantPhoneNumber) ─────────────── */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
+      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
         <div className="flex items-center gap-2 mb-1">
           <Phone className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
@@ -719,7 +749,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               Playbook + FAQ.
           Replaces the two prior sections (Website URL + Thumbtack
           profile URLs). */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
+      <section className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-5">
         <div className="flex items-center gap-2 mb-1">
           <Globe className="w-4 h-4 text-slate-500" />
           <h2 className="text-sm font-extrabold text-slate-900">Business profile or website</h2>

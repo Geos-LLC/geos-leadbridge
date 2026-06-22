@@ -1,4 +1,4 @@
-import { Check, Loader2, Sparkles, X } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Sparkles, X } from 'lucide-react';
 import { createContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WizardChecklist, WizardStep } from '../../types';
@@ -219,10 +219,9 @@ export default function WizardShell({
       </aside>
 
       {/* ─── Right content pane ─────────────────────────────────────── */}
-      <div className="lb-wizard-pane flex-1 flex flex-col min-w-0" style={{ background: 'var(--lb-surface)' }}>
+      <div className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--lb-surface)' }}>
         {/* Header: title + description + close button */}
         <div
-          className="lb-wizard-pane-header"
           style={{
             padding: '22px 28px 16px',
             borderBottom: '1px solid var(--lb-line-soft)',
@@ -231,31 +230,16 @@ export default function WizardShell({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Mobile-only step indicator. The desktop rail already shows
-                "Step N of N" — at <=760px the rail is hidden, so we
-                surface the same counter as a mono accent eyebrow above
-                the title. CSS toggles visibility (display:none until the
-                breakpoint hits) — see `.lb-wizard-step-indicator`. */}
-            <div className="lb-wizard-step-indicator" style={{
-              fontSize: 10, fontWeight: 700,
-              color: 'var(--lb-accent)',
-              fontFamily: 'var(--lb-font-mono)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              marginBottom: 4,
-            }}>
-              Step {currentIndex + 1} of {totalSteps}
-            </div>
-            <h2 className="lb-wizard-title" style={{
+            <h2 style={{
               margin: 0,
-              fontSize: 19, fontWeight: 800, color: 'var(--lb-ink-1)',
+              fontSize: 21, fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.02em',
             }}>
               {currentMeta.title}
             </h2>
-            <p className="lb-wizard-subtitle" style={{
-              margin: '4px 0 0',
-              fontSize: 13, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            <p style={{
+              margin: '5px 0 0',
+              fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
             }}>
               {currentMeta.description}
             </p>
@@ -271,7 +255,7 @@ export default function WizardShell({
               background: 'var(--lb-surface)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
-              color: 'var(--lb-ink-5)',
+              color: 'var(--lb-ink-4)',
               flexShrink: 0,
               fontFamily: 'inherit',
             }}
@@ -295,7 +279,7 @@ export default function WizardShell({
 
         {/* Step body */}
         <main
-          className="lb-wizard-body flex-1 overflow-y-auto"
+          className="flex-1 overflow-y-auto"
           style={{
             minHeight: 0,
             padding: '24px 28px',
@@ -311,11 +295,10 @@ export default function WizardShell({
 
         {/* Footer: Back (left) — spacer — step buttons / Skip / Continue / Finish (right) */}
         <div
-          className="lb-wizard-footer"
           style={{
-            padding: '16px 28px',
+            padding: '14px 28px',
             borderTop: '1px solid var(--lb-line-soft)',
-            display: 'flex', alignItems: 'center', gap: 12,
+            display: 'flex', alignItems: 'center', gap: 10,
             flexShrink: 0,
             background: 'var(--lb-surface)',
           }}
@@ -326,10 +309,10 @@ export default function WizardShell({
               onClick={onBack}
               disabled={saving}
               style={{
-                padding: '10px 18px',
+                padding: '10px 16px',
                 borderRadius: 10,
                 border: '1px solid var(--lb-line)',
-                background: '#fff',
+                background: 'var(--lb-surface)',
                 color: 'var(--lb-ink-3)',
                 fontSize: 13, fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer',
@@ -372,36 +355,29 @@ export default function WizardShell({
                   Skip this step
                 </button>
               )}
-              {onContinue && (() => {
-                // Bundle uses green for the final "Finish" button, accent
-                // blue for the intermediate "Continue". Detect by label so
-                // existing callers (SetupWizard passes "Finish" on the last
-                // step) get the right color without a new prop.
-                const isFinish = /finish/i.test(continueLabel);
-                const bg = isFinish ? 'var(--lb-success)' : 'var(--lb-accent)';
-                return (
-                  <button
-                    type="button"
-                    onClick={onContinue}
-                    disabled={continueDisabled || saving}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '10px 22px',
-                      borderRadius: 10,
-                      border: 0,
-                      background: bg,
-                      color: '#fff',
-                      fontSize: 13, fontWeight: 700,
-                      cursor: (continueDisabled || saving) ? 'not-allowed' : 'pointer',
-                      fontFamily: 'inherit',
-                      opacity: (continueDisabled || saving) ? 0.5 : 1,
-                    }}
-                  >
-                    {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                    {saving ? 'Saving…' : continueLabel}
-                  </button>
-                );
-              })()}
+              {onContinue && (
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  disabled={continueDisabled || saving}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '10px 22px',
+                    borderRadius: 10,
+                    border: 0,
+                    background: 'var(--lb-accent)',
+                    color: 'var(--lb-accent-fg)',
+                    fontSize: 13, fontWeight: 700,
+                    cursor: (continueDisabled || saving) ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    opacity: (continueDisabled || saving) ? 0.5 : 1,
+                  }}
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {saving ? 'Saving…' : continueLabel}
+                  {!saving && <ArrowRight size={14} />}
+                </button>
+              )}
             </>
           )}
         </div>

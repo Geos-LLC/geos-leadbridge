@@ -621,7 +621,11 @@ export function PresetPickerModal({ onClose, onCreated }: { onClose: () => void;
   const handleCreate = async (preset: ServiceProfilePreset) => {
     setCreatingKey(preset.key);
     try {
-      await serviceProfilePresetsApi.createFromPreset({ templateId: preset.templateId });
+      await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'admin_template'
+          ? { templateId: preset.templateId! }
+          : { presetKey: preset.presetKey ?? preset.key },
+      );
       notify.success('Service profile created', `${preset.label} is in draft. Click Activate when ready.`);
       onCreated();
     } catch (err: any) {
@@ -782,7 +786,11 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
   const handleCreatePreset = async (preset: ServiceProfilePreset) => {
     setCreatingKey(preset.key);
     try {
-      await serviceProfilePresetsApi.createFromPreset({ templateId: preset.templateId });
+      await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'admin_template'
+          ? { templateId: preset.templateId! }
+          : { presetKey: preset.presetKey ?? preset.key },
+      );
       notify.success('Service created', `${preset.label} is in draft. Click Activate when ready.`);
       onCreated();
     } catch (err: any) {

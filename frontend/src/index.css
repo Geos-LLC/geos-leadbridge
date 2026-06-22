@@ -80,10 +80,17 @@ h1, h2, h3, h4 {
   font-weight: 700;
 }
 
-/* Setup button keeps the full "✦ Setup" pill at every width. The
-   topbar only carries the hamburger + LeadBridge logo on mobile (no
-   page-title h1 below `lg:`), so a 380px viewport fits the pill with
-   room to spare — no need to collapse it to an icon. */
+/* ─── Responsive: top-nav Setup button collapses to icon-only ≤640px ─── */
+@media (max-width: 640px) {
+  .lb-setup-btn {
+    padding: 0 !important;
+    width: 36px;
+    height: 36px;
+  }
+  .lb-setup-btn .lb-setup-label {
+    display: none;
+  }
+}
 
 /* ─── Responsive: AI launcher tucks down ≤560px ─── */
 @media (max-width: 560px) {
@@ -100,28 +107,6 @@ h1, h2, h3, h4 {
     height: auto !important;
   }
 }
-
-/* The desktop wizard rail carries the "Step N of N" indicator; the
-   mobile pane has its own eyebrow that takes over when the rail is
-   hidden. Default-hidden here so it never paints on desktop. */
-.lb-wizard-step-indicator { display: none; }
-
-/* Generic wizard section card — matches the LeadBridge Wizard Bundle's
-   plain white card chrome. Used by step bodies that previously rendered
-   on a slate-50/50 wash; the new look is a flat white card with a
-   single `--lb-line` border. Tailwind's `border` utility supplies the
-   1px stroke; the color hop happens here so callers don't need an
-   inline `style={{borderColor}}` workaround. */
-.lb-wiz-card {
-  border-color: var(--lb-line) !important;
-}
-
-/* Lead Activity status-filter row hides its scrollbar across browsers.
-   The row is horizontally scrollable so every tab stays reachable at
-   any width; the scrollbar would otherwise eat 8–12px of vertical
-   space below the tabs on Windows / Chrome on Linux. */
-.lb-status-filters::-webkit-scrollbar { display: none; }
-.lb-status-filters { scrollbar-width: none; }
 
 /* ─── Responsive: horizontal-scroll tab bars at ≤760px ───
    Settings tabs, Account tabs, status filters, Follow-up cadence stepper
@@ -176,231 +161,4 @@ h1, h2, h3, h4 {
     height: 100dvh !important;
     border-radius: 0 !important;
   }
-
-  /* ─── Mobile pass — page padding, headers, field rows, option cards ─
-     Applies to Settings (/settings) and Automation (/automation/*) pages.
-     All hooks are className-only — JSX structure and behavior unchanged.
-     The desktop layout keeps its 20/28 padding and side-by-side rows;
-     these rules only kick in below the 760px breakpoint. */
-
-  /* Page padding compresses on phones — 28px side gutters waste touch
-     room and the bottom edge no longer needs the 60px tail since the
-     responsive composer/tab bar (where present) handles its own offset. */
-  .lb-pad {
-    padding: 18px 16px 56px !important;
-  }
-
-  /* Dashboard / Overview hero — bumps the eyebrow + title + subtitle to
-     hero scale on phones. Desktop keeps its compact greeting block
-     because the Layout topbar carries the page name visibly there.
-     `overflow-wrap: break-word` is the load-bearing rule for very long
-     tenant names (e.g. "SPOTLESS HOMES FLORIDA LLC") so the eyebrow
-     soft-wraps onto a second line instead of forcing horizontal scroll. */
-  .lb-hero {
-    overflow: hidden;
-  }
-  .lb-hero-eyebrow {
-    font-size: 12px !important;
-    letter-spacing: 0.12em !important;
-    overflow-wrap: break-word;
-    word-break: break-word;
-  }
-  .lb-hero-title {
-    font-size: 30px !important;
-    font-weight: 800 !important;
-    letter-spacing: -0.03em !important;
-    line-height: 1.1 !important;
-    margin: 8px 0 6px !important;
-    overflow-wrap: break-word;
-  }
-  .lb-hero-sub {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-    color: var(--lb-ink-5) !important;
-    overflow-wrap: break-word;
-  }
-
-  /* AutoPageHeader stacks: title block on top, actions cluster below.
-     The Settings phone mock shows the in-page title + Settings badge +
-     subtitle visible above the Saved / More row — we don't hide it
-     globally because the topbar doesn't always echo the sub-section.
-     Long titles wrap naturally; long subtitles soft-wrap so the actions
-     row stays anchored to the left edge. */
-  .lb-page-header {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 10px !important;
-    margin-bottom: 14px !important;
-  }
-  .lb-page-header-actions {
-    justify-content: flex-start;
-  }
-
-  /* FieldRow stacks: label on top, control below. The 150–170px label
-     column shrinks to auto and the decorative leading IconTile is hidden
-     so the label doesn't get orphaned onto its own line. */
-  .lb-row {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 9px !important;
-  }
-  .lb-row > .lb-row-label {
-    width: auto !important;
-  }
-  .lb-row > .lb-row-icon {
-    display: none !important;
-  }
-
-  /* OptionCard pairs (Connection Mode: Agent First / Parallel) stack
-     one per row so each card has full readable width. */
-  .lb-option-pair {
-    flex-direction: column !important;
-  }
-
-  /* ─── Setup wizard mobile pass ──────────────────────────────────────
-     The 248px navy rail is already hidden on small screens via the
-     `hidden md:flex` Tailwind class on the <aside>. Side gutters in
-     the right pane drop from 28px (desktop) to 16px on phones —
-     28px left ~337px of usable content on a 393px viewport which
-     felt too narrow in practice. Vertical paddings stay close to
-     desktop so the chrome rhythm doesn't change. Footer adds extra
-     bottom padding to clear iOS / Android safe areas. */
-  .lb-wizard-step-indicator {
-    display: block !important;
-  }
-  .lb-wizard-pane-header {
-    padding: 18px 16px 14px !important;
-  }
-  .lb-wizard-body {
-    padding: 18px 16px !important;
-  }
-  .lb-wizard-footer {
-    padding: 14px 16px !important;
-    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px) + 14px) !important;
-  }
-
-  /* ─── LeadBridge Automation Bundle — mobile pass ────────────────────
-     Ported verbatim from the bundle's <=760px @media block. The
-     attribute selectors (`[style*="padding: 20px 24px"]` etc.) target
-     SettingCard / FieldRow / SectionCard inline styles directly, so
-     the existing components compress without per-component prop work.
-     Together they replicate the bundle's full-bleed mobile feel:
-     14/12 page gutters, 13/16 card insets, smaller section headers,
-     stacked option pairs + qualifier grids, scrollable account tabs,
-     1-col rule cards. */
-  .lb-pad {
-    padding: 14px 12px 96px !important;
-  }
-  .lb-pagehead h1,
-  .lb-pagehead h2,
-  .lb-page-header h1,
-  .lb-page-header h2 {
-    font-size: 21px !important;
-  }
-  /* SettingCard / SectionCard inner paddings */
-  .lb-pad [style*="padding: 20px 24px"] { padding: 13px 16px !important; }
-  .lb-pad [style*="padding: 18px 24px"] { padding: 13px 16px !important; }
-  .lb-pad [style*="padding: 18px 20px"] { padding: 13px 16px !important; }
-  .lb-pad [style*="padding: 16px 20px"] { padding: 12px 16px !important; }
-  .lb-pad [style*="padding: 8px 24px 24px"] { padding: 2px 16px 13px !important; }
-  .lb-pad [style*="padding: 6px 24px 18px"] { padding: 2px 16px 12px !important; }
-  .lb-pad [style*="padding: 20px 24px 8px"] { padding: 13px 16px 6px !important; }
-  .lb-pad [style*="padding: 20px 24px 24px"] { padding: 13px 16px 14px !important; }
-  .lb-pad [style*="padding: 22px 24px 24px"] { padding: 14px 16px 14px !important; }
-  .lb-pad [style*="padding: 40px 24px"] { padding: 26px 16px !important; }
-  /* Inner card gaps tighten */
-  .lb-pad [style*="gap: 20px"] { gap: 12px !important; }
-  .lb-pad [style*="gap: 18px"] { gap: 12px !important; }
-  .lb-pad [style*="gap: 16px"] { gap: 11px !important; }
-  /* Card section sub-headers smaller */
-  .lb-pad [style*="font-size: 17px"] { font-size: 15px !important; }
-  /* Group-header margins collapse */
-  .lb-pad [style*="margin-top: 22px"] { margin-top: 13px !important; }
-  .lb-pad [style*="margin-top: 18px"] { margin-top: 12px !important; }
-  .lb-pad [style*="margin: 22px 0 12px"] { margin-top: 13px !important; margin-bottom: 9px !important; }
-  .lb-pad [style*="margin-bottom: 14px"] { margin-bottom: 10px !important; }
-  /* Field rows: tighter vertical insets */
-  .lb-row {
-    padding-top: 8px !important;
-    padding-bottom: 8px !important;
-  }
-  /* Account tabs: horizontal scroll (in addition to the existing
-     lb-settings-tabs / lb-account-tabs rules above). */
-  .lb-tabscroll {
-    flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  .lb-tabscroll::-webkit-scrollbar { display: none; }
-  .lb-tabscroll > * { flex: 0 0 auto !important; }
-  /* Conversation Goal / Qualify grids reflow to 1-col on phone */
-  .lb-strat { grid-template-columns: 1fr !important; }
-  .lb-strat > button {
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 9px !important;
-    padding: 11px 13px !important;
-  }
-  .lb-qual { grid-template-columns: 1fr !important; }
-  /* Rule cards (Resume / Deferral / Hired competitor) collapse 3-col -> 1-col */
-  .lb-rule {
-    grid-template-columns: 1fr !important;
-    gap: 12px !important;
-  }
-  .lb-rule > div:nth-child(2) {
-    display: flex !important;
-    align-items: center !important;
-    gap: 10px !important;
-  }
-  .lb-rule > div:nth-child(2) > div:first-child {
-    margin-bottom: 0 !important;
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-  }
-  .lb-rule > div:nth-child(2) > select {
-    flex: 1 !important;
-    min-width: 0 !important;
-  }
-  /* Hide the AI tip column on the right of each rule row at mobile */
-  .lb-rule > div:nth-child(3) { display: none !important; }
-
-  /* Timing rows: keep checkbox + Edit Hours on one line; bundle hides
-     the trailing Edit Hours link at mobile so the checkbox text gets
-     full row width without wrapping. */
-  .lb-hoursrow {
-    flex-wrap: nowrap !important;
-    gap: 8px !important;
-  }
-  .lb-hoursrow > button:first-child {
-    min-width: 0 !important;
-    flex: 0 1 auto !important;
-  }
-  .lb-hoursrow > button:first-child > span:last-child {
-    white-space: nowrap !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    font-size: 12.5px !important;
-  }
-  .lb-hoursrow > button:last-child {
-    display: none !important;
-  }
-
-  /* AutoPageHeader actions cluster (Saved pill + More) takes the full
-     mobile row width per bundle. The first row (title block) already
-     stacks via .lb-page-header { flex-direction: column }. */
-  .lb-page-header-actions {
-    width: 100% !important;
-    justify-content: space-between !important;
-  }
-}
-
-/* Tiny phones (<=430px) shrink icon tiles further so card rows stay
-   single-line. Targets the bundle's recurring tile sizes. */
-@media (max-width: 430px) {
-  .lb-pad [style*="width: 46px"][style*="height: 46px"] { width: 38px !important; height: 38px !important; }
-  .lb-pad [style*="width: 44px"][style*="height: 44px"] { width: 36px !important; height: 36px !important; }
-  .lb-pad [style*="width: 42px"][style*="height: 42px"] { width: 34px !important; height: 34px !important; }
-  .lb-pad [style*="width: 38px"][style*="height: 38px"] { width: 32px !important; height: 32px !important; }
-  .lb-pad [style*="width: 36px"][style*="height: 36px"] { width: 32px !important; height: 32px !important; }
-  .lb-pad [style*="width: 34px"][style*="height: 34px"] { width: 30px !important; height: 30px !important; }
 }

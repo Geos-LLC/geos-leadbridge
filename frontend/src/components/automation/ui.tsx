@@ -121,7 +121,7 @@ export function AutoPageHeader({
   backLink?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="lb-page-header" style={{
+    <div style={{
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
       gap: 16, marginBottom: 22,
     }}>
@@ -136,7 +136,7 @@ export function AutoPageHeader({
         </div>
         {subtitle && <p style={{ margin: 0, fontSize: 13.5, color: 'var(--lb-ink-5)' }}>{subtitle}</p>}
       </div>
-      <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
         {headerActions}
         <button title="More" style={{
           width: 38, height: 38, borderRadius: 10,
@@ -227,7 +227,7 @@ export function BigToggle({
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
-  mixed, mixedTooltip, compact,
+  mixed, mixedTooltip,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -240,51 +240,34 @@ export function SettingCard({
   contentPad?: CSSProperties['padding'];
   mixed?: boolean;
   mixedTooltip?: string;
-  /** Tightens chrome for in-wizard usage — smaller padding, lighter
-      border, 14px title — matches the LeadBridge Wizard Bundle's
-      compact card design. Settings pages keep the full-size default. */
-  compact?: boolean;
 }) {
   return (
     <div style={{
       background: 'white',
-      border: compact ? '1px solid var(--lb-line)' : '1.5px solid var(--lb-line)',
-      borderRadius: compact ? 12 : 14,
-      boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
+      border: '1.5px solid var(--lb-line)',
+      borderRadius: 14,
+      boxShadow: '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
-        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
-        padding: compact ? '15px 16px' : '20px 24px',
+        display: 'flex', alignItems: 'flex-start', gap: 14,
+        padding: '20px 24px',
       }}>
-        <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
+        <IconTile icon={icon} tone={iconTone} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{
-              fontSize: compact ? 14 : 17,
-              fontWeight: 700, color: 'var(--lb-ink-1)',
-              letterSpacing: '-0.01em',
-            }}>{title}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
-          {subtitle && <div style={{
-            fontSize: compact ? 12 : 13.5,
-            color: 'var(--lb-ink-5)', marginTop: 2,
-          }}>{subtitle}</div>}
+          {subtitle && <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', marginTop: 2 }}>{subtitle}</div>}
         </div>
         {headerRight}
         {onToggle && (
-          <div style={{
-            display: 'flex', alignItems: 'center',
-            gap: compact ? 0 : 10,
-            paddingTop: compact ? 0 : 2,
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
-            {!compact && (
-              <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
-                {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
-              </span>
-            )}
+            <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
+              {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
+            </span>
           </div>
         )}
       </div>
@@ -435,17 +418,17 @@ export function FieldRow({
   noBorder?: boolean;
 }) {
   return (
-    <div className="lb-row" style={{
+    <div style={{
       display: 'flex', gap: 16, alignItems: align === 'top' ? 'flex-start' : 'center',
       padding: '16px 0',
       borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
     }}>
-      {icon && <span className="lb-row-icon"><IconTile icon={icon} tone={iconTone} size="sm" /></span>}
-      <div className="lb-row-label" style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
+      {icon && <IconTile icon={icon} tone={iconTone} size="sm" />}
+      <div style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)' }}>{label}</div>
         {sublabel && <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>{sublabel}</div>}
       </div>
-      <div className="lb-row-control" style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   );
 }
@@ -944,7 +927,7 @@ export function TimingRow({
       }
       sublabel={sublabel}
     >
-      <div className="lb-hoursrow" style={{
+      <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 12, flexWrap: 'wrap',
       }}>

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
+  CheckCircle2,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   Circle,
   ExternalLink,
-  Layers,
   Loader2,
   Plus,
   ShieldAlert,
@@ -106,21 +107,22 @@ export default function ServicesStep({
     [profiles],
   );
 
-  // Pull the seeded "Custom Service" to the top of the picker; everything
-  // else lands in the main list. Both groups read from the same DB-backed
-  // presets list — what used to be hardcoded "code presets" are now
-  // seeded admin templates with stable keys.
+  // Group presets the same way Settings does: Generic on top, curated
+  // code presets in the middle, published admin templates at the bottom.
   const groupedPresets = useMemo(() => {
     const generic: typeof presets = [];
-    const others: typeof presets = [];
+    const curated: typeof presets = [];
+    const admin: typeof presets = [];
     for (const p of presets) {
-      if (p.key === 'generic_custom_service') generic.push(p);
-      else others.push(p);
+      if (p.source === 'admin_template') admin.push(p);
+      else if (p.key === 'generic_custom_service' || p.presetKey === 'generic_custom_service') generic.push(p);
+      else curated.push(p);
     }
     const byLabel = (a: typeof presets[number], b: typeof presets[number]) => a.label.localeCompare(b.label);
     return {
       generic,
-      others: others.sort(byLabel),
+      curated: curated.sort(byLabel),
+      admin: admin.sort(byLabel),
     };
   }, [presets]);
 
@@ -128,7 +130,8 @@ export default function ServicesStep({
   // input creates the always-works starter.
   useEffect(() => {
     if (!showAddPanel || selectedPresetKey || groupedPresets.generic.length === 0) return;
-    setSelectedPresetKey(groupedPresets.generic[0].templateId);
+    const g = groupedPresets.generic[0];
+    setSelectedPresetKey(g.source === 'code_preset' ? g.presetKey! : g.templateId!);
   }, [showAddPanel, selectedPresetKey, groupedPresets.generic]);
 
   function ensureAiDraft(profile: ServiceProfile) {
@@ -209,16 +212,21 @@ export default function ServicesStep({
 
   async function handleCreateFromPreset() {
     if (!selectedPresetKey || creating) return;
-    const preset = presets.find(p => p.templateId === selectedPresetKey);
+    const preset = presets.find(p =>
+      (p.source === 'code_preset' && p.presetKey === selectedPresetKey)
+      || (p.source === 'admin_template' && p.templateId === selectedPresetKey),
+    );
     if (!preset) {
       notify.error('Pick a service template', 'Select one from the dropdown first.');
       return;
     }
     setCreating(true);
     try {
-      const created = await serviceProfilePresetsApi.createFromPreset({
-        templateId: preset.templateId,
-      });
+      const created = await serviceProfilePresetsApi.createFromPreset(
+        preset.source === 'code_preset'
+          ? { presetKey: preset.presetKey!, status: 'active' }
+          : { templateId: preset.templateId! },
+      );
       setSelectedPresetKey('');
       await refreshAll();
       setOpenId(created.profileId);
@@ -281,16 +289,20 @@ export default function ServicesStep({
           onClick={() => void handleContinue()}
           disabled={saving || !canContinue}
           title={!canContinue ? 'Add at least one active service to continue' : undefined}
-          style={{
-            padding: '10px 22px', borderRadius: 10,
-            border: 0, background: 'var(--lb-accent)', color: '#fff',
-            fontSize: 13, fontWeight: 700,
-            cursor: (saving || !canContinue) ? 'not-allowed' : 'pointer',
-            opacity: (saving || !canContinue) ? 0.5 : 1,
-            fontFamily: 'inherit',
-          }}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md shadow-blue-200 transition-all"
         >
-          {saving ? 'Continuing…' : 'Continue'}
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? 'Continuing…' : 'Save & Continue'}
+          {!saving && <ArrowRight className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings?tab=ai-playbook')}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
+        >
+          Full AI playbook
+          <ExternalLink className="w-3.5 h-3.5" />
         </button>
         {!canContinue && !loading && (
           <span className="text-xs text-amber-600 font-medium">
@@ -337,17 +349,32 @@ export default function ServicesStep({
                   <option value="">Pick a template…</option>
                   {groupedPresets.generic.length > 0 && (
                     <optgroup label="Recommended starter">
-                      {groupedPresets.generic.map(p => (
-                        <option key={p.templateId} value={p.templateId}>
-                          {p.label} — works for any service
-                        </option>
-                      ))}
+                      {groupedPresets.generic.map(p => {
+                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                        return (
+                          <option key={`${p.source}-${key}`} value={key}>
+                            {p.label} — works for any service
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   )}
-                  {groupedPresets.others.length > 0 && (
-                    <optgroup label="Service templates">
-                      {groupedPresets.others.map(p => (
-                        <option key={p.templateId} value={p.templateId}>
+                  {groupedPresets.curated.length > 0 && (
+                    <optgroup label="Curated templates">
+                      {groupedPresets.curated.map(p => {
+                        const key = p.source === 'code_preset' ? p.presetKey! : p.templateId!;
+                        return (
+                          <option key={`${p.source}-${key}`} value={key}>
+                            {p.label}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {groupedPresets.admin.length > 0 && (
+                    <optgroup label="Published custom templates">
+                      {groupedPresets.admin.map(p => (
+                        <option key={`admin-${p.templateId}`} value={p.templateId!}>
                           {p.label}
                         </option>
                       ))}
@@ -364,6 +391,11 @@ export default function ServicesStep({
                   Add
                 </button>
               </div>
+              {groupedPresets.admin.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  More templates will appear here when admins publish them.
+                </p>
+              )}
             </div>
 
             <div>
@@ -459,57 +491,28 @@ export default function ServicesStep({
                         void refreshOne(profile.id);
                       }
                     }}
-                    className="w-full hover:bg-slate-50 transition-colors"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 13,
-                      padding: '16px', textAlign: 'left',
-                    }}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
                   >
-                    {/* Leading layers icon tile — accent-tint per bundle */}
-                    <span style={{
-                      width: 38, height: 38, borderRadius: 9,
-                      background: 'var(--lb-accent-tint)', color: 'var(--lb-accent)',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                    }}>
-                      <Layers className="w-[18px] h-[18px]" />
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {open ? (
+                        <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                      )}
+                      <div className="text-left min-w-0">
+                        <div className="text-sm font-bold text-slate-900 truncate">
                           {profile.name}
-                        </span>
-                        {profile.status === 'active' && (
-                          <span style={{
-                            fontSize: 10, fontWeight: 700,
-                            padding: '2px 7px', borderRadius: 99,
-                            background: 'var(--lb-success-tint)', color: '#15803d',
-                            textTransform: 'uppercase', letterSpacing: '0.05em',
-                          }}>Active</span>
-                        )}
-                        {profile.isDefault && (
-                          <span style={{
-                            fontSize: 10, fontWeight: 700,
-                            padding: '2px 7px', borderRadius: 99,
-                            background: 'var(--lb-ink-10)', color: 'var(--lb-ink-5)',
-                            textTransform: 'uppercase', letterSpacing: '0.05em',
-                          }}>Default</span>
-                        )}
-                      </span>
-                      <span style={{
-                        display: 'block', fontSize: 12,
-                        color: 'var(--lb-ink-5)', marginTop: 3,
-                      }}>
-                        {configured
-                          ? 'Pricing, FAQ and qualification configured.'
-                          : 'Add pricing and customer answers to activate.'}
-                      </span>
-                    </span>
-                    {open ? (
-                      <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                    )}
+                          {profile.isDefault && (
+                            <span className="ml-2 text-xs font-semibold text-slate-400">
+                              default
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <StatusPill status={profile.status} configured={configured} />
+                        </div>
+                      </div>
+                    </div>
                   </button>
 
                   {open && (
@@ -659,6 +662,36 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       </div>
       {children}
     </div>
+  );
+}
+
+function StatusPill({
+  status,
+  configured,
+}: {
+  status: 'active' | 'draft' | 'archived';
+  configured: boolean;
+}) {
+  if (status === 'draft') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+        Draft · AI paused
+      </span>
+    );
+  }
+  if (configured) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+        <CheckCircle2 className="w-3 h-3" />
+        Ready
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+      <ShieldAlert className="w-3 h-3" />
+      Needs pricing + answers
+    </span>
   );
 }
 
