@@ -5,7 +5,7 @@ import {
   AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox,
   BarChart3, ChevronsUpDown, ChevronRight, ChevronDown, ArrowLeft,
   DollarSign, Sparkles, Paperclip, Send, X, MessageSquare,
-  FileText, Activity,
+  FileText,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -415,7 +415,6 @@ export function Layout() {
     if (path === '/admin/billing') return 'Subscriptions & Billing';
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/admin/service-templates') return 'Service Templates';
-    if (path === '/admin/tenant-health') return 'Cross-Tenant Health';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
     if (path.startsWith('/partner-network')) return 'Partner Network Beta';
@@ -676,7 +675,6 @@ export function Layout() {
                 {renderNavItem({ icon: <DollarSign size={15} />, label: 'Subscriptions', path: '/admin/billing' })}
                 {renderNavItem({ icon: <Smartphone size={15} />, label: 'Tenant Numbers', path: '/admin/tenant-numbers' })}
                 {renderNavItem({ icon: <FileText size={15} />, label: 'Service Templates', path: '/admin/service-templates' })}
-                {renderNavItem({ icon: <Activity size={15} />, label: 'Tenant Health', path: '/admin/tenant-health' })}
                 {renderNavItem({ icon: <Inbox size={15} />, label: 'SMS History', path: '/sms-history' })}
                 {renderNavItem({ icon: <FlaskConical size={15} />, label: 'API Test', path: '/api-test' })}
               </>
