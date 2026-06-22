@@ -210,6 +210,40 @@ h1, h2, h3, h4 {
     grid-template-columns: 1fr !important;
   }
 
+  /* ─── Topbar mobile (Phase 3 from FinalDesign port) ───
+     Tighten the topbar's side gutters from 24 to 16 so the
+     hamburger + page title + sub-label + Setup pill cluster fits
+     a 393px viewport without crowding. The canonical also hides a
+     topbar search input + settings-side rail on mobile — neither
+     exists in our current JSX, but the rules are added defensively
+     so any future surface that uses these class names disappears on
+     phones without extra wiring. */
+  .lb-topbar {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  .lb-topbar-search {
+    display: none !important;
+  }
+  .lb-settings-side {
+    display: none !important;
+  }
+}
+
+/* Setup button collapses to a 36px icon-only circle at ≤640px so the
+   topbar doesn't crowd on phones. The class hook (`lb-setup-btn` +
+   `lb-setup-label`) is already on the JSX in Layout.tsx — this is just
+   the matching mobile rule that was previously missing. */
+@media (max-width: 640px) {
+  .lb-setup-label {
+    display: none !important;
+  }
+  .lb-setup-btn {
+    padding: 0 !important;
+    width: 36px !important;
+    justify-content: center !important;
+  }
+
   /* Conversation Goal 4-up grid reflows to 2 columns per spec. */
   .lb-strategy-grid {
     grid-template-columns: repeat(2, 1fr) !important;

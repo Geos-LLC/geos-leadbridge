@@ -752,10 +752,13 @@ export function Layout() {
         <div className="lg:ml-[232px]">
           <ImpersonationBanner />
 
-          {/* Top page header — utility-first, minimal decoration */}
+          {/* Top page header — utility-first, minimal decoration.
+              `lb-topbar` class tightens the side gutters to 16px on
+              phones (≤760px) so the title + Setup pill cluster fits
+              the 393px viewport without crowding. */}
           {location.pathname !== '/lead-activity' && (
             <header
-              className="sticky top-0 z-30"
+              className="lb-topbar sticky top-0 z-30"
               style={{
                 background: 'var(--lb-surface)',
                 borderBottom: '1px solid var(--lb-line)',
