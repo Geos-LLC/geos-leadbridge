@@ -307,7 +307,7 @@ export function SettingsCommunication() {
           )}
         </FieldRow>
         <div style={{ paddingTop: 16, marginTop: 16, borderTop: '1px solid var(--lb-line-soft)' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+          <div className="lb-comm-stack-row" style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
             <div style={{ minWidth: 0, width: 170, flexShrink: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)' }}>LeadBridge numbers</div>
               <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
@@ -372,7 +372,7 @@ export function SettingsCommunication() {
                 noBorder={idx === accounts.length - 1}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="lb-comm-perbiz-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <PerBusinessTile
                       icon={PhoneCall}
                       label="LeadBridge number"

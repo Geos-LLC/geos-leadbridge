@@ -335,6 +335,39 @@ h1, h2, h3, h4 {
     flex: 0 0 auto !important;
   }
 
+  /* ─── Settings tabs — hand-rolled rows that need stacking ───
+     The settings tabs use `SettingCard` / `FieldRow` from
+     components/automation/ui which already get the `.lb-row` stacking
+     pass. These rules cover the few hand-rolled layouts that don't go
+     through those primitives. */
+
+  /* Communication → Phone numbers → "LeadBridge numbers" row.
+     170px label + flex:1 control built inline (not via FieldRow),
+     so it doesn't pick up the `.lb-row` stacking. Apply the same
+     stack-on-mobile behavior here. */
+  .lb-comm-stack-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 9px !important;
+  }
+  .lb-comm-stack-row > div:first-child {
+    width: auto !important;
+  }
+
+  /* Communication → Per-business tiles — `1fr 1fr` for LeadBridge
+     number + Alert phone. At 393px each tile would be ~155px and
+     the phone-number + badge text overflows. Stack to 1-col. */
+  .lb-comm-perbiz-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* AI Playbook → Qualification fields editor — `1fr 1fr 180px`
+     (key + label + type select) is unreadable at 393px. Stack each
+     row to a single column on phone. */
+  .lb-pb-qual-row {
+    grid-template-columns: 1fr !important;
+  }
+
   /* ─── LeadBridge Automation Bundle — mobile pass ────────────────────
      Ported verbatim from the bundle's <=760px @media block. The
      attribute selectors (`[style*="padding: 20px 24px"]` etc.) target

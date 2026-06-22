@@ -1241,7 +1241,7 @@ function ServiceQualificationRowsEditor({
                 <Trash2 size={12} /> Delete
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 8 }}>
+            <div className="lb-pb-qual-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 8 }}>
               <input
                 value={row.key}
                 onChange={(e) => updateRow(i, { key: e.target.value })}
