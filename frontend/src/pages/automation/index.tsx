@@ -44,29 +44,15 @@ export function AutomationPage() {
   const meta = META[tab];
 
   const storedAccounts = useAppStore(s => s.savedAccounts);
-  // Account scope is shared with the sidebar account switcher (zustand
-  // persisted store), so picking an account here updates the sidebar pill
-  // and vice versa. The inline <AccountTabs> strip and the sidebar dropdown
-  // are two surfaces on the same selection. The legacy
-  // `lb_automation_scope` localStorage key is migrated once on mount so
-  // existing users don't lose their last pick.
+  // Account scope is shared with the sidebar account switcher (same store
+  // slice), so picking an account in either surface updates both. Scope
+  // is not persisted and resets to "All accounts" whenever the user
+  // leaves /automation (handled in Layout via the route-change effect).
   const { selectedAccountId, setSelectedAccountId } = useSelectedAccount();
   const accountId: string = selectedAccountId ?? ALL_ACCOUNTS;
   const onChangeScope = (id: string) => {
     setSelectedAccountId(id === ALL_ACCOUNTS ? null : id);
   };
-  useEffect(() => {
-    if (selectedAccountId !== null) return;
-    const legacy = localStorage.getItem('lb_automation_scope');
-    if (!legacy || legacy === ALL_ACCOUNTS) return;
-    if (storedAccounts.some(a => a.id === legacy)) {
-      setSelectedAccountId(legacy);
-    }
-    localStorage.removeItem('lb_automation_scope');
-  // Run once after the accounts list hydrates — comparison against
-  // storedAccounts guards against pinning a stale id.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storedAccounts.length]);
 
   // Block Automation when the tenant has no active ServiceProfile —
   // qualification + pricing both read from service data, so the page

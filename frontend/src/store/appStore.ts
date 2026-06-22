@@ -46,9 +46,11 @@ interface AppState {
   addSavedAccount: (account: SavedAccount) => void;
   removeSavedAccount: (id: string) => void;
 
-  // Cross-page account scope. null = "All accounts" (default). Drives the
-  // sidebar account switcher, AI Playbook, Automation filters, etc.
-  // Persisted so the choice survives full reload + page navigation.
+  // Per-page account scope. null = "All accounts" (default). Drives the
+  // sidebar account switcher and any per-account surface (AI Playbook,
+  // Automation, etc) while the user is on that page. NOT persisted —
+  // Layout resets this to null on every route change so leaving the page
+  // snaps the scope back to "All accounts".
   selectedAccountId: string | null;
   setSelectedAccountId: (id: string | null) => void;
 
@@ -240,7 +242,8 @@ export const useAppStore = create<AppState>()(
         dashboardStats: state.dashboardStats,
         analyticsCache: state.analyticsCache,
         configuredBusinessId: state.configuredBusinessId,
-        selectedAccountId: state.selectedAccountId,
+        // selectedAccountId intentionally NOT persisted — leaving a page
+        // (route change) resets scope back to "All accounts".
       }),
     }
   )

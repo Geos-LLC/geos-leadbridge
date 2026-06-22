@@ -240,6 +240,18 @@ export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Leaving a page resets the account scope back to "All accounts". We
+  // key off the first path segment so sub-tab navigation within a single
+  // page (e.g. /automation/respond → /automation/engage,
+  // /settings?tab=general → /settings?tab=ai-playbook) keeps the user's
+  // pick, but moving to a different top-level page (/automation →
+  // /dashboard) drops it.
+  const topLevelPath = location.pathname.split('/')[1] || '';
+  useEffect(() => {
+    setSelectedAccountId(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topLevelPath]);
   const [aiChatOpen, setAiChatOpen] = useState(false);
   // In-app Setup wizard modal. The /onboarding/setup route still works
   // for first-run / direct deep-links; this flag overlays the wizard on
@@ -604,7 +616,9 @@ export function Layout() {
         : 'Account')
     : `${connectedCount} ${connectedCount === 1 ? 'source' : 'sources'}`;
 
-  // Shared nav-item renderer — rounded-pill active state with accent-tint + accent text
+  // Shared nav-item renderer — rounded-pill with a solid accent background +
+  // white text on the active item (high-contrast against the surface so the
+  // current section reads at a glance), neutral hover on the rest.
   const renderNavItem = (item: { icon: React.ReactNode; label: string; path: string }) => (
     <NavLink
       key={item.path}
@@ -612,7 +626,7 @@ export function Layout() {
       className={({ isActive }) =>
         `group flex items-center gap-2.5 px-3 py-[8px] rounded-full transition-colors mb-[2px] ` +
         (isActive
-          ? 'bg-[var(--lb-accent-tint)] text-[var(--lb-accent)] font-bold'
+          ? 'bg-[var(--lb-accent)] text-white font-bold shadow-[0_1px_2px_rgba(16,24,40,0.08)]'
           : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)] font-medium')
       }
       onClick={() => setMobileMenuOpen(false)}
