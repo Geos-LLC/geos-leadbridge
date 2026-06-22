@@ -31,6 +31,7 @@ import {
 } from './service-profile.types';
 import {
   classifyLeadCategory,
+  deriveServiceGroupFromMappings,
   SERVICE_GROUP_PRIORITY,
   type ServiceGroup,
 } from './service-group-classifier';
@@ -337,6 +338,18 @@ export class ServiceProfileService {
       `templateId=${template.id} slug=${slug}`,
     );
 
+    // Derive serviceGroup from the template's provider category so the
+    // resolver's classifier match works on day 1. Without this the row
+    // ships with the schema default 'other', which never matches any
+    // lead category and silently pauses AI for the whole tenant.
+    const mappings = [
+      {
+        provider: template.provider,
+        providerCategoryId: template.providerCategoryId ?? undefined,
+        categoryName: template.providerCategoryName,
+      },
+    ];
+    const serviceGroup = deriveServiceGroupFromMappings(mappings);
     return this.prisma.serviceProfile.create({
       data: {
         userId: args.userId,
@@ -344,13 +357,8 @@ export class ServiceProfileService {
         slug,
         status: 'draft',
         isDefault: false,
-        providerCategoryMappingsJson: [
-          {
-            provider: template.provider,
-            providerCategoryId: template.providerCategoryId ?? undefined,
-            categoryName: template.providerCategoryName,
-          },
-        ] as any,
+        providerCategoryMappingsJson: mappings as any,
+        serviceGroup,
         pricingJson,
         faqJson,
         qualificationSchemaJson,
@@ -436,6 +444,12 @@ export class ServiceProfileService {
       `[service-profile] createBlank userId=${args.userId} name="${trimmed}" slug=${slug} ` +
       `preset=${GENERIC_CUSTOM_SERVICE_PRESET.key}`,
     );
+    // Custom services have no provider mapping, so derive serviceGroup
+    // from the user-supplied name (e.g. "Carpet Cleaning" → 'cleaning').
+    // Falls through to 'other' for genuinely off-niche names — that's
+    // the right outcome since the classifier can't route off-niche
+    // leads anyway.
+    const serviceGroup = deriveServiceGroupFromMappings([{ categoryName: trimmed }]);
     return this.prisma.serviceProfile.create({
       data: {
         userId: payload.userId,
@@ -444,6 +458,7 @@ export class ServiceProfileService {
         status: payload.status,
         isDefault: payload.isDefault,
         providerCategoryMappingsJson: [] as any,
+        serviceGroup,
         pricingJson: payload.pricingJson,
         faqJson: payload.faqJson,
         qualificationSchemaJson: payload.qualificationSchemaJson,
@@ -585,6 +600,41 @@ export class ServiceProfileService {
         );
         err.code = 'DEFAULT_BLOCKED';
         throw err;
+      }
+    }
+
+    // On draft → active, auto-promote this profile to the tenant default
+    // if (and only if) the tenant has no default yet. Without this, the
+    // wizard ships tenants with profiles but `User.defaultServiceProfileId
+    // = null`, leaving the runtime resolver with no fallback for leads
+    // whose category falls outside the classifier's regex coverage.
+    const shouldAutoPromote =
+      nextStatus === 'active' && cur === 'draft' && !profile.isDefault;
+    if (shouldAutoPromote) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { defaultServiceProfileId: true },
+      });
+      const tenantHasDefault = !!user?.defaultServiceProfileId;
+      if (!tenantHasDefault) {
+        return this.prisma.$transaction(async (tx) => {
+          const updated = await tx.serviceProfile.update({
+            where: { id: profileId },
+            data: {
+              status: nextStatus,
+              archivedAt: null,
+              isDefault: true,
+            },
+          });
+          await tx.user.update({
+            where: { id: userId },
+            data: { defaultServiceProfileId: profileId },
+          });
+          this.logger.log(
+            `[service-profile] auto-promoted profile ${profileId} as default for user ${userId} on first activation`,
+          );
+          return updated;
+        });
       }
     }
 

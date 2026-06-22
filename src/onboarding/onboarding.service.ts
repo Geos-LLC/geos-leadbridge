@@ -263,6 +263,7 @@ export class OnboardingService {
           id: true,
           name: true,
           status: true,
+          serviceGroup: true,
           pricingJson: true,
           faqJson: true,
           qualificationSchemaJson: true,
@@ -318,7 +319,18 @@ export class OnboardingService {
     const everyActiveConfigured = services
       .filter(s => s.status === 'active')
       .every(s => s.pricingConfigured && s.customerAnswersConfigured);
-    const servicesDone = activeServiceCount > 0 && everyActiveConfigured;
+    // Defense-in-depth: an active profile with serviceGroup='other' is
+    // invisible to the runtime resolver — the classifier never returns
+    // 'other' for a real lead category, so the AI silently pauses on
+    // every lead. Treat the wizard's services step as NOT done until at
+    // least one active profile has a routable group ('cleaning' /
+    // 'upholstery_carpet'). The create paths now derive this at the
+    // source (createFromAdminTemplate / createBlank), so this should
+    // only trip on legacy rows produced before that fix.
+    const hasRoutableActive = profiles.some(
+      p => p.status === 'active' && p.serviceGroup !== 'other',
+    );
+    const servicesDone = activeServiceCount > 0 && everyActiveConfigured && hasRoutableActive;
     const serviceSetupDone = servicesDone;
 
     // Automation reads off the primary SavedAccount's followUpSettingsJson

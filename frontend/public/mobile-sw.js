@@ -9,11 +9,14 @@
 // with a navigation-fallback only.
 
 // Bumped from v1 → v2 (2026-06-17): excludes /version.json from cache-first
-// to fix a "Update available" banner that never went away. The previous
-// version cached /version.json on first fetch, then served the stale copy
-// forever — the hook's `cache: 'no-store'` only affects the HTTP layer,
-// not this SW. Bumping the constant evicts every v1 cache on next install.
-const VERSION = 'lb-mobile-v2';
+// to fix a "Update available" banner that never went away.
+// Bumped v2 → v3 (2026-06-22): navigation handler now falls back to the
+// cached shell on 4xx (not just network failure) and always returns a
+// Response so the SW never throws "Failed to convert value to 'Response'"
+// when neither '/m' nor '/' is in cache. Symptom: SPA deep-links like
+// /automation/respond returned 404 (Vercel routing miss) and the SW
+// rejected the FetchEvent, breaking the page entirely.
+const VERSION = 'lb-mobile-v3';
 const APP_SHELL = ['/', '/m', '/m/today'];
 
 self.addEventListener('install', (event) => {
@@ -56,10 +59,32 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Navigation requests (top-level HTML loads) — network first, fall back
-  // to the cached shell so the app still opens when offline.
+  // to the cached shell so the app still opens when offline AND so SPA
+  // deep links (e.g. /automation/respond) don't surface server-side 404s
+  // when the host's catch-all routing misses. The fallback chain is
+  // guaranteed to return a Response (never undefined), otherwise
+  // respondWith throws "Failed to convert value to 'Response'".
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req).catch(() => caches.match('/m').then((r) => r || caches.match('/'))),
+      (async () => {
+        const shellFallback = async () =>
+          (await caches.match('/m')) ||
+          (await caches.match('/')) ||
+          new Response(
+            '<!doctype html><meta charset="utf-8"><title>Offline</title><body>Reload to continue.</body>',
+            { status: 200, headers: { 'Content-Type': 'text/html' } },
+          );
+        try {
+          const res = await fetch(req);
+          // Treat 4xx/5xx as a miss and fall back to the cached shell —
+          // the SPA router can resolve the path client-side. Without
+          // this, a server-side 404 broke navigation under the SW.
+          if (!res.ok) return shellFallback();
+          return res;
+        } catch {
+          return shellFallback();
+        }
+      })(),
     );
     return;
   }
