@@ -537,31 +537,24 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         />
       )}
 
-      {/* Price Table — unified collapsible chrome shared with item_quantity pricing. */}
-      <CollapsibleSection
-        title="Price table"
-        icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
-        rightBadge={<UnifiedSectionBadge>{`${pricing.priceTable?.length || 0} rows`}</UnifiedSectionBadge>}
-        open={!!expandedSections.priceTable}
-        onToggle={() => toggleSection('priceTable')}
-      >
-        <div>
-          {/* Two render paths:
-                wizardMode = compact flex-based table — bordered card,
-                  `flex:1.5` row label, `flex:1` per column, no
-                  horizontal scroll, no `+ col` sentinel, no per-row
-                  delete sentinel. Matches the FinalDesign "Service
-                  Setup (standalone)" inline editor where the table
-                  fits inside the service accordion and never needs to
-                  scroll because the wizard is bounded.
-                full editor = horizontal-scroll table from the
-                  "Pricing Table (standalone)" canonical — fixed 88px
-                  columns, `+ col` sentinel, 50px delete sentinel,
-                  right-edge fade. Optimized for unbounded width in
-                  Settings → AI Playbook.
-          */}
-          {wizardMode ? (
-            <div style={{ padding: '0 0 4px' }}>
+      {/* Price Table — two render paths:
+              wizardMode = compact flex-based table rendered DIRECTLY
+                (no CollapsibleSection wrapper) to avoid the
+                table-in-card-in-card nesting the canonical
+                explicitly avoids. Bordered card around the table
+                only, `flex:1.5` row label, `flex:1` per column, no
+                horizontal scroll, no `+ col` sentinel, no per-row
+                delete sentinel. Matches FinalDesign "Service Setup
+                (standalone)" — the table sits inline below the
+                Pricing nav row.
+              full editor = horizontal-scroll table from the
+                "Pricing Table (standalone)" canonical wrapped in the
+                shared CollapsibleSection chrome — fixed 88px
+                columns, `+ col` sentinel, 50px delete sentinel,
+                right-edge fade. Optimized for unbounded width in
+                Settings → AI Playbook. */}
+      {wizardMode ? (
+        <div style={{ padding: '0 0 4px' }}>
               <div style={{
                 border: '1px solid var(--lb-line, #e5e9f2)',
                 borderRadius: 11,
@@ -820,7 +813,14 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
               </div>
             </div>
           ) : (
-          <>
+          <CollapsibleSection
+            title="Price table"
+            icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
+            rightBadge={<UnifiedSectionBadge>{`${pricing.priceTable?.length || 0} rows`}</UnifiedSectionBadge>}
+            open={!!expandedSections.priceTable}
+            onToggle={() => toggleSection('priceTable')}
+          >
+          <div>
           <div style={{ position: 'relative', borderTop: '1px solid var(--lb-line-soft, #eef1f7)' }}>
             <div className="pt-scroll" style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 'max-content' }}>
@@ -1134,10 +1134,9 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
               <Plus size={14} /> Add column
             </button>
           </div>
-          </>
+          </div>
+          </CollapsibleSection>
           )}
-        </div>
-      </CollapsibleSection>
 
       {/* Frequency Discounts — hidden in wizardMode (lives in full
           editor at Settings → AI Playbook after onboarding) */}
