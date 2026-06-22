@@ -755,6 +755,17 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
     return () => { cancelled = true; };
   }, [view, presets, presetLoadError]);
 
+  // Curated templates first; generic "Custom Service" lives at the bottom
+  // and is rendered with a manual-setup / not-recommended badge — picking
+  // it leaves the tenant with hourly defaults that need to be edited by
+  // hand before activation.
+  const orderedPresets = useMemo(() => {
+    if (!presets) return null;
+    const others = presets.filter(p => p.key !== 'generic_custom_service');
+    const generic = presets.filter(p => p.key === 'generic_custom_service');
+    return [...others, ...generic];
+  }, [presets]);
+
   const handleCreateBlank = async () => {
     const name = blankName.trim();
     if (!name) return;
@@ -857,7 +868,7 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
                 <div style={{
                   display: 'inline-block',
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: 700,
                   color: '#92400e',
                   background: '#fef3c7',
                   padding: '2px 8px',
@@ -865,7 +876,7 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
                   textTransform: 'uppercase',
                   letterSpacing: 0.04,
                 }}>
-                  Generic starter template — review before activating
+                  ⚠ Manual setup required — not recommended
                 </div>
               </div>
               <Plus size={16} color="var(--lb-text-muted)" />
@@ -955,53 +966,72 @@ export function AddServiceModal({ onClose, onCreated }: { onClose: () => void; o
         {view === 'preset' && (
           <>
             {presetLoadError && <div style={errorBanner}>{presetLoadError}</div>}
-            {!presets && !presetLoadError && (
+            {!orderedPresets && !presetLoadError && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lb-text-muted)', fontSize: 13 }}>
                 <Loader2 size={14} className="animate-spin" /> Loading templates…
               </div>
             )}
-            {presets && presets.length === 0 && (
+            {orderedPresets && orderedPresets.length === 0 && (
               <div style={{ fontSize: 13, color: 'var(--lb-text-muted)' }}>No templates available.</div>
             )}
-            {presets && presets.length > 0 && (
+            {orderedPresets && orderedPresets.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {presets.map((p) => (
-                  <div key={p.key} style={card}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
-                      <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
-                      <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
-                        <span>{p.pricingJson?.items?.length ?? p.pricingJson?.basePrices?.length ?? 0} items</span>
-                        <span>
-                          {(p.qualificationSchemaJson?.questions.length
-                            ?? p.serviceOptionsJson?.groups.length
-                            ?? 0)} questions
-                        </span>
-                        <span>
-                          {(p.faqJson?.customQA.length
-                            ?? p.customerAnswersJson?.entries.length
-                            ?? 0)} answers
-                        </span>
-                        {p.serviceRules && (
-                          <span style={{ color: '#b45309', fontWeight: 600 }}>+ service rules</span>
+                {orderedPresets.map((p) => {
+                  const isGeneric = p.key === 'generic_custom_service';
+                  return (
+                    <div key={p.key} style={card}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
+                        <div style={{ fontSize: 13, color: 'var(--lb-text-muted)', marginBottom: 8 }}>{p.description}</div>
+                        <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--lb-text-muted)', flexWrap: 'wrap' }}>
+                          <span>{p.pricingJson?.items?.length ?? p.pricingJson?.basePrices?.length ?? 0} items</span>
+                          <span>
+                            {(p.qualificationSchemaJson?.questions.length
+                              ?? p.serviceOptionsJson?.groups.length
+                              ?? 0)} questions
+                          </span>
+                          <span>
+                            {(p.faqJson?.customQA.length
+                              ?? p.customerAnswersJson?.entries.length
+                              ?? 0)} answers
+                          </span>
+                          {p.serviceRules && (
+                            <span style={{ color: '#b45309', fontWeight: 600 }}>+ service rules</span>
+                          )}
+                          {p.source === 'admin_template' && (
+                            <span style={{ color: '#2563eb', fontWeight: 600 }}>via admin</span>
+                          )}
+                          <span>via {p.provider}</span>
+                        </div>
+                        {isGeneric && (
+                          <div style={{
+                            display: 'inline-block',
+                            marginTop: 8,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: '#92400e',
+                            background: '#fef3c7',
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.04,
+                          }}>
+                            ⚠ Manual setup required — not recommended
+                          </div>
                         )}
-                        {p.source === 'admin_template' && (
-                          <span style={{ color: '#2563eb', fontWeight: 600 }}>via admin</span>
-                        )}
-                        <span>via {p.provider}</span>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCreatePreset(p)}
+                        disabled={creatingKey !== null && creatingKey !== p.key}
+                        style={primaryBtn}
+                      >
+                        {creatingKey === p.key ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                        Create
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCreatePreset(p)}
-                      disabled={creatingKey !== null && creatingKey !== p.key}
-                      style={primaryBtn}
-                    >
-                      {creatingKey === p.key ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                      Create
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
