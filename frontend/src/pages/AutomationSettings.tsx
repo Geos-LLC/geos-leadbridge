@@ -39,15 +39,19 @@ export function AutomationSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Selected account filter — backed by ?account= so the inline "Filter by
-  // account" dropdown stays in sync with the sidebar account switcher, and
-  // the selection survives navigation.
+  // Selected account filter — read from the shared persisted store so the
+  // sidebar account switcher and this inline dropdown stay in sync, and the
+  // choice survives page navigation.
   const { selectedAccountId: pinnedAccountId, setSelectedAccountId: setPinnedAccountId } = useSelectedAccount();
   const setSavedAccountsGlobal = useAppStore((s) => s.setSavedAccounts);
   const selectedAccountId: string | 'all' = pinnedAccountId ?? 'all';
   const setSelectedAccountId = (value: string) => {
     setPinnedAccountId(value === 'all' ? null : value);
   };
+  // Temporary diagnostic — confirms in the user's DevTools that Automation
+  // is actually receiving the sidebar's pin updates. Remove once verified.
+  // eslint-disable-next-line no-console
+  console.log('[Automation] render — selectedAccountId =', selectedAccountId, 'pinnedAccountId =', pinnedAccountId);
 
   // Edit/create mode
   const [editingRule, setEditingRule] = useState<AutomationRule | null>(null);
