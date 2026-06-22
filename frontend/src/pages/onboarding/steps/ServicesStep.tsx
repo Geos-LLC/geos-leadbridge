@@ -3,7 +3,10 @@ import {
   ChevronDown,
   ChevronUp,
   Circle,
+  CircleDollarSign,
+  ClipboardCheck,
   ExternalLink,
+  HelpCircle,
   Layers,
   Loader2,
   Plus,
@@ -63,6 +66,19 @@ export default function ServicesStep({
   const [presets, setPresets] = useState<ServiceProfilePreset[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Per-profile inline-editor selection (canonical wizard pattern —
+  // summary nav rows on top, editor expands beneath the row when its
+  // Edit link is tapped). null = no editor open (all 3 rows show
+  // summary only); set to 'price' / 'ans' / 'rules' to expand. Keyed
+  // by profile id so each accordion has its own state.
+  type EditSection = 'price' | 'ans' | 'rules' | null;
+  const [editByProfile, setEditByProfile] = useState<Record<string, EditSection>>({});
+  const toggleEdit = (profileId: string, section: Exclude<EditSection, null>) => {
+    setEditByProfile(prev => ({
+      ...prev,
+      [profileId]: prev[profileId] === section ? null : section,
+    }));
+  };
 
   // Per-profile AI draft state.
   const [aiDraft, setAiDraft] = useState<Record<string, { value: string; dirty: boolean; saving: boolean }>>({});
@@ -512,93 +528,134 @@ export default function ServicesStep({
                     )}
                   </button>
 
-                  {open && (
-                    <div className="border-t border-slate-100 p-4 space-y-6 bg-slate-50/40">
-                      <Section label="Pricing">
-                        {primaryAccount ? (
-                          <div
-                            className="rounded-xl border border-slate-200 bg-white p-3"
-                            onBlur={() => void refreshOne(profile.id)}
-                          >
-                            <ServicePricingForm
-                              accountId={primaryAccount.id}
-                              accountName={profile.name}
-                              serviceProfileId={profile.id}
-                            />
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                            Connect an account first to edit pricing.
-                          </div>
-                        )}
-                      </Section>
-
-                      <Section label="Customer answers (FAQ)">
-                        {primaryAccount ? (
-                          <div
-                            className="rounded-xl border border-slate-200 bg-white p-3"
-                            onBlur={() => void refreshOne(profile.id)}
-                          >
-                            <AccountFaqForm
-                              accountId={primaryAccount.id}
-                              accountName={profile.name}
-                              serviceProfileId={profile.id}
-                            />
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                            Connect an account first to edit customer answers.
-                          </div>
-                        )}
-                      </Section>
-
-                      {/* Service rules — read-only viewer over the
-                          rules that came with the template (or empty
-                          for blank services). Editing happens on the
-                          full AI Playbook deep link; the wizard just
-                          surfaces what the template seeded. */}
-                      <Section label="Service rules">
-                        {serviceRules ? (
-                          <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
-                            <ServiceRulesRow
-                              title="Required details"
-                              items={serviceRules.requiredDetails}
-                            />
-                            <ServiceRulesRow
-                              title="Workflow steps"
-                              items={serviceRules.workflowSteps}
-                            />
-                            <ServiceRulesRow
-                              title="Unsupported services"
-                              items={serviceRules.unsupportedServices}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                  {open && (() => {
+                    const editSection = editByProfile[profile.id] ?? null;
+                    return (
+                    <div className="p-4 pt-1 bg-slate-50/40" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                      {/* Canonical wizard pattern: 3 summary nav rows
+                          (Pricing / Customer answers / Service rules)
+                          stacked with `Edit →` links. Tapping a link
+                          expands the matching editor inline beneath
+                          that row; tapping again collapses it. Same
+                          forms as before — just hidden behind a row-
+                          tap so the accordion doesn't dump everything
+                          on the user at once. */}
+                      <SummaryNavRow
+                        icon={CircleDollarSign}
+                        iconTone="green"
+                        title="Pricing"
+                        body={pricingSummary(profile)}
+                        actionLabel={editSection === 'price' ? 'Close ↑' : 'Edit pricing →'}
+                        onAction={() => toggleEdit(profile.id, 'price')}
+                      />
+                      {editSection === 'price' && (
+                        <div className="mt-2 mb-3">
+                          {primaryAccount ? (
+                            <div
+                              className="rounded-xl border border-slate-200 bg-white p-3"
+                              onBlur={() => void refreshOne(profile.id)}
                             >
-                              Edit service rules in AI Playbook
-                              <ExternalLink className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                            No rules yet — templates ship with required
-                            details, workflow steps, and unsupported
-                            services. Add them via the{' '}
-                            <button
-                              type="button"
-                              onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
-                              className="font-semibold text-blue-700 hover:underline inline-flex items-center gap-0.5"
-                            >
-                              full AI Playbook
-                              <ExternalLink className="w-3 h-3" />
-                            </button>.
-                          </div>
-                        )}
-                      </Section>
+                              <ServicePricingForm
+                                accountId={primaryAccount.id}
+                                accountName={profile.name}
+                                serviceProfileId={profile.id}
+                              />
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                              Connect an account first to edit pricing.
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                      <Section label="AI instructions (optional)">
+                      <SummaryNavRow
+                        icon={HelpCircle}
+                        iconTone="purple"
+                        title="Customer answers"
+                        body={faqSummary(profile)}
+                        actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit answers →'}
+                        onAction={() => toggleEdit(profile.id, 'ans')}
+                      />
+                      {editSection === 'ans' && (
+                        <div className="mt-2 mb-3">
+                          {primaryAccount ? (
+                            <div
+                              className="rounded-xl border border-slate-200 bg-white p-3"
+                              onBlur={() => void refreshOne(profile.id)}
+                            >
+                              <AccountFaqForm
+                                accountId={primaryAccount.id}
+                                accountName={profile.name}
+                                serviceProfileId={profile.id}
+                              />
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                              Connect an account first to edit customer answers.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <SummaryNavRow
+                        icon={ClipboardCheck}
+                        iconTone="amber"
+                        title="Service rules"
+                        body={
+                          serviceRules
+                            ? 'Imported from the service template.'
+                            : 'No rules yet — add them via AI Playbook.'
+                        }
+                        actionLabel={editSection === 'rules' ? 'Close ↑' : 'View →'}
+                        onAction={() => toggleEdit(profile.id, 'rules')}
+                        noBorder
+                      />
+                      {editSection === 'rules' && (
+                        <div className="mt-2 mb-3">
+                          {serviceRules ? (
+                            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                              <ServiceRulesRow
+                                title="Required details"
+                                items={serviceRules.requiredDetails}
+                              />
+                              <ServiceRulesRow
+                                title="Workflow steps"
+                                items={serviceRules.workflowSteps}
+                              />
+                              <ServiceRulesRow
+                                title="Unsupported services"
+                                items={serviceRules.unsupportedServices}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                              >
+                                Edit service rules in AI Playbook
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                              No rules yet — templates ship with required
+                              details, workflow steps, and unsupported
+                              services. Add them via the{' '}
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/settings?tab=ai-playbook&scope=${profile.id}`)}
+                                className="font-semibold text-blue-700 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                full AI Playbook
+                                <ExternalLink className="w-3 h-3" />
+                              </button>.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                      <Section label="Additional AI instructions">
                         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
                           <div className="flex items-start gap-2 text-xs text-slate-500">
                             <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
@@ -639,8 +696,10 @@ export default function ServicesStep({
                           </button>
                         </div>
                       )}
+                      </div>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -660,6 +719,111 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       {children}
     </div>
   );
+}
+
+// Per-canonical wizard: each open service accordion shows 3 summary
+// nav rows (Pricing / Customer answers / Service rules) with an
+// `Edit X →` link. SummaryNavRow renders one such row — small icon
+// tile + title + 1-line body + right-aligned action button. The
+// existing editor forms remain unchanged; they're just hidden behind
+// the row-tap until the user opts into editing that section.
+const ROW_TONES: Record<string, { bg: string; fg: string }> = {
+  green:  { bg: '#d1fae5', fg: '#059669' },
+  purple: { bg: '#ede9fe', fg: '#7c3aed' },
+  amber:  { bg: '#fef3c7', fg: '#92400e' },
+};
+
+function SummaryNavRow({
+  icon: Icon, iconTone, title, body, actionLabel, onAction, noBorder,
+}: {
+  icon: React.ComponentType<{ className?: string; size?: number }>;
+  iconTone: 'green' | 'purple' | 'amber';
+  title: string;
+  body: string;
+  actionLabel: string;
+  onAction: () => void;
+  noBorder?: boolean;
+}) {
+  const tone = ROW_TONES[iconTone];
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '13px 0',
+        borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
+      }}
+    >
+      <span style={{
+        width: 30, height: 30, borderRadius: 8,
+        background: tone.bg, color: tone.fg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Icon size={15} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 1 }}>{body}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onAction}
+        style={{
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit',
+          fontSize: 12.5, fontWeight: 600,
+          color: 'var(--lb-accent)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+// One-line description of the pricing config for the summary nav row.
+// Reads pricingJson and reports the most informative facet: priceTable
+// rows, BookingKoala items count, or "set up pricing" placeholder.
+function pricingSummary(p: ServiceProfile): string {
+  const parsed = safeParse(p.pricingJson);
+  if (!parsed || typeof parsed !== 'object') return 'No pricing set — add base rates or a price table.';
+  if (parsed.quoteRequired === true) return 'Quote on request — no published rates.';
+  if (Array.isArray(parsed.priceTable) && parsed.priceTable.length > 0) {
+    return `${parsed.priceTable.length} size band${parsed.priceTable.length === 1 ? '' : 's'} · regular & deep options.`;
+  }
+  if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+    return `${parsed.items.length} priced item${parsed.items.length === 1 ? '' : 's'}.`;
+  }
+  if (Array.isArray(parsed.basePrices) && parsed.basePrices.length > 0) {
+    return `${parsed.basePrices.length} base rate${parsed.basePrices.length === 1 ? '' : 's'}.`;
+  }
+  if (typeof parsed.laborRate === 'number' && parsed.laborRate > 0) {
+    return `Hourly rate: $${parsed.laborRate}/hr.`;
+  }
+  return 'No pricing set — add base rates or a price table.';
+}
+
+// One-line description of the FAQ/customer-answers config. Counts the
+// configured quick answers + custom Q&A so the user sees progress
+// without opening the editor.
+function faqSummary(p: ServiceProfile): string {
+  const parsed = safeParse(p.faqJson);
+  if (!parsed || typeof parsed !== 'object') return 'No answers set — insured, supplies, payment, custom Q&A.';
+  const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
+  let quick = 0;
+  for (const k of valueKeys) {
+    const v = parsed[k]?.value;
+    if (typeof v === 'string' && v && v !== 'unset') quick += 1;
+  }
+  const custom =
+    (Array.isArray(parsed.customQA) ? parsed.customQA.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0) +
+    (Array.isArray(parsed.entries) ? parsed.entries.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0);
+  if (quick === 0 && custom === 0) return 'No answers set — insured, supplies, payment, custom Q&A.';
+  const parts: string[] = [];
+  if (quick > 0) parts.push(`${quick} quick answer${quick === 1 ? '' : 's'}`);
+  if (custom > 0) parts.push(`${custom} custom Q&A`);
+  return parts.join(' + ') + '.';
 }
 
 function ServiceRulesRow({ title, items }: { title: string; items: string[] | undefined }) {

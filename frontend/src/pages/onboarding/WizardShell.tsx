@@ -114,7 +114,7 @@ export default function WizardShell({
             <Sparkles size={16} color="#fff" />
           </span>
           <div style={{ lineHeight: 1.1 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>Setup wizard</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>Setup guide</div>
             <div style={{
               fontSize: 10, fontFamily: 'var(--lb-font-mono)', color: '#aeb9d6',
               textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2,
@@ -194,17 +194,17 @@ export default function WizardShell({
           })}
         </nav>
 
-        {/* Rail footer — informational text + optional restart link */}
+        {/* Rail footer — only the optional restart link. The "you can
+            reopen this wizard…" copy was removed per the FinalDesign
+            canonical port; the rail now ends cleanly with the step
+            list. Restart link still surfaces when the parent passes
+            `onRestart` — it's a recovery escape hatch, not a normal
+            affordance. */}
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 11, color: '#8b94ab', lineHeight: 1.5 }}>
-          You can reopen this wizard any time from the{' '}
-          <strong style={{ color: '#cdd6ea' }}>Setup</strong> button in the top bar.
-        </div>
         {onRestart && (
           <button
             onClick={onRestart}
             style={{
-              marginTop: 10,
               background: 'transparent', border: 0, padding: 0,
               fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
               color: '#aeb9d6',

@@ -13,7 +13,7 @@ import type { AutomationRule, NotificationRule } from '../../../types';
 import { notify } from '../../../store/notificationStore';
 import { WizardStepActions } from '../WizardStepActions';
 import {
-  FieldRow, FooterBanner, SettingCard, ToggleRow,
+  FieldRow, SettingCard, ToggleRow,
 } from '../../../components/automation/ui';
 
 interface Props {
@@ -642,35 +642,36 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         )}
       </div>
 
-      {/* Advanced-controls banner — points the user at Settings →
-          Automation for the bits the wizard intentionally omits (custom
-          AI prompts, agent whisper, voicemail TTS, per-goal
-          qualification fields, handoff triggers, follow-up plan
-          editor). Uses the shared FooterBanner so the visual rhythm
-          matches the main Automation pages. */}
-      <div style={{ marginTop: 28 }}>
-        <FooterBanner
-          icon={ExternalLink}
-          body={
-            <>
-              <strong>Looking for more?</strong> Custom AI prompts, agent
-              whisper messages, follow-up plan editor, per-goal
-              qualification fields, and handoff triggers all live in{' '}
-              <button
-                type="button"
-                onClick={() => navigate('/automation/respond')}
-                style={{
-                  background: 'transparent', border: 0, padding: 0,
-                  fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 600,
-                  color: 'var(--lb-accent)', cursor: 'pointer',
-                }}
-              >
-                Settings → Automation
-              </button>
-              {' '}after onboarding.
-            </>
-          }
-        />
+      {/* Simpler tip box per the FinalDesign canonical — single line
+          pointing at the full Automation pages. Replaces the prior
+          FooterBanner which carried a longer "Looking for more?"
+          breakdown that the canonical compressed into one sentence. */}
+      <div style={{
+        marginTop: 28,
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 14px',
+        background: 'var(--lb-accent-tint)',
+        border: '1px solid var(--lb-accent-line)',
+        borderRadius: 10,
+        fontSize: 12.5, color: 'var(--lb-ink-3)', lineHeight: 1.45,
+      }}>
+        <Info size={15} style={{ color: 'var(--lb-accent)', flexShrink: 0 }} />
+        <div>
+          Every control here is also on the{' '}
+          <button
+            type="button"
+            onClick={() => navigate('/automation/respond')}
+            style={{
+              background: 'transparent', border: 0, padding: 0,
+              fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 700,
+              color: 'var(--lb-ink-1)', cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+          >
+            Automation
+          </button>
+          {' '}pages — adjust now or anytime later.
+        </div>
       </div>
 
       <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
+  AlertTriangle, CalendarClock, ChevronRight as ChevronRightIcon,
+  CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
   Loader2, Phone, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
@@ -57,6 +59,7 @@ interface VerifyOutcome {
  * old behavior. The Fetch buttons are an upgrade, not a replacement.
  */
 export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving }: Props) {
+  const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   // Title + description live in WizardShell header (2026-06-13 redesign).
@@ -948,6 +951,48 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             </div>
           </div>
         )}
+      </section>
+
+      {/* ─── 4. Business hours — deep-link card ──────────────────
+          The canonical FinalDesign puts a full schedule editor in
+          this step; we keep the existing Settings → Business Hours
+          page as the editor and just surface a deep-link card here
+          so the user knows the affordance exists during onboarding.
+          One card, no inline editor — tapping it routes to
+          /settings?tab=hours where the full editor lives. */}
+      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
+        <button
+          type="button"
+          onClick={() => navigate('/settings?tab=hours')}
+          className="w-full flex items-center gap-3 text-left"
+          style={{ background: 'transparent', border: 0, padding: 0, fontFamily: 'inherit', cursor: 'pointer' }}
+        >
+          <span style={{
+            width: 38, height: 38, borderRadius: 10,
+            background: '#dbeafe', color: '#2563eb',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <CalendarClock className="w-[18px] h-[18px]" />
+          </span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
+              Business hours
+            </span>
+            <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.5 }}>
+              When you take jobs. AI books inside these hours and respects them for follow-ups.
+            </span>
+          </span>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 12.5, fontWeight: 600,
+            color: 'var(--lb-accent)',
+            flexShrink: 0,
+          }}>
+            Edit
+            <ChevronRightIcon className="w-3.5 h-3.5" />
+          </span>
+        </button>
       </section>
 
       <ManualBusinessInfoModal

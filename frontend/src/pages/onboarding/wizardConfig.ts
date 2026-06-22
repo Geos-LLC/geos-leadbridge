@@ -74,8 +74,8 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
   {
     slug: 'done',
     label: 'Done',
-    title: "You're all set!",
-    description: 'LeadBridge is configured and ready to handle your leads.',
+    title: 'LeadBridge is ready',
+    description: 'Your sources are connected, services are set, and automation is on. New leads get an instant reply and follow-ups run automatically.',
     countsTowardChecklist: false,
   },
 ];
