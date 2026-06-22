@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, CalendarClock, ChevronRight as ChevronRightIcon,
   CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
-  Loader2, Phone, Sparkles, Users,
+  Info, Loader2, Phone, PhoneCall, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
@@ -139,6 +139,18 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
   // primary business number is usually enough; teams add additional
   // crew numbers only when needed.
   const [showAssociates, setShowAssociates] = useState(false);
+  // Per-card info-circle popovers. Canonical FinalDesign uses a small
+  // info-circle button next to each card title that toggles a short
+  // explanation inline — keeps the card header clean while preserving
+  // the helper copy. One open at a time per card.
+  const [infoPhoneOpen, setInfoPhoneOpen] = useState(false);
+  const [infoLbnumOpen, setInfoLbnumOpen] = useState(false);
+  const [infoWebsiteOpen, setInfoWebsiteOpen] = useState(false);
+  // LeadBridge phone — collapse the full area-code/city search behind
+  // a "Get a number" CTA when no number is assigned yet. Matches the
+  // canonical's empty-state pattern (dashed tile + Get a number
+  // button → reveal the picker).
+  const [showLbnumPicker, setShowLbnumPicker] = useState(false);
 
   // ── Unified profile URL state ──────────────────────────────────────
   // Detected platform from the LAST successful apply — drives the badge
@@ -471,17 +483,54 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
-      {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
-      <section className="mt-2 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Phone className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">Business phone</h2>
+      {/* ─── 1. Your phone number (User.businessPhone) ──────────────
+          Canonical "Business Step (standalone)" chrome:
+            - 38x38 dbeafe-bg icon tile + title + info-circle popover
+            - bordered tile + greyed Save button
+            - collapsible "Add associate numbers" row at bottom with
+              border-top divider */}
+      <section style={{
+        marginTop: 8,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <span style={{
+            width: 38, height: 38, borderRadius: 10,
+            background: '#dbeafe', color: '#2563eb',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Phone size={18} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Your phone number
+            </span>
+            <button
+              type="button"
+              onClick={() => setInfoPhoneOpen(v => !v)}
+              aria-label="More info"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 20, height: 20, border: 0, background: 'transparent',
+                cursor: 'pointer', padding: 0, flexShrink: 0,
+                color: 'var(--lb-accent)',
+              }}
+            >
+              <Info size={15} />
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-3">
-          Your primary owner/company number. Used for owner alerts and auto-registered
-          as the primary associate phone on connected Thumbtack businesses.
-        </p>
-        <div className="flex items-center gap-2 lb-wiz-inline-save">
+        {infoPhoneOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 9, lineHeight: 1.45 }}>
+            Used for lead alerts and auto-registered as the primary associate phone on
+            connected Thumbtack businesses.
+          </div>
+        )}
+        <div className="lb-wiz-inline-save" style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="tel"
             inputMode="tel"
@@ -489,7 +538,17 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             value={businessPhone}
             onChange={e => setBusinessPhone(e.target.value)}
             placeholder="+1 (555) 010-1234"
-            className="flex-1 min-w-0 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            style={{
+              flex: 1, minWidth: 0,
+              padding: '12px 14px',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 10,
+              fontSize: 14,
+              fontFamily: 'var(--lb-font-mono)',
+              color: 'var(--lb-ink-2)',
+              outline: 'none',
+              background: '#fff',
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -497,17 +556,30 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               }
             }}
           />
-          {businessPhoneSavedAt && !businessPhoneError && (
-            <span className="text-xs font-semibold text-emerald-700">Saved</span>
-          )}
           <button
             type="button"
             onClick={() => void handleSaveBusinessPhone()}
             disabled={savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed rounded-xl transition-all shrink-0"
+            style={{
+              flexShrink: 0,
+              padding: '12px 20px',
+              borderRadius: 9,
+              border: 0,
+              background: (savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || '')))
+                ? 'var(--lb-ink-10)'
+                : 'var(--lb-accent)',
+              color: (savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || '')))
+                ? 'var(--lb-ink-6)'
+                : '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: savingBusinessPhone ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
           >
             {savingBusinessPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {savingBusinessPhone ? 'Saving…' : 'Save'}
+            {savingBusinessPhone ? 'Saving…' : (businessPhoneSavedAt && !businessPhoneError) ? 'Saved' : 'Save'}
           </button>
         </div>
         {businessPhoneError && (
@@ -516,20 +588,36 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
           </div>
         )}
 
-        {/* Additional associate numbers — collapsible, TT-only. Same
-            editor Settings → Communication exposes; each entry registers
-            on the matching Thumbtack business's profile. */}
+        {/* Additional associate numbers — collapsible, TT-only. */}
         {ttAccounts.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
+          <>
             <button
               type="button"
               onClick={() => setShowAssociates(v => !v)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+              style={{
+                marginTop: 14, paddingTop: 14,
+                display: 'flex', alignItems: 'center', gap: 11,
+                width: '100%',
+                border: 0, borderTop: '1px solid var(--lb-line-soft)',
+                background: 'transparent', cursor: 'pointer',
+                fontFamily: 'inherit', textAlign: 'left',
+              }}
             >
-              {showAssociates ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              <Users className="w-3.5 h-3.5" />
-              Add associate numbers (Thumbtack)
-              <span className="text-slate-400 font-normal">— optional, per business</span>
+              {showAssociates ? (
+                <ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--lb-ink-5)' }} />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--lb-ink-5)' }} />
+              )}
+              <Users size={16} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13.5, fontWeight: 600,
+                color: 'var(--lb-ink-1)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                Add associate numbers
+              </span>
+              <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--lb-ink-6)' }}>Optional</span>
             </button>
             {showAssociates && (
               <div className="mt-3 space-y-4">
@@ -544,9 +632,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
                         savedAccountId={acct.id}
                         initialValue={initial}
                         onSaved={(next) => {
-                          // Mirror Communication.tsx — write the new list back
-                          // into the cached account's followUpSettingsJson so
-                          // a re-render shows the saved state without a refetch.
                           setSavedAccounts(
                             savedAccounts.map((a: SavedAccount) => {
                               if (a.id !== acct.id) return a;
@@ -565,21 +650,45 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
                 })}
               </div>
             )}
-          </div>
+          </>
         )}
       </section>
 
       {/* ─── 2. LeadBridge phone (TenantPhoneNumber) ─────────────── */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Phone className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
+      <section style={{
+        marginTop: 12,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <PhoneCall size={17} style={{ color: 'var(--lb-ink-3)' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            LeadBridge phone number
+          </span>
+          <button
+            type="button"
+            onClick={() => setInfoLbnumOpen(v => !v)}
+            aria-label="More info"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 20, border: 0, background: 'transparent',
+              cursor: 'pointer', padding: 0, flexShrink: 0, marginLeft: 1,
+              color: 'var(--lb-accent)',
+            }}
+          >
+            <Info size={15} />
+          </button>
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-4">
-          The phone number LeadBridge uses to text and call your customers.
-          Assigned from Twilio. You can also assign or release numbers from Settings.
-        </p>
+        {infoLbnumOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 7, lineHeight: 1.5 }}>
+            The phone number LeadBridge uses to text and call your customers. Assigned from Twilio.
+            You can also assign or release numbers from Settings.
+          </div>
+        )}
 
+        <div style={{ marginTop: 13 }} />
         {phonesLoading ? (
           <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
             <Loader2 className="w-4 h-4 animate-spin" /> Checking…
@@ -620,6 +729,49 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               Pick now
             </button>
           </div>
+        ) : !showLbnumPicker ? (
+          /* Canonical empty state — dashed-bordered tile + info icon +
+              "No number assigned yet" + Get a number CTA. Tapping
+              expands the full area-code/city picker below. */
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '11px 12px 11px 14px',
+              border: '1px dashed var(--lb-line)',
+              borderRadius: 10,
+              background: '#fff',
+            }}>
+              <Info size={16} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13, fontWeight: 600,
+                color: 'var(--lb-ink-3)',
+              }}>
+                No number assigned yet
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowLbnumPicker(true)}
+                style={{
+                  flexShrink: 0,
+                  padding: '8px 14px',
+                  borderRadius: 9,
+                  border: 0,
+                  background: 'var(--lb-accent)',
+                  color: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Get a number
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-6)', marginTop: 9, lineHeight: 1.5 }}>
+              A LeadBridge number is also assigned automatically when you connect a lead source.
+            </div>
+          </>
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
@@ -722,29 +874,70 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               Playbook + FAQ.
           Replaces the two prior sections (Website URL + Thumbtack
           profile URLs). */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Globe className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">Business profile or website</h2>
-          {detectedPlatform && (
-            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold uppercase tracking-widest">
-              {platformLabel(detectedPlatform)}
-            </span>
-          )}
-          {savedAndVerified && (
-            <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest">
-              <CheckCircle2 className="w-3 h-3" />
-              Verified
-            </span>
-          )}
+      <section style={{
+        marginTop: 12,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+          <Globe size={18} style={{ flexShrink: 0, marginTop: 2, color: 'var(--lb-ink-3)' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Business info
+          </span>
+          <button
+            type="button"
+            onClick={() => setInfoWebsiteOpen(v => !v)}
+            aria-label="More info"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 20, border: 0, background: 'transparent',
+              cursor: 'pointer', padding: 0, flexShrink: 0, margin: '0 2px 0 3px',
+              color: 'var(--lb-accent)',
+            }}
+          >
+            <Info size={15} />
+          </button>
+          <span style={{ flex: 1, minWidth: 0 }} />
+          <span style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {detectedPlatform && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontSize: 9.5, fontWeight: 700,
+                fontFamily: 'var(--lb-font-mono)',
+                textTransform: 'uppercase', letterSpacing: '.04em',
+                padding: '3px 8px', borderRadius: 99,
+                background: '#dbeafe', color: '#1d4ed8',
+              }}>
+                {platformLabel(detectedPlatform)}
+              </span>
+            )}
+            {savedAndVerified && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontSize: 9.5, fontWeight: 700,
+                fontFamily: 'var(--lb-font-mono)',
+                textTransform: 'uppercase', letterSpacing: '.04em',
+                padding: '3px 8px', borderRadius: 99,
+                background: '#dcfce7', color: '#15803d',
+              }}>
+                <CheckCircle2 size={10} />
+                Verified
+              </span>
+            )}
+          </span>
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-3">
-          Paste your <span className="font-semibold">Thumbtack profile</span>,{' '}
-          <span className="font-semibold">Yelp business page</span>, or{' '}
-          <span className="font-semibold">your website</span> — whichever has the most
-          info about your business. We auto-detect the source and pull services,
-          location, insurance, pricing, and more into your AI Playbook + FAQ.
-        </p>
+        {infoWebsiteOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 9, lineHeight: 1.55 }}>
+            Paste your <strong style={{ color: 'var(--lb-ink-2)' }}>business profile</strong>,{' '}
+            <strong style={{ color: 'var(--lb-ink-2)' }}>Yelp page</strong>, or{' '}
+            <strong style={{ color: 'var(--lb-ink-2)' }}>website</strong> — whichever has the most
+            info about your business. We auto-detect the source and pull services, location,
+            insurance, pricing, and more into your AI Playbook + FAQ.
+          </div>
+        )}
+        <div style={{ marginTop: 13 }} />
 
         <div className="flex items-center gap-2 lb-wiz-inline-save">
           <div className="relative flex-1 min-w-0">
