@@ -471,7 +471,11 @@ export default function ServicesStep({
                   {open && (() => {
                     const editSection = editByProfile[profile.id] ?? null;
                     return (
-                    <div className="p-4 pt-1 bg-slate-50/40" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                    // Canonical accordion body: 0 top / 16 sides / 16
+                    // bottom padding, flat-white background (no slate
+                    // tint). Top border separates the body from the
+                    // header row above.
+                    <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--lb-line-soft)', background: '#fff' }}>
                       {/* Canonical wizard pattern: 2 summary nav rows
                           (Pricing / Customer answers) stacked with
                           `Edit →` links. Tapping a link expands the
@@ -494,19 +498,20 @@ export default function ServicesStep({
                         onAction={() => toggleEdit(profile.id, 'price')}
                       />
                       {editSection === 'price' && (
-                        <div className="mt-2 mb-3">
+                        // Canonical "Service Setup (standalone)" places
+                        // the pricing editor flush with the accordion
+                        // body's 16px gutter (`margin: 8px 0 14px;`) —
+                        // no extra rounded card wrapping. The
+                        // ServicePricingForm wizardMode branch carries
+                        // its OWN bordered table card already.
+                        <div style={{ margin: '8px 0 14px' }} onBlur={() => void refreshOne(profile.id)}>
                           {primaryAccount ? (
-                            <div
-                              className="rounded-xl border border-slate-200 bg-white p-3"
-                              onBlur={() => void refreshOne(profile.id)}
-                            >
-                              <ServicePricingForm
-                                accountId={primaryAccount.id}
-                                accountName={profile.name}
-                                serviceProfileId={profile.id}
-                                wizardMode
-                              />
-                            </div>
+                            <ServicePricingForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                              wizardMode
+                            />
                           ) : (
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                               Connect an account first to edit pricing.
@@ -525,18 +530,16 @@ export default function ServicesStep({
                         noBorder
                       />
                       {editSection === 'ans' && (
-                        <div className="mt-2 mb-3">
+                        // Flush with the accordion gutter — the FAQ
+                        // form draws its own Q&A cards; no outer
+                        // bordered wrapper needed.
+                        <div style={{ margin: '8px 0 14px' }} onBlur={() => void refreshOne(profile.id)}>
                           {primaryAccount ? (
-                            <div
-                              className="rounded-xl border border-slate-200 bg-white p-3"
-                              onBlur={() => void refreshOne(profile.id)}
-                            >
-                              <AccountFaqForm
-                                accountId={primaryAccount.id}
-                                accountName={profile.name}
-                                serviceProfileId={profile.id}
-                              />
-                            </div>
+                            <AccountFaqForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                            />
                           ) : (
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                               Connect an account first to edit FAQ.
