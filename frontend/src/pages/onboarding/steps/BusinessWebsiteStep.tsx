@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CalendarClock,
-  CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
-  Info, Loader2, Phone, PhoneCall, Sparkles, Users,
+  CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Globe,
+  Info, Link2, Loader2, Phone, PhoneCall, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
@@ -10,7 +10,6 @@ import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import type { SavedAccount } from '../../../types';
-import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 import { ManualBusinessInfoModal } from '../../../components/ManualBusinessInfoModal';
 import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
 import { WizardStepActions } from '../WizardStepActions';
@@ -1038,187 +1037,208 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             insurance, pricing, and more into your AI Playbook + FAQ.
           </div>
         )}
-        <div style={{ marginTop: 13 }} />
 
-        <div className="flex items-center gap-2 lb-wiz-inline-save">
-          <div className="relative flex-1 min-w-0">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Globe className="w-4 h-4" />
-            </span>
-            <input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
-              value={value}
-              onChange={e => {
-                setValue(e.target.value);
-                if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
-                  setVerifyState({ kind: 'idle' });
-                }
-                if (lowYieldScrape) setLowYieldScrape(false);
-                // Clear the stale apply card the moment the user edits
-                // the URL — otherwise the card claims "pulled X fields"
-                // from the OLD URL while the input shows the new one.
-                if (lastApply && e.target.value.trim() !== lastApply.url) setLastApply(null);
-              }}
-              disabled={isChecking}
-              className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border-2 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
-                savedAndVerified ? 'border-emerald-300' : 'border-slate-200'
-              }`}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && canSave) {
-                  e.preventDefault();
-                  void fetchSiteData();
-                }
-              }}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => void fetchSiteData()}
-            disabled={!canSave}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
-          >
-            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
-            {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Fetch'}
-          </button>
-        </div>
-
-        {isBusy && (
-          <div className="mt-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-            <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <div className="font-bold text-slate-900">
-                {isApplying ? 'Applying to your AI Playbook…' : 'Pulling info…'}
-              </div>
-              <div className="text-slate-500 mt-0.5">
-                {isApplying
-                  ? 'Filling empty Playbook + FAQ sections so your AI starts with real context.'
-                  : 'We fetch the page, generate an AI summary, and pre-fill what we can. Takes a few seconds.'}
-              </div>
+        {/* URL display tile + Re-scan link when a URL is saved;
+            otherwise editable input + Apply button. Mirrors the
+            canonical "Business Step (standalone)" layout. */}
+        {savedAndVerified ? (
+          <>
+            <div style={{
+              marginTop: 13,
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 14px',
+              border: '1px solid var(--lb-accent-line)', borderRadius: 10,
+              background: '#fff',
+            }}>
+              <Link2 size={15} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13, color: 'var(--lb-ink-2)',
+                fontFamily: 'var(--lb-font-mono)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {(lastApply?.url || value.trim() || user?.website) || ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => void fetchSiteData()}
+                disabled={isBusy}
+                style={{
+                  flexShrink: 0,
+                  background: 'transparent', border: 0, padding: 0,
+                  fontSize: 11.5, fontWeight: 700,
+                  color: 'var(--lb-accent)', cursor: isBusy ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                  opacity: isBusy ? 0.5 : 1,
+                }}
+              >
+                {isBusy ? 'Scanning…' : 'Re-scan'}
+              </button>
             </div>
-          </div>
-        )}
 
-        {verifyState.kind === 'invalid' && (
-          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-start gap-2" role="alert">
-            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-            <div className="min-w-0 text-xs">
-              <div className="font-bold text-rose-900">
-                {verifyState.outcome.errorMessage || "We couldn't load that link."}
-              </div>
-              <div className="text-rose-700 mt-0.5">
-                Double-check the URL, or use <span className="font-semibold">I don't have one</span> below.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {savedAndVerified && savedMetadata && !isBusy && detectedPlatform === 'website' && (
-          <div className="mt-3">
-            <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
-          </div>
-        )}
-
-        {/* TT / Yelp confirmation card. Renders for any populated
-            lastApply (fresh fetch in this session OR persisted snapshot
-            on user.websiteMetadataJson.lastBusinessApply) — Settings →
-            General does the same. The previous `verifyState=valid`
-            gate hid the card on reload, leaving the wizard looking
-            inert even when info was actually saved server-side. */}
-        {lastApply && lastApply.platform !== 'website' && !isBusy && (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="min-w-0 text-xs flex-1">
-              <div className="font-bold text-emerald-900">
-                {platformLabel(lastApply.platform)} connected
-                {lastApply.fieldsApplied > 0
-                  ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your Playbook`
-                  : lastApply.fieldsExtracted > 0
-                    ? ` — ${lastApply.fieldsExtracted} field${lastApply.fieldsExtracted === 1 ? '' : 's'} already saved`
-                    : ''}
-              </div>
-              <div className="text-emerald-800 mt-0.5 leading-snug break-all">
-                {lastApply.url}
-                {lastApply.accountsAffected > 0 && (
-                  <>
-                    {' · '}
-                    Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}
-                  </>
-                )}
-              </div>
-              {lastApply.fieldsApplied > 0 && (
-                <div className="text-[11px] text-emerald-700 mt-1.5">
-                  Review on the next steps or in Settings → AI Playbook after setup.
+            {/* Scanned result: 96x96 mock thumbnail + clamped scan
+                snippet to the right. Show more / Show less toggle. */}
+            {(lastApply?.summary || (savedMetadata as any)?.summary || lastApply?.url) && (
+              <>
+                <div style={{ marginTop: 13, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  {/* CSS mock browser screenshot — matches canonical's
+                      stylized thumbnail since we don't usually have a
+                      real og:image rendered here. */}
+                  <div style={{
+                    width: 96, height: 96, flexShrink: 0,
+                    borderRadius: 10,
+                    border: '1px solid var(--lb-line)',
+                    overflow: 'hidden',
+                    background: '#fff',
+                    boxShadow: '0 1px 2px rgba(10,21,48,0.05)',
+                  }}>
+                    <div style={{
+                      height: 26, background: 'var(--lb-accent)',
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '0 8px',
+                    }}>
+                      <span style={{ width: 5, height: 5, borderRadius: 99, background: 'rgba(255,255,255,0.85)' }} />
+                      <span style={{ width: '36%', height: 5, borderRadius: 9, background: 'rgba(255,255,255,0.7)' }} />
+                    </div>
+                    <div style={{ padding: 9, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <div style={{ height: 5, width: '85%', borderRadius: 9, background: '#d4d9e4' }} />
+                      <div style={{ height: 5, width: '95%', borderRadius: 9, background: '#e3e8f2' }} />
+                      <div style={{ height: 5, width: '68%', borderRadius: 9, background: '#e3e8f2' }} />
+                      <div style={{ height: 15, width: '46%', borderRadius: 5, background: '#dcfce7', marginTop: 3 }} />
+                    </div>
+                  </div>
+                  <div style={{
+                    flex: 1, minWidth: 0,
+                    fontSize: 12.5, color: 'var(--lb-ink-3)', lineHeight: 1.5,
+                    ...(showExtracted ? {} : {
+                      display: '-webkit-box',
+                      WebkitLineClamp: 4,
+                      WebkitBoxOrient: 'vertical' as const,
+                      overflow: 'hidden',
+                    }),
+                  }}>
+                    {lastApply?.summary
+                      || (savedMetadata as any)?.summary
+                      || `We pulled ${lastApply?.fieldsApplied || lastApply?.fieldsExtracted || 0} fields into your AI Playbook from ${platformLabel(lastApply?.platform || 'website')}.`}
+                  </div>
                 </div>
-              )}
-              {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
-                <div className="text-[11px] text-emerald-700 mt-1.5">
-                  Your AI Playbook already reflects this page's facts.
-                </div>
-              )}
-
-              {/* GPT prose summary — same content WebsitePreviewCard
-                  shows for the website branch. Lets the tenant scan
-                  "what does the AI think this business is about?"
-                  without opening the structured-fields disclosure. */}
-              {lastApply.summary && (
-                <div
-                  className="mt-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] text-slate-700 italic leading-snug"
-                >
-                  {lastApply.summary}
-                </div>
-              )}
-
-              {/* Expandable "Show what we pulled" — renders the
-                  extractedFields blob the backend now returns. Tells
-                  the tenant which specific fields were saved (instead
-                  of just a count) and saves a trip to Settings → AI
-                  Playbook just to verify the scrape did the right
-                  thing. */}
-              {lastApply.extractedFields && Object.keys(lastApply.extractedFields).length > 0 && (
-                <div className="mt-2">
+                {(lastApply?.summary || (savedMetadata as any)?.summary) && (
                   <button
                     type="button"
                     onClick={() => setShowExtracted(v => !v)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900"
+                    style={{
+                      marginTop: 9,
+                      background: 'transparent', border: 0, padding: 0,
+                      fontFamily: 'inherit',
+                      fontSize: 12, fontWeight: 600,
+                      color: 'var(--lb-accent)', cursor: 'pointer',
+                    }}
                   >
-                    {showExtracted ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    {showExtracted ? 'Hide details' : 'Show what we pulled'}
+                    {showExtracted ? 'Show less' : 'Show more'}
                   </button>
-                  {showExtracted && (
-                    <div
-                      className="mt-1.5 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] grid"
-                      style={{ gridTemplateColumns: 'auto 1fr', columnGap: 12, rowGap: 4 }}
-                    >
-                      {Object.entries(lastApply.extractedFields).map(([key, value]) => {
-                        const display = formatExtractedValue(value);
-                        if (!display) return null;
-                        return (
-                          <Fragment key={key}>
-                            <div className="font-semibold text-emerald-700 whitespace-nowrap">
-                              {humanizeFieldKey(key)}
-                            </div>
-                            <div className="text-slate-700 break-words">
-                              {display}
-                            </div>
-                          </Fragment>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Editable input + Apply button — empty / unsaved state. */}
+            <div className="flex items-center gap-2 lb-wiz-inline-save" style={{ marginTop: 13 }}>
+              <div className="relative flex-1 min-w-0">
+                <span style={{
+                  position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                  color: 'var(--lb-ink-5)', pointerEvents: 'none',
+                }}>
+                  <Globe size={15} />
+                </span>
+                <input
+                  type="text"
+                  inputMode="url"
+                  autoComplete="url"
+                  placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
+                  value={value}
+                  onChange={e => {
+                    setValue(e.target.value);
+                    if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
+                      setVerifyState({ kind: 'idle' });
+                    }
+                    if (lowYieldScrape) setLowYieldScrape(false);
+                    if (lastApply && e.target.value.trim() !== lastApply.url) setLastApply(null);
+                  }}
+                  disabled={isChecking}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px 12px 36px',
+                    border: '1px solid var(--lb-line)',
+                    borderRadius: 10,
+                    fontSize: 13.5,
+                    fontFamily: 'var(--lb-font-mono)',
+                    color: 'var(--lb-ink-2)',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && canSave) {
+                      e.preventDefault();
+                      void fetchSiteData();
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchSiteData()}
+                disabled={!canSave}
+                style={{
+                  flexShrink: 0,
+                  padding: '12px 20px',
+                  borderRadius: 9,
+                  border: 0,
+                  background: canSave ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
+                  color: canSave ? '#fff' : 'var(--lb-ink-6)',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Apply'}
+              </button>
             </div>
-          </div>
+            {isBusy && (
+              <div className="mt-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <div className="font-bold text-slate-900">
+                    {isApplying ? 'Applying to your AI Playbook…' : 'Pulling info…'}
+                  </div>
+                  <div className="text-slate-500 mt-0.5">
+                    {isApplying
+                      ? 'Filling empty Playbook + FAQ sections so your AI starts with real context.'
+                      : 'We fetch the page, generate an AI summary, and pre-fill what we can. Takes a few seconds.'}
+                  </div>
+                </div>
+              </div>
+            )}
+            {verifyState.kind === 'invalid' && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-start gap-2" role="alert">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                <div className="min-w-0 text-xs">
+                  <div className="font-bold text-rose-900">
+                    {verifyState.outcome.errorMessage || "We couldn't load that link."}
+                  </div>
+                  <div className="text-rose-700 mt-0.5">
+                    Double-check the URL, or paste your business info manually below.
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Low-yield warning — fires when the URL was reachable but the
-            scrape returned no Playbook seed (BookingKoala SPA, meta-less
-            site, Cloudflare-protected page). The green VERIFIED card
-            alone is misleading; this banner tells the user what didn't
-            happen and offers a fallback (TT URL OR paste manually). */}
+            scrape returned nothing useful. Keep visible regardless of
+            empty / saved branch so the operator can recover. */}
         {lowYieldScrape && verifyState.kind === 'valid' && !isBusy && (
           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 flex items-start gap-2.5" role="alert">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -1469,38 +1489,11 @@ function platformLabel(p: 'thumbtack' | 'yelp' | 'website'): string {
   return 'Website';
 }
 
-// Friendly labels for the extracted-fields disclosure. Mirrors the
-// EXTRACTED_FIELD_LABELS map in Settings → General; kept inline here
-// because the seed schema isn't yet a shared module. If you add a new
-// key in either place, add it in both.
-const EXTRACTED_FIELD_LABELS: Record<string, string> = {
-  serviceArea: 'Service area',
-  teamSize: 'Team size',
-  yearsInBusiness: 'Years in business',
-  ownerName: 'Owner / founder',
-  suppliesPolicy: 'Supplies policy',
-  petsPolicy: 'Pets policy',
-  paymentMethods: 'Payment methods',
-  officeLocations: 'Office locations',
-  insurance: 'Insurance',
-  bonding: 'Bonding',
-  licensing: 'Licensing',
-  guarantees: 'Guarantees',
-  ecoFriendly: 'Eco-friendly',
-};
-
-function humanizeFieldKey(key: string): string {
-  if (EXTRACTED_FIELD_LABELS[key]) return EXTRACTED_FIELD_LABELS[key];
-  return key
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, c => c.toUpperCase());
-}
-
-function formatExtractedValue(v: string | string[] | undefined): string {
-  if (v === undefined || v === null) return '';
-  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
-  return String(v);
-}
+// Extracted-fields humanizer / formatter removed 2026-06-22 along
+// with the "Show what we pulled" disclosure — the canonical Business
+// step shows a single scan-snippet block instead of the per-field
+// table. If we re-introduce the disclosure, the labels map lives at
+// `frontend/src/pages/settings/General.tsx`.
 
 // Parse the additionalAssociatePhones list out of a SavedAccount's
 // followUpSettingsJson. Returns [] for any of: null, malformed JSON,
