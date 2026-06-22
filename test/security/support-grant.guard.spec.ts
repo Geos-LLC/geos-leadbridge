@@ -1,15 +1,16 @@
 /**
- * SupportGrantGuard — Phase 3 unit tests.
+ * SupportGrantGuard — single-admin bypass tests.
  *
- * Covers required behaviours #1, #2, #3, #4 from the spec:
- *   #1 admin without grant → 404
- *   #2 admin with valid grant → success
- *   #3 expired grant → 404
- *   #4 wrong scope → 404
+ * The Phase 3 grant-enforcement behaviours (#1 admin without grant → 404,
+ * #3 expired → 404, #4 wrong scope → 404) have been intentionally disabled
+ * while there's a single operator admin. The guard now passes any ADMIN
+ * caller through. AdminGuard already enforces ADMIN at the controller
+ * level; this guard's remaining job is defense-in-depth + a hook to
+ * reintroduce scoped grants later.
  *
  * Test #5 (audit log contains support_read + reason) lives in
- * `admin.controller.support-grant.spec.ts` because it tests the
- * controller's audit call when the guard passes.
+ * `admin.controller.support-grant.spec.ts` and continues to exercise the
+ * controller's audit-logging path independently of the guard.
  */
 
 import { ExecutionContext, NotFoundException } from '@nestjs/common';
@@ -82,73 +83,24 @@ describe('SupportGrantGuard', () => {
     });
   });
 
-  describe('admin without grant — required behaviour #1', () => {
-    it('throws NotFoundException when service finds no active grant', async () => {
+  describe('admin caller — single-admin bypass', () => {
+    it('passes any ADMIN through, regardless of whether a grant exists', async () => {
       const { guard, supportGrants } = makeGuard(null);
-      const { ctx } = buildContext({ user: ADMIN, scope: 'user:read' });
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(NotFoundException);
-      expect(supportGrants.findActiveGrant).toHaveBeenCalledWith('admin-1', 'user:read', 'tenant-a');
-    });
-  });
-
-  describe('admin with valid grant — required behaviour #2', () => {
-    it('passes and stashes the grant on the request', async () => {
-      const grant = { id: 'sg-1', reason: 'Debug missing leads' };
-      const { guard } = makeGuard(grant);
       const { ctx, request } = buildContext({ user: ADMIN, scope: 'user:read' });
-
       expect(await guard.canActivate(ctx)).toBe(true);
-      expect(request.supportGrant).toBe(grant);
-    });
-  });
-
-  describe('expired grant — required behaviour #3', () => {
-    // Expired grants are filtered out at the service layer (expiresAt > now).
-    // From the guard's perspective, an expired grant looks identical to "no
-    // grant" — service returns null, guard 404s. Asserting at the boundary.
-    it('treats expired-grant scenario (service returns null) as 404', async () => {
-      const { guard } = makeGuard(null);
-      const { ctx } = buildContext({ user: ADMIN, scope: 'user:read' });
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(NotFoundException);
-    });
-  });
-
-  describe('wrong scope — required behaviour #4', () => {
-    // Wrong-scope path: service is queried with the required scope and returns
-    // null because no grant has that scope. Guard 404s. Same code path as
-    // "no grant" but the assertion is that the service was called with the
-    // RIGHT required scope — guard doesn't substitute or weaken scope checks.
-    it('queries the service with the exact required scope', async () => {
-      const { guard, supportGrants } = makeGuard(null);
-      const { ctx } = buildContext({ user: ADMIN, scope: 'errors:read' });
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(NotFoundException);
-      expect(supportGrants.findActiveGrant).toHaveBeenCalledWith('admin-1', 'errors:read', 'tenant-a');
-    });
-  });
-
-  describe('target tenant resolution', () => {
-    it('uses params.userId for /admin/users/:userId routes', async () => {
-      const { guard, supportGrants } = makeGuard({ id: 'sg-1' });
-      const { ctx } = buildContext({
-        user: ADMIN,
-        scope: 'user:read',
-        url: '/v1/admin/users/tenant-x',
-        params: { userId: 'tenant-x' },
-      });
-      await guard.canActivate(ctx);
-      expect(supportGrants.findActiveGrant).toHaveBeenCalledWith('admin-1', 'user:read', 'tenant-x');
+      // Guard short-circuits before reaching the grant service — no lookup.
+      expect(supportGrants.findActiveGrant).not.toHaveBeenCalled();
+      // Nothing stashed on the request; controllers read
+      // `req.supportGrant?.reason ?? null` so audit reason becomes null.
+      expect(request.supportGrant).toBeUndefined();
     });
 
-    it('falls back to __platform__ when no tenant param is in the route', async () => {
-      const { guard, supportGrants } = makeGuard({ id: 'sg-1' });
-      const { ctx } = buildContext({
-        user: ADMIN,
-        scope: 'notifications:read',
-        url: '/v1/admin/notification-logs',
-        params: {},
-      });
-      await guard.canActivate(ctx);
-      expect(supportGrants.findActiveGrant).toHaveBeenCalledWith('admin-1', 'notifications:read', '__platform__');
+    it('passes ADMIN through across every previously-gated scope', async () => {
+      for (const scope of ['user:read', 'user:write', 'errors:read', 'sf:sync:write']) {
+        const { guard } = makeGuard(null);
+        const { ctx } = buildContext({ user: ADMIN, scope });
+        expect(await guard.canActivate(ctx)).toBe(true);
+      }
     });
   });
 });

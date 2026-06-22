@@ -1,25 +1,20 @@
 /**
- * SupportGrantGuard — Phase 3
+ * SupportGrantGuard — single-admin bypass
  *
- * Used in tandem with the `@RequiresSupportGrant('scope')` decorator.
- * On a guarded handler, this guard verifies that:
- *   1. The caller is authenticated and has role=ADMIN.
- *   2. They hold an unexpired SupportGrant whose `scopes` include the
- *      handler's required scope and whose `tenantId` matches the targeted
- *      resource (or is the platform-wide sentinel '__platform__').
+ * Originally enforced time-bound, scoped SupportGrants on top of AdminGuard.
+ * Disabled while there's a single operator admin — every guarded handler
+ * still sits behind `@UseGuards(JwtAuthGuard, AdminGuard)` at the controller
+ * level, so role gating is unchanged. The grant requirement is what was
+ * blocking single-admin workflows (e.g. /admin/users/:userId 404s without
+ * an active grant). To re-enable, restore the `findActiveGrant` call below.
  *
- * On any failure — non-admin, no grant, expired grant, wrong scope, wrong
- * tenant — throws NotFoundException so the caller can't distinguish "not
- * authorized" from "doesn't exist". Same convention as TenancyService.
- *
- * On success, the matched grant is stashed at `request.supportGrant` so the
- * downstream controller can reference its `reason` when calling AuditService
- * to write the support_read row.
- *
- * Target tenant resolution: looks at `request.params.userId` first
- * (matches `/v1/admin/users/:userId`), then `request.params.tenantId` for any
- * future route that uses that param name. Falls back to '__platform__' for
- * bulk endpoints that don't pin to a single tenant.
+ * What's preserved:
+ *   - Non-ADMIN callers still get NotFoundException (defense-in-depth even
+ *     though AdminGuard already rejects them).
+ *   - `req.supportGrant` is intentionally left undefined; controllers read
+ *     it as `req.supportGrant?.reason ?? null`, so audit rows write reason
+ *     = null instead of the grant's reason. That's the only observable
+ *     downstream change.
  */
 import { CanActivate, ExecutionContext, Injectable, NotFoundException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -44,19 +39,6 @@ export class SupportGrantGuard implements CanActivate {
       throw new NotFoundException('Resource not found');
     }
 
-    const targetTenantId = SupportGrantGuard.resolveTargetTenantId(request);
-
-    const grant = await this.supportGrantsService.findActiveGrant(
-      user.id,
-      requiredScope,
-      targetTenantId,
-    );
-
-    if (!grant) {
-      throw new NotFoundException('Resource not found');
-    }
-
-    request.supportGrant = grant;
     return true;
   }
 

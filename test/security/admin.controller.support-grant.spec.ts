@@ -41,6 +41,7 @@ function makeController() {
     {} as any, // PrismaService
     {} as any, // YelpBackfillService
     auditService,
+    {} as any, // MonitoringService
   );
   return { controller, auditPrisma };
 }
