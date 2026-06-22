@@ -161,4 +161,66 @@ h1, h2, h3, h4 {
     height: 100dvh !important;
     border-radius: 0 !important;
   }
+
+  /* ─── Mobile pass — page padding, headers, field rows, option cards ─
+     Applies to Settings (/settings) and Automation (/automation/*) pages.
+     All hooks are className-only — JSX structure and behavior unchanged.
+     The desktop layout keeps its 20/28 padding and side-by-side rows;
+     these rules only kick in below the 760px breakpoint. */
+
+  /* Page padding compresses on phones — 28px side gutters waste touch
+     room and the bottom edge no longer needs the 60px tail since the
+     responsive composer/tab bar (where present) handles its own offset. */
+  .lb-pad {
+    padding: 18px 16px 56px !important;
+  }
+
+  /* AutoPageHeader (title + Saved-pill / Save row) stacks vertically so
+     long page titles + the actions cluster don't fight over a 360px row.
+     The actions cluster still right-aligns within its own row. */
+  .lb-page-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  .lb-page-header-actions {
+    justify-content: flex-end;
+  }
+
+  /* FieldRow stacks: label on top, control below. The 150–170px label
+     column shrinks to auto and the decorative leading IconTile is hidden
+     so the label doesn't get orphaned onto its own line. */
+  .lb-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 9px !important;
+  }
+  .lb-row > .lb-row-label {
+    width: auto !important;
+  }
+  .lb-row > .lb-row-icon {
+    display: none !important;
+  }
+
+  /* OptionCard pairs (Connection Mode: Agent First / Parallel) stack
+     one per row so each card has full readable width. */
+  .lb-option-pair {
+    flex-direction: column !important;
+  }
+
+  /* ─── Setup wizard mobile pass ──────────────────────────────────────
+     The 248px navy rail is already hidden on small screens via the
+     `hidden md:flex` Tailwind class on the <aside>. These rules just
+     tighten the right pane's padding so the wizard content uses every
+     available pixel on a phone. */
+  .lb-wizard-pane-header {
+    padding: 18px 16px 14px !important;
+    gap: 12px !important;
+  }
+  .lb-wizard-body {
+    padding: 18px 16px !important;
+  }
+  .lb-wizard-footer {
+    padding: 12px 16px !important;
+  }
 }

@@ -746,7 +746,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             label="Connection Mode"
             align="top"
           >
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="lb-option-pair" style={{ display: 'flex', gap: 12 }}>
               <OptionCard
                 selected={connMode === 'agent-first'}
                 onClick={() => onConnMode('agent-first')}

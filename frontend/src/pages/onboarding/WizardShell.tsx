@@ -219,9 +219,10 @@ export default function WizardShell({
       </aside>
 
       {/* ─── Right content pane ─────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--lb-surface)' }}>
+      <div className="lb-wizard-pane flex-1 flex flex-col min-w-0" style={{ background: 'var(--lb-surface)' }}>
         {/* Header: title + description + close button */}
         <div
+          className="lb-wizard-pane-header"
           style={{
             padding: '22px 28px 16px',
             borderBottom: '1px solid var(--lb-line-soft)',
@@ -279,7 +280,7 @@ export default function WizardShell({
 
         {/* Step body */}
         <main
-          className="flex-1 overflow-y-auto"
+          className="lb-wizard-body flex-1 overflow-y-auto"
           style={{
             minHeight: 0,
             padding: '24px 28px',
@@ -295,6 +296,7 @@ export default function WizardShell({
 
         {/* Footer: Back (left) — spacer — step buttons / Skip / Continue / Finish (right) */}
         <div
+          className="lb-wizard-footer"
           style={{
             padding: '14px 28px',
             borderTop: '1px solid var(--lb-line-soft)',
