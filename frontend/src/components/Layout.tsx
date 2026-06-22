@@ -91,16 +91,52 @@ function AssistantBubble({
   );
 }
 
+// Shared platform palette so the sidebar account avatar matches Settings →
+// Connected Sources. Falls back to a neutral green tile for unknown
+// platforms (and for the "All accounts" / tenant-name display).
+const SIDEBAR_PLATFORM_COLOR: Record<string, string> = {
+  thumbtack: 'var(--lb-thumbtack)',
+  yelp: 'var(--lb-yelp)',
+  angi: 'var(--lb-angi)',
+  google: 'var(--lb-google)',
+};
+function sidebarAvatarStyle(platform?: string | null): React.CSSProperties {
+  const color = platform && SIDEBAR_PLATFORM_COLOR[platform];
+  if (color) {
+    return {
+      background: color,
+      color: 'white',
+    };
+  }
+  return {
+    background: 'var(--lb-success-tint)',
+    color: '#0c4a2b',
+  };
+}
+function platformInitial(platform?: string | null, businessName?: string | null): string {
+  if (platform === 'thumbtack') return 'T';
+  if (platform === 'yelp') return 'Y';
+  if (platform === 'angi') return 'A';
+  if (platform === 'google') return 'G';
+  return (businessName?.[0] || '?').toUpperCase();
+}
+
 function SidebarAccountRow({
+  platform,
   label,
   sub,
   active,
   onClick,
+  isAll,
 }: {
+  platform?: string | null;
   label: string;
   sub?: string;
   active: boolean;
   onClick: () => void;
+  // "All accounts" row gets a neutral grid avatar instead of a platform
+  // letter so the visual doesn't collide with Angi's "A".
+  isAll?: boolean;
 }) {
   return (
     <button
@@ -112,7 +148,7 @@ function SidebarAccountRow({
         width: '100%',
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
         padding: '8px 10px',
         borderRadius: 8,
         background: active ? 'var(--lb-accent-tint)' : 'transparent',
@@ -129,6 +165,24 @@ function SidebarAccountRow({
         if (!active) e.currentTarget.style.background = 'transparent';
       }}
     >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 10,
+          fontWeight: 800,
+          flexShrink: 0,
+          ...(isAll
+            ? { background: 'var(--lb-ink-bg-soft, #f3f4f6)', color: 'var(--lb-ink-3)' }
+            : sidebarAvatarStyle(platform)),
+        }}
+      >
+        {isAll ? <LayoutGrid size={12} /> : platformInitial(platform, label)}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
@@ -539,16 +593,16 @@ export function Layout() {
     };
   }, [accountMenuOpen]);
 
-  // What the sidebar card displays. When a specific account is pinned via
-  // ?account=<id>, show its name + platform. Otherwise show the tenant's
-  // business name + connected-source count (legacy behavior).
+  // What the sidebar card displays. When a specific account is pinned, show
+  // its name + platform with a platform-colored avatar. Otherwise show the
+  // tenant's business name + connected-source count with a neutral grid
+  // avatar (legacy behavior).
   const switcherTopLine = selectedAccount?.businessName || businessName;
   const switcherSubLine = selectedAccount
     ? (selectedAccount.platform
         ? selectedAccount.platform.charAt(0).toUpperCase() + selectedAccount.platform.slice(1)
         : 'Account')
     : `${connectedCount} ${connectedCount === 1 ? 'source' : 'sources'}`;
-  const switcherInitial = ((selectedAccount?.businessName || businessName)[0] || '?').toUpperCase();
 
   // Shared nav-item renderer — rounded-pill active state with accent-tint + accent text
   const renderNavItem = (item: { icon: React.ReactNode; label: string; path: string }) => (
@@ -737,17 +791,20 @@ export function Layout() {
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  background: 'var(--lb-success-tint)',
-                  color: '#0c4a2b',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 11,
                   fontWeight: 800,
                   flexShrink: 0,
+                  ...(selectedAccount
+                    ? sidebarAvatarStyle(selectedAccount.platform)
+                    : { background: 'var(--lb-ink-bg-soft, #f3f4f6)', color: 'var(--lb-ink-3)' }),
                 }}
               >
-                {switcherInitial}
+                {selectedAccount
+                  ? platformInitial(selectedAccount.platform, selectedAccount.businessName)
+                  : <LayoutGrid size={13} />}
               </div>
               <div className="flex-1 min-w-0">
                 <div
@@ -777,11 +834,15 @@ export function Layout() {
                   borderRadius: 12,
                   boxShadow: '0 8px 24px rgba(16,24,40,0.16)',
                   padding: 6,
-                  maxHeight: 360,
+                  // No fixed cap — show the full list. Only scroll when the
+                  // viewport is too short to fit everything (tall menus on
+                  // small laptops, etc.).
+                  maxHeight: 'calc(100vh - 160px)',
                   overflowY: 'auto',
                 }}
               >
                 <SidebarAccountRow
+                  isAll
                   label={`All accounts (${connectedCount})`}
                   sub="Show every connected source"
                   active={selectedAccountId === null}
@@ -800,6 +861,7 @@ export function Layout() {
                 {savedAccounts.map(a => (
                   <SidebarAccountRow
                     key={a.id}
+                    platform={a.platform}
                     label={a.businessName || a.platform || a.id}
                     sub={a.platform
                       ? a.platform.charAt(0).toUpperCase() + a.platform.slice(1)
