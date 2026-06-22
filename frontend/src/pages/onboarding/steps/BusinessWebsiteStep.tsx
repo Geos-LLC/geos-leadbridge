@@ -1076,50 +1076,24 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               </button>
             </div>
 
-            {/* Scanned result: 96x96 mock thumbnail + clamped scan
-                snippet to the right. Show more / Show less toggle. */}
+            {/* Scanned snippet — full-width text below the URL tile,
+                clamped to 4 lines with a Read more / Read less
+                toggle. Matches the canonical layout (no thumbnail). */}
             {(lastApply?.summary || (savedMetadata as any)?.summary || lastApply?.url) && (
               <>
-                <div style={{ marginTop: 13, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                  {/* CSS mock browser screenshot — matches canonical's
-                      stylized thumbnail since we don't usually have a
-                      real og:image rendered here. */}
-                  <div style={{
-                    width: 96, height: 96, flexShrink: 0,
-                    borderRadius: 10,
-                    border: '1px solid var(--lb-line)',
+                <div style={{
+                  marginTop: 13,
+                  fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55,
+                  ...(showExtracted ? {} : {
+                    display: '-webkit-box',
+                    WebkitLineClamp: 4,
+                    WebkitBoxOrient: 'vertical' as const,
                     overflow: 'hidden',
-                    background: '#fff',
-                    boxShadow: '0 1px 2px rgba(10,21,48,0.05)',
-                  }}>
-                    <div style={{
-                      height: 26, background: 'var(--lb-accent)',
-                      display: 'flex', alignItems: 'center', gap: 5, padding: '0 8px',
-                    }}>
-                      <span style={{ width: 5, height: 5, borderRadius: 99, background: 'rgba(255,255,255,0.85)' }} />
-                      <span style={{ width: '36%', height: 5, borderRadius: 9, background: 'rgba(255,255,255,0.7)' }} />
-                    </div>
-                    <div style={{ padding: 9, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <div style={{ height: 5, width: '85%', borderRadius: 9, background: '#d4d9e4' }} />
-                      <div style={{ height: 5, width: '95%', borderRadius: 9, background: '#e3e8f2' }} />
-                      <div style={{ height: 5, width: '68%', borderRadius: 9, background: '#e3e8f2' }} />
-                      <div style={{ height: 15, width: '46%', borderRadius: 5, background: '#dcfce7', marginTop: 3 }} />
-                    </div>
-                  </div>
-                  <div style={{
-                    flex: 1, minWidth: 0,
-                    fontSize: 12.5, color: 'var(--lb-ink-3)', lineHeight: 1.5,
-                    ...(showExtracted ? {} : {
-                      display: '-webkit-box',
-                      WebkitLineClamp: 4,
-                      WebkitBoxOrient: 'vertical' as const,
-                      overflow: 'hidden',
-                    }),
-                  }}>
-                    {lastApply?.summary
-                      || (savedMetadata as any)?.summary
-                      || `We pulled ${lastApply?.fieldsApplied || lastApply?.fieldsExtracted || 0} fields into your AI Playbook from ${platformLabel(lastApply?.platform || 'website')}.`}
-                  </div>
+                  }),
+                }}>
+                  {lastApply?.summary
+                    || (savedMetadata as any)?.summary
+                    || `We pulled ${lastApply?.fieldsApplied || lastApply?.fieldsExtracted || 0} fields into your AI Playbook from ${platformLabel(lastApply?.platform || 'website')}.`}
                 </div>
                 {(lastApply?.summary || (savedMetadata as any)?.summary) && (
                   <button
@@ -1129,11 +1103,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
                       marginTop: 9,
                       background: 'transparent', border: 0, padding: 0,
                       fontFamily: 'inherit',
-                      fontSize: 12, fontWeight: 600,
+                      fontSize: 12.5, fontWeight: 600,
                       color: 'var(--lb-accent)', cursor: 'pointer',
                     }}
                   >
-                    {showExtracted ? 'Show less' : 'Show more'}
+                    {showExtracted ? 'Read less' : 'Read more'}
                   </button>
                 )}
               </>
