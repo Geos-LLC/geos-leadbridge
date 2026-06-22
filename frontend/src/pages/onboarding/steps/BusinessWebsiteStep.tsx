@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, CalendarClock, ChevronRight as ChevronRightIcon,
+  AlertTriangle, CalendarClock,
   CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
   Info, Loader2, Phone, PhoneCall, Sparkles, Users,
 } from 'lucide-react';
@@ -59,7 +58,6 @@ interface VerifyOutcome {
  * old behavior. The Fetch buttons are an upgrade, not a replacement.
  */
 export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving }: Props) {
-  const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   // Title + description live in WizardShell header (2026-06-13 redesign).
