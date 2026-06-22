@@ -368,6 +368,52 @@ h1, h2, h3, h4 {
     grid-template-columns: 1fr !important;
   }
 
+  /* ─── Defensive overflow guard ──────────────────────────────────────
+     The Settings page chrome (cards, FieldRows, etc.) was rendering
+     wider than the viewport on phones even with the existing mobile
+     pass. Symptom: card right edges clipped past the viewport, h1
+     subtitles cut off mid-word. Root cause is hard to pin down per-
+     element (a mix of `flex-shrink: 0` clusters and long unbreakable
+     URLs in cards) — this guard makes `.lb-pad` itself max-out at the
+     viewport and forces every descendant to wrap text + shrink in flex
+     containers instead of escaping. Cheap, broadly applicable, no
+     desktop impact. */
+  .lb-pad {
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+  .lb-pad > *,
+  .lb-pad section,
+  .lb-pad article {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  /* Long URLs / unbreakable strings (Thumbtack profile URL, etc.)
+     must wrap inside cards instead of forcing the card wider. */
+  .lb-pad {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  /* Inputs / selects / textareas inside settings cards never exceed
+     their flex parent. Combined with `min-width: 0` propagation
+     below, this lets long URL values render truncated in the input
+     box without dragging the card past the viewport. */
+  .lb-pad input,
+  .lb-pad select,
+  .lb-pad textarea {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* Force flex children to shrink. Default `min-width: auto` on flex
+     items lets long inline content push the parent wider; resetting
+     to 0 makes the item shrink to whatever the flex layout dictates. */
+  .lb-pad [style*="display: flex"],
+  .lb-pad [style*="display:flex"] {
+    min-width: 0;
+  }
+
   /* ─── LeadBridge Automation Bundle — mobile pass ────────────────────
      Ported verbatim from the bundle's <=760px @media block. The
      attribute selectors (`[style*="padding: 20px 24px"]` etc.) target
