@@ -368,6 +368,39 @@ h1, h2, h3, h4 {
     grid-template-columns: 1fr !important;
   }
 
+  /* Automation → AI Conversation → Custom required field editor row.
+     4-col grid `minmax(140px, 1fr) minmax(180px, 2fr) auto auto` has a
+     ~404px minimum width — overflows the ~310px content area on
+     phones. Stack to a single column; the Required toggle + delete
+     button align to the right on their own row. */
+  .lb-qual-field-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* Automation → AI Conversation → Booking availability time row.
+     `64px 1fr 1fr` (label + Morning + Afternoon pills) — keep
+     side-by-side but compress the label column so the pills don't
+     squeeze at narrow widths. */
+  .lb-booking-time-row {
+    grid-template-columns: auto 1fr 1fr !important;
+    gap: 8px !important;
+  }
+
+  /* Bundle class aliases — the LeadBridge Automation Bundle uses
+     `lb-frow` / `lb-flabel` for what our FieldRow component renders
+     as `lb-row` / `lb-row-label`. Alias the bundle names so any
+     hand-rolled JSX that copies from the bundle markup picks up the
+     same mobile stacking. */
+  .lb-frow {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 9px !important;
+  }
+  .lb-frow > .lb-flabel {
+    width: auto !important;
+  }
+
   /* ─── Defensive overflow guard ──────────────────────────────────────
      The Settings page chrome (cards, FieldRows, etc.) was rendering
      wider than the viewport on phones even with the existing mobile

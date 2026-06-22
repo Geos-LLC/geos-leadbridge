@@ -1397,7 +1397,7 @@ function BookingDayRow({
   onAfternoonToggle: () => void;
 }) {
   return (
-    <div style={{
+    <div className="lb-booking-time-row" style={{
       display: 'grid',
       gridTemplateColumns: '64px 1fr 1fr',
       gap: 10, alignItems: 'center',
@@ -1471,7 +1471,7 @@ function CustomFieldRow({
 }) {
   const labelEmpty = field.label.trim().length === 0;
   return (
-    <div style={{
+    <div className="lb-qual-field-row" style={{
       display: 'grid',
       gridTemplateColumns: 'minmax(140px, 1fr) minmax(180px, 2fr) auto auto',
       gap: 8, alignItems: 'center',
