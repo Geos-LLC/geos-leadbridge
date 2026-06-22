@@ -150,9 +150,24 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
 
   return (
     <div className="space-y-5">
+      {/* Quick answers eyebrow — mono uppercase per FinalDesign FAQ
+          (standalone) canonical. The account name is the smaller
+          subtitle line; the inherited badge keeps its right-aligned
+          warning when the FAQ has not yet been customized for this
+          account. */}
       <div className="flex items-center justify-between">
         <div>
-          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Account FAQ</h4>
+          <h4 style={{
+            fontSize: 11,
+            fontWeight: 700,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--lb-ink-6, #8b94ab)',
+            margin: 0,
+          }}>
+            Quick answers
+          </h4>
           <p className="text-[11px] text-slate-400 mt-0.5">{accountName}</p>
         </div>
         {inherited && (
@@ -163,7 +178,7 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
       </div>
 
       <p className="text-xs text-slate-500 leading-relaxed bg-blue-50/60 border border-blue-100 rounded-xl p-3">
-        These answers are injected into the AI prompt so it can respond accurately to common customer questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
+        Answers the AI gives verbatim when customers ask common questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
       </p>
 
       {/* Five baseline chip groups — shared with every non-cleaning

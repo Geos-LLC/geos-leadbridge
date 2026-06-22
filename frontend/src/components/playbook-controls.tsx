@@ -419,37 +419,112 @@ export function FaqRow({
   const addChip = () => writeChips([...chips, '']);
 
   return (
+    // Canonical FAQ-standalone card chrome — bordered rounded card per
+    // Q&A entry with a violet "Q" badge above the question text and a
+    // green "A" badge above the answer chips.
     <div
       style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 10,
-        padding: '14px 14px',
-        borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
+        border: '1px solid var(--lb-line, #e5e9f2)',
+        borderRadius: 11,
+        overflow: 'hidden',
+        background: '#fff',
+        margin: '0 14px 10px',
       }}
     >
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Q row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '12px 13px 10px' }}>
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 6,
+            background: '#ede9fe',
+            color: '#7c3aed',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            fontSize: 11,
+            fontWeight: 800,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          }}
+        >
+          Q
+        </span>
         <input
           type="text"
           value={question}
           onChange={(e) => onChangeQuestion(e.target.value)}
           placeholder="What question would a lead ask?"
           style={{
-            width: '100%',
-            padding: '4px 6px',
+            flex: 1,
+            minWidth: 0,
+            padding: '0 2px',
             border: '1px solid transparent',
             borderRadius: 6,
             background: 'transparent',
             fontFamily: 'inherit',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--lb-ink-5, #64748b)',
+            fontSize: 13.5,
+            fontWeight: 600,
+            lineHeight: 1.4,
+            color: 'var(--lb-ink-1, #0a1530)',
+            outline: 'none',
             boxSizing: 'border-box',
           }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'var(--lb-line, #e5e9f2)';
+            e.currentTarget.style.background = '#fff';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'transparent';
+            e.currentTarget.style.background = 'transparent';
+          }}
         />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Remove Q&A"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 24,
+              height: 24,
+              borderRadius: 6,
+              border: '1px solid var(--lb-line, #e5e9f2)',
+              background: '#fff',
+              color: 'var(--lb-ink-6, #8b94ab)',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+      {/* A row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '0 13px 12px' }}>
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 6,
+            background: '#dcfce7',
+            color: '#16a34a',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginTop: 2,
+            fontSize: 11,
+            fontWeight: 800,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          }}
+        >
+          A
+        </span>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {chips.map((chip, i) => (
             <FaqAnswerChip
               key={i}
@@ -465,7 +540,7 @@ export function FaqRow({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
-              padding: '8px 12px',
+              padding: '6px 10px',
               borderRadius: 8,
               border: '1px dashed var(--lb-accent-line, #c3d4ff)',
               background: 'var(--lb-accent-tint, #e7efff)',
@@ -480,29 +555,6 @@ export function FaqRow({
           </button>
         </div>
       </div>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          title="Remove Q&A"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            borderRadius: 7,
-            border: '1px solid var(--lb-line, #e5e9f2)',
-            background: 'white',
-            color: 'var(--lb-ink-5, #64748b)',
-            cursor: 'pointer',
-            flexShrink: 0,
-            marginTop: 2,
-          }}
-        >
-          <Trash2 size={13} />
-        </button>
-      )}
     </div>
   );
 }

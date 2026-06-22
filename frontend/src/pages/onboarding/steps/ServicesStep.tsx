@@ -155,7 +155,7 @@ export default function ServicesStep({
     } catch (err: any) {
       notify.error(
         'Could not activate',
-        err.response?.data?.message || 'Add pricing or customer answers first.',
+        err.response?.data?.message || 'Add pricing or FAQ first.',
       );
     }
   }
@@ -382,7 +382,7 @@ export default function ServicesStep({
               <div>
                 <strong>{incompleteActive.length}</strong> active service
                 {incompleteActive.length === 1 ? '' : 's'} still need pricing
-                or customer answers. Active services must have both to
+                or FAQ. Active services must have both to
                 count toward setup completion.
               </div>
             </div>
@@ -460,7 +460,7 @@ export default function ServicesStep({
                       }}>
                         {configured
                           ? 'Pricing, FAQ and qualification configured.'
-                          : 'Add pricing and customer answers to activate.'}
+                          : 'Add pricing and FAQ to activate.'}
                       </span>
                     </span>
                     {open ? (
@@ -520,9 +520,9 @@ export default function ServicesStep({
                       <SummaryNavRow
                         icon={HelpCircle}
                         iconTone="purple"
-                        title="Customer answers"
+                        title="FAQ"
                         body={faqSummary(profile)}
-                        actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit answers →'}
+                        actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit FAQ →'}
                         onAction={() => toggleEdit(profile.id, 'ans')}
                         noBorder
                       />
@@ -541,7 +541,7 @@ export default function ServicesStep({
                             </div>
                           ) : (
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                              Connect an account first to edit customer answers.
+                              Connect an account first to edit FAQ.
                             </div>
                           )}
                         </div>
@@ -658,7 +658,7 @@ function pricingSummary(p: ServiceProfile): string {
 // without opening the editor.
 function faqSummary(p: ServiceProfile): string {
   const parsed = safeParse(p.faqJson);
-  if (!parsed || typeof parsed !== 'object') return 'No answers set — insured, supplies, payment, custom Q&A.';
+  if (!parsed || typeof parsed !== 'object') return 'No FAQ set — insured, supplies, payment, custom Q&A.';
   const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
   let quick = 0;
   for (const k of valueKeys) {
