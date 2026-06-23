@@ -1392,7 +1392,7 @@ function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
       icon={BookOpen}
       iconTone="blue"
       title="FAQ"
-      subtitle={
+      infoText={
         scoped
           ? `Answers the AI uses verbatim for ${serviceName ?? 'this service'} leads. Specific to this service only.`
           : 'Answers the AI uses verbatim. Applies to every connected account.'

@@ -177,9 +177,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         )}
       </div>
 
-      <p className="text-xs text-slate-500 leading-relaxed bg-blue-50/60 border border-blue-100 rounded-xl p-3">
-        Answers the AI gives verbatim when customers ask common questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
-      </p>
+      {/* "Answers the AI gives verbatim…" banner removed 2026-06-23 — the
+          same explanation now sits behind the FAQ SettingCard's title (i)
+          icon, so the standalone blue tile here was duplicative. */}
 
       {/* Five baseline chip groups — shared with every non-cleaning
           service so the FAQ chrome is identical across verticals. The
