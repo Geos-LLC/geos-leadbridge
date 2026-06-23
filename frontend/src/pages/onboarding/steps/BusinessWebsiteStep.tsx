@@ -638,10 +638,14 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             placeholder="+1 (555) 010-1234"
             style={{
               flex: 1, minWidth: 0,
-              padding: '12px 14px',
+              // Unified with the URL display tile in Section 3 — both
+              // sit at ~38px height (was ~44px) so the two cards read
+              // consistently on phone.
+              padding: '9px 14px',
               border: '1px solid var(--lb-line)',
               borderRadius: 10,
-              fontSize: 14,
+              fontSize: 13.5,
+              lineHeight: 1.4,
               fontFamily: 'var(--lb-font-mono)',
               color: 'var(--lb-ink-2)',
               outline: 'none',
@@ -660,7 +664,7 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             disabled={savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))}
             style={{
               flexShrink: 0,
-              padding: '12px 20px',
+              padding: '9px 18px',
               borderRadius: 9,
               border: 0,
               background: (savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || '')))
