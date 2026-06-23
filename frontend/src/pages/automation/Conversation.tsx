@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
@@ -849,11 +849,13 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             )}
           </div>
         </div>
+        {/* Strategy grid — wizard's lb-strat-grid: 5-col on desktop,
+            1-col on mobile (see index.css). Replaces the previous
+            inline repeat(5,1fr) which had no mobile collapse and
+            squeezed titles into a letter-per-line wrap on phones. */}
         <div
-          className="lb-strategy-grid lb-strat"
-          style={{
-            display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10,
-          }}
+          className="lb-strat-grid"
+          style={{ display: 'grid', gap: 10 }}
         >
           {STRATEGIES.map(s => (
             <StrategyCard
@@ -1113,52 +1115,66 @@ function StrategyCard({
   iconTone: IconTone;
   title: string;
   body: string;
-  /** Show a small "REC" pill in the card's top-right. Used on Auto. */
+  /** Show a small "REC" pill next to the title. Used on Auto. */
   recommended?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
 }) {
+  // Wizard-mirroring horizontal layout: icon-left, title+body-middle,
+  // info-glyph-right. The vertical column layout we used before broke
+  // titles letter-by-letter when the parent grid collapsed to narrow
+  // columns. Now the title has the full row width available.
   return (
     <button
       type="button"
       onClick={onClick}
       title={mixed ? mixedTooltip : undefined}
       style={{
-        position: 'relative',
-        textAlign: 'left', padding: '14px 16px 16px',
+        textAlign: 'left', padding: 12,
         background: mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
         border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
         borderRadius: 12,
         cursor: 'pointer', fontFamily: 'inherit',
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 10,
         transition: 'border-color 120ms, background 120ms',
         boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
       }}
     >
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        gap: 8, width: '100%',
-      }}>
-        <IconTile icon={icon} tone={iconTone} size="md" />
-        {recommended && !mixed && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
-            padding: '3px 8px', borderRadius: 999,
-            background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-            textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
-            border: '1px solid #a7f3d0',
-          }}>
-            REC
+      <IconTile icon={icon} tone={iconTone} size="md" />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            {title}
           </span>
-        )}
-        {mixed && (
-          <span style={{ color: '#d97706', marginTop: 4 }}>
-            <AlertTriangle size={14} />
-          </span>
-        )}
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
-      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.45 }}>{body}</div>
+          {recommended && !mixed && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+              padding: '2px 7px', borderRadius: 999,
+              background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+              textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+              border: '1px solid #a7f3d0',
+            }}>
+              REC
+            </span>
+          )}
+          {mixed && (
+            <span style={{ color: '#d97706', display: 'inline-flex' }}>
+              <AlertTriangle size={13} />
+            </span>
+          )}
+        </span>
+        <span style={{
+          display: '-webkit-box',
+          fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.4,
+          marginTop: 2,
+          overflow: 'hidden',
+          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        } as CSSProperties}>
+          {body}
+        </span>
+      </span>
     </button>
   );
 }
