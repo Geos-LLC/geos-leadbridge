@@ -30,7 +30,6 @@ import {
 import {
   PriceChip,
   PriceRow,
-  PriceTableSection,
   UnifiedAddRowButton,
 } from '../../components/playbook-controls';
 
@@ -1312,27 +1311,10 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
       </div>
 
       {mode === 'item_quantity' && (
-        <PriceTableSection
-          title="Price table"
-          icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
-          rightBadge={
-            items.length > 0 && (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--lb-ink-5, #64748b)',
-                  background: 'var(--lb-ink-10, #f3f5fa)',
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {items.length} {items.length === 1 ? 'row' : 'rows'}
-              </span>
-            )
-          }
-        >
+        <>
+          {/* "Price table" CollapsibleSection wrapper removed 2026-06-23 —
+              the outer Pricing SettingCard already provides the only card
+              chrome (collapsible). The header row + items render flush. */}
           {items.length === 0 ? (
             <div
               style={{
@@ -1445,30 +1427,15 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
               </div>
             </>
           )}
-        </PriceTableSection>
+        </>
       )}
 
       {mode === 'hourly' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <PriceTableSection
-            title="Price table"
-            icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
-            rightBadge={
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--lb-ink-5, #64748b)',
-                  background: 'var(--lb-ink-10, #f3f5fa)',
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {hourly.currency ?? 'USD'}
-              </span>
-            }
-          >
+          {/* "Price table" CollapsibleSection wrapper removed 2026-06-23 —
+              outer Pricing SettingCard owns the only card chrome. The
+              rate rows render flush. */}
+          <div>
             <div
               style={{
                 display: 'flex',
@@ -1528,7 +1495,7 @@ export function PricingEditor({ value, onChange }: { value: string; onChange: (n
             <div style={{ padding: '12px 14px 4px' }}>
               <UnifiedAddRowButton label="Add row" onClick={addHourlyRate} />
             </div>
-          </PriceTableSection>
+          </div>
 
           <div
             style={{
