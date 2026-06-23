@@ -141,6 +141,65 @@ function UnifiedSectionBadge({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Sqft-adjust checkbox row with an info-icon popover. The longform
+ * explanation of how AI uses the row's $/sqft to scale prices stays
+ * collapsed by default — same chrome the wizard uses on its other
+ * helper-text rows.
+ */
+function SqftAdjustRow({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <label
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16 }}
+        />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          Adjust price by square footage
+        </span>
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); setInfoOpen(o => !o); }}
+          aria-label="About square-footage adjustment"
+          aria-pressed={infoOpen}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: 0, padding: 0,
+            cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+            color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+          }}
+        >
+          <InfoIcon size={14} />
+        </button>
+      </label>
+      {infoOpen && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 9,
+          background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
+          fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+        }}>
+          When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Quote shape picker — two-button segmented control matching the
  * sqft-toggle card chrome. Lets the operator decide whether AI quotes
  * a calculated range ($L–$H) or a single number for THIS pricing JSON.
@@ -415,28 +474,14 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           column. See frontend/src/data/defaultPricing.ts. */}
 
       {/* Square footage adjustment toggle — flush within the parent
-          Pricing card (no inner card chrome). Hidden in wizardMode. */}
+          Pricing card (no inner card chrome). The longform explanation
+          lives behind a small (i) toggle next to the label so the row
+          stays a single line. Hidden in wizardMode. */}
       {!wizardMode && (
-        <label style={{
-          display: 'flex', alignItems: 'flex-start', gap: 10,
-          cursor: 'pointer',
-          userSelect: 'none',
-        }}>
-          <input
-            type="checkbox"
-            checked={pricing.sqftAdjustEnabled !== false}
-            onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
-            style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16, marginTop: 2 }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-              Adjust price by square footage
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
-              When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
-            </div>
-          </div>
-        </label>
+        <SqftAdjustRow
+          checked={pricing.sqftAdjustEnabled !== false}
+          onChange={(next) => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: next }))}
+        />
       )}
 
       {/* Quote shape — Range (default) vs Exact. Moved here from

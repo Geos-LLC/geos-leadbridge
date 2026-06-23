@@ -1332,42 +1332,6 @@ function CustomQAForm({
   );
 }
 
-// Read-only label for the pricing model badge in the unified Pricing
-// card header. Returns null when the shape is empty / unrecognized so
-// the badge isn't rendered.
-function pricingModelLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const p = parsed as Record<string, unknown>;
-    if (p.pricingModel === 'item_quantity') return 'Item table';
-    if (p.pricingModel === 'hourly') return 'Hourly';
-    if (p.pricingModel === 'flat_rate') return 'Flat rate';
-    if (Array.isArray(p.priceTable) || Array.isArray(p.cleaningTypes)) return 'Bed-bath grid';
-    return 'Custom';
-  } catch {
-    return null;
-  }
-}
-
-function ModelBadge({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex', alignItems: 'center',
-        padding: '4px 10px', borderRadius: 999,
-        background: 'var(--lb-ink-10, #f3f5fa)',
-        color: 'var(--lb-ink-3, #475569)',
-        fontSize: 11.5, fontWeight: 600, letterSpacing: '0.02em',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
 function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   const { primary, allIds } = useConnectedAccountsForPane();
   const scoped = !!profile;
@@ -1375,7 +1339,6 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   // Global tab: always use the cleaning form (the SavedAccount pricing
   // shape is cleaning-grid). Service tab: branch by the stored shape.
   const cleaning = profile ? isCleaningPricing(profile.pricingJson) : true;
-  const badge = profile ? pricingModelLabel(profile.pricingJson) : null;
 
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
@@ -1385,12 +1348,11 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
         icon={CircleDollarSign}
         iconTone="green"
         title="Pricing"
-        subtitle={
+        infoText={
           scoped
             ? `Pricing the AI uses to quote ${serviceName ?? 'this service'} leads. Specific to this service only.`
             : 'Edit the table the AI uses to quote leads. Applies to every connected account.'
         }
-        headerRight={badge ? <ModelBadge label={badge} /> : undefined}
         contentPad="16px 24px 24px"
       >
         {!primary ? (
