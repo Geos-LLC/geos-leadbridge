@@ -497,6 +497,16 @@ function MobileScopeAccordion({
   const [showArchived, setShowArchived] = useState(false);
   const archivedExpanded = showArchived || archivedScopeActive;
 
+  // Local "collapsed all" flag — decouples accordion-visible from URL
+  // scope so tapping an open card truly closes it (instead of falling
+  // back to opening Global). Selecting a different scope via onSelect
+  // resets this so the newly-selected card opens.
+  const [collapsed, setCollapsed] = useState(false);
+  const scopeKey = scope.kind === 'service' ? scope.profileId : 'global';
+  useEffect(() => {
+    setCollapsed(false);
+  }, [scopeKey]);
+
   const { primary, archived } = useMemo(() => {
     if (!profiles) return { primary: [] as ServiceProfile[], archived: [] as ServiceProfile[] };
     const rank = (p: ServiceProfile) =>
@@ -516,21 +526,34 @@ function MobileScopeAccordion({
     return { primary: primarySorted, archived: archivedSorted };
   }, [profiles]);
 
-  const globalOpen = scope.kind === 'global';
+  const matchesScope = (next: Scope) =>
+    (next.kind === 'global' && scope.kind === 'global') ||
+    (next.kind === 'service' && scope.kind === 'service' && next.profileId === scope.profileId);
 
-  // Tap an open card → collapse it by falling back to Global. Tap a
-  // closed card → select that scope. Global card stays as the natural
-  // resting state when everything else is collapsed.
-  const handleTap = (next: Scope, isOpen: boolean) => {
-    if (isOpen && next.kind !== 'global') {
-      onSelect({ kind: 'global' });
-    } else if (!isOpen) {
+  const globalOpen = scope.kind === 'global' && !collapsed;
+
+  // Tap a closed card → open it (re-selecting if needed). Tap the open
+  // card → collapse it, leave URL scope alone so no other card auto-
+  // opens in its place.
+  const handleTap = (next: Scope) => {
+    const isCurrentlyOpen = matchesScope(next) && !collapsed;
+    if (isCurrentlyOpen) {
+      setCollapsed(true);
+      return;
+    }
+    if (matchesScope(next)) {
+      // Same scope, was collapsed → just expand
+      setCollapsed(false);
+    } else {
+      // Different scope → URL change triggers the useEffect above which
+      // resets collapsed=false, so the new card mounts open.
       onSelect(next);
     }
   };
 
   const renderProfileCard = (p: ServiceProfile, badge: ScopeBadge) => {
-    const isOpen = scope.kind === 'service' && scope.profileId === p.id;
+    const isOpen =
+      scope.kind === 'service' && scope.profileId === p.id && !collapsed;
     const isActive = isOpen && !!activeProfile;
     return (
       <div
@@ -548,7 +571,7 @@ function MobileScopeAccordion({
           label={getServiceDisplayName(p)}
           badge={badge}
           isOpen={isOpen}
-          onClick={() => handleTap({ kind: 'service', profileId: p.id }, isOpen)}
+          onClick={() => handleTap({ kind: 'service', profileId: p.id })}
           subtitle={
             p.status === 'archived'
               ? 'Not used for AI replies.'
@@ -564,6 +587,7 @@ function MobileScopeAccordion({
               profile={activeProfile!}
               onSaved={onProfileRefresh}
               onDeleted={onProfileDeleted}
+              hideHeader
             />
           </div>
         )}
@@ -589,7 +613,7 @@ function MobileScopeAccordion({
           label="Global"
           badge="global"
           isOpen={globalOpen}
-          onClick={() => handleTap({ kind: 'global' }, globalOpen)}
+          onClick={() => handleTap({ kind: 'global' })}
           subtitle="Applies to all services. Tenant-wide tone and instructions."
         />
         {globalOpen && (
@@ -1832,10 +1856,15 @@ function ServicePlaybookEditor({
   profile,
   onSaved,
   onDeleted,
+  hideHeader,
 }: {
   profile: ServiceProfile;
   onSaved: () => void;
   onDeleted: () => void;
+  /** Skip the in-body "Service name + badges + applies-only-to…" header.
+   *  Set true from the mobile accordion, where the surrounding card
+   *  header already shows that information. */
+  hideHeader?: boolean;
 }) {
   // PR — service tab is structured-data-first. The three legacy service
   // HOW cards (Service business details / Service pricing instructions /
@@ -1951,7 +1980,7 @@ function ServicePlaybookEditor({
       {!error && saving && <StatusPill status="saving" />}
       {!error && !saving && savedAt && <StatusPill status="saved" />}
 
-      <ServiceHeader profile={profile} onRenamed={onSaved} />
+      {!hideHeader && <ServiceHeader profile={profile} onRenamed={onSaved} />}
       {isArchived && (
         <ArchivedWarningBanner
           onReactivate={handleReactivate}
