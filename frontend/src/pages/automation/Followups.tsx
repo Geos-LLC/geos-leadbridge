@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
@@ -835,29 +835,13 @@ function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
 }
 
 // Match the cadence stepper's container width to its parent. The
-// breakpoint at 560px flips from a horizontal flex stepper (connectors
-// stretch to fill available width) to a vertical list view tuned for
-// mobile — short rows with a connector spine on the left.
-function useContainerNarrow(ref: RefObject<HTMLElement | null>, breakpoint = 560) {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setNarrow(entry.contentRect.width < breakpoint);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref, breakpoint]);
-  return narrow;
-}
+// useContainerNarrow removed 2026-06-23 — the stepper is now always
+// horizontal with overflow-x:auto on narrow viewports, so the vertical
+// list branch is gone and the breakpoint flip is no longer needed.
 
 function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () => void }) {
   const nodes = nodesForPlan(plan);
   const stepperRef = useRef<HTMLDivElement>(null);
-  const narrow = useContainerNarrow(stepperRef);
   const [planInfoOpen, setPlanInfoOpen] = useState(false);
   return (
     <SectionCard padding="20px 24px 22px">
@@ -900,112 +884,75 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
         </button>
       </div>
 
-      {/* Cadence stepper — horizontal on wide containers, vertical list on narrow */}
+      {/* Cadence stepper — always horizontal; overflows to a swipeable
+          scroll row on narrow viewports. Drops the previous vertical-on-
+          narrow branch so the layout reads the same on every width. */}
       <div
         ref={stepperRef}
         style={{
           background: '#f8fafc',
           border: '1px solid var(--lb-line-soft)',
           borderRadius: 12,
-          padding: narrow ? '14px 14px 6px' : '20px 18px',
+          padding: '20px 18px',
           marginBottom: 14,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
         }}
       >
-        {narrow ? (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {nodes.map((node, i) => {
-              const isLast = i === nodes.length - 1;
-              const next = nodes[i + 1];
-              const dashedConnector = next && (next.n - node.n) > 1;
-              return (
-                <div key={`${node.n}-${i}`} style={{ display: 'flex', alignItems: 'stretch', gap: 12 }}>
-                  {/* Spine: circle + vertical connector */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                    <PlanCircle n={node.n} style={node.style} />
-                    {!isLast && (
-                      <div
-                        style={{
-                          flex: 1,
-                          width: 0,
-                          marginTop: 4,
-                          marginBottom: 4,
-                          borderLeft: dashedConnector
-                            ? '2px dashed var(--lb-ink-7)'
-                            : '2px solid var(--lb-ink-8)',
-                        }}
-                      />
-                    )}
-                  </div>
-                  {/* Label */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 0,
+          // On desktop the row stretches to fill the card. On mobile
+          // it uses its natural width and the parent scrolls.
+          minWidth: 'min-content',
+        }}>
+          {nodes.map((node, i) => {
+            const isLast = i === nodes.length - 1;
+            const next = nodes[i + 1];
+            // Dashed connector when the visualized gap skips intermediate
+            // steps (head-summary mode shows 1-5 then jumps to the last).
+            const dashedConnector = next && (next.n - node.n) > 1;
+            return (
+              <div
+                key={`${node.n}-${i}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  // First/last segment shouldn't grow — only the inner
+                  // node+connector pairs stretch on desktop. flex-shrink
+                  // 0 so the row keeps its natural width on mobile.
+                  flex: isLast ? '0 0 auto' : '1 0 auto',
+                }}
+              >
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: 6, flexShrink: 0, minWidth: 56,
+                }}>
+                  <PlanCircle n={node.n} style={node.style} />
                   <div style={{
-                    paddingTop: 4,
-                    paddingBottom: isLast ? 0 : 14,
-                    fontSize: 13.5,
-                    fontWeight: 700,
-                    color: 'var(--lb-ink-1)',
+                    fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
                     fontFamily: 'var(--lb-font-mono)',
                     letterSpacing: '-0.01em',
+                    whiteSpace: 'nowrap',
                   }}>
                     {node.time}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, width: '100%' }}>
-            {nodes.map((node, i) => {
-              const isLast = i === nodes.length - 1;
-              const next = nodes[i + 1];
-              // Dashed connector when the visualized gap skips intermediate
-              // steps (head-summary mode shows 1-5 then jumps to the last).
-              const dashedConnector = next && (next.n - node.n) > 1;
-              return (
-                <div
-                  key={`${node.n}-${i}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    // First/last segment shouldn't grow — only the inner
-                    // node+connector pairs stretch so labels stay centered
-                    // under their circles. The connector inside stretches.
-                    flex: isLast ? '0 0 auto' : '1 1 0',
-                    minWidth: 0,
-                  }}
-                >
-                  {/* Node + labels */}
-                  <div style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    gap: 6, flexShrink: 0, minWidth: 56,
-                  }}>
-                    <PlanCircle n={node.n} style={node.style} />
-                    <div style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
-                      fontFamily: 'var(--lb-font-mono)',
-                      letterSpacing: '-0.01em',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {node.time}
-                    </div>
-                  </div>
-                  {/* Connector line — flex-1 so the stepper fills the card */}
-                  {!isLast && (
-                    <div
-                      style={{
-                        flex: '1 1 auto',
-                        minWidth: 16,
-                        marginTop: 12,
-                        borderTop: dashedConnector
-                          ? '2px dashed var(--lb-ink-7)'
-                          : '2px solid var(--lb-ink-8)',
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                {!isLast && (
+                  <div
+                    style={{
+                      flex: '1 1 auto',
+                      minWidth: 32,
+                      marginTop: 12,
+                      borderTop: dashedConnector
+                        ? '2px dashed var(--lb-ink-7)'
+                        : '2px solid var(--lb-ink-8)',
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Stat strip — 3 cells, bordered + divided. Switched from a fixed
