@@ -826,16 +826,31 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
       {!(aiOn || !canUseAi) ? null : <>
 
-      {/* ───── 1. Conversation Goal — header on top, 4-card grid below ─── */}
-      <SectionCard padding="22px 24px 24px">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 18 }}>
-          <IconTile icon={Target} tone="violet" size="lg" />
+      {/* ───── 1. Conversation Goal — wizard chrome ────────────────────── */}
+      <div style={{
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 14,
+        boxShadow: 'var(--lb-shadow-sm)',
+        padding: 16,
+      }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <span style={{
+            width: 40, height: 40, borderRadius: 11,
+            background: '#e0e7ff', color: '#6366f1',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Target size={19} />
+          </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>Conversation Goal</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                Conversation Goal
+              </div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.5 }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
                 How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
@@ -849,6 +864,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             )}
           </div>
         </div>
+        <div style={{ marginTop: 16 }} />
         {/* Strategy grid — wizard's lb-strat-grid: 5-col on desktop,
             1-col on mobile (see index.css). Replaces the previous
             inline repeat(5,1fr) which had no mobile collapse and
@@ -872,7 +888,7 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             />
           ))}
         </div>
-      </SectionCard>
+      </div>
 
       {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
       <GoalSetupCard
