@@ -340,7 +340,17 @@ export class ServiceProfileService {
     const qualificationSchemaJson = bridgeServiceOptionsToQualification(
       template.serviceOptionsJson,
     );
-    const faqJson = bridgeCustomerAnswersToFaq(template.customerAnswersJson);
+    // For seeded code-side presets (HOUSE_CLEANING, UPHOLSTERY, GENERIC)
+    // the rich v1 faqJson — standardScope, deepScope, customQA — is
+    // written verbatim by the boot seeder. The v2 customerAnswersJson on
+    // those same rows is only a derived subset (customQA → entries[]).
+    // Bridging from the subset drops standardScope and deepScope.
+    // Prefer the v1 column when present; fall back to the bridge only
+    // for admin-generated templates that have no v1 faqJson.
+    const faqJson =
+      typeof template.faqJson === 'string' && template.faqJson.trim().length > 0
+        ? template.faqJson
+        : bridgeCustomerAnswersToFaq(template.customerAnswersJson);
     const pricingJson = bridgeAdminPricingToV1(template.pricingJson);
 
     this.logger.log(
