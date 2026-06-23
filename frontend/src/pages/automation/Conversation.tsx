@@ -1259,6 +1259,12 @@ function GoalSetupCard({
   bookingAvailability: BookingAvailability;
   toggleBookingDayPeriod: (day: BookingDayKey, period: 'morning' | 'afternoon') => void;
 }) {
+  // Local-only priceMode mirror — the canonical value is per-service on
+  // each ServicePricingForm's pricingJson.priceQuoteMode in the AI
+  // Playbook. Same wizard pattern: lets the operator preview Range vs
+  // Exact framing without competing for the per-service truth.
+  const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
+  const navigate = useNavigate();
   // Auto + Call Handoff goals have no per-goal setup card per design —
   // Auto routes to whichever sub-goal applies, Call Handoff behavior is
   // fully driven by the global rules. Booking renders an availability
@@ -1313,11 +1319,127 @@ function GoalSetupCard({
     );
   }
 
-  // Price goal no longer has a per-goal setup card. The range/exact
-  // picker that used to live here moved to AI Playbook → Pricing
-  // Guidance → ServicePricingForm on 2026-06-18 so it lives next to
-  // the price table the operator is reviewing and applies independent
-  // of the Conversation Goal.
+  // ─── Price goal: Pricing source link + Quote style picker (wizard parity) ──
+  // The per-service priceQuoteMode lives on each ServicePricingForm in
+  // AI Playbook (since 2026-06-18). The picker here mirrors the wizard's
+  // Price panel — interactive UI, but the canonical setting is per-service
+  // via the "Edit →" deep-link.
+  if (strategy === 'price') {
+    return (
+      <SectionCard padding="22px 24px 22px">
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Price goal setup
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.55 }}>
+            AI quotes from your service Pricing Guidance and answers price
+            questions as fast as possible. Booking-critical Qualify fields
+            are still collected first.
+          </div>
+        </div>
+
+        {/* Pricing source — deep-link to AI Playbook → Pricing */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 13px',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 10,
+        }}>
+          <span style={{
+            width: 32, height: 32, borderRadius: 9,
+            background: '#d1fae5', color: '#059669',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <CircleDollarSign size={16} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+              Pricing source
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+              Per-service price tables in the AI Playbook.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/settings?tab=ai-playbook&section=pricing')}
+            style={{
+              background: 'transparent', border: 0, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+              color: 'var(--lb-accent)',
+              flexShrink: 0,
+            }}
+          >
+            Edit →
+          </button>
+        </div>
+
+        {/* Quote style — Range / Exact. Per-service value lives on the
+            ServicePricingForm; this picker is a deep-link cue. */}
+        <div style={{
+          marginTop: 12,
+          padding: '12px 13px',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 10,
+        }}>
+          <div style={{
+            fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8,
+          }}>
+            Quote style
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['range', 'exact'] as const).map(opt => {
+              const active = priceMode === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setPriceMode(opt)}
+                  style={{
+                    flex: 1,
+                    padding: '9px 12px',
+                    background: active ? 'var(--lb-accent-tint)' : '#fff',
+                    border: '1.5px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+                    borderRadius: 9,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                    transition: 'background 120ms, border-color 120ms',
+                  }}
+                >
+                  <div style={{
+                    fontSize: 13, fontWeight: 700,
+                    color: active ? 'var(--lb-accent)' : 'var(--lb-ink-1)',
+                  }}>
+                    {opt === 'range' ? 'Range' : 'Exact'}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.4 }}>
+                    {opt === 'range' ? 'AI quotes "$200–$300"' : 'AI quotes "$250"'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-6)', marginTop: 8, lineHeight: 1.45 }}>
+            Per-service value is saved on each Pricing table in the AI Playbook —{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/settings?tab=ai-playbook&section=pricing')}
+              style={{
+                background: 'transparent', border: 0, padding: 0,
+                fontFamily: 'inherit', fontSize: 'inherit',
+                color: 'var(--lb-accent)', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              edit per service →
+            </button>
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
+
   if (strategy !== 'qualify') return null;
 
   // ─── Qualify goal: Required information ──────────────────────────────
