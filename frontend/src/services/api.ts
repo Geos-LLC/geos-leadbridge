@@ -933,6 +933,8 @@ export type AdminServiceTemplate = {
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
+  /** Cleaning-shape FAQ block. Null when no FAQ has been authored. */
+  faqJson: string | null;
   sourceJson: string | null;
   status: 'draft' | 'published' | 'archived';
   createdByUserId: string | null;
@@ -950,11 +952,13 @@ export type AdminGeneratedTemplate = {
   serviceOptionsJson: unknown;
   pricingJson: unknown;
   customerAnswersJson: unknown;
+  faqJson: unknown;
   sourceJson: {
     kind: 'admin_generated';
     provider: string;
     rawOptionsText: string;
     rawPricingText: string;
+    rawFaqText?: string;
     notes?: string;
     generatorVersion: number;
     generatedAt: string;
@@ -978,6 +982,7 @@ export const adminServiceTemplatesApi = {
     notes?: string | null;
     rawOptionsText: string;
     rawPricingText: string;
+    rawFaqText?: string;
   }): Promise<{ generated: AdminGeneratedTemplate }> => {
     const { data } = await api.post('/v1/admin/service-templates/generate', input);
     return data;
@@ -999,6 +1004,7 @@ export const adminServiceTemplatesApi = {
       serviceOptionsJson: unknown;
       pricingJson: unknown;
       customerAnswersJson: unknown;
+      faqJson: unknown;
     }>,
   ): Promise<{ template: AdminServiceTemplate }> => {
     const { data } = await api.patch(`/v1/admin/service-templates/${id}`, patch);

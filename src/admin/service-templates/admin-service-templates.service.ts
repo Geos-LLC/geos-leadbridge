@@ -79,6 +79,42 @@ function toJsonString(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
+/**
+ * Treat the FAQ block as "real" only when it has at least one populated
+ * field (scope text or a QA pair). Stops the create path from writing
+ * an empty `{customQA: []}` placeholder over the column when the admin
+ * skipped the FAQ paste box entirely.
+ */
+function hasFaqContent(value: unknown): boolean {
+  if (!value) return false;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '""' || trimmed === '{}') return false;
+    try {
+      return hasFaqContent(JSON.parse(trimmed));
+    } catch {
+      return trimmed.length > 0;
+    }
+  }
+  if (typeof value !== 'object') return false;
+  const o = value as Record<string, unknown>;
+  if (typeof o.standardScope === 'string' && o.standardScope.trim().length > 0) return true;
+  if (typeof o.deepScope === 'string' && o.deepScope.trim().length > 0) return true;
+  if (Array.isArray(o.customQA) && o.customQA.length > 0) return true;
+  // Any other populated key (insuredAndBonded, paymentMethods, etc.)
+  // counts as content too — admins may hand-author the richer cleaning
+  // FAQ shape in the JSON pane.
+  for (const k of Object.keys(o)) {
+    if (k === 'standardScope' || k === 'deepScope' || k === 'customQA') continue;
+    const v = o[k];
+    if (v == null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (typeof v === 'string' && v.trim().length === 0) continue;
+    return true;
+  }
+  return false;
+}
+
 /** Defensive parse — returns null when the blob isn't valid JSON. */
 function safeParse<T>(value: string | null | undefined): T | null {
   if (!value) return null;
@@ -191,6 +227,10 @@ export class AdminServiceTemplatesService implements OnApplicationBootstrap {
         serviceOptionsJson: toJsonString(input.serviceOptionsJson),
         pricingJson: toJsonString(input.pricingJson),
         customerAnswersJson: toJsonString(input.customerAnswersJson),
+        // FAQ block — written only when the admin actually populated
+        // it. Empty `{customQA: []}` from the generator stays null in
+        // the DB so the runtime preset reader can fall back cleanly.
+        faqJson: hasFaqContent(input.faqJson) ? toJsonString(input.faqJson) : null,
         sourceJson: input.sourceJson ? toJsonString(input.sourceJson) : null,
         status: 'draft',
         createdByUserId: adminUserId,

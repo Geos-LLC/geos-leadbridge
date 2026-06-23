@@ -141,6 +141,33 @@ export type CustomerAnswersJson = {
   entries: CustomerAnswerEntry[];
 };
 
+// ── FAQ (cleaning-shape runtime FAQ) ───────────────────────────────
+//
+// What the AI actually reads at runtime for cleaning tenants. Lives
+// alongside customerAnswersJson (which is v2 admin-builder shape).
+// The parser writes the three keys below — admins can hand-edit the
+// JSON to add any of the richer cleaning-FAQ fields (insuredAndBonded,
+// paymentMethods, etc.) that aren't easy to express as paste-text.
+
+export type FaqQA = {
+  question: string;
+  answer: string;
+};
+
+export type FaqJson = {
+  /** Free-text describing what's included in a regular / standard clean. */
+  standardScope?: string;
+  /** Free-text describing what's included in a deep clean. */
+  deepScope?: string;
+  /** Generic Q/A pairs surfaced to the AI prompt's FAQ block. */
+  customQA: FaqQA[];
+  /** Pass-through for richer cleaning-FAQ fields (insuredAndBonded,
+   *  paymentMethods, customerMustBeHome, sameCleanerForRecurring,
+   *  laborRatePerCleanerHour, crewSizeRule, etc.) that the parser
+   *  doesn't write but admins may hand-author in the JSON pane. */
+  [key: string]: unknown;
+};
+
 // ── Source attribution ─────────────────────────────────────────────
 
 /**
@@ -153,6 +180,8 @@ export type GeneratorSourceJson = {
   provider: string;
   rawOptionsText: string;
   rawPricingText: string;
+  /** Raw FAQ text the admin pasted, if any. Empty string when not used. */
+  rawFaqText?: string;
   /** Optional admin-authored notes pasted alongside the inputs. */
   notes?: string;
   /** Bumps when the deterministic parser changes shape. v1 is 1. */
@@ -178,6 +207,9 @@ export type GeneratedTemplate = {
   serviceOptionsJson: ServiceOptionsJson;
   pricingJson: AdminPricingJson;
   customerAnswersJson: CustomerAnswersJson;
+  /** Cleaning-shape FAQ block. Empty `{customQA: []}` when admin pasted
+   *  no FAQ text — the create endpoint then leaves the DB column null. */
+  faqJson: FaqJson;
   sourceJson: GeneratorSourceJson;
 };
 

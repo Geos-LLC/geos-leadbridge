@@ -36,11 +36,13 @@ type EditableTemplate = {
   notes: string;
   rawOptionsText: string;
   rawPricingText: string;
+  rawFaqText: string;
   // Generator output — stored as strings (pretty-printed JSON) so the
   // edit pane can show them verbatim. JSON.parse on save.
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
+  faqJson: string;
   keyOverride: string;
   description: string;
   sourceJson: AdminGeneratedTemplate['sourceJson'] | null;
@@ -54,9 +56,11 @@ const EMPTY: EditableTemplate = {
   notes: '',
   rawOptionsText: '',
   rawPricingText: '',
+  rawFaqText: '',
   serviceOptionsJson: '',
   pricingJson: '',
   customerAnswersJson: '',
+  faqJson: '',
   keyOverride: '',
   description: '',
   sourceJson: null,
@@ -178,6 +182,7 @@ export default function AdminServiceTemplates() {
         notes: draft.notes.trim() || null,
         rawOptionsText: draft.rawOptionsText,
         rawPricingText: draft.rawPricingText,
+        rawFaqText: draft.rawFaqText,
       });
       setDraft((d) => ({
         ...d,
@@ -186,6 +191,7 @@ export default function AdminServiceTemplates() {
         serviceOptionsJson: pretty(generated.serviceOptionsJson),
         pricingJson: pretty(generated.pricingJson),
         customerAnswersJson: pretty(generated.customerAnswersJson),
+        faqJson: pretty(generated.faqJson),
         sourceJson: generated.sourceJson,
       }));
       notify.success('Generated', 'Review the JSON below, then Save Draft or Publish.');
@@ -209,6 +215,11 @@ export default function AdminServiceTemplates() {
     const opts: unknown = safeParse(draft.serviceOptionsJson);
     const pricing: unknown = safeParse(draft.pricingJson);
     const answers: unknown = safeParse(draft.customerAnswersJson);
+    // FAQ block is optional. An empty textarea persists as `null` on
+    // create (no DB row written) and on patch (column cleared). The
+    // generator emits `{customQA: []}` when admin pastes nothing — the
+    // service layer's hasFaqContent() guard treats that as null too.
+    const faq: unknown = draft.faqJson.trim().length === 0 ? null : safeParse(draft.faqJson);
 
     // Defensive guard: refuse to save when the JSON textareas would
     // wipe the template down to empty groups/no prices. This protects
@@ -238,6 +249,7 @@ export default function AdminServiceTemplates() {
           serviceOptionsJson: opts,
           pricingJson: pricing,
           customerAnswersJson: answers,
+          faqJson: faq,
         });
         const ts = res?.template?.updatedAt;
         const stamp = ts
@@ -255,6 +267,7 @@ export default function AdminServiceTemplates() {
           serviceOptionsJson: opts,
           pricingJson: pricing,
           customerAnswersJson: answers,
+          faqJson: faq,
           sourceJson: draft.sourceJson!,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
@@ -324,9 +337,14 @@ export default function AdminServiceTemplates() {
       notes: '',
       rawOptionsText: '',
       rawPricingText: '',
+      rawFaqText: '',
       serviceOptionsJson: pretty(safeParse(template.serviceOptionsJson)),
       pricingJson: pretty(safeParse(template.pricingJson)),
       customerAnswersJson: pretty(safeParse(template.customerAnswersJson)),
+      // Existing seeded rows (e.g. HOUSE_CLEANING_PRESET) carry their
+      // standardScope/deepScope/customQA here — load verbatim so the
+      // admin can hand-edit without losing prior content.
+      faqJson: template.faqJson ? pretty(safeParse(template.faqJson)) : '',
       keyOverride: template.key,
       description: template.description ?? '',
       sourceJson: (template.sourceJson
@@ -442,6 +460,18 @@ export default function AdminServiceTemplates() {
           </Field>
         </div>
 
+        <Field label="FAQ (paste — what's included, Q&A pairs)">
+          <textarea
+            value={draft.rawFaqText}
+            onChange={(e) => setDraft({ ...draft, rawFaqText: e.target.value })}
+            rows={10}
+            style={textareaStyle}
+            placeholder={
+              'Regular Cleaning Includes:\n- Dust all surfaces\n- Vacuum and mop floors\n- Clean kitchen counters and bathroom sinks\n\nDeep Cleaning Includes:\n- Everything in regular cleaning\n- Inside oven\n- Inside fridge\n- Baseboards and door frames\n\nQ: Do you bring supplies?\nA: Yes, standard supplies and equipment are included.\n\nQ: Do you charge extra for pets?\nA: A small pet surcharge applies.'
+            }
+          />
+        </Field>
+
         <Field label="Notes (optional, stored in sourceJson)">
           <textarea
             value={draft.notes}
@@ -516,6 +546,16 @@ export default function AdminServiceTemplates() {
                 onChange={(e) => setDraft({ ...draft, customerAnswersJson: e.target.value })}
                 rows={10}
                 style={{ ...textareaStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+              />
+            </Field>
+
+            <Field label="FAQ JSON (cleaning-shape — standardScope / deepScope / customQA)">
+              <textarea
+                value={draft.faqJson}
+                onChange={(e) => setDraft({ ...draft, faqJson: e.target.value })}
+                rows={10}
+                style={{ ...textareaStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+                placeholder={'{\n  "standardScope": "...",\n  "deepScope": "...",\n  "customQA": []\n}'}
               />
             </Field>
 
