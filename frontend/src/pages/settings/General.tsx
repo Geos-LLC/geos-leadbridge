@@ -433,6 +433,7 @@ export function SettingsGeneral() {
         iconTone="violet"
         title="Business profile"
         subtitle="How your business shows up in customer replies and notifications."
+        infoText="Your business name appears in every AI-generated reply, owner SMS alert, and lead notification. Timezone controls when business hours / quiet hours boundaries are interpreted (so 6 PM means 6 PM in your time, not server time)."
         contentPad="8px 24px 24px"
       >
         <FieldRow label="Business name">
@@ -465,6 +466,7 @@ export function SettingsGeneral() {
         iconTone="violet"
         title="Business profile or website"
         subtitle="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source and pull info into your AI Playbook + FAQ."
+        infoText="We scrape the page once on save, extract structured facts (services, hours, service area, ratings, owner name, summary), and merge them into your AI Playbook so replies sound informed. Re-fetch any time you update the listing."
         contentPad="8px 24px 24px"
       >
         <FieldRow label="URL">
@@ -696,6 +698,7 @@ export function SettingsGeneral() {
         iconTone="blue"
         title="Business phone"
         subtitle="Your primary owner / company number. Used for owner alerts and auto-registered on connected Thumbtack businesses as an associate phone."
+        infoText="Owner SMS alerts (new lead, customer reply, handoff) get sent here. Thumbtack also receives this as your business's associate phone so they can call you directly. This is NOT the number customers see — that's your dedicated LeadBridge number, set up under Settings → Communication."
         contentPad="8px 24px 24px"
       >
         <FieldRow label="Phone number" noBorder>

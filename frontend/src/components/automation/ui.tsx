@@ -7,6 +7,7 @@ import {
   ExternalLink,
   ArrowLeft,
   AlertTriangle,
+  Info as InfoIcon,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -227,7 +228,7 @@ export function BigToggle({
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
-  mixed, mixedTooltip, compact,
+  mixed, mixedTooltip, compact, infoText,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -244,46 +245,76 @@ export function SettingCard({
       border, 14px title — matches the LeadBridge Wizard Bundle's
       compact card design. Settings pages keep the full-size default. */
   compact?: boolean;
+  /** Optional long-form explanation revealed via a click-to-toggle (i)
+      icon next to the subtitle. Matches the wizard's InfoDot/InfoTip
+      pattern. */
+  infoText?: ReactNode;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
     <div style={{
       background: 'white',
-      // Compact mode now mirrors the FinalDesign "Wizard Automation
-      // (standalone)" canonical: 1.5px border + 14px radius + soft
-      // shadow + larger icon tile + slightly bigger title. The full
-      // (non-compact) variant kept identical for Settings → Automation.
-      border: '1.5px solid var(--lb-line)',
-      borderRadius: 14,
-      boxShadow: 'var(--lb-shadow-sm, 0 1px 2px rgba(10,21,48,0.03))',
+      border: compact ? '1px solid var(--lb-line)' : '1.5px solid var(--lb-line)',
+      borderRadius: compact ? 12 : 14,
+      boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
       <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 14,
-        padding: compact ? '16px' : '20px 24px',
+        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
+        padding: compact ? '15px 16px' : '20px 24px',
       }}>
-        <IconTile icon={icon} tone={iconTone} size="lg" />
+        <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{
-              fontSize: compact ? 15 : 17,
+              fontSize: compact ? 14 : 17,
               fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.01em',
             }}>{title}</div>
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
-          {subtitle && <div style={{
-            fontSize: 12.5,
-            color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
-          }}>{subtitle}</div>}
+          {subtitle && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: compact ? 12 : 13.5,
+              color: 'var(--lb-ink-5)', marginTop: 2,
+            }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
+              {infoText && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
+                  aria-label="More info"
+                  aria-pressed={infoOpen}
+                  style={{
+                    background: 'transparent', border: 0, padding: 0,
+                    cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+                  }}
+                >
+                  <InfoIcon size={13} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+                </button>
+              )}
+            </div>
+          )}
+          {infoOpen && infoText && (
+            <div style={{
+              marginTop: 10,
+              padding: '10px 12px',
+              background: '#f8fafc',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 9,
+              fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            }}>
+              {infoText}
+            </div>
+          )}
         </div>
         {headerRight}
         {onToggle && (
           <div style={{
             display: 'flex', alignItems: 'center',
             gap: compact ? 0 : 10,
-            paddingTop: 2,
+            paddingTop: compact ? 0 : 2,
           }}>
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
             {!compact && (
