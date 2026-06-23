@@ -25,7 +25,7 @@ import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
   ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, CheckCircle2, MessageSquare, Trash2,
-  Archive, Plus,
+  Archive, Plus, Layers,
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, SettingCard, StatusPill } from '../../components/automation/ui';
@@ -113,6 +113,25 @@ function readScopeFromParams(search: URLSearchParams): Scope {
   return { kind: 'service', profileId: raw };
 }
 
+// Mobile detection — switches the scope picker from the desktop tab strip
+// to a stacked accordion at narrow widths. 768px matches Tailwind's `md`
+// breakpoint and the natural cutover where the tab buttons would otherwise
+// wrap onto multiple rows.
+function useIsMobile(maxWidth = 768): boolean {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia(query);
+    const handler = () => setIsMobile(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [query]);
+  return isMobile;
+}
+
 export function SettingsAiPlaybook() {
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = readScopeFromParams(searchParams);
@@ -194,6 +213,30 @@ export function SettingsAiPlaybook() {
     setSearchParams(sp, { replace: false });
   };
 
+  const isMobile = useIsMobile();
+  const onProfileDeleted = () => {
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('scope');
+    setSearchParams(sp, { replace: true });
+    setRefreshTok((t) => t + 1);
+  };
+
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <MobileScopeAccordion
+          profiles={profiles}
+          scope={scope}
+          activeProfile={activeProfile}
+          onSelect={selectScope}
+          onProfileRefresh={() => setRefreshTok((t) => t + 1)}
+          onProfileDeleted={onProfileDeleted}
+          error={profilesError}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <ScopeTabStrip
@@ -209,12 +252,7 @@ export function SettingsAiPlaybook() {
           key={activeProfile.id}
           profile={activeProfile}
           onSaved={() => setRefreshTok((t) => t + 1)}
-          onDeleted={() => {
-            const sp = new URLSearchParams(searchParams);
-            sp.delete('scope');
-            setSearchParams(sp, { replace: true });
-            setRefreshTok((t) => t + 1);
-          }}
+          onDeleted={onProfileDeleted}
         />
       )}
       {scope.kind === 'service' && profiles && !activeProfile && (
@@ -423,6 +461,268 @@ function ScopeStatusLine({ profile }: { profile: ServiceProfile }) {
       {isDraft && <>AI paused until activated.</>}
       {!isArchived && !isDraft && <>Applies only to {displayName}.</>}
     </div>
+  );
+}
+
+// ─── Mobile accordion ─────────────────────────────────────────────────────
+//
+// On narrow viewports the tab strip wraps onto multiple rows and the
+// active editor pushes far down the page. The accordion presents one
+// card per scope (Global + each Service), only one open at a time —
+// matches the wizard's per-service accordion pattern in ServicesStep.
+// The currently-open card mirrors `?scope=` so deep links and the
+// desktop tab state stay shared. Archived services live behind a
+// "Show N archived" toggle, same as the desktop strip.
+
+function MobileScopeAccordion({
+  profiles,
+  scope,
+  activeProfile,
+  onSelect,
+  onProfileRefresh,
+  onProfileDeleted,
+  error,
+}: {
+  profiles: ServiceProfile[] | null;
+  scope: Scope;
+  activeProfile: ServiceProfile | null;
+  onSelect: (next: Scope) => void;
+  onProfileRefresh: () => void;
+  onProfileDeleted: () => void;
+  error: string | null;
+}) {
+  const loading = profiles === null && !error;
+  const archivedScopeActive =
+    scope.kind === 'service' && activeProfile?.status === 'archived';
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedExpanded = showArchived || archivedScopeActive;
+
+  const { primary, archived } = useMemo(() => {
+    if (!profiles) return { primary: [] as ServiceProfile[], archived: [] as ServiceProfile[] };
+    const rank = (p: ServiceProfile) =>
+      p.status === 'active' ? (p.isDefault ? 0 : 1) : 2; // draft = 2
+    const primarySorted = profiles
+      .filter((p) => p.status !== 'archived')
+      .slice()
+      .sort((a, b) => {
+        const d = rank(a) - rank(b);
+        if (d !== 0) return d;
+        return getServiceDisplayName(a).localeCompare(getServiceDisplayName(b));
+      });
+    const archivedSorted = profiles
+      .filter((p) => p.status === 'archived')
+      .slice()
+      .sort((a, b) => getServiceDisplayName(a).localeCompare(getServiceDisplayName(b)));
+    return { primary: primarySorted, archived: archivedSorted };
+  }, [profiles]);
+
+  const globalOpen = scope.kind === 'global';
+
+  // Tap an open card → collapse it by falling back to Global. Tap a
+  // closed card → select that scope. Global card stays as the natural
+  // resting state when everything else is collapsed.
+  const handleTap = (next: Scope, isOpen: boolean) => {
+    if (isOpen && next.kind !== 'global') {
+      onSelect({ kind: 'global' });
+    } else if (!isOpen) {
+      onSelect(next);
+    }
+  };
+
+  const renderProfileCard = (p: ServiceProfile, badge: ScopeBadge) => {
+    const isOpen = scope.kind === 'service' && scope.profileId === p.id;
+    const isActive = isOpen && !!activeProfile;
+    return (
+      <div
+        key={p.id}
+        style={{
+          background: '#fff',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <AccordionHeader
+          icon={Layers}
+          iconTone="accent"
+          label={getServiceDisplayName(p)}
+          badge={badge}
+          isOpen={isOpen}
+          onClick={() => handleTap({ kind: 'service', profileId: p.id }, isOpen)}
+          subtitle={
+            p.status === 'archived'
+              ? 'Not used for AI replies.'
+              : p.status === 'draft'
+                ? 'AI paused until activated.'
+                : `Applies only to ${getServiceDisplayName(p)}.`
+          }
+        />
+        {isActive && (
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
+            <ServicePlaybookEditor
+              key={p.id}
+              profile={activeProfile!}
+              onSaved={onProfileRefresh}
+              onDeleted={onProfileDeleted}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Global card — always rendered first; open by default when no
+          service is selected. */}
+      <div
+        style={{
+          background: '#fff',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <AccordionHeader
+          icon={Globe}
+          iconTone="blue"
+          label="Global"
+          badge="global"
+          isOpen={globalOpen}
+          onClick={() => handleTap({ kind: 'global' }, globalOpen)}
+          subtitle="Applies to all services. Tenant-wide tone and instructions."
+        />
+        {globalOpen && (
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
+            <GlobalPlaybookEditor />
+          </div>
+        )}
+      </div>
+
+      {primary.map((p) =>
+        renderProfileCard(p, p.status === 'active' ? 'service' : 'draft'),
+      )}
+
+      {archivedExpanded && archived.map((p) => renderProfileCard(p, 'archived'))}
+
+      {archived.length > 0 && !archivedScopeActive && (
+        <button
+          type="button"
+          onClick={() => setShowArchived((v) => !v)}
+          style={{
+            alignSelf: 'flex-start',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '8px 12px', borderRadius: 8,
+            border: '1px dashed var(--lb-line)',
+            background: 'transparent',
+            color: 'var(--lb-ink-5)',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <Archive size={12} />
+          {showArchived ? 'Hide archived' : `Show ${archived.length} archived`}
+        </button>
+      )}
+
+      {loading && (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 12, color: 'var(--lb-ink-5)',
+          padding: '8px 4px',
+        }}>
+          <Loader2 size={12} className="animate-spin" /> Loading services…
+        </span>
+      )}
+
+      {scope.kind === 'service' && profiles && !activeProfile && (
+        <div style={{
+          padding: '12px 14px',
+          borderRadius: 10,
+          background: 'var(--lb-ink-tint, #f8fafc)',
+          fontSize: 13, color: 'var(--lb-ink-3)',
+        }}>
+          Service profile not found — switching to Global.
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: 12, color: '#b91c1c', padding: '4px 4px' }}>
+          Could not load services: {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccordionHeader({
+  icon: Icon,
+  iconTone,
+  label,
+  badge,
+  subtitle,
+  isOpen,
+  onClick,
+}: {
+  icon: LucideIcon;
+  iconTone: 'accent' | 'blue';
+  label: string;
+  badge: ScopeBadge;
+  subtitle?: string;
+  isOpen: boolean;
+  onClick: () => void;
+}) {
+  const tile = iconTone === 'blue'
+    ? { bg: '#dbeafe', fg: '#2563eb' }
+    : { bg: 'var(--lb-accent-tint, #eef2ff)', fg: 'var(--lb-accent, #2563eb)' };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={isOpen}
+      style={{
+        width: '100%',
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 14px',
+        background: 'transparent', border: 0,
+        cursor: 'pointer', textAlign: 'left',
+        fontFamily: 'inherit',
+      }}
+    >
+      <span style={{
+        width: 36, height: 36, borderRadius: 9,
+        background: tile.bg, color: tile.fg,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Icon size={18} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 14, fontWeight: 700,
+            color: 'var(--lb-ink-1)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            maxWidth: '100%',
+          }}>
+            {label}
+          </span>
+          <ScopeBadgePill badge={badge} />
+        </span>
+        {subtitle && (
+          <span style={{
+            display: 'block', fontSize: 12,
+            color: 'var(--lb-ink-5)', marginTop: 3,
+          }}>
+            {subtitle}
+          </span>
+        )}
+      </span>
+      {isOpen ? (
+        <ChevronUp size={16} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+      ) : (
+        <ChevronDown size={16} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+      )}
+    </button>
   );
 }
 
