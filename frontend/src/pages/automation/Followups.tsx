@@ -587,8 +587,13 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           (Phase 3 design refresh). When OFF, show the centered empty
           state instead of the controls. Writing OFF still goes through
           followUpMode='off' via the legacy onFollowUpsOn handler.
-          Gated on `hydrated` so the page doesn't flash the empty state
-          on first mount before settings load. */}
+          Render priority:
+            • !hydrated → show the content optimistically with defaults
+              (toggle values overwrite once the fetch resolves). Mirrors
+              what Respond/Conversation do so the page chrome appears
+              instantly instead of waiting for the API.
+            • hydrated && !followUpsOn → swap to the empty state.
+            • hydrated && followUpsOn → keep showing the content. */}
       {hydrated && !followUpsOn ? (
         <PlanOffEmptyState
           planLabel="Follow-ups"
@@ -596,9 +601,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onTurnOn={() => onFollowUpsOn(true)}
           description="Turn on to start following up with leads who stop responding."
         />
-      ) : null}
-
-      {!followUpsOn ? null : <>
+      ) : <>
 
       {/* Follow-up mode — spec 2g. Quiet hours is folded into the first
           row of this card as a Timing checkbox; the separate Quiet hours
@@ -723,6 +726,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     </div>
   );
 }
+
 
 // ─── Follow-up plan card ──────────────────────────────────────────────
 //
