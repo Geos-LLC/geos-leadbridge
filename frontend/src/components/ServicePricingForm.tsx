@@ -1,7 +1,7 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
   Plus, Trash2, Loader2, Info as InfoIcon,
-  Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
+  Repeat, PlusCircle, AlertCircle, BadgePercent,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
@@ -173,11 +173,6 @@ function QuoteShapePicker({
   return (
     <div
       style={{
-        padding: '12px 14px',
-        background: 'var(--lb-surface)',
-        border: '1.5px solid var(--lb-line)',
-        borderRadius: 14,
-        boxShadow: 'var(--lb-shadow-sm)',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
@@ -419,32 +414,28 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           to "disable" a service, the user enters 0 for every row of that
           column. See frontend/src/data/defaultPricing.ts. */}
 
-      {/* Square footage adjustment toggle — hidden in wizardMode */}
+      {/* Square footage adjustment toggle — flush within the parent
+          Pricing card (no inner card chrome). Hidden in wizardMode. */}
       {!wizardMode && (
         <label style={{
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-        padding: '12px 14px',
-        background: 'var(--lb-surface)',
-        border: '1.5px solid var(--lb-line)',
-        borderRadius: 14,
-        boxShadow: 'var(--lb-shadow-sm)',
-        cursor: 'pointer',
-        userSelect: 'none',
-      }}>
-        <input
-          type="checkbox"
-          checked={pricing.sqftAdjustEnabled !== false}
-          onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
-          style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16, marginTop: 2 }}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-            Adjust price by square footage
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}>
+          <input
+            type="checkbox"
+            checked={pricing.sqftAdjustEnabled !== false}
+            onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
+            style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16, marginTop: 2 }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+              Adjust price by square footage
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
+              When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
-            When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
-          </div>
-        </div>
         </label>
       )}
 
@@ -462,23 +453,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         />
       )}
 
-      {/* Price Table — both render paths use the SAME canonical
-          flex-based layout from FinalDesign "Pricing Table (standalone)"
-          (unified 2026-06-23, replacing the legacy horizontal-scroll
-          variant that diverged from the wizard). Two thin shells:
-            wizardMode = renders DIRECTLY (no CollapsibleSection) so the
-              accordion in ServicesStep is the only card edge.
-            full editor (AI Playbook) = wraps the same table in the
-              shared CollapsibleSection for collapse + title chrome,
-              keeping it consistent with the sibling sections
-              (Frequency / Add-ons / Surcharges / Discounts). */}
-      {wizardMode ? (
-        <>
-              {/* Flush table — no outer bordered card. The only card
-                  edge is the surrounding accordion's. Each row carries
-                  its own bottom border for row separation; the header
-                  row keeps a heavier bottom border to separate it
-                  visually from the body. */}
+      {/* Price Table — flush layout from FinalDesign "Pricing Table
+          (standalone)". The surrounding card (SettingCard in AI Playbook,
+          accordion in the wizard) is the only card edge — no inner
+          CollapsibleSection. Each row carries its own bottom border for
+          row separation; the header row keeps a heavier bottom border to
+          separate it visually from the body. */}
               <div>
                 {/* Header — column labels wrap to multiple lines if
                     needed so "Moving / Move-out" and "Airbnb / Turnover"
@@ -736,261 +716,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                   <Plus size={13} /> Add column
                 </button>
               </div>
-            </>
-          ) : (
-          <CollapsibleSection
-            title="Price table"
-            icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
-            rightBadge={<UnifiedSectionBadge>{`${pricing.priceTable?.length || 0} rows`}</UnifiedSectionBadge>}
-            open={!!expandedSections.priceTable}
-            onToggle={() => toggleSection('priceTable')}
-          >
-            <div style={{ padding: '12px 14px 14px' }}>
-              {/* Canonical flat table — same as wizardMode above. */}
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'stretch',
-                    borderBottom: '1px solid var(--lb-line, #e5e9f2)',
-                  }}
-                >
-                  <div
-                    style={{
-                      flex: 2,
-                      minWidth: 0,
-                      padding: '9px 4px 9px 0',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: 'var(--lb-ink-6, #8b94ab)',
-                    }}
-                  >
-                    Size band
-                  </div>
-                  {allTypes.map((t: any) => (
-                    <div
-                      key={t.key}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        padding: '9px 6px',
-                        textAlign: 'right',
-                        fontSize: 9.5,
-                        fontWeight: 700,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.02em',
-                        color: 'var(--lb-ink-6, #8b94ab)',
-                        lineHeight: 1.2,
-                        wordBreak: 'break-word',
-                      }}
-                      title={t.label}
-                    >
-                      {t.label}
-                    </div>
-                  ))}
-                  <div style={{ width: 24, flexShrink: 0 }} />
-                </div>
-
-                {pricing.priceTable?.map((row: any, i: number) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      borderBottom: '1px solid var(--lb-line-soft, #f3f5fa)',
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 2,
-                        minWidth: 0,
-                        padding: '8px 4px 8px 0',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 3,
-                          fontSize: 12.5,
-                          fontWeight: 600,
-                          color: 'var(--lb-ink-1, #0a1530)',
-                        }}
-                      >
-                        <input
-                          type="number"
-                          value={row.bed}
-                          min={1}
-                          max={10}
-                          onChange={(e) =>
-                            updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
-                          }
-                          style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
-                        />
-                        <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bed</span>
-                        <span style={INLINE_DOT}>·</span>
-                        <input
-                          type="number"
-                          value={row.bath}
-                          min={1}
-                          max={10}
-                          onChange={(e) =>
-                            updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
-                          }
-                          style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
-                        />
-                        <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bath</span>
-                      </div>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 2,
-                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                          fontSize: 10.5,
-                          color: 'var(--lb-ink-6, #8b94ab)',
-                        }}
-                      >
-                        <input
-                          type="number"
-                          value={row.sqftMin ?? ''}
-                          min={0}
-                          step={50}
-                          onChange={(e) =>
-                            updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
-                          }
-                          style={{ ...INLINE_SQFT_INPUT, width: 40 }}
-                        />
-                        <span>–</span>
-                        <input
-                          type="number"
-                          value={row.sqftMax ?? ''}
-                          min={0}
-                          step={50}
-                          onChange={(e) =>
-                            updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
-                          }
-                          style={{ ...INLINE_SQFT_INPUT, width: 40 }}
-                        />
-                        <span style={{ marginLeft: 2 }}>sqft</span>
-                      </div>
-                    </div>
-                    {allTypes.map((t: any) => (
-                      <div key={t.key} style={{ flex: 1, minWidth: 0, padding: '6px 5px' }}>
-                        <span style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'flex-end',
-                          gap: 2,
-                          padding: '7px 7px',
-                          border: '1px solid var(--lb-line, #e5e9f2)',
-                          borderRadius: 8,
-                          background: '#fff',
-                        }}>
-                          <span style={{
-                            fontSize: 10,
-                            color: 'var(--lb-ink-7, #b4bbcc)',
-                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                          }}>$</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={Number(row[t.key]) || 0}
-                            onChange={(e) => updatePriceCell(i, t.key, parseInt(e.target.value) || 0)}
-                            style={{
-                              width: '100%',
-                              minWidth: 0,
-                              padding: 0,
-                              border: 0,
-                              background: 'transparent',
-                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                              fontSize: 12.5,
-                              fontWeight: 700,
-                              color: 'var(--lb-ink-1, #0a1530)',
-                              textAlign: 'right',
-                              outline: 'none',
-                            }}
-                          />
-                        </span>
-                      </div>
-                    ))}
-                    <div style={{ width: 24, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => removePriceRow(i)}
-                        title="Remove row"
-                        style={{
-                          background: 'transparent',
-                          border: 0,
-                          padding: 4,
-                          cursor: 'pointer',
-                          color: 'var(--lb-ink-6, #8b94ab)',
-                          fontFamily: 'inherit',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ marginTop: 12, display: 'flex', gap: 9, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={addPriceRow}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 13px',
-                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
-                    borderRadius: 10,
-                    background: 'var(--lb-accent-tint, #e7efff)',
-                    color: 'var(--lb-accent, #2563eb)',
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  <Plus size={13} /> Add row
-                </button>
-                <button
-                  type="button"
-                  onClick={addCleaningType}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 13px',
-                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
-                    borderRadius: 10,
-                    background: 'var(--lb-accent-tint, #e7efff)',
-                    color: 'var(--lb-accent, #2563eb)',
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  <Plus size={13} /> Add column
-                </button>
-              </div>
-            </div>
-          </CollapsibleSection>
-          )}
 
       {/* Frequency Discounts — hidden in wizardMode (lives in full
           editor at Settings → AI Playbook after onboarding) */}
