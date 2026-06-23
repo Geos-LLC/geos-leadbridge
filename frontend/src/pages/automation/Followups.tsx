@@ -2,16 +2,16 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
-  RefreshCw, Clock, UserX, Info, Power,
+  Clock, Info, Power,
   Plus, Trash2, X, RotateCcw,
+  MessageSquare, PhoneCall,
 } from 'lucide-react';
 import {
   SectionCard,
-  Dropdown, IconTile, FooterBanner, StatusPill, MixedBadge,
+  IconTile, FooterBanner, StatusPill, MixedBadge,
   PlanOffEmptyState, TimingRow, MessageGenerationRow,
-  type IconTone,
 } from '../../components/automation/ui';
-import type { LucideIcon } from 'lucide-react';
+import { FollowupCard } from '../../components/automation/wizard-cards';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -49,6 +49,12 @@ type CachedFollowups = {
   resumeDelay: string;
   deferralDelay: string;
   hiredDelay: string;
+  // Per-rule enable flags — wizard surfaces these as a Toggle on each
+  // FollowupCard. Default true so existing tenants keep the legacy
+  // always-on behaviour.
+  resumeOn: boolean;
+  deferralOn: boolean;
+  hiredOn: boolean;
   plan: PlanStepData[];
   // Read-only on this page (edited in AutomationConversation). Cached so
   // the AI Strategy tile under Follow-up mode reflects the saved value.
@@ -134,6 +140,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [resumeDelay, setResumeDelay] = useState('12 hours');
   const [deferralDelay, setDeferralDelay] = useState('3 days');
   const [hiredDelay, setHiredDelay] = useState('3 weeks');
+  // Per-rule master toggles — match the wizard's three FollowupCard
+  // toggles. Default true to preserve legacy always-on behaviour for
+  // tenants whose saved JSON doesn't carry these keys yet.
+  const [resumeOn, setResumeOn] = useState(true);
+  const [deferralOn, setDeferralOn] = useState(true);
+  const [hiredOn, setHiredOn] = useState(true);
   // 11-step plan — editable. Persisted to followUpSettingsJson.followUpSteps
   // as [{ delay: '2 min', message: null }, ...]. Backend parseDelay()
   // converts each delay string into minutes for scheduling.
@@ -163,6 +175,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     | 'quietOn' | 'deliveryMode' | 'messageMode'
     | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
     | 'resumeDelay' | 'deferralDelay' | 'hiredDelay'
+    | 'resumeOn' | 'deferralOn' | 'hiredOn'
     | 'plan';
   const dirtyFieldsRef = useRef<Set<FollowupsField>>(new Set());
   // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
@@ -209,6 +222,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       resumeDelay: s?.fuReEnrollDelay || '12 hours',
       deferralDelay: s?.aiDeferralDelay || '3 days',
       hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
+      resumeOn: s?.fuReEnrollOnSilence ?? true,
+      deferralOn: s?.aiDeferralCheckIn ?? true,
+      hiredOn: s?.aiHiredCompetitorReengage ?? true,
       plan: hydratedPlan,
       followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
     };
@@ -231,6 +247,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(first.resumeDelay);
         setDeferralDelay(first.deferralDelay);
         setHiredDelay(first.hiredDelay);
+        setResumeOn(first.resumeOn);
+        setDeferralOn(first.deferralOn);
+        setHiredOn(first.hiredOn);
         setPlan(first.plan);
         setFollowUpStrategy(first.followUpStrategy);
       }
@@ -247,6 +266,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(cached.resumeDelay);
         setDeferralDelay(cached.deferralDelay);
         setHiredDelay(cached.hiredDelay);
+        setResumeOn(cached.resumeOn);
+        setDeferralOn(cached.deferralOn);
+        setHiredOn(cached.hiredOn);
         setPlan(cached.plan);
         setFollowUpStrategy(cached.followUpStrategy);
       }
@@ -283,6 +305,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             setResumeDelay(first.resumeDelay);
             setDeferralDelay(first.deferralDelay);
             setHiredDelay(first.hiredDelay);
+            setResumeOn(first.resumeOn);
+            setDeferralOn(first.deferralOn);
+            setHiredOn(first.hiredOn);
             setPlan(first.plan);
             setFollowUpStrategy(first.followUpStrategy);
           }
@@ -308,6 +333,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           setResumeDelay(parsed.resumeDelay);
           setDeferralDelay(parsed.deferralDelay);
           setHiredDelay(parsed.hiredDelay);
+          setResumeOn(parsed.resumeOn);
+          setDeferralOn(parsed.deferralOn);
+          setHiredOn(parsed.hiredOn);
           setPlan(parsed.plan);
           setFollowUpStrategy(parsed.followUpStrategy);
         }
@@ -346,6 +374,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     if (fields.has('resumeDelay'))      wizardPayload.fuReEnrollDelay        = resumeDelay;
     if (fields.has('deferralDelay'))    wizardPayload.aiDeferralDelay        = deferralDelay;
     if (fields.has('hiredDelay'))       wizardPayload.aiHiredCompetitorDelay = hiredDelay;
+    if (fields.has('resumeOn'))         wizardPayload.fuReEnrollOnSilence       = resumeOn;
+    if (fields.has('deferralOn'))       wizardPayload.aiDeferralCheckIn         = deferralOn;
+    if (fields.has('hiredOn'))          wizardPayload.aiHiredCompetitorReengage = hiredOn;
     if (fields.has('plan')) {
       // Persisted as the canonical `steps` array. Backend writes it to
       // followUpSettingsJson.followUpSteps; the scheduler prefers these
@@ -368,7 +399,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       if (!prev) {
         followupsCache.set(a.id, {
           followUpsOn, quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-          resumeDelay, deferralDelay, hiredDelay, plan, followUpStrategy,
+          resumeDelay, deferralDelay, hiredDelay, resumeOn, deferralOn, hiredOn, plan, followUpStrategy,
         });
         return;
       }
@@ -393,6 +424,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         resumeDelay:      fields.has('resumeDelay')      ? resumeDelay      : prev.resumeDelay,
         deferralDelay:    fields.has('deferralDelay')    ? deferralDelay    : prev.deferralDelay,
         hiredDelay:       fields.has('hiredDelay')       ? hiredDelay       : prev.hiredDelay,
+        resumeOn:         fields.has('resumeOn')         ? resumeOn         : prev.resumeOn,
+        deferralOn:       fields.has('deferralOn')       ? deferralOn       : prev.deferralOn,
+        hiredOn:          fields.has('hiredOn')          ? hiredOn          : prev.hiredOn,
         plan:             fields.has('plan')             ? plan             : prev.plan,
         // followUpStrategy is read-only on this page — preserve prev or
         // fall back to the displayed value (loaded from getSettings).
@@ -515,6 +549,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
   const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
   const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
+  const onResumeOn      = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeOn');      setResumeOn(v); };
+  const onDeferralOn    = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralOn');    setDeferralOn(v); };
+  const onHiredOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredOn');       setHiredOn(v); };
   // Single plan setter used by the cadence-edit modal. Replaces the whole
   // array because the modal commits a working draft on Save. Per-step
   // diffing isn't needed since the wizard payload serializes the entire
@@ -605,53 +642,67 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         onResetDefault={() => onPlan(DEFAULT_FOLLOWUP_PLAN)}
       />
 
-      {/* Rule cards — each is its own bordered card, matching the
-          wizard's FollowupCard chrome (icon + title + body + info dot,
-          then a divider + label + dropdown below). Replaced the
-          previous 3-column grid stacked inside one SectionCard so the
-          surface reads the same as Settings → Wizard → Follow-ups. */}
+      {/* Rule cards — wizard FollowupCard chrome (extracted to
+          components/automation/wizard-cards.tsx). Per-rule toggle is
+          wired to the same fuReEnrollOnSilence / aiDeferralCheckIn /
+          aiHiredCompetitorReengage flags the wizard writes. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <RuleCardRow
-          icon={RefreshCw}
-          iconTone="green"
-          title="Resume follow-ups after conversation"
-          body="When a customer replies and then goes silent again, start a new follow-up sequence."
-          fieldLabel="Wait before resuming"
-          fieldValue={resumeDelay}
-          onFieldChange={onResumeDelay}
-          fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
-          allowCustom
-          tip="How long to wait after your last message before starting follow-ups again."
-          mixed={mixedResume.mixed}
-          mixedTooltip={mixedResume.tooltip}
+        <FollowupCard
+          icon={RotateCcw}
+          iconBg="#ccfbf1"
+          iconColor="#0d9488"
+          title="Resume follow-ups after a conversation"
+          subtitle="When a customer replies and then goes silent again, start a new follow-up sequence."
+          info="Once a lead has replied at least once, follow-ups stop. If they then go quiet again, we wait the configured delay and restart the sequence so they don't drift away unattended."
+          enabled={resumeOn}
+          onToggle={onResumeOn}
+          pickerLabel="Send after"
+          pickerValue={resumeDelay}
+          pickerOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
+          onPickerChange={onResumeDelay}
+          extra={mixedResume.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedResume.tooltip}
+            </div>
+          ) : undefined}
         />
-        <RuleCardRow
-          icon={Clock}
-          iconTone="orange"
+        <FollowupCard
+          icon={MessageSquare}
+          iconBg="#ede9fe"
+          iconColor="#7c3aed"
           title="Check in after customer deferral"
-          body={"When customer says \"I'll get back to you\" / \"let me think\", silence the AI and schedule one nudge later. Cancels if they reply first."}
-          fieldLabel="Send check-in after"
-          fieldValue={deferralDelay}
-          onFieldChange={onDeferralDelay}
-          fieldOptions={['1 day', '2 days', '3 days', '1 week']}
-          allowCustom
-          tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
-          mixed={mixedDeferral.mixed}
-          mixedTooltip={mixedDeferral.tooltip}
+          subtitle={"When customer says \"I'll get back to you\", schedule one nudge later. Cancels if they reply first."}
+          info={'AI detects soft brush-offs ("let me think", "I\'ll get back to you", "checking with my partner") and schedules a single polite nudge after the configured delay. If they reply first, the nudge is canceled automatically.'}
+          enabled={deferralOn}
+          onToggle={onDeferralOn}
+          pickerLabel="Send check-in after"
+          pickerValue={deferralDelay}
+          pickerOptions={['1 day', '2 days', '3 days', '1 week']}
+          onPickerChange={onDeferralDelay}
+          extra={mixedDeferral.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedDeferral.tooltip}
+            </div>
+          ) : undefined}
         />
-        <RuleCardRow
-          icon={UserX}
-          iconTone="rose"
+        <FollowupCard
+          icon={PhoneCall}
+          iconBg="#ffedd5"
+          iconColor="#ea580c"
           title="Re-engage after customer hired competitor"
-          body="When customer says they hired someone else, send one polite check-in later. Captures the dissatisfied ones."
-          fieldLabel="Send re-engage after"
-          fieldValue={hiredDelay}
-          onFieldChange={onHiredDelay}
-          fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
-          allowCustom
-          tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
-          mixed={mixedHired.mixed}
-          mixedTooltip={mixedHired.tooltip}
+          subtitle="When customer says they hired someone else, send one polite check-in later."
+          info="When AI detects the lead picked another vendor, follow-ups stop immediately — but we wait the configured period and send one final friendly check-in. Catches the cases where the other vendor underdelivers and the lead is open to a do-over."
+          enabled={hiredOn}
+          onToggle={onHiredOn}
+          pickerLabel="Send re-engage after"
+          pickerValue={hiredDelay}
+          pickerOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
+          onPickerChange={onHiredDelay}
+          extra={mixedHired.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedHired.tooltip}
+            </div>
+          ) : undefined}
         />
       </div>
 
@@ -985,181 +1036,6 @@ function StatCell({ value, label, divided }: { value: ReactNode; label: string; 
       <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
         {label}
       </div>
-    </div>
-  );
-}
-
-const CUSTOM_SENTINEL = '__custom__';
-
-// Unit choices for the custom delay editor. Backend parseDelay() accepts
-// any of these via substring matching, so the labels here just need to
-// contain the unit keyword.
-const CUSTOM_UNIT_OPTIONS: { value: PlanUnit; label: string }[] = [
-  { value: 'min',   label: 'minutes' },
-  { value: 'hour',  label: 'hours' },
-  { value: 'day',   label: 'days' },
-  { value: 'week',  label: 'weeks' },
-  { value: 'month', label: 'months' },
-];
-
-function RuleCardRow({
-  icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tip,
-  mixed, mixedTooltip, allowCustom,
-}: {
-  icon: LucideIcon;
-  iconTone: IconTone;
-  title: string;
-  body: string;
-  fieldLabel: string;
-  fieldValue: string;
-  onFieldChange: (v: string) => void;
-  fieldOptions: string[];
-  /** Long-form explanation revealed via the info-dot popover (replaces
-   *  the previous right-column tip box; matches the wizard's
-   *  FollowupCard chrome). */
-  tip: string;
-  mixed?: boolean;
-  mixedTooltip?: string;
-  allowCustom?: boolean;
-}) {
-  const [infoOpen, setInfoOpen] = useState(false);
-  // A value is "custom" when it doesn't match any preset. Note the
-  // sentinel is never the saved value — selecting it just switches the
-  // row into custom-edit mode (and persists the parsed current step).
-  const isCustom = allowCustom && !fieldOptions.includes(fieldValue);
-  const dropdownOptions = allowCustom
-    ? [...fieldOptions, { value: CUSTOM_SENTINEL, label: 'Custom…' }]
-    : fieldOptions;
-  const dropdownValue = isCustom ? CUSTOM_SENTINEL : fieldValue;
-  const handleDropdownChange = (v: string) => {
-    if (v === CUSTOM_SENTINEL) {
-      const seed = parseDelayToStep(fieldValue);
-      onFieldChange(stepToDelayString(seed));
-      return;
-    }
-    onFieldChange(v);
-  };
-  const customStep = parseDelayToStep(fieldValue);
-  const onCustomVal = (n: number) => {
-    const safe = Math.max(1, Math.floor(Number.isFinite(n) ? n : 1));
-    onFieldChange(stepToDelayString({ val: safe, unit: customStep.unit }));
-  };
-  const onCustomUnit = (u: PlanUnit) => {
-    onFieldChange(stepToDelayString({ val: customStep.val, unit: u }));
-  };
-  return (
-    <div className="lb-rule" style={{
-      background: '#fff',
-      border: '1px solid var(--lb-line)',
-      borderRadius: 12,
-      padding: '15px 16px',
-      ...(mixed ? { background: '#fffbeb', borderLeft: '4px solid #f59e0b' } : {}),
-    }}>
-      {/* Header — icon + title + body + info dot. Mirrors the wizard's
-          FollowupCard. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-        <IconTile icon={icon} tone={iconTone} size="md" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            {title}
-          </div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            marginTop: 2,
-          }}>
-            <span style={{
-              flex: 1, minWidth: 0,
-              fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
-            }}>
-              {body}
-            </span>
-            <button
-              type="button"
-              onClick={() => setInfoOpen(o => !o)}
-              aria-label="More info"
-              aria-pressed={infoOpen}
-              style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                background: 'transparent', border: 0, padding: 0,
-                cursor: 'pointer', lineHeight: 0, flexShrink: 0,
-                color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
-              }}
-            >
-              <Info size={14} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Info popover — hidden by default, click the (i) to reveal. */}
-      {infoOpen && (
-        <div style={{
-          marginTop: 10,
-          padding: '10px 12px',
-          background: '#f8fafc',
-          border: '1px solid var(--lb-line-soft)',
-          borderRadius: 9,
-          fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
-        }}>
-          <Sparkles size={12} style={{ display: 'inline-block', marginRight: 6, color: 'var(--lb-accent)', verticalAlign: 'middle' }} />
-          {tip}
-        </div>
-      )}
-
-      {/* Divider + picker row */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        marginTop: 12, paddingTop: 12,
-        borderTop: '1px solid var(--lb-line-soft)',
-      }}>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-3)',
-          flex: 1, minWidth: 0,
-        }}>
-          {fieldLabel}
-          {mixed && <MixedBadge tooltip={mixedTooltip} />}
-        </span>
-        <Dropdown
-          value={dropdownValue}
-          onChange={handleDropdownChange}
-          options={dropdownOptions}
-        />
-      </div>
-
-      {/* Custom inline editor when "Custom…" is selected. */}
-      {isCustom && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
-          <input
-            type="number"
-            min={1}
-            value={customStep.val}
-            onChange={e => onCustomVal(parseInt(e.target.value, 10))}
-            style={{
-              width: 72, padding: '9px 10px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: 'white', color: 'var(--lb-ink-1)',
-              outline: 'none',
-            }}
-          />
-          <select
-            value={customStep.unit}
-            onChange={e => onCustomUnit(e.target.value as PlanUnit)}
-            style={{
-              flex: 1, padding: '9px 32px 9px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: 'white', color: 'var(--lb-ink-1)',
-              appearance: 'none', cursor: 'pointer', outline: 'none',
-            }}
-          >
-            {CUSTOM_UNIT_OPTIONS.map(u => (
-              <option key={u.value} value={u.value}>{u.label}</option>
-            ))}
-          </select>
-        </div>
-      )}
     </div>
   );
 }

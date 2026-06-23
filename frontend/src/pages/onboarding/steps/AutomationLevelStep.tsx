@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ComponentType } from 'react';
 import {
-  CalendarCheck, Check, ChevronDown, ChevronRight, CircleDollarSign, Clock,
+  CalendarCheck, ChevronDown, ChevronRight, CircleDollarSign, Clock,
   Info, MessageCircle, MessageSquare, MessageSquareText, Phone,
   PhoneCall, Plus, RotateCcw, Sparkles, UserCheck, Workflow, Loader2, X,
 } from 'lucide-react';
@@ -16,6 +16,7 @@ import { WizardStepActions } from '../WizardStepActions';
 // pre-2026-06-22 Follow-ups & AI section; canonical now uses custom
 // inline FollowupCard / ConversationGoalCard / AiResponseModeCard below.
 import { InfoDot, InfoTip } from '../../../components/InfoPopover';
+import { FirstReplyCard, Toggle, Checkbox } from '../../../components/automation/wizard-cards';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -762,137 +763,10 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
 
 // ─── Subcomponents ──────────────────────────────────────────────────────
 
-/**
- * First reply card chrome — canonical "Wizard Automation (standalone)"
- * 1.5px border, 14 radius, shadow, 40×40 colored icon tile, 15px/700
- * title. Header carries the master toggle; when on, an inline body
- * appears with a biz-hours checkbox and (optionally) children rendered
- * below it. Used 3× in First reply: Instant Reply (with Message
- * generation expand), Instant Text, Instant Call.
- */
-function FirstReplyCard({
-  icon: Icon, iconBg, iconColor, title, subtitle, info, enabled, onToggle,
-  bizLabel, bizChecked, onBizToggle, bizNoBorder, children,
-}: {
-  icon: ComponentType<{ size?: number; style?: CSSProperties }>;
-  iconBg: string;
-  iconColor: string;
-  title: string;
-  subtitle: string;
-  info: string;
-  enabled: boolean;
-  onToggle: (v: boolean) => void;
-  bizLabel: string;
-  bizChecked: boolean;
-  onBizToggle: (v: boolean) => void;
-  bizNoBorder?: boolean;
-  children?: ReactNode;
-}) {
-  const [infoOpen, setInfoOpen] = useState(false);
-  return (
-    <div style={{
-      background: '#fff',
-      border: '1.5px solid var(--lb-line)',
-      borderRadius: 14,
-      boxShadow: 'var(--lb-shadow-sm)',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: 16 }}>
-        <span style={{
-          width: 40, height: 40, borderRadius: 11,
-          background: iconBg, color: iconColor,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-        }}>
-          <Icon size={18} />
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            {title}
-          </div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
-          }}>
-            <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
-            <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
-          </div>
-          {infoOpen && <InfoTip>{info}</InfoTip>}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 2 }}>
-          <Toggle on={enabled} onChange={onToggle} />
-        </div>
-      </div>
-
-      {/* Body (only when enabled) */}
-      {enabled && (
-        <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '6px 16px 16px' }}>
-          {/* Biz hours checkbox row */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-            padding: '13px 0',
-            borderBottom: !bizNoBorder ? '1px solid var(--lb-line-soft)' : undefined,
-          }}>
-            <button
-              type="button"
-              onClick={() => onBizToggle(!bizChecked)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                background: 'transparent', border: 0, cursor: 'pointer',
-                fontFamily: 'inherit', textAlign: 'left', padding: 0,
-                flex: 1, minWidth: 0,
-              }}
-            >
-              <Checkbox checked={bizChecked} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                {bizLabel}
-              </span>
-            </button>
-          </div>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!on)}
-      aria-pressed={on}
-      style={{
-        width: 42, height: 24, borderRadius: 99,
-        background: on ? 'var(--lb-accent)' : 'var(--lb-line)',
-        position: 'relative', flexShrink: 0,
-        border: 0, padding: 0, cursor: 'pointer',
-        transition: 'background 140ms',
-      }}
-    >
-      <span style={{
-        position: 'absolute', top: 3, left: on ? 21 : 3,
-        width: 18, height: 18, borderRadius: 99, background: '#fff',
-        transition: 'left 140ms',
-      }} />
-    </button>
-  );
-}
-
-function Checkbox({ checked }: { checked: boolean }) {
-  return (
-    <span style={{
-      width: 18, height: 18, borderRadius: 5,
-      border: '1.5px solid ' + (checked ? 'var(--lb-accent)' : 'var(--lb-line)'),
-      background: checked ? 'var(--lb-accent)' : '#fff',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexShrink: 0, transition: 'background 120ms, border-color 120ms',
-    }}>
-      {checked && <Check size={11} style={{ color: '#fff', strokeWidth: 3 }} />}
-    </span>
-  );
-}
+// FirstReplyCard, Toggle, and Checkbox moved 2026-06-23 to
+// components/automation/wizard-cards.tsx so the production Automation
+// pages (Respond / Followups / Conversation) can render the same
+// chrome instead of the legacy SettingCard variants.
 
 /**
  * Informational card — small 36×36 tile + title + subtitle, no controls.
