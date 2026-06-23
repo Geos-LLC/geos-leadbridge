@@ -1,6 +1,6 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Loader2, ChevronDown,
+  Plus, Trash2, Loader2, ChevronDown, Info as InfoIcon,
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
@@ -107,6 +107,9 @@ const INLINE_UNIT_LABEL: CSSProperties = {
   letterSpacing: '0.06em',
   color: 'var(--lb-ink-5, #64748b)',
   textTransform: 'uppercase',
+  // Keep "BED" / "BATH" on a single token even when the parent column
+  // is narrow (AI Playbook scoped tab is ~80px tighter than wizard).
+  whiteSpace: 'nowrap',
 };
 
 const INLINE_DOT: CSSProperties = {
@@ -151,11 +154,12 @@ function QuoteShapePicker({
   mode: 'range' | 'exact';
   onChange: (next: 'range' | 'exact') => void;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   const optStyle = (selected: boolean): CSSProperties => ({
     flex: 1,
-    padding: '10px 14px',
+    padding: '7px 12px',
     border: selected ? '1.5px solid var(--lb-accent)' : '1.5px solid var(--lb-line)',
-    borderRadius: 12,
+    borderRadius: 10,
     background: selected ? 'var(--lb-accent-10, #eef2ff)' : 'var(--lb-surface)',
     cursor: 'pointer',
     fontFamily: 'inherit',
@@ -164,6 +168,7 @@ function QuoteShapePicker({
     color: selected ? 'var(--lb-accent)' : 'var(--lb-ink-2)',
     textAlign: 'left',
     transition: 'border-color 120ms, background 120ms',
+    lineHeight: 1.25,
   });
   return (
     <div
@@ -179,23 +184,46 @@ function QuoteShapePicker({
       }}
     >
       <div>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-          Quote shape
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)', flex: 1, minWidth: 0 }}>
+            Quote shape
+          </div>
+          <button
+            type="button"
+            onClick={() => setInfoOpen(o => !o)}
+            aria-label="More info"
+            aria-pressed={infoOpen}
+            style={{
+              background: 'transparent', border: 0, padding: 0,
+              cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+            }}
+          >
+            <InfoIcon size={13} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+          </button>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
-          How AI quotes the calculated price to the customer. Range uses the ±gap configured on this pricing JSON (default ±10%).
-        </div>
+        {infoOpen && (
+          <div style={{
+            marginTop: 8,
+            padding: '10px 12px',
+            background: '#f8fafc',
+            border: '1px solid var(--lb-line-soft)',
+            borderRadius: 9,
+            fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+          }}>
+            How AI quotes the calculated price to the customer. <strong style={{ color: 'var(--lb-ink-2)' }}>Range</strong> uses the ±gap configured on this pricing JSON (default ±10%) — better when scope is variable. <strong style={{ color: 'var(--lb-ink-2)' }}>Exact</strong> sends one number — only safe when the price table reflects a fixed scope you can stand behind.
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <button type="button" style={optStyle(mode === 'range')} onClick={() => onChange('range')}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Range</div>
-          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Range</div>
+          <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 1 }}>
             e.g. $270–$330
           </div>
         </button>
         <button type="button" style={optStyle(mode === 'exact')} onClick={() => onChange('exact')}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Exact</div>
-          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Exact</div>
+          <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 1 }}>
             single number from the table
           </div>
         </button>
@@ -555,6 +583,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             fontSize: 12.5,
                             fontWeight: 600,
                             color: 'var(--lb-ink-1, #0a1530)',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           <input
@@ -589,6 +618,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
                             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                             fontSize: 10.5,
                             color: 'var(--lb-ink-6, #8b94ab)',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           <input
