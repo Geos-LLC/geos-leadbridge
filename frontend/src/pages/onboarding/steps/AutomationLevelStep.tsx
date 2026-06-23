@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ComponentType, type ReactNode } from 'react';
 import {
-  ArrowRight, CalendarCheck, CircleDollarSign, Clock, ExternalLink, Info,
-  MessageCircle, MessageSquare, MessageSquareText, Moon, Phone, PhoneCall, RotateCcw,
-  Sparkles, UserCheck, Workflow, Loader2,
+  ArrowRight, CalendarCheck, Check, ChevronDown, ChevronRight, CircleDollarSign, Clock,
+  ExternalLink, Info, MessageCircle, MessageSquare, MessageSquareText, Moon, Phone,
+  PhoneCall, RotateCcw, Sparkles, UserCheck, Workflow, Loader2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
@@ -31,6 +31,7 @@ type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
 type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
 
 const DEFAULTS = {
+  firstMsgDuringBusinessHours: true,
   callDuringBusinessHours: true,
   followUpsApplyQuietHours: true,
   fuReEnrollOnSilence: true,
@@ -127,6 +128,12 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   const [instantReplyOn, setInstantReplyOn] = useState(true);
   const [instantTextOn, setInstantTextOn] = useState(true);
   const [instantCallOn, setInstantCallOn] = useState(true);
+  // Message-generation expand state for Instant Reply (AI vs Template).
+  const [respAdvOpen, setRespAdvOpen] = useState(false);
+  // AI vs Template for Instant Reply — maps to `useAi` on the new_lead
+  // automation rule. Default to AI to match the existing Respond.tsx
+  // defaults so a fresh account behaves the same after wizard save.
+  const [replyUseAi, setReplyUseAi] = useState(true);
   const navigate = useNavigate();
 
   const cascadeNote = savedAccounts.length > 1;
@@ -179,11 +186,15 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           r => r.triggerType === 'new_lead' && r.sendToCustomer,
         );
         const callSettings: any = (callRes as any)?.settings ?? null;
-        if (newLeadRule) setInstantReplyOn(!!newLeadRule.enabled);
+        if (newLeadRule) {
+          setInstantReplyOn(!!newLeadRule.enabled);
+          setReplyUseAi((newLeadRule as any).useAi !== false);
+        }
         if (customerTextRule) setInstantTextOn(!!customerTextRule.enabled);
         if (callSettings) setInstantCallOn(callSettings.enabled !== false);
         setOpts(prev => ({
           ...prev,
+          firstMsgDuringBusinessHours: hours?.firstMsgDuringBusinessHours ?? prev.firstMsgDuringBusinessHours,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
           followUpsApplyQuietHours: hours?.followUpsApplyQuietHours ?? prev.followUpsApplyQuietHours,
           fuReEnrollOnSilence: s.fuReEnrollOnSilence ?? prev.fuReEnrollOnSilence,
@@ -258,38 +269,34 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   async function saveFirstReplyToAccount(accountId: string): Promise<void> {
     const ops: Promise<unknown>[] = [];
 
-    // Account-hours fan-out. firstMsgDuringBusinessHours intentionally
-    // omitted — the wizard's "Only send during business hours" toggle
-    // for Instant Text is not surfaced (timing knobs live in the
-    // Timing & follow-ups section), so we don't want to overwrite
-    // whatever the account already has saved for it.
+    // Account-hours fan-out. The wizard's First reply section now
+    // exposes per-card biz-hours checkboxes (canonical 2026-06-22),
+    // so we write both firstMsg + call gates here. followUpsApplyQuietHours
+    // is the overnight gate driven by the Timing card further down.
     ops.push(
       usersApi.updateAccountHours(accountId, {
+        firstMsgDuringBusinessHours: opts.firstMsgDuringBusinessHours,
         callDuringBusinessHours: opts.callDuringBusinessHours,
         followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
       }).catch(() => undefined),
     );
 
-    // Instant Reply — automation rule. Patch only `enabled`; the
-    // useAi / replyType decision lives on Settings → Automation and
-    // must not be clobbered when the wizard isn't surfacing it.
+    // Instant Reply — automation rule. Patches enabled + useAi (Message
+    // generation: AI vs Template, surfaced as a radio inside the card).
     ops.push((async () => {
       const r = await automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] }));
       const nl = (r.rules || []).find(
         x => x.triggerType === 'new_lead' && (!x.delayMinutes || x.delayMinutes === 0),
       );
       if (nl) {
-        await automationApi.updateRule(nl.id, { enabled: instantReplyOn });
+        await automationApi.updateRule(nl.id, { enabled: instantReplyOn, useAi: replyUseAi } as any);
       } else {
-        // No new-lead rule yet — seed one with sane defaults
-        // (useAi=true matches Respond.tsx's defaults so a fresh
-        // account behaves the same after wizard vs after Settings).
         await automationApi.createRule({
           savedAccountId: accountId,
           name: 'Instant Reply',
           triggerType: 'new_lead',
           enabled: instantReplyOn,
-          useAi: true,
+          useAi: replyUseAi,
           delayMinutes: 0,
         } as any);
       }
@@ -414,42 +421,94 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           </h2>
         </div>
 
-        {/* First-reply cards carry ONLY the master toggle in the wizard.
-            Message generation (AI vs Template), Connection Mode, and
-            timing all live on Settings → Automation. The footer banner
-            below deep-links there. */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <SettingCard
-            compact
+        {/* First-reply cards — canonical 2026-06-22 chrome (1.5px border,
+            14 radius, shadow, 40×40 icon tile, 15px/700 title). Each
+            card opens an inline biz-hours checkbox; Instant Reply also
+            opens a Message generation expand with AI / Custom template
+            radio buttons. Master toggles plus useAi + firstMsg /
+            callDuringBusinessHours are saved per-account in
+            saveFirstReplyToAccount. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <FirstReplyCard
             icon={MessageSquareText}
-            iconTone="blue"
+            iconBg="#dbeafe"
+            iconColor="#2563eb"
             title="Instant Reply"
             subtitle="Send the first message automatically when a new lead arrives."
             enabled={instantReplyOn}
             onToggle={setInstantReplyOn}
-            contentPad="8px 24px 16px"
-          />
+            bizLabel="Only send during business hours"
+            bizChecked={opts.firstMsgDuringBusinessHours}
+            onBizToggle={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
+          >
+            {/* Message generation expandable — AI vs Custom template */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '13px 0 0' }}>
+              <button
+                type="button"
+                onClick={() => setRespAdvOpen(o => !o)}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%',
+                  background: 'transparent', border: 0, cursor: 'pointer',
+                  fontFamily: 'inherit', textAlign: 'left', padding: 0,
+                }}
+              >
+                {respAdvOpen
+                  ? <ChevronDown size={15} style={{ color: 'var(--lb-ink-5)', marginTop: 2, flexShrink: 0 }} />
+                  : <ChevronRight size={15} style={{ color: 'var(--lb-ink-5)', marginTop: 2, flexShrink: 0 }} />}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-2)' }}>
+                    Message generation
+                  </span>
+                  <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+                    How messages are composed.
+                  </span>
+                </span>
+              </button>
+              {respAdvOpen && (
+                <div style={{ marginTop: 13, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 13 }}>
+                  <RadioButton
+                    selected={replyUseAi}
+                    onClick={() => setReplyUseAi(true)}
+                    title="AI-generated"
+                    body="AI writes each message from your Business Info, FAQ, Pricing and AI Playbook."
+                  />
+                  <RadioButton
+                    selected={!replyUseAi}
+                    onClick={() => setReplyUseAi(false)}
+                    title="Custom template"
+                    body="Use your own pre-written messages instead of AI."
+                  />
+                </div>
+              )}
+            </div>
+          </FirstReplyCard>
 
-          <SettingCard
-            compact
+          <FirstReplyCard
             icon={MessageCircle}
-            iconTone="green"
+            iconBg="#d1fae5"
+            iconColor="#059669"
             title="Instant Text"
             subtitle="Automatically text the lead when a new lead arrives."
             enabled={instantTextOn}
             onToggle={setInstantTextOn}
-            contentPad="8px 24px 16px"
+            bizLabel="Only send during business hours"
+            bizChecked={opts.firstMsgDuringBusinessHours}
+            onBizToggle={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
+            bizNoBorder
           />
 
-          <SettingCard
-            compact
+          <FirstReplyCard
             icon={Phone}
-            iconTone="purple"
+            iconBg="#e0e7ff"
+            iconColor="#6366f1"
             title="Instant Call"
             subtitle="Call your team and connect to the lead right away."
             enabled={instantCallOn}
             onToggle={setInstantCallOn}
-            contentPad="8px 24px 16px"
+            bizLabel="Only call during business hours"
+            bizChecked={opts.callDuringBusinessHours}
+            onBizToggle={v => setOpts(o => ({ ...o, callDuringBusinessHours: v }))}
+            bizNoBorder
           />
         </div>
       </div>
@@ -687,6 +746,166 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
 }
 
 // ─── Subcomponents ──────────────────────────────────────────────────────
+
+/**
+ * First reply card chrome — canonical "Wizard Automation (standalone)"
+ * 1.5px border, 14 radius, shadow, 40×40 colored icon tile, 15px/700
+ * title. Header carries the master toggle; when on, an inline body
+ * appears with a biz-hours checkbox and (optionally) children rendered
+ * below it. Used 3× in First reply: Instant Reply (with Message
+ * generation expand), Instant Text, Instant Call.
+ */
+function FirstReplyCard({
+  icon: Icon, iconBg, iconColor, title, subtitle, enabled, onToggle,
+  bizLabel, bizChecked, onBizToggle, bizNoBorder, children,
+}: {
+  icon: ComponentType<{ size?: number; style?: CSSProperties }>;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  enabled: boolean;
+  onToggle: (v: boolean) => void;
+  bizLabel: string;
+  bizChecked: boolean;
+  onBizToggle: (v: boolean) => void;
+  bizNoBorder?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <div style={{
+      background: '#fff',
+      border: '1.5px solid var(--lb-line)',
+      borderRadius: 14,
+      boxShadow: 'var(--lb-shadow-sm)',
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: 16 }}>
+        <span style={{
+          width: 40, height: 40, borderRadius: 11,
+          background: iconBg, color: iconColor,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Icon size={18} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45 }}>
+            {subtitle}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 2 }}>
+          <Toggle on={enabled} onChange={onToggle} />
+        </div>
+      </div>
+
+      {/* Body (only when enabled) */}
+      {enabled && (
+        <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '6px 16px 16px' }}>
+          {/* Biz hours checkbox row */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            padding: '13px 0',
+            borderBottom: !bizNoBorder ? '1px solid var(--lb-line-soft)' : undefined,
+          }}>
+            <button
+              type="button"
+              onClick={() => onBizToggle(!bizChecked)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: 'transparent', border: 0, cursor: 'pointer',
+                fontFamily: 'inherit', textAlign: 'left', padding: 0,
+                flex: 1, minWidth: 0,
+              }}
+            >
+              <Checkbox checked={bizChecked} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                {bizLabel}
+              </span>
+            </button>
+          </div>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      aria-pressed={on}
+      style={{
+        width: 42, height: 24, borderRadius: 99,
+        background: on ? 'var(--lb-accent)' : 'var(--lb-line)',
+        position: 'relative', flexShrink: 0,
+        border: 0, padding: 0, cursor: 'pointer',
+        transition: 'background 140ms',
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 3, left: on ? 21 : 3,
+        width: 18, height: 18, borderRadius: 99, background: '#fff',
+        transition: 'left 140ms',
+      }} />
+    </button>
+  );
+}
+
+function Checkbox({ checked }: { checked: boolean }) {
+  return (
+    <span style={{
+      width: 18, height: 18, borderRadius: 5,
+      border: '1.5px solid ' + (checked ? 'var(--lb-accent)' : 'var(--lb-line)'),
+      background: checked ? 'var(--lb-accent)' : '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0, transition: 'background 120ms, border-color 120ms',
+    }}>
+      {checked && <Check size={11} style={{ color: '#fff', strokeWidth: 3 }} />}
+    </span>
+  );
+}
+
+function RadioButton({
+  selected, onClick, title, body,
+}: { selected: boolean; onClick: () => void; title: string; body: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        background: 'transparent', border: 0, cursor: 'pointer',
+        fontFamily: 'inherit', textAlign: 'left', padding: 0,
+      }}
+    >
+      <span style={{
+        width: 18, height: 18, borderRadius: 99,
+        border: '1.5px solid ' + (selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        background: selected ? 'var(--lb-accent)' : '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, marginTop: 1,
+        transition: 'background 120ms, border-color 120ms',
+      }}>
+        {selected && <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff' }} />}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          {title}
+        </span>
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5, marginTop: 3 }}>
+          {body}
+        </span>
+      </span>
+    </button>
+  );
+}
 
 /**
  * Horizontal pill row — used for the delay pickers (6-hour, 12-hour, …).
