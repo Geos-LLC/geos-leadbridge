@@ -159,6 +159,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
 
   const [loading, setLoading] = useState(false);
+  // True once we've populated state from either the cache or a fetch.
+  // Gates the master-off empty state so the page doesn't flash
+  // "Follow-ups is off" on first mount before settings load. Other
+  // Automation pages don't have this race because they don't switch
+  // their entire layout based on a single loaded boolean.
+  const [hydrated, setHydrated] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -253,6 +259,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setHiredOn(first.hiredOn);
         setPlan(first.plan);
         setFollowUpStrategy(first.followUpStrategy);
+        setHydrated(true);
       }
     } else {
       const cached = followupsCache.get(accountId);
@@ -272,6 +279,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setHiredOn(cached.hiredOn);
         setPlan(cached.plan);
         setFollowUpStrategy(cached.followUpStrategy);
+        setHydrated(true);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -313,7 +321,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             setFollowUpStrategy(first.followUpStrategy);
           }
         }
-      }).finally(() => { if (alive) setLoading(false); });
+      }).finally(() => { if (alive) { setLoading(false); setHydrated(true); } });
     } else {
       setLoading(true); setError(null);
       Promise.all([
@@ -342,7 +350,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         }
       })
       .catch(() => { /* non-fatal */ })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive) { setLoading(false); setHydrated(true); } });
     }
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -578,8 +586,10 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       {/* Master Follow-ups toggle moved to the page-shell PlanSwitcher
           (Phase 3 design refresh). When OFF, show the centered empty
           state instead of the controls. Writing OFF still goes through
-          followUpMode='off' via the legacy onFollowUpsOn handler. */}
-      {!followUpsOn ? (
+          followUpMode='off' via the legacy onFollowUpsOn handler.
+          Gated on `hydrated` so the page doesn't flash the empty state
+          on first mount before settings load. */}
+      {hydrated && !followUpsOn ? (
         <PlanOffEmptyState
           planLabel="Follow-ups"
           icon={Power}
