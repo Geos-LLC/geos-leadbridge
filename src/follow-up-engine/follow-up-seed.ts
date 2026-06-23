@@ -228,7 +228,9 @@ export const FOLLOW_UP_PRESETS = [
 
   // ==========================================
   // customer_deferred — fires when the customer says "I'll get back to
-  // you" / "let me think". Single-step, fixed message, default 3 days.
+  // you" / "let me think". Single-step, default 3 days. Default generation
+  // mode is AI (the literal fallback message lives in the editable
+  // Templates list as "Customer Deferral").
   // ==========================================
   {
     name: 'Customer Deferred Check-In',
@@ -243,7 +245,10 @@ export const FOLLOW_UP_PRESETS = [
           stepOrder: 0,
           delayMinutes: 4320, // 3 days
           objective: 'follow_up',
-          messageTemplate: "Hi {{lead.name}}, just circling back — did you get a chance to think it over? Happy to answer any questions or help get you on the schedule if you're ready.",
+          // messageTemplate intentionally omitted — engine takes the AI
+          // path when it is null/empty. Users who flip the section to
+          // Template mode get a starter from the "Customer Deferral"
+          // MessageTemplate seed (src/templates/templates.service.ts).
         },
       ],
     },
@@ -251,8 +256,9 @@ export const FOLLOW_UP_PRESETS = [
 
   // ==========================================
   // customer_hired_competitor — fires when the customer says they hired
-  // someone else. Single-step, fixed message, default 21 days.
-  // Supersedes the old Lead.reengageAt = now+75d behavior.
+  // someone else. Single-step, default 21 days. Default generation mode is
+  // AI (the literal fallback message lives in the editable Templates list
+  // as "Re-engage"). Supersedes the old Lead.reengageAt = now+75d behavior.
   // ==========================================
   {
     name: 'Customer Hired Competitor Re-Engage',
@@ -267,7 +273,9 @@ export const FOLLOW_UP_PRESETS = [
           stepOrder: 0,
           delayMinutes: 30240, // 21 days
           objective: 'follow_up',
-          messageTemplate: "Hi {{lead.name}}, hope your cleaning went well! If anything didn't go the way you hoped, we'd be happy to help next time. No pressure either way.",
+          // messageTemplate intentionally omitted — see customer_deferred
+          // note above. Fallback literal lives in the "Re-engage"
+          // MessageTemplate seed.
         },
       ],
     },
@@ -276,9 +284,8 @@ export const FOLLOW_UP_PRESETS = [
 
 /**
  * Customer-reply trigger states — auto-fired by phrase detection in
- * automation.service.ts (deferral / hired-competitor). Use literal-message
- * mode + auto_send because the message text is fixed and we want to fire
- * without admin review.
+ * automation.service.ts (deferral / hired-competitor). Use auto_send
+ * because we want to fire without admin review.
  */
 const CUSTOMER_REPLY_TRIGGER_STATES = ['customer_deferred', 'customer_hired_competitor'] as const;
 
@@ -286,8 +293,13 @@ function modeForTriggerState(triggerState: string): 'suggest' | 'auto_send' {
   return (CUSTOMER_REPLY_TRIGGER_STATES as readonly string[]).includes(triggerState) ? 'auto_send' : 'suggest';
 }
 
-function generationModeForTriggerState(triggerState: string): 'ai' | 'template' {
-  return (CUSTOMER_REPLY_TRIGGER_STATES as readonly string[]).includes(triggerState) ? 'template' : 'ai';
+function generationModeForTriggerState(_triggerState: string): 'ai' | 'template' {
+  // All preset trigger states default to AI generation. Users can flip
+  // an individual sequence to template mode from the UI; the propagate
+  // path in follow-up-engine.controller writes generationMode='template'
+  // + a literal messageTemplate (sourced from the user's edit or the
+  // matching MessageTemplate seed) when they do.
+  return 'ai';
 }
 
 /**

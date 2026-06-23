@@ -85,20 +85,91 @@ export class FollowUpGeneratorService {
    * Generate a follow-up message for a step.
    *
    * Flow: thread context → suggestStrategy() → strategy prompt → objective flavor → message
+   *
+   * Decision tree:
+   *   1. step.messageTemplate set       → use it (inline literal wins always)
+   *   2. generationMode === 'template'  → look up the user's named
+   *      MessageTemplate (mapped from triggerState — e.g.
+   *      "Customer Deferral" / "Re-engage" / "Follow Up") and use its
+   *      content. Falls through to AI only if no named template exists.
+   *   3. otherwise                      → AI generation
    */
   async generateMessage(
     step: SequenceStep,
     conversationId: string,
     generationMode: string,
     promptTemplateId?: string | null,
+    triggerState?: string | null,
   ): Promise<GeneratedFollowUp> {
-    // If step has a user-assigned template message, always use it (regardless of mode)
+    // 1. Inline literal on the step always wins.
     if (step.messageTemplate) {
       return this.generateFromTemplate(step, conversationId);
     }
 
-    // AI mode: generate contextual message
+    // 2. Template mode without an inline literal → resolve the user's
+    //    named MessageTemplate by triggerState (Customer Deferral /
+    //    Re-engage / Follow Up). Lets users edit the body in the
+    //    Templates page instead of copy-pasting it into the sequence.
+    if (generationMode === 'template' && triggerState) {
+      const namedBody = await this.lookupNamedMessageTemplate(conversationId, triggerState);
+      if (namedBody) {
+        return this.generateFromTemplate(
+          { ...step, messageTemplate: namedBody },
+          conversationId,
+        );
+      }
+    }
+
+    // 3. AI mode (default).
     return this.generateFromAI(step, conversationId, promptTemplateId);
+  }
+
+  /**
+   * Map a sequence's triggerState to the MessageTemplate seed name that
+   * holds the user-editable literal for that section. Names match the
+   * Templates page seed list in `src/templates/templates.service.ts`.
+   * Returns null for trigger states without a named template (caller
+   * falls back to AI).
+   */
+  private static templateNameForTriggerState(triggerState: string): string | null {
+    switch (triggerState) {
+      case 'customer_deferred':            return 'Customer Deferral';
+      case 'customer_hired_competitor':    return 'Re-engage';
+      case 'no_reply_after_initial':
+      case 'no_reply_after_question':
+      case 'no_reply_after_price':
+      case 'no_reply_after_conversion':
+        return 'Follow Up';
+      default:                             return null;
+    }
+  }
+
+  /**
+   * Resolve the user-editable MessageTemplate body for this sequence's
+   * triggerState. Returns null when the user has deleted the seed row,
+   * the lead has no tenant context, or the trigger state has no mapping.
+   */
+  private async lookupNamedMessageTemplate(
+    conversationId: string,
+    triggerState: string,
+  ): Promise<string | null> {
+    const name = FollowUpGeneratorService.templateNameForTriggerState(triggerState);
+    if (!name) return null;
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { userId: true },
+      });
+      if (!lead?.userId) return null;
+      const tmpl = await this.prisma.messageTemplate.findFirst({
+        where: { userId: lead.userId, name, type: 'message' },
+        select: { content: true },
+      });
+      const content = tmpl?.content ?? null;
+      return content && content.trim().length > 0 ? content : null;
+    } catch {
+      return null;
+    }
   }
 
   private async generateFromTemplate(step: SequenceStep, conversationId?: string): Promise<GeneratedFollowUp> {

@@ -350,6 +350,7 @@ export class FollowUpEngineController {
       conversationId,
       enrollment.sequenceTemplate.generationMode,
       enrollment.sequenceTemplate.promptTemplateId,
+      enrollment.sequenceTemplate.triggerState,
     );
 
     return {
