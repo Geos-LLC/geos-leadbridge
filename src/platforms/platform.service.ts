@@ -1271,7 +1271,22 @@ export class PlatformService {
         });
       })
       .catch((err) => {
-        this.logger.warn(`[saveAccount] Sigcore auto-provision / settings seed failed for ${savedAccount.id}: ${err.message}`);
+        // Escalate from warn → error and capture to SystemErrorLog so the
+        // failure is visible in the admin error feed, not silently swallowed
+        // in Loki. Pre-2026-06-23, a swallowed Sigcore provision left tenants
+        // with a SavedAccount but no NotificationSettings — they looked
+        // "connected" yet never received owner SMS (Natasha 2026-06-18).
+        this.logger.error(`[saveAccount] Sigcore auto-provision / settings seed failed for ${savedAccount.id}: ${err.message}`);
+        this.monitoring.captureError({
+          category: 'other',
+          code: 'sigcore_provision_failed',
+          platform,
+          severity: 'error',
+          message: `Sigcore auto-provision / NS seed failed: ${err.message}`,
+          userId,
+          accountId: savedAccount.id,
+          accountName: businessName,
+        }).catch((e) => this.logger.warn(`[saveAccount] captureError failed: ${e.message}`));
       });
 
     // Initialize/upgrade adaptive trial based on connected platforms
@@ -1364,6 +1379,15 @@ export class PlatformService {
     });
 
     this.logger.log(`[autoProvisionSigcore] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
+
+    // Register the inbound-SMS webhook subscription on Sigcore immediately so
+    // customer SMS replies thread back into LeadBridge without waiting for the
+    // tenant to open the Settings UI (where the lazy auto-heal lives). Failure
+    // is non-fatal — the lazy heal at notifications.service.ts:266 still fires
+    // on next getSettings() call.
+    this.notificationsService.ensureInboundSmsWebhook(savedAccountId).catch(e => {
+      this.logger.warn(`[autoProvisionSigcore] Inbound SMS webhook registration deferred: ${e.message}`);
+    });
 
     // Register in Sigcore business identity model (non-blocking, idempotent)
     // This creates a business + product_workspace + links phone assets
