@@ -55,6 +55,13 @@ export type ResolvedProfile =
       effectivePricingJson: string | null;
       effectiveFaqJson: string | null;
       effectiveAiInstructionsJson: string | null;
+      // Profile-side qualification schema. Drives the QUALIFICATION REQUIRED
+      // FIELDS block when the SavedAccount has no qualificationV2 saved —
+      // fixes the "bot asks square footage for an upholstery lead" class of
+      // bug (Crystal Clear Care 2026-06-23). Surfaces both the schema's
+      // `questions[]` and `aiInstructionsJson.serviceRules.requiredDetails`
+      // through the prompt-block builder.
+      effectiveQualificationSchemaJson: string | null;
       matchedBy: 'serviceGroup';
     }
   | {
