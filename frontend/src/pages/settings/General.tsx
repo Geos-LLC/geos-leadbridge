@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building, Globe, Info, Loader2, Phone, Layers, Plus, Edit3,
-  CheckCircle2, Archive, ChevronDown, ChevronUp,
-  Trash2, AlertTriangle,
+  CheckCircle2, Archive,
+  Trash2, AlertTriangle, Link2,
 } from 'lucide-react';
 import {
   SettingCard, FieldRow, Dropdown, FooterBanner,
@@ -12,7 +12,6 @@ import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 import { usersApi, authApi, serviceProfilesApi, type ServiceProfile } from '../../services/api';
 import { notify } from '../../store/notificationStore';
-import { WebsitePreviewCard } from '../../components/WebsitePreviewCard';
 import { ManualBusinessInfoModal } from '../../components/ManualBusinessInfoModal';
 import { AddServiceModal } from './Services';
 
@@ -461,238 +460,214 @@ export function SettingsGeneral() {
         </FieldRow>
       </SettingCard>
 
-      <SettingCard
-        icon={Globe}
-        iconTone="violet"
-        title="Business profile or website"
-        infoText="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source, scrape it once on save, and pull structured facts (services, hours, service area, ratings, owner name, summary) into your AI Playbook + FAQ. Re-fetch any time you update the listing."
-        contentPad="8px 24px 24px"
-      >
-        {/* URL field spans the full card width — same layout as the
-            wizard's Business info card. The "URL" left-column label
-            (via FieldRow) was dropped 2026-06-23 so the input + Fetch
-            button get the whole row. */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap', paddingTop: 8 }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <SettingsInput
-              value={website}
-              onChange={(next) => {
-                setWebsite(next);
-                // Edit invalidates the platform badge + the last-apply
-                // confirmation card. Without this the badge says
-                // THUMBTACK while the input shows a bookingkoala URL
-                // (reported 2026-06-17 — stale state from a prior fetch).
-                if (detectedPlatform && next.trim() !== website.trim()) {
-                  setDetectedPlatform(null);
-                }
-                if (lastApply && next.trim() !== lastApply.url) {
-                  setLastApply(null);
-                }
-                if (verifyError) setVerifyError(null);
-              }}
-              placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
-            />
-          </div>
-          {detectedPlatform && (
-            <span style={{
-              fontSize: 11, fontWeight: 700,
-              padding: '4px 10px', borderRadius: 999,
-              background: 'var(--lb-accent-tint, #dbeafe)',
-              color: 'var(--lb-accent, #2563eb)',
-              textTransform: 'uppercase', letterSpacing: 0.02,
-            }}>
-              {detectedPlatform === 'thumbtack' ? 'Thumbtack' : detectedPlatform === 'yelp' ? 'Yelp' : 'Website'}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => void applyBusinessUrl()}
-            disabled={verifying}
-            style={{
-              padding: '9px 16px',
-              fontSize: 13, fontWeight: 700,
-              color: 'white',
-              background: 'var(--lb-accent)',
-              border: 0, borderRadius: 8,
-              cursor: verifying ? 'not-allowed' : 'pointer',
-              opacity: verifying ? 0.6 : 1,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
-            {verifying ? 'Fetching…' : 'Fetch & save'}
-          </button>
-          {/* "Apply to AI Playbook" button removed 2026-06-17 — Fetch &
-              save already runs applyPlaybookSeedToAccounts +
-              applyFaqFromWebsiteSeed for ALL three branches (website,
-              TT, Yelp), so the second button was a confusing no-op
-              that just re-ran what already happened. */}
-        </div>
-        {verifyError && (
-          <div style={{
-            margin: '0 24px 12px', padding: '8px 12px', borderRadius: 8,
-            background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
-            fontSize: 12, fontWeight: 600,
-          }}>{verifyError}</div>
-        )}
-        {/* Persistent fallback link — for tenants whose site can't be
-            scraped (Yelp/BookingKoala/Cloudflare) or who'd just rather
-            type the info than guess at a URL. The same modal auto-opens
-            on a failed apply, but having it surfaced here means a tenant
-            who already KNOWS their site won't scrape doesn't have to fail
-            once to find this path. */}
-        <div style={{ margin: '0 24px 14px', fontSize: 12, color: 'var(--lb-ink-5)' }}>
-          Site not scraping?{' '}
-          <button
-            type="button"
-            onClick={() => { setFallbackUrl(website.trim() || null); setFallbackOpen(true); }}
-            style={{
-              border: 0, background: 'transparent', padding: 0,
-              color: 'var(--lb-link, #2563eb)', cursor: 'pointer',
-              fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-              textDecoration: 'underline',
-            }}
-          >
-            Paste your business info instead
-          </button>
-        </div>
-        {detectedPlatform === 'website' && (user?.website || websiteMetadata) && (
-          <div style={{ padding: '0 24px 12px' }}>
-            <WebsitePreviewCard
-              url={user?.website || website || null}
-              metadata={websiteMetadata}
-              tone="settings"
-            />
-          </div>
-        )}
-
-        {/* TT / Yelp confirmation card — mirrors the wizard's emerald
-            card. WebsitePreviewCard above is hard-gated on the website
-            path because the underlying data only exists for that path.
-            Without this card a TT/Yelp fetch shows zero visible
-            confirmation (tenant reported 2026-06-17: "no info is showed"
-            after a successful TT fetch). */}
-        {lastApply && lastApply.platform !== 'website' && lastApply.url.trim() === website.trim() && (
-          <div style={{ padding: '0 24px 12px' }}>
+      {(() => {
+        // Wizard-style "Business info" card chrome (2026-06-23). Two states:
+        //   savedAndVerified → URL display tile + Re-scan + summary +
+        //     Read more, with a Verified pill in the header.
+        //   unsaved/edited → full-width input + Fetch & save button.
+        // The wizard's BusinessWebsiteStep carries the same pattern;
+        // both UIs now read as a single card with a single content block.
+        const savedMetadata = (user as any)?.websiteMetadataJson ?? null;
+        const trimmedSite = website.trim();
+        const savedAndVerified =
+          (!!user?.website && !!savedMetadata && user.website.trim() === trimmedSite && trimmedSite.length > 0)
+          || (!!lastApply && lastApply.url.trim() === trimmedSite && trimmedSite.length > 0);
+        const displayUrl = lastApply?.url || user?.website || website || '';
+        const summary = lastApply?.summary || (websiteMetadata as any)?.summary || null;
+        const verifiedPill = savedAndVerified ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 10, fontWeight: 700,
+            fontFamily: 'var(--lb-font-mono)',
+            textTransform: 'uppercase', letterSpacing: '.04em',
+            padding: '4px 9px', borderRadius: 99,
+            background: '#dcfce7', color: '#15803d',
+            flexShrink: 0,
+          }}>
+            <CheckCircle2 size={11} />
+            Verified
+          </span>
+        ) : undefined;
+        return (
+        <SettingCard
+          icon={Globe}
+          iconTone="violet"
+          title="Business info"
+          infoText="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source, scrape it once on save, and pull structured facts (services, hours, service area, ratings, owner name, summary) into your AI Playbook + FAQ. Re-fetch any time you update the listing."
+          headerRight={verifiedPill}
+          contentPad="8px 24px 24px"
+        >
+        {savedAndVerified ? (
+          <>
+            {/* URL display tile + Re-scan / Change — saved & verified state. */}
             <div style={{
-              display: 'flex', alignItems: 'flex-start', gap: 10,
-              padding: '12px 14px', borderRadius: 12,
-              border: '1px solid #a7f3d0',
-              background: '#ecfdf5',
-              color: '#065f46',
-              fontSize: 12.5, lineHeight: 1.5,
+              marginTop: 8,
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 14px',
+              border: '1px solid var(--lb-accent-line, #c3d4ff)', borderRadius: 10,
+              background: '#fff',
             }}>
-              <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1, color: '#059669' }} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#064e3b' }}>
-                  {lastApply.platform === 'thumbtack' ? 'Thumbtack profile' : 'Yelp business page'} connected
-                  {lastApply.fieldsApplied > 0
-                    ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your AI Playbook`
-                    : lastApply.fieldsExtracted > 0
-                      ? ` — ${lastApply.fieldsExtracted} field${lastApply.fieldsExtracted === 1 ? '' : 's'} already saved`
-                      : ''}
-                </div>
-                <div style={{ marginTop: 3, wordBreak: 'break-all' }}>
-                  {lastApply.url}
-                  {lastApply.accountsAffected > 0 && (
-                    <> · Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}</>
-                  )}
-                </div>
-                {/* Three cases distinguished by (fieldsApplied, fieldsExtracted):
-                    - (>0, *)  : new data merged — primary headline covers it
-                    - (0, >0)  : everything on the page already matches saved — quiet "up to date" note
-                    - (0, 0)   : scrape worked but yielded no structured facts — point to manual paste */}
-                {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
-                  <div style={{ marginTop: 5, color: '#065f46', fontSize: 11.5 }}>
-                    Your AI Playbook already reflects this page's facts. Re-fetch any time you update the listing.
-                  </div>
-                )}
-                {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted === 0 && (
-                  <div style={{ marginTop: 5, color: '#78350f', fontSize: 11.5 }}>
-                    No structured info was extracted from that page. Use the "Paste your business info instead" link above
-                    to fill the Playbook by hand.
-                  </div>
-                )}
-                {/* GPT prose summary — same content `WebsitePreviewCard`
-                    surfaces for the website branch. For TT/Yelp scrapes
-                    summarizeWebsite was already producing this (Loki:
-                    "extracted summary=738ch") and it was being discarded.
-                    Plain serif read so the tenant can scan "what does
-                    the AI think this business is about?" without opening
-                    the structured-fields disclosure. */}
-                {lastApply.summary && (
-                  <div style={{
-                    marginTop: 8,
-                    padding: '8px 10px',
-                    background: 'white',
-                    border: '1px solid #d1fae5',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                    color: '#1f2937',
-                    fontStyle: 'italic',
-                  }}>
-                    {lastApply.summary}
-                  </div>
-                )}
-                {/* Expandable "Show what we pulled" — renders the extractedFields
-                    blob the backend now returns. Tenants asked for inline
-                    visibility of WHICH fields were saved; tells them more
-                    than a count and saves a trip to Settings → AI Playbook
-                    just to verify the scrape did the right thing. */}
-                {lastApply.extractedFields && Object.keys(lastApply.extractedFields).length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowExtracted((v) => !v)}
-                      style={{
-                        background: 'transparent', border: 0, padding: 0,
-                        color: '#065f46', fontSize: 11.5, fontWeight: 600,
-                        cursor: 'pointer', fontFamily: 'inherit',
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                      }}
-                    >
-                      {showExtracted ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      {showExtracted ? 'Hide details' : 'Show what we pulled'}
-                    </button>
-                    {showExtracted && (
-                      <div style={{
-                        marginTop: 6,
-                        padding: '8px 10px',
-                        background: 'white',
-                        border: '1px solid #d1fae5',
-                        borderRadius: 8,
-                        fontSize: 12,
-                        color: '#064e3b',
-                        display: 'grid',
-                        gridTemplateColumns: 'auto 1fr',
-                        columnGap: 12,
-                        rowGap: 4,
-                      }}>
-                        {Object.entries(lastApply.extractedFields).map(([key, value]) => {
-                          const display = formatExtractedValue(value as any);
-                          if (!display) return null;
-                          return (
-                            <React.Fragment key={key}>
-                              <div style={{ fontWeight: 600, color: '#047857', whiteSpace: 'nowrap' }}>
-                                {humanizeFieldKey(key)}
-                              </div>
-                              <div style={{ color: '#1f2937', wordBreak: 'break-word' }}>
-                                {display}
-                              </div>
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              <Link2 size={15} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13, color: 'var(--lb-ink-2)',
+                fontFamily: 'var(--lb-font-mono)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {displayUrl}
+              </span>
+              <button
+                type="button"
+                onClick={() => void applyBusinessUrl()}
+                disabled={verifying}
+                style={{
+                  flexShrink: 0,
+                  background: 'transparent', border: 0, padding: 0,
+                  fontSize: 11.5, fontWeight: 700,
+                  color: 'var(--lb-accent)', cursor: verifying ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                  opacity: verifying ? 0.5 : 1,
+                }}
+              >
+                {verifying ? 'Scanning…' : 'Re-scan'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Clear lastApply + reset the input so the editable
+                  // state surfaces — gives the user a way to swap to a
+                  // different URL without leaving this card.
+                  setLastApply(null);
+                  setWebsite('');
+                  setDetectedPlatform(null);
+                }}
+                style={{
+                  flexShrink: 0,
+                  background: 'transparent', border: 0, padding: 0,
+                  fontSize: 11.5, fontWeight: 600,
+                  color: 'var(--lb-ink-5)', cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Change
+              </button>
             </div>
-          </div>
+
+            {/* Summary — full-width body text, clamped to 4 lines with
+                a Read more / Read less toggle. Same chrome the wizard
+                uses; no thumbnail, no field-level disclosure. */}
+            {summary && (
+              <>
+                <div style={{
+                  marginTop: 13,
+                  fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55,
+                  ...(showExtracted ? {} : {
+                    display: '-webkit-box',
+                    WebkitLineClamp: 4,
+                    WebkitBoxOrient: 'vertical' as const,
+                    overflow: 'hidden',
+                  }),
+                }}>
+                  {summary}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowExtracted(v => !v)}
+                  style={{
+                    marginTop: 9,
+                    background: 'transparent', border: 0, padding: 0,
+                    fontFamily: 'inherit',
+                    fontSize: 12.5, fontWeight: 600,
+                    color: 'var(--lb-accent)', cursor: 'pointer',
+                  }}
+                >
+                  {showExtracted ? 'Read less' : 'Read more'}
+                </button>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Editable input + Fetch & save — empty / unsaved state.
+                URL field spans the full card width (no FieldRow label
+                column), matching the wizard's Business info layout. */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap', paddingTop: 8 }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <SettingsInput
+                  value={website}
+                  onChange={(next) => {
+                    setWebsite(next);
+                    if (detectedPlatform && next.trim() !== website.trim()) {
+                      setDetectedPlatform(null);
+                    }
+                    if (lastApply && next.trim() !== lastApply.url) {
+                      setLastApply(null);
+                    }
+                    if (verifyError) setVerifyError(null);
+                  }}
+                  placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
+                />
+              </div>
+              {detectedPlatform && (
+                <span style={{
+                  fontSize: 11, fontWeight: 700,
+                  padding: '4px 10px', borderRadius: 999,
+                  background: 'var(--lb-accent-tint, #dbeafe)',
+                  color: 'var(--lb-accent, #2563eb)',
+                  textTransform: 'uppercase', letterSpacing: 0.02,
+                }}>
+                  {detectedPlatform === 'thumbtack' ? 'Thumbtack' : detectedPlatform === 'yelp' ? 'Yelp' : 'Website'}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => void applyBusinessUrl()}
+                disabled={verifying || !website.trim()}
+                style={{
+                  padding: '9px 16px',
+                  fontSize: 13, fontWeight: 700,
+                  color: 'white',
+                  background: 'var(--lb-accent)',
+                  border: 0, borderRadius: 8,
+                  cursor: (verifying || !website.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: (verifying || !website.trim()) ? 0.6 : 1,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
+                {verifying ? 'Fetching…' : 'Fetch & save'}
+              </button>
+            </div>
+            {verifyError && (
+              <div style={{
+                marginTop: 12, padding: '8px 12px', borderRadius: 8,
+                background: 'var(--lb-danger-tint)', color: 'var(--lb-danger)',
+                fontSize: 12, fontWeight: 600,
+              }}>{verifyError}</div>
+            )}
+            {/* Persistent fallback link — for tenants whose site can't be
+                scraped or who'd rather type the info than guess at a URL. */}
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--lb-ink-5)' }}>
+              Site not scraping?{' '}
+              <button
+                type="button"
+                onClick={() => { setFallbackUrl(website.trim() || null); setFallbackOpen(true); }}
+                style={{
+                  border: 0, background: 'transparent', padding: 0,
+                  color: 'var(--lb-link, #2563eb)', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                  textDecoration: 'underline',
+                }}
+              >
+                Paste your business info instead
+              </button>
+            </div>
+          </>
         )}
-      </SettingCard>
+        </SettingCard>
+        );
+      })()}
 
       <SettingCard
         icon={Phone}
@@ -895,40 +870,6 @@ export function SettingsGeneral() {
       )}
     </div>
   );
-}
-
-// Maps the playbookSeed.businessInformation camelCase keys to the labels
-// the user sees in Settings → AI Playbook. Anything not in the map falls
-// back to a humanized version of the key. Kept inline rather than
-// imported so the seed schema and its display strings don't drift; the
-// schema is the source of truth.
-const EXTRACTED_FIELD_LABELS: Record<string, string> = {
-  serviceArea: 'Service area',
-  teamSize: 'Team size',
-  yearsInBusiness: 'Years in business',
-  ownerName: 'Owner / founder',
-  suppliesPolicy: 'Supplies policy',
-  petsPolicy: 'Pets policy',
-  paymentMethods: 'Payment methods',
-  officeLocations: 'Office locations',
-  insurance: 'Insurance',
-  bonding: 'Bonding',
-  licensing: 'Licensing',
-  guarantees: 'Guarantees',
-  ecoFriendly: 'Eco-friendly',
-};
-
-function humanizeFieldKey(key: string): string {
-  if (EXTRACTED_FIELD_LABELS[key]) return EXTRACTED_FIELD_LABELS[key];
-  // camelCase → "Camel Case"
-  return key
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, (c) => c.toUpperCase());
-}
-
-function formatExtractedValue(v: string | string[]): string {
-  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
-  return String(v);
 }
 
 function SettingsInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
