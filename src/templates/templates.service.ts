@@ -455,17 +455,33 @@ Output:
 
     // Rename legacy seed rows in place so they line up with the current
     // section-named seed list (Templates page becomes browsable by feature).
+    //
+    // Collision detection is type-agnostic to match the DB uniqueness
+    // constraint. Pre-2026-06-23 the constraint was @@unique(userId, name)
+    // — even after the migration to @@unique(userId, name, type), this
+    // pass stays defensive so a stale schema (e.g. migration not yet
+    // applied on a fresh env) can never fail the whole GET /templates
+    // request mid-rename with P2002.
     for (const r of TemplatesService.SEED_RENAMES) {
       if (type && type !== r.type) continue;
       const legacy = templates.find((t: any) => t.type === r.type && t.name === r.from);
       if (!legacy) continue;
-      const collidesWithNewName = templates.some((t: any) => t.type === r.type && t.name === r.to);
+      const collidesWithNewName = templates.some((t: any) => t.name === r.to);
       if (collidesWithNewName) continue;
-      await this.prisma.messageTemplate.update({
-        where: { id: legacy.id },
-        data: { name: r.to },
-      });
-      legacy.name = r.to;
+      try {
+        await this.prisma.messageTemplate.update({
+          where: { id: legacy.id },
+          data: { name: r.to },
+        });
+        legacy.name = r.to;
+      } catch (err: any) {
+        // P2002 = unique-constraint race (another concurrent request
+        // already created the new-name row). Leave the legacy row in
+        // place — the user keeps editable access via the old name, and
+        // the seed-missing pass below will add the canonical one on
+        // the next call (skipDuplicates makes that idempotent).
+        if (err?.code !== 'P2002') throw err;
+      }
     }
 
     // Seed missing defaults (per-name) so new platform-specific templates
