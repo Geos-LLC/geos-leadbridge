@@ -1031,11 +1031,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           AI pursues the Conversation Goal until the goal is reached. Then it stops and hands the lead off — your team is notified.
         </div>
 
-        <div style={{
-          display: 'flex', alignItems: 'stretch', gap: 12,
-          background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
-          borderRadius: 12, padding: '14px 16px',
-        }}>
+        {/* lb-flow: horizontal row on desktop, single column on mobile
+            (CSS in index.css). The previous 3-flex layout had no mobile
+            collapse — each step got ~80px wide and the title text
+            wrapped one character per line. */}
+        <div
+          className="lb-flow"
+          style={{
+            display: 'flex', alignItems: 'stretch', gap: 12,
+            background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
+            borderRadius: 12, padding: '14px 16px',
+          }}
+        >
           <FlowStep icon={MessageSquareText} iconTone="blue"   title="AI is chatting"          subtitle="pursuing the goal" />
           <FlowArrow />
           <FlowStep icon={Target}             iconTone="violet" title="Goal reached"            subtitle="(or protected event fired)" />
@@ -1209,7 +1216,7 @@ function FlowStep({ icon, iconTone, title, subtitle }: { icon: LucideIcon; iconT
 
 function FlowArrow() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)' }}>
+    <div className="lb-flow-arrow" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--lb-ink-6)' }}>
       <ArrowRight size={16} />
     </div>
   );

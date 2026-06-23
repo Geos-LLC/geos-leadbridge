@@ -614,6 +614,17 @@ h1, h2, h3, h4 {
   .lb-strat-grid {
     grid-template-columns: 1fr !important;
   }
+  /* How-it-works flow row stacks vertically on phones — the previous
+     horizontal 3-col flex squeezed each step into ~80px and broke
+     titles one-character-per-line. The arrows rotate 90° so they
+     point top→down between the stacked steps. */
+  .lb-flow {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .lb-flow-arrow svg {
+    transform: rotate(90deg);
+  }
   .lb-qual { grid-template-columns: 1fr !important; }
   /* Rule cards (Resume / Deferral / Hired competitor) collapse 3-col -> 1-col */
   .lb-rule {
