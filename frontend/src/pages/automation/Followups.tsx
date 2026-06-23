@@ -9,9 +9,9 @@ import {
 import {
   SectionCard,
   IconTile, FooterBanner, StatusPill, MixedBadge,
-  PlanOffEmptyState, TimingRow, MessageGenerationRow,
+  PlanOffEmptyState, TimingRow,
 } from '../../components/automation/ui';
-import { FollowupCard } from '../../components/automation/wizard-cards';
+import { FollowupCard, MessageGenerationExpander } from '../../components/automation/wizard-cards';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -612,14 +612,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
         />
 
-        {/* Unified Message generation row (spec 2e) bound to messageMode.
-            Backend wiring unchanged — saveWizardSettings still reads
-            replyType from messageMode. */}
-        <MessageGenerationRow
+        {/* Wizard Message generation expander — chevron-toggle header
+            that reveals AI-generated / Custom template radios. Same
+            chrome the wizard step uses. Backend wiring unchanged —
+            saveWizardSettings still reads replyType from messageMode. */}
+        <MessageGenerationExpander
           useAi={messageMode === 'ai'}
           onChangeUseAi={next => onMessageMode(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => navigate('/templates?filter=auto-reply', { state: fromState })}
+          aiBody="AI writes each follow-up from your Business Info, FAQ, Pricing and AI Playbook."
         />
         {mixedMessage.mixed && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 6 }}>
