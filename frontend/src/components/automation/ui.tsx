@@ -271,6 +271,26 @@ export function SettingCard({
               fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.01em',
             }}>{title}</div>
+            {/* Info icon next to the title when there's no subtitle —
+                matches the wizard "Business info" card chrome where
+                the description hides behind a small (i) toggle. With
+                a subtitle present, the icon stays on the subtitle row
+                (below) so existing cards don't change. */}
+            {infoText && !subtitle && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
+                aria-label="More info"
+                aria-pressed={infoOpen}
+                style={{
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+                  display: 'inline-flex', alignItems: 'center',
+                }}
+              >
+                <InfoIcon size={14} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+              </button>
+            )}
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
           {subtitle && (

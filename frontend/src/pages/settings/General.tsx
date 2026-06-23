@@ -465,69 +465,70 @@ export function SettingsGeneral() {
         icon={Globe}
         iconTone="violet"
         title="Business profile or website"
-        subtitle="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source and pull info into your AI Playbook + FAQ."
-        infoText="We scrape the page once on save, extract structured facts (services, hours, service area, ratings, owner name, summary), and merge them into your AI Playbook so replies sound informed. Re-fetch any time you update the listing."
+        infoText="Paste your Thumbtack profile, Yelp business page, or website — we auto-detect the source, scrape it once on save, and pull structured facts (services, hours, service area, ratings, owner name, summary) into your AI Playbook + FAQ. Re-fetch any time you update the listing."
         contentPad="8px 24px 24px"
       >
-        <FieldRow label="URL">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <SettingsInput
-                value={website}
-                onChange={(next) => {
-                  setWebsite(next);
-                  // Edit invalidates the platform badge + the last-apply
-                  // confirmation card. Without this the badge says
-                  // THUMBTACK while the input shows a bookingkoala URL
-                  // (reported 2026-06-17 — stale state from a prior fetch).
-                  if (detectedPlatform && next.trim() !== website.trim()) {
-                    setDetectedPlatform(null);
-                  }
-                  if (lastApply && next.trim() !== lastApply.url) {
-                    setLastApply(null);
-                  }
-                  if (verifyError) setVerifyError(null);
-                }}
-                placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
-              />
-            </div>
-            {detectedPlatform && (
-              <span style={{
-                fontSize: 11, fontWeight: 700,
-                padding: '4px 10px', borderRadius: 999,
-                background: 'var(--lb-accent-tint, #dbeafe)',
-                color: 'var(--lb-accent, #2563eb)',
-                textTransform: 'uppercase', letterSpacing: 0.02,
-              }}>
-                {detectedPlatform === 'thumbtack' ? 'Thumbtack' : detectedPlatform === 'yelp' ? 'Yelp' : 'Website'}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => void applyBusinessUrl()}
-              disabled={verifying}
-              style={{
-                padding: '9px 16px',
-                fontSize: 13, fontWeight: 700,
-                color: 'white',
-                background: 'var(--lb-accent)',
-                border: 0, borderRadius: 8,
-                cursor: verifying ? 'not-allowed' : 'pointer',
-                opacity: verifying ? 0.6 : 1,
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                whiteSpace: 'nowrap',
+        {/* URL field spans the full card width — same layout as the
+            wizard's Business info card. The "URL" left-column label
+            (via FieldRow) was dropped 2026-06-23 so the input + Fetch
+            button get the whole row. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', flexWrap: 'wrap', paddingTop: 8 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <SettingsInput
+              value={website}
+              onChange={(next) => {
+                setWebsite(next);
+                // Edit invalidates the platform badge + the last-apply
+                // confirmation card. Without this the badge says
+                // THUMBTACK while the input shows a bookingkoala URL
+                // (reported 2026-06-17 — stale state from a prior fetch).
+                if (detectedPlatform && next.trim() !== website.trim()) {
+                  setDetectedPlatform(null);
+                }
+                if (lastApply && next.trim() !== lastApply.url) {
+                  setLastApply(null);
+                }
+                if (verifyError) setVerifyError(null);
               }}
-            >
-              {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
-              {verifying ? 'Fetching…' : 'Fetch & save'}
-            </button>
-            {/* "Apply to AI Playbook" button removed 2026-06-17 — Fetch &
-                save already runs applyPlaybookSeedToAccounts +
-                applyFaqFromWebsiteSeed for ALL three branches (website,
-                TT, Yelp), so the second button was a confusing no-op
-                that just re-ran what already happened. */}
+              placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
+            />
           </div>
-        </FieldRow>
+          {detectedPlatform && (
+            <span style={{
+              fontSize: 11, fontWeight: 700,
+              padding: '4px 10px', borderRadius: 999,
+              background: 'var(--lb-accent-tint, #dbeafe)',
+              color: 'var(--lb-accent, #2563eb)',
+              textTransform: 'uppercase', letterSpacing: 0.02,
+            }}>
+              {detectedPlatform === 'thumbtack' ? 'Thumbtack' : detectedPlatform === 'yelp' ? 'Yelp' : 'Website'}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void applyBusinessUrl()}
+            disabled={verifying}
+            style={{
+              padding: '9px 16px',
+              fontSize: 13, fontWeight: 700,
+              color: 'white',
+              background: 'var(--lb-accent)',
+              border: 0, borderRadius: 8,
+              cursor: verifying ? 'not-allowed' : 'pointer',
+              opacity: verifying ? 0.6 : 1,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {verifying ? <Loader2 size={13} className="animate-spin" /> : null}
+            {verifying ? 'Fetching…' : 'Fetch & save'}
+          </button>
+          {/* "Apply to AI Playbook" button removed 2026-06-17 — Fetch &
+              save already runs applyPlaybookSeedToAccounts +
+              applyFaqFromWebsiteSeed for ALL three branches (website,
+              TT, Yelp), so the second button was a confusing no-op
+              that just re-ran what already happened. */}
+        </div>
         {verifyError && (
           <div style={{
             margin: '0 24px 12px', padding: '8px 12px', borderRadius: 8,
