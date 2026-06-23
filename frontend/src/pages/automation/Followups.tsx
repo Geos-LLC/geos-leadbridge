@@ -605,8 +605,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         onResetDefault={() => onPlan(DEFAULT_FOLLOWUP_PLAN)}
       />
 
-      {/* Stacked rule cards */}
-      <SectionCard padding="0">
+      {/* Rule cards — each is its own bordered card, matching the
+          wizard's FollowupCard chrome (icon + title + body + info dot,
+          then a divider + label + dropdown below). Replaced the
+          previous 3-column grid stacked inside one SectionCard so the
+          surface reads the same as Settings → Wizard → Follow-ups. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <RuleCardRow
           icon={RefreshCw}
           iconTone="green"
@@ -617,7 +621,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onResumeDelay}
           fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
           allowCustom
-          tipIcon={Sparkles}
           tip="How long to wait after your last message before starting follow-ups again."
           mixed={mixedResume.mixed}
           mixedTooltip={mixedResume.tooltip}
@@ -632,7 +635,6 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onDeferralDelay}
           fieldOptions={['1 day', '2 days', '3 days', '1 week']}
           allowCustom
-          tipIcon={Sparkles}
           tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedDeferral.mixed}
           mixedTooltip={mixedDeferral.tooltip}
@@ -647,13 +649,11 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           onFieldChange={onHiredDelay}
           fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           allowCustom
-          tipIcon={Sparkles}
           tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
           mixed={mixedHired.mixed}
           mixedTooltip={mixedHired.tooltip}
-          noBorder
         />
-      </SectionCard>
+      </div>
 
       <FooterBanner
         icon={Info}
@@ -1003,7 +1003,7 @@ const CUSTOM_UNIT_OPTIONS: { value: PlanUnit; label: string }[] = [
 ];
 
 function RuleCardRow({
-  icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tipIcon: TipIcon, tip, noBorder,
+  icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tip,
   mixed, mixedTooltip, allowCustom,
 }: {
   icon: LucideIcon;
@@ -1014,13 +1014,15 @@ function RuleCardRow({
   fieldValue: string;
   onFieldChange: (v: string) => void;
   fieldOptions: string[];
-  tipIcon: LucideIcon;
+  /** Long-form explanation revealed via the info-dot popover (replaces
+   *  the previous right-column tip box; matches the wizard's
+   *  FollowupCard chrome). */
   tip: string;
-  noBorder?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
   allowCustom?: boolean;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   // A value is "custom" when it doesn't match any preset. Note the
   // sentinel is never the saved value — selecting it just switches the
   // row into custom-edit mode (and persists the parsed current step).
@@ -1031,9 +1033,6 @@ function RuleCardRow({
   const dropdownValue = isCustom ? CUSTOM_SENTINEL : fieldValue;
   const handleDropdownChange = (v: string) => {
     if (v === CUSTOM_SENTINEL) {
-      // Seed the custom editor with the parsed current step so users
-      // don't lose context — e.g. "12 hours" → step{12, hour} → still
-      // "12 hours" (no-op write, but the row flips to custom mode).
       const seed = parseDelayToStep(fieldValue);
       onFieldChange(stepToDelayString(seed));
       return;
@@ -1050,76 +1049,117 @@ function RuleCardRow({
   };
   return (
     <div className="lb-rule" style={{
-      display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
-      padding: '20px 24px',
-      borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
-      alignItems: 'flex-start',
-      background: mixed ? '#fffbeb' : undefined,
-      borderLeft: mixed ? '4px solid #f59e0b' : undefined,
+      background: '#fff',
+      border: '1px solid var(--lb-line)',
+      borderRadius: 12,
+      padding: '15px 16px',
+      ...(mixed ? { background: '#fffbeb', borderLeft: '4px solid #f59e0b' } : {}),
     }}>
-      <div style={{ display: 'flex', gap: 12 }}>
+      {/* Header — icon + title + body + info dot. Mirrors the wizard's
+          FollowupCard. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
         <IconTile icon={icon} tone={iconTone} size="md" />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>{body}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            {title}
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            marginTop: 2,
+          }}>
+            <span style={{
+              flex: 1, minWidth: 0,
+              fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            }}>
+              {body}
+            </span>
+            <button
+              type="button"
+              onClick={() => setInfoOpen(o => !o)}
+              aria-label="More info"
+              aria-pressed={infoOpen}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 0, padding: 0,
+                cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+                color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+              }}
+            >
+              <Info size={14} />
+            </button>
+          </div>
         </div>
       </div>
-      <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+
+      {/* Info popover — hidden by default, click the (i) to reveal. */}
+      {infoOpen && (
+        <div style={{
+          marginTop: 10,
+          padding: '10px 12px',
+          background: '#f8fafc',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 9,
+          fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+        }}>
+          <Sparkles size={12} style={{ display: 'inline-block', marginRight: 6, color: 'var(--lb-accent)', verticalAlign: 'middle' }} />
+          {tip}
+        </div>
+      )}
+
+      {/* Divider + picker row */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        marginTop: 12, paddingTop: 12,
+        borderTop: '1px solid var(--lb-line-soft)',
+      }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-3)',
+          flex: 1, minWidth: 0,
+        }}>
           {fieldLabel}
           {mixed && <MixedBadge tooltip={mixedTooltip} />}
-        </div>
+        </span>
         <Dropdown
           value={dropdownValue}
           onChange={handleDropdownChange}
           options={dropdownOptions}
-          width="100%"
         />
-        {isCustom && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-            <input
-              type="number"
-              min={1}
-              value={customStep.val}
-              onChange={e => onCustomVal(parseInt(e.target.value, 10))}
-              style={{
-                width: 72, padding: '9px 10px',
-                border: '1px solid var(--lb-line)', borderRadius: 8,
-                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-                background: 'white', color: 'var(--lb-ink-1)',
-                outline: 'none',
-              }}
-            />
-            <select
-              value={customStep.unit}
-              onChange={e => onCustomUnit(e.target.value as PlanUnit)}
-              style={{
-                flex: 1, padding: '9px 32px 9px 12px',
-                border: '1px solid var(--lb-line)', borderRadius: 8,
-                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-                background: 'white', color: 'var(--lb-ink-1)',
-                appearance: 'none', cursor: 'pointer', outline: 'none',
-              }}
-            >
-              {CUSTOM_UNIT_OPTIONS.map(u => (
-                <option key={u.value} value={u.value}>{u.label}</option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
-      <div style={{
-        display: 'flex', gap: 10,
-        padding: '12px 14px',
-        background: '#f8fafc',
-        border: '1px solid var(--lb-line-soft)',
-        borderRadius: 10,
-        fontSize: 12.5, color: 'var(--lb-ink-4)',
-        lineHeight: 1.5,
-      }}>
-        <TipIcon size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 1 }} />
-        <div>{tip}</div>
-      </div>
+
+      {/* Custom inline editor when "Custom…" is selected. */}
+      {isCustom && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+          <input
+            type="number"
+            min={1}
+            value={customStep.val}
+            onChange={e => onCustomVal(parseInt(e.target.value, 10))}
+            style={{
+              width: 72, padding: '9px 10px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+              background: 'white', color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
+          />
+          <select
+            value={customStep.unit}
+            onChange={e => onCustomUnit(e.target.value as PlanUnit)}
+            style={{
+              flex: 1, padding: '9px 32px 9px 12px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+              background: 'white', color: 'var(--lb-ink-1)',
+              appearance: 'none', cursor: 'pointer', outline: 'none',
+            }}
+          >
+            {CUSTOM_UNIT_OPTIONS.map(u => (
+              <option key={u.value} value={u.value}>{u.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   );
 }
