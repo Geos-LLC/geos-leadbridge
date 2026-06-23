@@ -849,17 +849,12 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
                 Conversation Goal
               </div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.5 }}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
-                How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
-              </span>
               <InfoDot open={goalInfoOpen} onClick={() => setGoalInfoOpen(o => !o)} />
             </div>
             {goalInfoOpen && (
               <InfoTip>
                 Each goal changes how AI replies, what it tries to find out, and when it hands off to your team. Pick the one that matches your business — or leave on Auto and AI switches strategies based on what each lead asks.
+                {' '}How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
               </InfoTip>
             )}
           </div>
