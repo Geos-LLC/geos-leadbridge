@@ -12,6 +12,7 @@ import {
   PlanOffEmptyState, TimingRow,
 } from '../../components/automation/ui';
 import { FollowupCard, MessageGenerationExpander } from '../../components/automation/wizard-cards';
+import { InfoDot, InfoTip } from '../../components/InfoPopover';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -652,8 +653,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           iconBg="#ccfbf1"
           iconColor="#0d9488"
           title="Resume follow-ups after a conversation"
-          subtitle="When a customer replies and then goes silent again, start a new follow-up sequence."
-          info="Once a lead has replied at least once, follow-ups stop. If they then go quiet again, we wait the configured delay and restart the sequence so they don't drift away unattended."
+          info="When a customer replies and then goes silent again, start a new follow-up sequence."
           enabled={resumeOn}
           onToggle={onResumeOn}
           pickerLabel="Send after"
@@ -671,8 +671,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           iconBg="#ede9fe"
           iconColor="#7c3aed"
           title="Check in after customer deferral"
-          subtitle={"When customer says \"I'll get back to you\", schedule one nudge later. Cancels if they reply first."}
-          info={'AI detects soft brush-offs ("let me think", "I\'ll get back to you", "checking with my partner") and schedules a single polite nudge after the configured delay. If they reply first, the nudge is canceled automatically.'}
+          info={'When customer says "I\'ll get back to you", schedule one nudge later. Cancels if they reply first.'}
           enabled={deferralOn}
           onToggle={onDeferralOn}
           pickerLabel="Send check-in after"
@@ -690,8 +689,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           iconBg="#ffedd5"
           iconColor="#ea580c"
           title="Re-engage after customer hired competitor"
-          subtitle="When customer says they hired someone else, send one polite check-in later."
-          info="When AI detects the lead picked another vendor, follow-ups stop immediately — but we wait the configured period and send one final friendly check-in. Catches the cases where the other vendor underdelivers and the lead is open to a do-over."
+          info="When customer says they hired someone else, send one polite check-in later."
           enabled={hiredOn}
           onToggle={onHiredOn}
           pickerLabel="Send re-engage after"
@@ -850,20 +848,28 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
   const nodes = nodesForPlan(plan);
   const stepperRef = useRef<HTMLDivElement>(null);
   const narrow = useContainerNarrow(stepperRef);
+  const [planInfoOpen, setPlanInfoOpen] = useState(false);
   return (
     <SectionCard padding="20px 24px 22px">
-      {/* Header — violet History tile + title + description + Edit cadence button */}
+      {/* Header — violet History tile + title + (i) info dot + Edit button.
+          Description ("LeadBridge nudges unresponsive leads…") collapses
+          behind the (i) toggle so the header reads as a single line. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
         <IconTile icon={History} tone="purple" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-            Follow-up plan
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Follow-up plan
+            </div>
+            <InfoDot open={planInfoOpen} onClick={() => setPlanInfoOpen(o => !o)} />
           </div>
-          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            LeadBridge nudges unresponsive leads on this cadence — AI
-            writes every step from the live conversation. Edit the timing
-            to match how often you want to follow up.
-          </div>
+          {planInfoOpen && (
+            <InfoTip>
+              LeadBridge nudges unresponsive leads on this cadence — AI
+              writes every step from the live conversation. Edit the timing
+              to match how often you want to follow up.
+            </InfoTip>
+          )}
         </div>
         <button
           type="button"
@@ -880,7 +886,7 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
             whiteSpace: 'nowrap',
           }}
         >
-          Edit cadence
+          Edit
         </button>
       </div>
 
@@ -992,14 +998,17 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
         )}
       </div>
 
-      {/* Stat strip — 3 cells, bordered + divided */}
+      {/* Stat strip — 3 cells, bordered + divided. Switched from a fixed
+          3-col grid to a horizontally-scrollable flex row so the third
+          cell ("AI writes each step") stops getting clipped on phones —
+          users now swipe right to see the rest. */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          display: 'flex',
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
           border: '1px solid var(--lb-line)',
           borderRadius: 10,
-          overflow: 'hidden',
           background: 'var(--lb-surface)',
         }}
       >

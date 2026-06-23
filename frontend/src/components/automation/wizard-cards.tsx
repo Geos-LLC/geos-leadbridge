@@ -166,7 +166,9 @@ export function FollowupCard({
   iconBg: string;
   iconColor: string;
   title: string;
-  subtitle: string;
+  /** Always-visible secondary text under the title. Omit to render only
+   *  the title + (i) icon (info popover carries the description). */
+  subtitle?: string;
   info: string;
   enabled: boolean;
   onToggle: (v: boolean) => void;
@@ -199,16 +201,27 @@ export function FollowupCard({
           <Icon size={18} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            {title}
-          </div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
-          }}>
-            <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
-            <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
-          </div>
+          {subtitle ? (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                {title}
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
+              }}>
+                <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
+                <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                {title}
+              </div>
+              <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
+            </div>
+          )}
           {infoOpen && <InfoTip>{info}</InfoTip>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 2 }}>
