@@ -250,7 +250,9 @@ export function MessageSettings() {
           overflow: 'hidden',
         }}
       >
-        {/* Header */}
+        {/* Header — icon + title-block on the same row; Create New
+            wraps to a full-width row below on narrow viewports so the
+            subtitle stops getting squeezed into a 6-line column. */}
         <div
           style={{
             display: 'flex', alignItems: 'flex-start', gap: 14,
@@ -259,34 +261,38 @@ export function MessageSettings() {
             flexWrap: 'wrap',
           }}
         >
-          <span
-            style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: '#ede9fe', color: '#7c3aed',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <MessageSquare className="w-5 h-5" />
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-              Your Library
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45 }}>
-              Used when you choose <strong style={{ color: 'var(--lb-ink-2)' }}>Custom Template</strong> instead of AI in your automation settings.
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: '1 1 220px', minWidth: 0 }}>
+            <span
+              style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: '#ede9fe', color: '#7c3aed',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <MessageSquare className="w-5 h-5" />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                Your Library
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45 }}>
+                Used when you choose <strong style={{ color: 'var(--lb-ink-2)' }}>Custom Template</strong> instead of AI in your automation settings.
+              </div>
             </div>
           </div>
           <button
             onClick={openCreate}
+            className="lb-templates-create"
             style={{
               flexShrink: 0,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '9px 14px',
               borderRadius: 9, border: 0,
               background: 'var(--lb-accent)', color: '#fff',
               fontSize: 12.5, fontWeight: 600,
               cursor: 'pointer', fontFamily: 'inherit',
+              whiteSpace: 'nowrap',
             }}
           >
             <Plus className="w-3.5 h-3.5" /> Create New

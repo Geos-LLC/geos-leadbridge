@@ -682,6 +682,13 @@ h1, h2, h3, h4 {
      a 2-character column). The outer .lb-billing-plan-row already has
      flexWrap=wrap; this just stretches the wrapped actions row across
      the full card width. */
+  /* Templates page → "Create New" button spans full card width when
+     it wraps under the Your Library header block on phones, instead
+     of sitting awkwardly small in a half-row. */
+  .lb-templates-create {
+    width: 100% !important;
+  }
+
   .lb-billing-plan-actions {
     width: 100% !important;
     flex-direction: row !important;
