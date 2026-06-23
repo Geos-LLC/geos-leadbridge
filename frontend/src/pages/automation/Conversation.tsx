@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
@@ -869,40 +869,48 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             1-col on mobile (see index.css). Replaces the previous
             inline repeat(5,1fr) which had no mobile collapse and
             squeezed titles into a letter-per-line wrap on phones. */}
+        {/* Strategy grid with inline goal-setup expansion — when a card
+            is selected, the GoalSetupCard renders directly under it as
+            a full-width row (lb-strat-panel: grid-column 1 / -1).
+            Mirrors the wizard's inline-expand pattern instead of
+            stacking the setup card below the whole grid. */}
         <div
           className="lb-strat-grid"
           style={{ display: 'grid', gap: 10 }}
         >
           {STRATEGIES.map(s => (
-            <StrategyCard
-              key={s.k}
-              selected={strategy === s.k}
-              onClick={() => onStrategy(s.k)}
-              icon={s.icon}
-              iconTone={s.iconTone}
-              title={s.title}
-              body={s.body}
-              recommended={s.recommended}
-              mixed={mixedStrategy.mixed && strategy === s.k}
-              mixedTooltip={mixedStrategy.tooltip}
-            />
+            <Fragment key={s.k}>
+              <StrategyCard
+                selected={strategy === s.k}
+                onClick={() => onStrategy(s.k)}
+                icon={s.icon}
+                iconTone={s.iconTone}
+                title={s.title}
+                body={s.body}
+                recommended={s.recommended}
+                mixed={mixedStrategy.mixed && strategy === s.k}
+                mixedTooltip={mixedStrategy.tooltip}
+              />
+              {strategy === s.k && (
+                <div className="lb-strat-panel">
+                  <GoalSetupCard
+                    strategy={strategy}
+                    qualificationRequiredFields={qualificationRequiredFields}
+                    toggleQualificationField={toggleQualificationField}
+                    recommendedKeys={recommendedKeys}
+                    qualificationCustomFields={qualificationCustomFields}
+                    addCustomField={addCustomField}
+                    updateCustomField={updateCustomField}
+                    removeCustomField={removeCustomField}
+                    bookingAvailability={bookingAvailability}
+                    toggleBookingDayPeriod={toggleBookingDayPeriod}
+                  />
+                </div>
+              )}
+            </Fragment>
           ))}
         </div>
       </div>
-
-      {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
-      <GoalSetupCard
-        strategy={strategy}
-        qualificationRequiredFields={qualificationRequiredFields}
-        toggleQualificationField={toggleQualificationField}
-        recommendedKeys={recommendedKeys}
-        qualificationCustomFields={qualificationCustomFields}
-        addCustomField={addCustomField}
-        updateCustomField={updateCustomField}
-        removeCustomField={removeCustomField}
-        bookingAvailability={bookingAvailability}
-        toggleBookingDayPeriod={toggleBookingDayPeriod}
-      />
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
             Normal users manage AI behavior via Conversation Goals. The
