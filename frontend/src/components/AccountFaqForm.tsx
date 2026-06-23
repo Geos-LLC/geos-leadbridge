@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { Loader2, MessageSquare, Info } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import {
   CollapsibleSection,
@@ -59,6 +59,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [inherited, setInherited] = useState(false);
+  // Hides the "Add anything the AI should know…" hint behind a small
+  // (i) toggle on the Custom Q&A empty state.
+  const [customQaInfoOpen, setCustomQaInfoOpen] = useState(false);
 
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
@@ -254,11 +257,32 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
               textAlign: 'center',
             }}
           >
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-5, #64748b)', marginBottom: 10 }}>
-              Add anything the AI should know how to answer. Examples: weekend availability,
-              eco product brands, parking instructions.
+            {customQaInfoOpen && (
+              <div style={{
+                fontSize: 12.5, color: 'var(--lb-ink-5, #64748b)',
+                marginBottom: 12, lineHeight: 1.5, textAlign: 'left',
+              }}>
+                Add anything the AI should know how to answer. Examples:
+                weekend availability, eco product brands, parking instructions.
+              </div>
+            )}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
+              <button
+                type="button"
+                onClick={() => setCustomQaInfoOpen(o => !o)}
+                aria-label="About Custom Q&A"
+                aria-pressed={customQaInfoOpen}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', lineHeight: 0,
+                  color: customQaInfoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+                }}
+              >
+                <Info size={14} />
+              </button>
             </div>
-            <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
           </div>
         ) : (
           <>
