@@ -1410,7 +1410,7 @@ function GoalSetupCard({
                     {opt === 'range' ? 'Range' : 'Exact'}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.4 }}>
-                    {opt === 'range' ? 'AI quotes "$200–$300"' : 'AI quotes "$250"'}
+                    {opt === 'range' ? '$200–$300' : '$250'}
                   </div>
                 </button>
               );
