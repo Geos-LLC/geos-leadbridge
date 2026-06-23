@@ -2701,6 +2701,9 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
   const [busyKind, setBusyKind] = useState<null | 'ai_conv' | 'follow_up'>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [deliveryInfoOpen, setDeliveryInfoOpen] = useState(false);
+  // Collapsible — closed by default, same chrome as the other Playbook
+  // sections (Custom Instructions, Business Information).
+  const [open, setOpen] = useState(false);
 
   // Load current state from the first connected account (Playbook is
   // global; per-account divergence is intentional but rare here).
@@ -2772,11 +2775,23 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
   return (
     <SectionCard padding="22px 24px">
       <div
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        aria-expanded={open}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        }}
         style={{
           display: 'flex',
           gap: 14,
           alignItems: 'flex-start',
-          marginBottom: 14,
+          marginBottom: open ? 14 : 0,
+          cursor: 'pointer',
+          userSelect: 'none',
         }}
       >
         <div
@@ -2809,7 +2824,7 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
             Delivery mode (advanced)
             <button
               type="button"
-              onClick={() => setDeliveryInfoOpen(o => !o)}
+              onClick={(e) => { e.stopPropagation(); setDeliveryInfoOpen(o => !o); }}
               aria-label="About delivery mode"
               aria-pressed={deliveryInfoOpen}
               style={{
@@ -2838,6 +2853,7 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
           </div>
           {deliveryInfoOpen && (
             <div
+              onClick={(e) => e.stopPropagation()}
               style={{
                 marginTop: 8,
                 padding: '10px 12px',
@@ -2856,23 +2872,30 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
             </div>
           )}
         </div>
+        <div style={{ flexShrink: 0, paddingTop: 6, color: 'var(--lb-ink-5)' }}>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </div>
       </div>
 
-      <SuggestToggleRow
-        title="Park AI Conversation replies for review"
-        body="AI drafts replies to customer messages and parks them for your approval. Nothing sends until you tap Send on the Lead Activity page."
-        on={aiConvSuggest}
-        busy={busyKind === 'ai_conv'}
-        onChange={onAiConvToggle}
-      />
-      <div style={{ height: 1, background: 'var(--lb-line-soft)', margin: '12px 0' }} />
-      <SuggestToggleRow
-        title="Park follow-ups for review"
-        body="Follow-up sequences draft each message and park it for your approval before sending. The cadence still runs; messages just wait at the gate."
-        on={followUpSuggest}
-        busy={busyKind === 'follow_up'}
-        onChange={onFollowUpToggle}
-      />
+      {open && (
+        <>
+          <SuggestToggleRow
+            title="Park AI Conversation replies for review"
+            body="AI drafts replies to customer messages and parks them for your approval. Nothing sends until you tap Send on the Lead Activity page."
+            on={aiConvSuggest}
+            busy={busyKind === 'ai_conv'}
+            onChange={onAiConvToggle}
+          />
+          <div style={{ height: 1, background: 'var(--lb-line-soft)', margin: '12px 0' }} />
+          <SuggestToggleRow
+            title="Park follow-ups for review"
+            body="Follow-up sequences draft each message and park it for your approval before sending. The cadence still runs; messages just wait at the gate."
+            on={followUpSuggest}
+            busy={busyKind === 'follow_up'}
+            onChange={onFollowUpToggle}
+          />
+        </>
+      )}
     </SectionCard>
   );
 }
@@ -2962,7 +2985,7 @@ function SuggestToggleRow({
 // ─── Building blocks ──────────────────────────────────────────────────────
 
 function PlaybookSectionShell({
-  icon: Icon, title, subtitle, infoText, collapsible, defaultOpen = true, children,
+  icon: Icon, title, subtitle, infoText, collapsible, defaultOpen = false, children,
 }: {
   icon: LucideIcon;
   title: string;
@@ -2975,8 +2998,9 @@ function PlaybookSectionShell({
    *  chevron renders at the right end. The (i) info button stops
    *  propagation so opening the description doesn't toggle the body. */
   collapsible?: boolean;
-  /** Initial open state for the collapsible body. Defaults to true so
-   *  existing call sites that don't pass collapsible see no change. */
+  /** Initial open state for the collapsible body. Defaults to FALSE
+   *  (closed) per the 2026-06-23 rule that every Playbook accordion
+   *  starts collapsed so the page reads as a compact section list. */
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
