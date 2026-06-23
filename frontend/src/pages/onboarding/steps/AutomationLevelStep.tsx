@@ -375,20 +375,23 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         await onSaveContinue();
         return;
       }
-      let firstError: any = null;
-      for (const acct of savedAccounts) {
-        try {
-          // Wizard payload only — instantTextMode (AI vs Template for
-          // Instant Text) is a Settings → Automation concern; not
-          // touched here so existing values are preserved.
-          await followUpApi.saveWizardSettings(acct.id, wizardPayload);
-          await saveFirstReplyToAccount(acct.id);
-        } catch (err) {
-          if (!firstError) firstError = err;
-        }
-      }
-      if (firstError) {
-        const msg = firstError.response?.data?.message || 'Some accounts did not save — you can re-apply from Automation later.';
+      // Parallel fan-out: each account's saves run concurrently, and
+      // within an account the wizard-settings + first-reply paths also
+      // run in parallel. This drops save time from O(N × 5 round-trips
+      // sequentially) to O(max-account round-trip), so a 5-account
+      // tenant goes from ~15s to ~3s on a typical network.
+      const results = await Promise.all(savedAccounts.map(acct =>
+        Promise.all([
+          followUpApi.saveWizardSettings(acct.id, wizardPayload),
+          saveFirstReplyToAccount(acct.id),
+        ]).then(
+          () => ({ ok: true as const }),
+          (err: any) => ({ ok: false as const, err }),
+        )
+      ));
+      const firstError = results.find(r => !r.ok);
+      if (firstError && !firstError.ok) {
+        const msg = firstError.err?.response?.data?.message || 'Some accounts did not save — you can re-apply from Automation later.';
         notify.error('Partial save', msg);
       }
       await onSaveContinue();
