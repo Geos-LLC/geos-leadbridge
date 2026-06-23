@@ -3,7 +3,6 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
-  MoreHorizontal,
   ExternalLink,
   ArrowLeft,
   AlertTriangle,
@@ -118,6 +117,10 @@ export function AutoPageHeader({
   subtitle?: ReactNode;
   onSave?: () => void;
   saving?: boolean;
+  /** Inline indicator/pill that sits on the title row, right of the badge.
+   *  The legacy non-functional "More" (3-dot) button was removed
+   *  2026-06-23 — pages that need an overflow menu should pass their
+   *  own affordance via headerActions. */
   headerActions?: ReactNode;
   backLink?: { label: string; onClick: () => void };
 }) {
@@ -134,20 +137,12 @@ export function AutoPageHeader({
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>{title}</h1>
           {badge && <AutoBadge tone={badge.tone}>{badge.label}</AutoBadge>}
+          {headerActions}
         </div>
         {subtitle && <p style={{ margin: 0, fontSize: 13.5, color: 'var(--lb-ink-5)' }}>{subtitle}</p>}
       </div>
-      <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-        {headerActions}
-        <button title="More" style={{
-          width: 38, height: 38, borderRadius: 10,
-          background: 'white', border: '1px solid var(--lb-line)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: 'var(--lb-ink-4)',
-        }}>
-          <MoreHorizontal size={16} />
-        </button>
-        {onSave && (
+      {onSave && (
+        <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
           <button
             onClick={onSave}
             disabled={saving}
@@ -162,8 +157,8 @@ export function AutoPageHeader({
           >
             {saving ? 'Saving...' : 'Save changes'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
