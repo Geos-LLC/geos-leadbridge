@@ -405,16 +405,13 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
           omitted — those live behind the AdvancedExpand on the full
           settings page; the wizard's footer banner points there. */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 12 }}>
           <h2 className="lb-wiz-section-h2" style={{
-            margin: 0, fontSize: 18, fontWeight: 700,
+            margin: 0, fontSize: 16, fontWeight: 800,
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>
             First reply
           </h2>
-          <p className="lb-wiz-section-sub" style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
-            What happens automatically when a new lead arrives.
-          </p>
         </div>
 
         {/* First-reply cards carry ONLY the master toggle in the wizard.
@@ -457,18 +454,18 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         </div>
       </div>
 
-      {/* ─── Fine-tune section ──────────────────────────────────────────── */}
+      {/* ─── Follow-ups & AI section ────────────────────────────────
+          Per the FinalDesign "Wizard Automation (standalone)"
+          canonical the wizard groups its second batch of cards under
+          a "Follow-ups & AI" header at 16/800 — no subtitle. */}
       <div>
-        <div style={{ marginBottom: 18 }}>
+        <div style={{ margin: '22px 0 12px' }}>
           <h2 className="lb-wiz-section-h2" style={{
-            margin: 0, fontSize: 18, fontWeight: 700,
+            margin: 0, fontSize: 16, fontWeight: 800,
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>
-            Timing &amp; follow-ups
+            Follow-ups &amp; AI
           </h2>
-          <p className="lb-wiz-section-sub" style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
-            All of these are editable later on Automation. Defaults are tuned for the trial.
-          </p>
         </div>
 
         {loading ? (

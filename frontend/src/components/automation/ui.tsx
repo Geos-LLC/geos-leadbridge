@@ -248,28 +248,34 @@ export function SettingCard({
   return (
     <div style={{
       background: 'white',
-      border: compact ? '1px solid var(--lb-line)' : '1.5px solid var(--lb-line)',
-      borderRadius: compact ? 12 : 14,
-      boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
+      // Compact mode now mirrors the FinalDesign "Wizard Automation
+      // (standalone)" canonical: 1.5px border + 14px radius + soft
+      // shadow + larger icon tile + slightly bigger title. The full
+      // (non-compact) variant kept identical for Settings → Automation.
+      border: '1.5px solid var(--lb-line)',
+      borderRadius: 14,
+      boxShadow: 'var(--lb-shadow-sm, 0 1px 2px rgba(10,21,48,0.03))',
       overflow: 'hidden',
     }}>
       <div style={{
-        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
-        padding: compact ? '15px 16px' : '20px 24px',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 14,
+        padding: compact ? '16px' : '20px 24px',
       }}>
-        <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
+        <IconTile icon={icon} tone={iconTone} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{
-              fontSize: compact ? 14 : 17,
+              fontSize: compact ? 15 : 17,
               fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.01em',
             }}>{title}</div>
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
           {subtitle && <div style={{
-            fontSize: compact ? 12 : 13.5,
-            color: 'var(--lb-ink-5)', marginTop: 2,
+            fontSize: 12.5,
+            color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
           }}>{subtitle}</div>}
         </div>
         {headerRight}
@@ -277,7 +283,7 @@ export function SettingCard({
           <div style={{
             display: 'flex', alignItems: 'center',
             gap: compact ? 0 : 10,
-            paddingTop: compact ? 0 : 2,
+            paddingTop: 2,
           }}>
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
             {!compact && (
