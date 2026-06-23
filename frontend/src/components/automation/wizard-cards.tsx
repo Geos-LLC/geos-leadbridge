@@ -14,7 +14,7 @@
  *   - Checkbox:       18×18 accent-colored checkbox
  */
 import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { InfoDot, InfoTip } from '../InfoPopover';
 
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
@@ -255,6 +255,108 @@ export function FollowupCard({
             </span>
           </div>
           {extra}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Radio button row — circle + bold title + subtitle. Matches the
+ * wizard's RadioButton used inside MessageGenerationExpander.
+ */
+export function RadioButton({
+  selected, onClick, title, body,
+}: { selected: boolean; onClick: () => void; title: string; body: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        background: 'transparent', border: 0, cursor: 'pointer',
+        fontFamily: 'inherit', textAlign: 'left', padding: 0,
+      }}
+    >
+      <span style={{
+        width: 18, height: 18, borderRadius: 99,
+        border: '1.5px solid ' + (selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        background: selected ? 'var(--lb-accent)' : '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, marginTop: 1,
+        transition: 'background 120ms, border-color 120ms',
+      }}>
+        {selected && <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff' }} />}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          {title}
+        </span>
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5, marginTop: 3 }}>
+          {body}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Wizard-style Message generation expander — chevron-toggle header
+ * ("Message generation / How messages are composed.") that reveals
+ * two RadioButtons (AI-generated vs Custom template). Used inside
+ * FirstReplyCard children on the Automation Respond page and the
+ * wizard step.
+ */
+export function MessageGenerationExpander({
+  useAi, onChangeUseAi,
+  aiBody = 'AI writes each message from your Business Info, FAQ, Pricing and AI Playbook.',
+  templateBody = 'Use your own pre-written messages instead of AI.',
+  defaultOpen = false,
+}: {
+  useAi: boolean;
+  onChangeUseAi: (next: boolean) => void;
+  aiBody?: string;
+  templateBody?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '13px 0 0' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%',
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left', padding: 0,
+        }}
+      >
+        {open
+          ? <ChevronDown size={15} style={{ color: 'var(--lb-ink-5)', marginTop: 2, flexShrink: 0 }} />
+          : <ChevronRight size={15} style={{ color: 'var(--lb-ink-5)', marginTop: 2, flexShrink: 0 }} />}
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-2)' }}>
+            Message generation
+          </span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
+            How messages are composed.
+          </span>
+        </span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 13, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 13 }}>
+          <RadioButton
+            selected={useAi}
+            onClick={() => onChangeUseAi(true)}
+            title="AI-generated"
+            body={aiBody}
+          />
+          <RadioButton
+            selected={!useAi}
+            onClick={() => onChangeUseAi(false)}
+            title="Custom template"
+            body={templateBody}
+          />
         </div>
       )}
     </div>

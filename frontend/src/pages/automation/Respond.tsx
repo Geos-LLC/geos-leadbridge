@@ -8,9 +8,8 @@ import {
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FieldRow, OptionCard, InfoTile, FooterBanner, StatusPill,
-  MessageGenerationRow,
 } from '../../components/automation/ui';
-import { FirstReplyCard } from '../../components/automation/wizard-cards';
+import { FirstReplyCard, MessageGenerationExpander } from '../../components/automation/wizard-cards';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
 import { automationApi, callConnectApi, followUpApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
@@ -101,9 +100,14 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // single-line. State + fetch removed. Schedule is editable in Settings →
   // Hours via the Edit Hours link.
 
-  // Loaded source-of-truth records (only when a specific account is picked)
+  // Loaded source-of-truth records (only when a specific account is picked).
+  // newLeadRule / customerTextRule are still populated by the load below;
+  // they're kept around with void to satisfy noUnusedLocals because they
+  // were previously consumed by the firstReplyMessageTpl / ctTpl lookups
+  // that the wizard MessageGenerationExpander no longer needs.
   const [newLeadRule, setNewLeadRule] = useState<AutomationRule | null>(null);
   const [customerTextRule, setCustomerTextRule] = useState<NotificationRule | null>(null);
+  void newLeadRule; void customerTextRule;
   const [callSettings, setCallSettings] = useState<CallConnectSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
@@ -613,21 +617,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     });
   };
 
-  // Instant Reply — message template (used in 'template' reply type).
-  // The AI prompt template (firstReplyPromptTpl) used to surface via the
-  // legacy ?advanced=1 custom-AI-prompt tile; that tile was removed when
-  // the unified Message Generation row landed. Prompts remain editable at
-  // /templates?filter=prompts.
-  const firstReplyMessageTpl =
-    newLeadRule?.template
-    || findTplByName('Auto Reply - New Lead', 'Auto Reply', 'First Reply Template');
-
-  // Customer Text — Instant Text card.
-  const ctTpl =
-    customerTextRule?.messageTemplate
-    || findTplByContent(customerTextRule?.template || null)
-    || findTplByName('Auto Reply - New Lead', 'CT - Auto Reply')
-    || findTplLoose('auto', 'reply');
+  // firstReplyMessageTpl / ctTpl were used by the old MessageGenerationRow
+  // to deep-link into Templates. The wizard MessageGenerationExpander
+  // doesn't expose those deep-links — operators jump to Templates via the
+  // sidebar / footer banner instead. Refs preserved nearby only as
+  // commentary; the actual lookups are gone.
 
   // Call Connect — whisper and voicemail.
   const whisperTpl =
@@ -665,11 +659,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         bizChecked={textBizHours}
         onBizToggle={onTextBizHours}
       >
-        <MessageGenerationRow
+        <MessageGenerationExpander
           useAi={replyType === 'ai'}
           onChangeUseAi={next => onReplyType(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
         />
         {mixedReplyType && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
@@ -698,11 +690,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         bizChecked={textBizHours}
         onBizToggle={onTextBizHours}
       >
-        <MessageGenerationRow
+        <MessageGenerationExpander
           useAi={instantTextMode === 'ai'}
           onChangeUseAi={next => onInstantTextMode(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => goTemplate(ctTpl, 'auto-reply')}
         />
         {mixedTextBizHours && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
