@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ComponentType, t
 import {
   CalendarCheck, Check, ChevronDown, ChevronRight, CircleDollarSign, Clock,
   Info, MessageCircle, MessageSquare, MessageSquareText, Phone,
-  PhoneCall, RotateCcw, Sparkles, UserCheck, Workflow, Loader2,
+  PhoneCall, Plus, RotateCcw, Sparkles, UserCheck, Workflow, Loader2, X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/appStore';
@@ -174,8 +174,9 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // booking windows / price mode lives on Settings → Automation;
   // saving here cascades them through wizardPayload so they round-trip.
   const [qualifyFields, setQualifyFields] = useState<Set<QualifyField>>(
-    () => new Set<QualifyField>(['zip', 'phone'] as QualifyField[]),
+    () => new Set<QualifyField>(QUALIFY_FIELD_DEFS.map(f => f.key)),
   );
+  const [customQualifyFields, setCustomQualifyFields] = useState<Array<{ label: string; checked: boolean }>>([]);
   const [bookingWindows, setBookingWindows] = useState<BookingWindows>(DEFAULT_BOOKING_WINDOWS);
   const [priceMode, setPriceMode] = useState<PriceMode>('range');
 
@@ -660,6 +661,18 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                 if (next.has(f)) next.delete(f); else next.add(f);
                 return next;
               })}
+              customQualifyFields={customQualifyFields}
+              onAddCustomQualifyField={(label) => setCustomQualifyFields(prev => (
+                prev.some(f => f.label.toLowerCase() === label.toLowerCase())
+                  ? prev
+                  : [...prev, { label, checked: true }]
+              ))}
+              onToggleCustomQualifyField={(label) => setCustomQualifyFields(prev =>
+                prev.map(f => f.label === label ? { ...f, checked: !f.checked } : f)
+              )}
+              onRemoveCustomQualifyField={(label) => setCustomQualifyFields(prev =>
+                prev.filter(f => f.label !== label)
+              )}
               bookingWindows={bookingWindows}
               onToggleBookingSlot={(day, slot) => setBookingWindows(prev => ({
                 ...prev,
@@ -1166,6 +1179,7 @@ const STRATEGY_DEFS: Array<{
 function ConversationGoalCard({
   value, onChange, priceMode, onPriceModeChange,
   qualifyFields, onToggleQualifyField,
+  customQualifyFields, onAddCustomQualifyField, onToggleCustomQualifyField, onRemoveCustomQualifyField,
   bookingWindows, onToggleBookingSlot,
   onDeepLink,
 }: {
@@ -1175,6 +1189,10 @@ function ConversationGoalCard({
   onPriceModeChange: (v: PriceMode) => void;
   qualifyFields: Set<QualifyField>;
   onToggleQualifyField: (f: QualifyField) => void;
+  customQualifyFields: Array<{ label: string; checked: boolean }>;
+  onAddCustomQualifyField: (label: string) => void;
+  onToggleCustomQualifyField: (label: string) => void;
+  onRemoveCustomQualifyField: (label: string) => void;
   bookingWindows: BookingWindows;
   onToggleBookingSlot: (day: BookingDay, slot: 'morning' | 'afternoon') => void;
   onDeepLink: () => void;
@@ -1286,32 +1304,16 @@ function ConversationGoalCard({
                     </>
                   )}
 
-                  {/* Qualify strategy — 6 required-field checkboxes */}
+                  {/* Qualify strategy — 6 required-field checkboxes + user-added customs */}
                   {def.value === 'qualify' && (
-                    <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr', gap: 9 }}>
-                      {QUALIFY_FIELD_DEFS.map(f => (
-                        <button
-                          key={f.key}
-                          type="button"
-                          onClick={() => onToggleQualifyField(f.key)}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '11px 12px',
-                            border: '1px solid var(--lb-line)',
-                            borderRadius: 10,
-                            background: '#fff',
-                            cursor: 'pointer',
-                            fontFamily: 'inherit',
-                            textAlign: 'left',
-                          }}
-                        >
-                          <Checkbox checked={qualifyFields.has(f.key)} />
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                            {f.label}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                    <QualifyFieldsPanel
+                      qualifyFields={qualifyFields}
+                      onToggleQualifyField={onToggleQualifyField}
+                      customQualifyFields={customQualifyFields}
+                      onAddCustomQualifyField={onAddCustomQualifyField}
+                      onToggleCustomQualifyField={onToggleCustomQualifyField}
+                      onRemoveCustomQualifyField={onRemoveCustomQualifyField}
+                    />
                   )}
 
                   {/* Booking strategy — 7-day × Morning/Afternoon grid */}
@@ -1458,6 +1460,178 @@ function PriceModeChooser({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Qualify required-information panel — built-in 6 fields + user-added
+ * customs + an inline "Add field" affordance. Each row carries a
+ * checkbox (toggle whether the field is required) and a small × on
+ * custom rows to delete them entirely. Duplicate-by-label is rejected
+ * silently in the add handler.
+ */
+function QualifyFieldsPanel({
+  qualifyFields, onToggleQualifyField,
+  customQualifyFields, onAddCustomQualifyField, onToggleCustomQualifyField, onRemoveCustomQualifyField,
+}: {
+  qualifyFields: Set<QualifyField>;
+  onToggleQualifyField: (f: QualifyField) => void;
+  customQualifyFields: Array<{ label: string; checked: boolean }>;
+  onAddCustomQualifyField: (label: string) => void;
+  onToggleCustomQualifyField: (label: string) => void;
+  onRemoveCustomQualifyField: (label: string) => void;
+}) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    onAddCustomQualifyField(trimmed);
+    setDraft('');
+    setAddOpen(false);
+  };
+
+  return (
+    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 9 }}>
+      {QUALIFY_FIELD_DEFS.map(f => (
+        <button
+          key={f.key}
+          type="button"
+          onClick={() => onToggleQualifyField(f.key)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '11px 12px',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 10,
+            background: '#fff',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            textAlign: 'left',
+          }}
+        >
+          <Checkbox checked={qualifyFields.has(f.key)} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+            {f.label}
+          </span>
+        </button>
+      ))}
+
+      {customQualifyFields.map(f => (
+        <div
+          key={f.label}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '11px 12px',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 10,
+            background: '#fff',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onToggleCustomQualifyField(f.label)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+              fontFamily: 'inherit', textAlign: 'left',
+              flex: 1, minWidth: 0,
+            }}
+          >
+            <Checkbox checked={f.checked} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+              {f.label}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onRemoveCustomQualifyField(f.label)}
+            aria-label={`Remove ${f.label}`}
+            style={{
+              background: 'transparent', border: 0, padding: 4, cursor: 'pointer',
+              color: 'var(--lb-ink-5)', lineHeight: 0,
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+
+      {addOpen ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '9px 10px 9px 12px',
+          border: '1.5px solid var(--lb-accent)',
+          borderRadius: 10,
+          background: '#fff',
+        }}>
+          <input
+            autoFocus
+            type="text"
+            placeholder="e.g. Pet name, Move-in date…"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              if (e.key === 'Escape') { setDraft(''); setAddOpen(false); }
+            }}
+            style={{
+              flex: 1, minWidth: 0,
+              border: 0, padding: '4px 0',
+              fontSize: 13, fontFamily: 'inherit',
+              color: 'var(--lb-ink-1)', background: 'transparent',
+              outline: 'none',
+            }}
+          />
+          <button
+            type="button"
+            onClick={commit}
+            disabled={!draft.trim()}
+            style={{
+              padding: '6px 12px',
+              background: draft.trim() ? 'var(--lb-accent)' : 'var(--lb-ink-8)',
+              color: '#fff',
+              border: 0, borderRadius: 8,
+              fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+              cursor: draft.trim() ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            onClick={() => { setDraft(''); setAddOpen(false); }}
+            aria-label="Cancel"
+            style={{
+              background: 'transparent', border: 0, padding: 4, cursor: 'pointer',
+              color: 'var(--lb-ink-5)', lineHeight: 0,
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '11px 12px',
+            border: '1px dashed var(--lb-line)',
+            borderRadius: 10,
+            background: 'transparent',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 13, fontWeight: 600,
+            color: 'var(--lb-accent)',
+            transition: 'background 120ms, border-color 120ms',
+          }}
+        >
+          <Plus size={14} />
+          Add custom field
+        </button>
+      )}
     </div>
   );
 }
