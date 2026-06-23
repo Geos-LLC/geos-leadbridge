@@ -152,6 +152,12 @@ export type PresetPricing = {
  */
 export type PresetFaq = {
   customQA: Array<{ question: string; answer: string }>;
+  /** Free-text describing what's included in a regular / standard clean.
+   *  Cleaning presets only; surfaced verbatim in the AI prompt's FAQ
+   *  block so the AI can answer "what's in a regular cleaning?". */
+  standardScope?: string;
+  /** Free-text describing what's included in a deep / initial clean. */
+  deepScope?: string;
 };
 
 /**
