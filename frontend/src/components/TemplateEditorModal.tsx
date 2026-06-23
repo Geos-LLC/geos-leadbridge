@@ -6,34 +6,55 @@ export interface TemplateVariable {
   desc: string;
 }
 
-// Variable sets for different template contexts
-export const AUTO_REPLY_VARIABLES: TemplateVariable[] = [
-  { name: '{customerName}', desc: 'Full customer name' },
-  { name: '{firstName}', desc: 'First name only' },
-  { name: '{accountName}', desc: 'Your business name' },
-  { name: '{category}', desc: 'Service category' },
-  { name: '{city}', desc: 'Customer city' },
-  { name: '{state}', desc: 'Customer state' },
+/**
+ * Canonical template-variable list. One entry per concept — the runtime
+ * renderer in `notifications.service.renderTemplate` is permissive and
+ * also accepts legacy aliases (`{customerName}` ≡ `{lead.name}`,
+ * `{accountName}` ≡ `{account.name}`, `{category}` ≡ `{lead.service}`,
+ * `{city}` / `{state}` covered by `{lead.location}`) plus the
+ * `{{lead.x}}` double-brace handlebars syntax. The UI standardises on the
+ * dotted single-brace form so users see exactly one way to write each
+ * variable. Old templates that still use the legacy aliases keep working.
+ */
+export const TEMPLATE_VARIABLES: TemplateVariable[] = [
+  // Customer
+  { name: '{lead.name}',               desc: 'Customer full name' },
+  { name: '{firstName}',               desc: 'Customer first name' },
+  { name: '{lead.phone}',              desc: 'Customer phone' },
+  { name: '{lead.email}',              desc: 'Customer email (Yelp)' },
+
+  // Business
+  { name: '{account.name}',            desc: 'Your business name' },
+
+  // Service request
+  { name: '{lead.service}',            desc: 'Service category' },
+  { name: '{lead.message}',            desc: 'Customer’s first message' },
+  { name: '{lead.serviceDescription}', desc: 'Detailed service description' },
+  { name: '{lead.requestDetails}',     desc: 'Full request Q&A' },
+  { name: '{lead.addons}',             desc: 'Add-ons selected' },
+  { name: '{lead.frequency}',          desc: 'Service frequency' },
+  { name: '{lead.bedrooms}',           desc: 'Bedrooms' },
+  { name: '{lead.bathrooms}',          desc: 'Bathrooms' },
+  { name: '{lead.pets}',               desc: 'Pets' },
+
+  // Location
+  { name: '{lead.location}',           desc: 'City, State' },
+  { name: '{lead.zip}',                desc: 'ZIP code' },
+
+  // Pricing & scheduling
+  { name: '{lead.price}',              desc: 'Lead price (Thumbtack)' },
+  { name: '{lead.estimate}',           desc: 'Estimated quote' },
+  { name: '{lead.dates}',              desc: 'Requested date' },
+  { name: '{lead.availability}',       desc: 'Customer availability (Yelp)' },
 ];
 
-export const SMS_VARIABLES: TemplateVariable[] = [
-  { name: '{account.name}', desc: 'Your business name' },
-  { name: '{lead.name}', desc: 'Customer name' },
-  { name: '{lead.phone}', desc: 'Customer phone' },
-  { name: '{lead.service}', desc: 'Service category' },
-  { name: '{lead.location}', desc: 'City, State' },
-  { name: '{lead.zip}', desc: 'ZIP code' },
-  { name: '{lead.message}', desc: 'Customer request message' },
-  { name: '{lead.serviceDescription}', desc: 'Detailed service description' },
-  { name: '{lead.addons}', desc: 'Service add-ons' },
-  { name: '{lead.frequency}', desc: 'Service frequency' },
-  { name: '{lead.bedrooms}', desc: 'Number of bedrooms' },
-  { name: '{lead.bathrooms}', desc: 'Number of bathrooms' },
-  { name: '{lead.price}', desc: 'Lead price/cost' },
-  { name: '{lead.pets}', desc: 'Pet information' },
-  { name: '{lead.estimate}', desc: 'Estimated cost/quote' },
-  { name: '{lead.dates}', desc: 'Requested date/schedule' },
-];
+/**
+ * @deprecated Use `TEMPLATE_VARIABLES`. Kept as a re-export so existing
+ * imports compile; will be removed once all callers migrate.
+ */
+export const AUTO_REPLY_VARIABLES = TEMPLATE_VARIABLES;
+/** @deprecated Use `TEMPLATE_VARIABLES`. */
+export const SMS_VARIABLES = TEMPLATE_VARIABLES;
 
 interface TemplateEditorModalProps {
   isOpen: boolean;

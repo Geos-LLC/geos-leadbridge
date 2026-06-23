@@ -14,6 +14,7 @@
  *   - Checkbox:       18×18 accent-colored checkbox
  */
 import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Check, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { InfoDot, InfoTip } from '../InfoPopover';
 
@@ -426,12 +427,20 @@ export function MessageGenerationExpander({
   aiBody = 'AI writes each message from your Business Info, FAQ, Pricing and AI Playbook.',
   templateBody = 'Use your own pre-written messages instead of AI.',
   defaultOpen = false,
+  templateName,
 }: {
   useAi: boolean;
   onChangeUseAi: (next: boolean) => void;
   aiBody?: string;
   templateBody?: string;
   defaultOpen?: boolean;
+  /**
+   * Section's primary MessageTemplate name (e.g. "Instant Reply",
+   * "Follow Up"). When provided AND Custom template is selected,
+   * surfaces an "Edit this template →" deep-link that opens the named
+   * template in the editor on the /templates page.
+   */
+  templateName?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -471,6 +480,21 @@ export function MessageGenerationExpander({
             title="Custom template"
             body={templateBody}
           />
+          {!useAi && templateName && (
+            <Link
+              to={`/templates?name=${encodeURIComponent(templateName)}&edit=1`}
+              style={{
+                alignSelf: 'flex-start',
+                marginLeft: 28,
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: 'var(--lb-accent)',
+                textDecoration: 'none',
+              }}
+            >
+              Edit “{templateName}” template →
+            </Link>
+          )}
         </div>
       )}
     </div>

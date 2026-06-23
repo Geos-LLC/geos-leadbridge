@@ -634,6 +634,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           useAi={messageMode === 'ai'}
           onChangeUseAi={next => onMessageMode(next ? 'ai' : 'template')}
           aiBody="AI writes each follow-up from your Business Info, FAQ, Pricing and AI Playbook."
+          templateName="Follow Up"
         />
         {mixedMessage.mixed && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 6 }}>

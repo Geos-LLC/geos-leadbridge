@@ -3,12 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText, Sparkles, MessageSquare } from 'lucide-react';
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
-import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
-
-// Combined variables for template page
-const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
-  v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
-)];
+import { TemplateEditorModal, TEMPLATE_VARIABLES } from '../components/TemplateEditorModal';
 
 type TemplateFilter = 'all' | 'auto-reply' | 'alerts' | 'call-connect' | 'prompts';
 
@@ -41,6 +36,13 @@ export function MessageSettings() {
   // doesn't cause the effect to re-evaluate to "no target" mid-animation.
   const initialHighlightRef = useRef<string | null>(searchParams.get('highlight'));
   const initialFilterRef = useRef<TemplateFilter | null>(searchParams.get('filter') as TemplateFilter | null);
+  // Deep-link by name: callers from the Automation pages link here via
+  // `?name=<TemplateName>&edit=1` when the user clicks "Edit X template" on
+  // a section's Custom template option. We resolve the name to a template
+  // id once templates load and then flow into the same highlight + flash
+  // path (plus auto-open the editor when `edit=1`).
+  const initialNameRef = useRef<string | null>(searchParams.get('name'));
+  const initialEditRef = useRef<boolean>(searchParams.get('edit') === '1');
   const highlightId = initialHighlightRef.current;
   const [templates, setTemplates] = useState<MessageTemplate[]>(_templatesCache ?? []);
   const [loading, setLoading] = useState(!_templatesCache);
@@ -81,10 +83,26 @@ export function MessageSettings() {
   // setTimeouts are tracked in refs and cancelled on unmount so navigating
   // away (e.g. via the top-bar Back link) doesn't get rewound by a pending
   // cleanup that calls navigate('/templates').
+  //
+  // Resolution priority: explicit `?highlight=<id>` wins; otherwise we
+  // resolve `?name=<name>` to a template id once templates load (deep-link
+  // entry point used by the Automation pages' "Edit X template" buttons).
   useEffect(() => {
-    if (!highlightId || templates.length === 0 || hasFlashedRef.current) return;
-    const target = templates.find(t => t.id === highlightId);
+    if (hasFlashedRef.current || templates.length === 0) return;
+
+    // Resolve target — id-first, then case-insensitive name match for the
+    // deep-link entry point. We don't fall back to fuzzy matching because
+    // the caller always passes the seed name verbatim.
+    let targetId: string | null = highlightId;
+    if (!targetId && initialNameRef.current) {
+      const wanted = initialNameRef.current.trim().toLowerCase();
+      const byName = templates.find(t => t.name.trim().toLowerCase() === wanted);
+      if (byName) targetId = byName.id;
+    }
+    if (!targetId) return;
+    const target = templates.find(t => t.id === targetId);
     if (!target) return;
+
     // Switch to the target's tab if the active filter would hide the row.
     const targetTab = getTemplateFilter(target);
     if (activeFilter !== 'all' && activeFilter !== targetTab) {
@@ -94,19 +112,26 @@ export function MessageSettings() {
     // Defer one paint so the row's ref is attached.
     scrollTimerRef.current = setTimeout(() => {
       if (!mountedRef.current) return;
-      const el = rowRefs.current[highlightId];
+      const el = rowRefs.current[targetId!];
       if (!el) return;
       hasFlashedRef.current = true;
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setFlashId(highlightId);
-      // After 3s: fade the flash and strip ?highlight/?filter, but preserve
-      // location.state so the top-bar back link survives.
+      setFlashId(targetId);
+      // Auto-open editor when ?edit=1 was set on the deep-link.
+      if (initialEditRef.current) {
+        setEditorMode('edit');
+        setEditingTemplate(target);
+      }
+      // After 3s: fade the flash and strip ?highlight/?filter/?name/?edit,
+      // but preserve location.state so the top-bar back link survives.
       cleanupTimerRef.current = setTimeout(() => {
         if (!mountedRef.current) return;
         setFlashId(null);
         const sp = new URLSearchParams(searchParams);
         sp.delete('highlight');
         sp.delete('filter');
+        sp.delete('name');
+        sp.delete('edit');
         navigate(
           { pathname: location.pathname, search: sp.toString() ? '?' + sp.toString() : '' },
           { replace: true, state: location.state },
@@ -526,7 +551,7 @@ export function MessageSettings() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {ALL_VARIABLES.map(v => (
+            {TEMPLATE_VARIABLES.map(v => (
               <div key={v.name} className="bg-white/5 border border-white/10 rounded-xl p-3 sm:p-4 flex items-start gap-3 hover:bg-white/10 transition-colors">
                 <code className="bg-white/10 px-2 py-1 rounded text-blue-300 text-xs font-mono shrink-0">{v.name}</code>
                 <span className="text-slate-300 text-sm">{v.desc}</span>
@@ -544,7 +569,7 @@ export function MessageSettings() {
         initialName={editingTemplate?.name || ''}
         initialContent={editingTemplate?.content || ''}
         saving={saving}
-        variables={ALL_VARIABLES}
+        variables={TEMPLATE_VARIABLES}
         existingNames={templates.filter(t => t.id !== editingTemplate?.id).map(t => t.name)}
         showDefaultCheckbox={true}
         initialIsDefault={editingTemplate?.isDefault || false}

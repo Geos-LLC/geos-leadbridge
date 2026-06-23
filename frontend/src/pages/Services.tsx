@@ -14,7 +14,7 @@ import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
   CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
-import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
+import { TemplateEditorModal, TEMPLATE_VARIABLES } from '../components/TemplateEditorModal';
 import ServicePricingForm from '../components/ServicePricingForm';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -23,11 +23,6 @@ import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
 import { AccountHoursControl } from '../components/AccountHoursControl';
-
-// Combined variables — same set for all card types (matches Templates page)
-const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
-  v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
-)];
 
 // -- ServiceCard sub-component --
 interface ServiceCardProps {
@@ -4084,7 +4079,7 @@ export function Services() {
         initialContent={templateEditor?.content || ''}
         templateName={templateEditor?.templateName}
         saving={saving}
-        variables={ALL_VARIABLES}
+        variables={TEMPLATE_VARIABLES}
         existingNames={templates.map(t => t.name)}
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}
@@ -4102,7 +4097,7 @@ export function Services() {
         delayPresets={['2 min', '10 min', '1 hour', '4 hours', '1 day', '3 days', '7 days', '2 weeks', '1 month']}
         templateName={fuStepEditor != null ? `Step #${fuStepEditor.idx + 1}` : ''}
         saving={false}
-        variables={SMS_VARIABLES}
+        variables={TEMPLATE_VARIABLES}
         existingNames={[]}
         hideContentField={fuReplyType === 'ai'}
         contentPlaceholder={fuReplyType === 'ai' ? (

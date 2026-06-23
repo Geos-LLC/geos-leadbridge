@@ -662,6 +662,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         <MessageGenerationExpander
           useAi={replyType === 'ai'}
           onChangeUseAi={next => onReplyType(next ? 'ai' : 'template')}
+          templateName="Instant Reply"
         />
         {mixedReplyType && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
@@ -693,6 +694,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         <MessageGenerationExpander
           useAi={instantTextMode === 'ai'}
           onChangeUseAi={next => onInstantTextMode(next ? 'ai' : 'template')}
+          templateName="Instant Text"
         />
         {mixedTextBizHours && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
