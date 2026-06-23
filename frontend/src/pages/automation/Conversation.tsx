@@ -15,6 +15,7 @@ import {
   PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
+import { InfoDot, InfoTip } from '../../components/InfoPopover';
 import { followUpApi, serviceProfilesApi, usersApi, type ServiceProfile } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -269,6 +270,10 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Click-to-toggle info popovers for the two main section headers
+  // (matches the wizard's InfoDot/InfoTip pattern).
+  const [goalInfoOpen, setGoalInfoOpen] = useState(false);
+  const [modeInfoOpen, setModeInfoOpen] = useState(false);
   // User-level business hours, shown in the "Outside of business hours"
   // option body. Replaces a hardcoded "Mon–Fri, 9:00 AM – 6:00 PM" string.
   const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
@@ -830,10 +835,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>Conversation Goal</div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
-              How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
+                How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
+              </span>
+              <InfoDot open={goalInfoOpen} onClick={() => setGoalInfoOpen(o => !o)} />
             </div>
+            {goalInfoOpen && (
+              <InfoTip>
+                Each goal changes how AI replies, what it tries to find out, and when it hands off to your team. Pick the one that matches your business — or leave on Auto and AI switches strategies based on what each lead asks.
+              </InfoTip>
+            )}
           </div>
         </div>
         <div
@@ -923,9 +936,17 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
             <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
               AI Response Mode
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              When AI is allowed to respond automatically to customer messages.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                When AI is allowed to respond automatically to customer messages.
+              </span>
+              <InfoDot open={modeInfoOpen} onClick={() => setModeInfoOpen(o => !o)} />
             </div>
+            {modeInfoOpen && (
+              <InfoTip>
+                "Assist when unavailable" lets your team handle live conversations during business hours; AI fills in only after-hours. "Full autopilot" runs AI any time. Either way, AI follow-ups and detection still run on their own schedule.
+              </InfoTip>
+            )}
           </div>
         </div>
 

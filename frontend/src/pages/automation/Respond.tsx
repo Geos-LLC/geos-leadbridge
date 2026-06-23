@@ -650,6 +650,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         iconTone="blue"
         title="Instant Reply"
         subtitle="Send the first message automatically when a new lead arrives."
+        infoText="The very first response a lead gets, written by AI from your Business Info, FAQ, Pricing, and AI Playbook. Industry studies show the first vendor to reply wins more than half of jobs — Instant Reply makes you that vendor."
         enabled={instantReplyOn}
         onToggle={onInstantReplyOn}
         mixed={mixedInstantReply}
@@ -681,6 +682,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         iconTone="green"
         title="Instant Text"
         subtitle="Automatically text the lead when a new lead arrives."
+        infoText="Sends a text message to the lead's phone number the moment they come in. Use this for SMS-first conversations or to capture a phone-callable thread early. Requires your dedicated LeadBridge number."
         enabled={instantTextOn}
         onToggle={onInstantTextOn}
         mixed={mixedInstantText}
@@ -719,6 +721,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         iconTone="violet"
         title="Instant Call"
         subtitle="Call your team and connect to the lead right away."
+        infoText="Dials your team's number and bridges them to the lead's phone for a live call. Best for high-intent leads where a voice conversation closes faster than chat. Requires the lead's phone number."
         enabled={instantCallOn}
         onToggle={onInstantCallOn}
         mixed={mixedInstantCall}
