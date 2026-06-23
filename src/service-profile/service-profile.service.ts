@@ -145,6 +145,7 @@ export class ServiceProfileService {
         effectivePricingJson: matched.pricingJson ?? null,
         effectiveFaqJson: matched.faqJson ?? null,
         effectiveAiInstructionsJson: matched.aiInstructionsJson ?? null,
+        effectiveQualificationSchemaJson: matched.qualificationSchemaJson ?? null,
         matchedBy: 'serviceGroup',
       };
     } catch (err: any) {
@@ -219,6 +220,12 @@ export class ServiceProfileService {
     pricingJson: string | null;
     faqJson: string | null;
     aiInstructionsJson: string | null;
+    // Profile-side qualification schema. Callers feed this into
+    // buildQualificationBlockForStrategy alongside the SavedAccount-level
+    // qualificationV2 so the qualify prompt sees service-specific fields
+    // (e.g. "Number of seats", "Fabric type" for upholstery) instead of
+    // defaulting to the prompt's hardcoded "square footage" example.
+    qualificationSchemaJson: string | null;
     aiPaused: boolean;
     profileId: string | null;
     source: 'service_profile' | 'none';
@@ -231,6 +238,7 @@ export class ServiceProfileService {
         pricingJson: null,
         faqJson: null,
         aiInstructionsJson: null,
+        qualificationSchemaJson: null,
         aiPaused: true,
         profileId: resolved.profileId,
         source: 'service_profile',
@@ -243,6 +251,7 @@ export class ServiceProfileService {
         pricingJson: resolved.effectivePricingJson,
         faqJson: resolved.effectiveFaqJson,
         aiInstructionsJson: resolved.effectiveAiInstructionsJson,
+        qualificationSchemaJson: resolved.effectiveQualificationSchemaJson,
         aiPaused: false,
         profileId: resolved.profileId,
         source: 'service_profile',
@@ -261,6 +270,7 @@ export class ServiceProfileService {
       pricingJson: null,
       faqJson: null,
       aiInstructionsJson: null,
+      qualificationSchemaJson: null,
       aiPaused: false,
       profileId: null,
       source: 'none',

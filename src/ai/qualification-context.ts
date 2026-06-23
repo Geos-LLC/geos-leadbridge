@@ -48,6 +48,58 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 /**
+ * Optional profile-side qualification inputs. Carry the JSON-parsed
+ * shape directly so the caller doesn't have to know our internal
+ * key paths.
+ *
+ * - `requiredDetails` — string[] from
+ *   `ServiceProfile.aiInstructionsJson.serviceRules.requiredDetails`.
+ * - `questions` — object[] from
+ *   `ServiceProfile.qualificationSchemaJson.questions` (each row has a
+ *   `label`).
+ *
+ * Both default to undefined when the profile is missing the data, the
+ * matched profile had nothing authored, or parsing failed upstream.
+ */
+export type ProfileQualificationExtras = {
+  requiredDetails?: unknown;
+  questions?: unknown;
+};
+
+/**
+ * Defensive parser. Given the resolver's raw JSON strings for
+ * `aiInstructionsJson` and `qualificationSchemaJson`, returns a
+ * ProfileQualificationExtras with only the array shapes we use.
+ * Anything malformed (non-JSON, wrong shape) is silently dropped so
+ * downstream prompt assembly never crashes.
+ */
+export function parseProfileQualificationExtras(
+  aiInstructionsJson: string | null | undefined,
+  qualificationSchemaJson: string | null | undefined,
+): ProfileQualificationExtras {
+  const out: ProfileQualificationExtras = {};
+  if (aiInstructionsJson) {
+    try {
+      const parsed = JSON.parse(aiInstructionsJson);
+      const rd = (parsed as any)?.serviceRules?.requiredDetails;
+      if (Array.isArray(rd)) out.requiredDetails = rd;
+    } catch {
+      // ignore
+    }
+  }
+  if (qualificationSchemaJson) {
+    try {
+      const parsed = JSON.parse(qualificationSchemaJson);
+      const q = (parsed as any)?.questions;
+      if (Array.isArray(q)) out.questions = q;
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+/**
  * Build the REFERENCE block content (the body — the caller adds the
  * `=== REFERENCE: ... ===` header). Returns an empty string when there
  * are no valid fields to emit; callers should treat empty as "skip this
@@ -63,10 +115,17 @@ const FIELD_LABELS: Record<string, string> = {
  *   ignored for prompt purposes (they remain saved on the account but
  *   don't gate qualification completion). Garbage-in safe: malformed
  *   rows + rows without a label are dropped.
+ * @param profileExtras Optional profile-side requirements lifted from
+ *   the matched ServiceProfile (serviceRules.requiredDetails AND
+ *   qualificationSchema.questions). Emitted FIRST so the most
+ *   service-specific questions are asked before the cross-cutting
+ *   account fields — fixes the bug where an upholstery lead was asked
+ *   "square footage" because nothing service-aware was in the block.
  */
 export function buildQualificationBlock(
   requiredFields: unknown,
   customFields?: unknown,
+  profileExtras?: ProfileQualificationExtras,
 ): string {
   // Parse the built-in catalog selections.
   const seen = new Set<string>();
@@ -102,10 +161,55 @@ export function buildQualificationBlock(
     }
   }
 
-  if (orderedBuiltins.length === 0 && customRows.length === 0) return '';
+  // Parse profile-side rows. Two sources, both array-of-… shapes:
+  //   serviceRules.requiredDetails — string[] of human labels
+  //   qualificationSchema.questions — object[] with `label`
+  // Dedupe across sources (case-insensitive label) and against the
+  // built-in catalog labels and custom rows so the same field never
+  // appears twice. Preserves source order so the operator's authored
+  // order in the profile editor matches what the model sees.
+  const profileRows: string[] = [];
+  const seenBuiltinLabels = new Set(orderedBuiltins.map((k) => FIELD_LABELS[k].toLowerCase()));
+  const seenCustomLabels = new Set(customRows.map((r) => r.label.toLowerCase()));
+  const profileLabelDedup = new Set<string>();
+  const pushProfileLabel = (label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seenBuiltinLabels.has(key)) return;
+    if (seenCustomLabels.has(key)) return;
+    if (profileLabelDedup.has(key)) return;
+    profileLabelDedup.add(key);
+    profileRows.push(trimmed);
+  };
+  if (Array.isArray(profileExtras?.requiredDetails)) {
+    for (const raw of profileExtras!.requiredDetails as unknown[]) {
+      if (typeof raw !== 'string') continue;
+      pushProfileLabel(raw);
+    }
+  }
+  if (Array.isArray(profileExtras?.questions)) {
+    for (const raw of profileExtras!.questions as unknown[]) {
+      if (!raw || typeof raw !== 'object') continue;
+      const label = (raw as Record<string, unknown>).label;
+      if (typeof label !== 'string') continue;
+      pushProfileLabel(label);
+    }
+  }
+
+  if (orderedBuiltins.length === 0 && customRows.length === 0 && profileRows.length === 0) {
+    return '';
+  }
 
   const lines: string[] = [];
   lines.push('The business has marked these fields as required to qualify a lead before quoting or booking:');
+  // Profile-derived rows lead — they're the most service-specific
+  // questions for the matched ServiceProfile (e.g. "Number of seats"
+  // for upholstery vs. "Square Footage" for house cleaning), and the
+  // qualify prompt asks fields in list order.
+  for (const label of profileRows) {
+    lines.push(`- ${label}`);
+  }
   for (const key of orderedBuiltins) {
     lines.push(`- ${FIELD_LABELS[key]}`);
   }
@@ -150,7 +254,8 @@ export function buildQualificationBlockForStrategy(
   strategy: string | undefined,
   requiredFields: unknown,
   customFields?: unknown,
+  profileExtras?: ProfileQualificationExtras,
 ): string {
   if (!strategy || !QUALIFICATION_STRATEGIES.has(strategy)) return '';
-  return buildQualificationBlock(requiredFields, customFields);
+  return buildQualificationBlock(requiredFields, customFields, profileExtras);
 }

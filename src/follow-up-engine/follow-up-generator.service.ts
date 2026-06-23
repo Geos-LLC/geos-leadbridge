@@ -31,7 +31,7 @@ import { computeQuoteAndIntent } from '../pricing/pricing-engine';
 import { extractLeadDetails } from '../leads/extract-lead-details';
 import { renderPlaybookBlock } from '../ai/playbook-renderer';
 import { resolveGlobalPrompt } from '../ai/global-prompt-resolver';
-import { buildQualificationBlockForStrategy } from '../ai/qualification-context';
+import { buildQualificationBlockForStrategy, parseProfileQualificationExtras } from '../ai/qualification-context';
 import { buildAvailabilityBlockForStrategy } from '../ai/booking-availability';
 import { ServiceProfileService } from '../service-profile/service-profile.service';
 import { buildPlaybookSettingsForRenderer } from '../service-profile/service-profile.types';
@@ -220,10 +220,14 @@ export class FollowUpGeneratorService {
     // reply. See src/pricing/price-intent.ts.
     let priceIntentContext = '';
     // Qualification REFERENCE block. Only emitted when the resolved strategy
-    // is 'price' or 'qualify' AND the tenant has saved a non-empty
-    // `qualificationV2.requiredFields` array. Existing accounts without
-    // that key keep the legacy hardcoded priority order from STRATEGY_PROMPTS.qualify.
-    const qualificationBlockBody: string = buildQualificationBlockForStrategy(
+    // is 'qualify' or 'booking'. Three storage locations are merged below
+    // (after profileInputs resolves): per-account qualificationV2 + the
+    // matched ServiceProfile's serviceRules.requiredDetails +
+    // qualificationSchema.questions. Initialized to the account-only
+    // result so the legacy non-businessId path still works unchanged;
+    // re-assigned inside the businessId branch once profileInputs is
+    // available, merging in profile-side fields.
+    let qualificationBlockBody: string = buildQualificationBlockForStrategy(
       strategyKey,
       accountSettings?.qualificationV2?.requiredFields,
       accountSettings?.qualificationV2?.customFields,
@@ -315,6 +319,23 @@ export class FollowUpGeneratorService {
       const effectivePlaybookSettingsJson = buildPlaybookSettingsForRenderer(
         profileInputs?.aiInstructionsJson ?? null,
         account?.followUpSettingsJson ?? null,
+      );
+
+      // Re-build the qualification REFERENCE block now that profileInputs
+      // is available — merges profile-side service-specific fields with the
+      // per-account qualificationV2 selections. Service-specific rows lead
+      // so an upholstery lead asks "Number of seats" before "Phone Number"
+      // (Crystal Clear Care 2026-06-23). When no profile matched, this
+      // re-build returns the same string the early initialization produced.
+      const profileQualificationExtras = parseProfileQualificationExtras(
+        profileInputs?.aiInstructionsJson ?? null,
+        profileInputs?.qualificationSchemaJson ?? null,
+      );
+      qualificationBlockBody = buildQualificationBlockForStrategy(
+        strategyKey,
+        accountSettings?.qualificationV2?.requiredFields,
+        accountSettings?.qualificationV2?.customFields,
+        profileQualificationExtras,
       );
       const owner = await this.prisma.user.findUnique({
         where: { id: lead.userId },

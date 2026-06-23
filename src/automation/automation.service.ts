@@ -2403,13 +2403,20 @@ export class AutomationService implements OnModuleInit {
             })
           : '';
 
-        // REFERENCE: Qualification required fields (Price / Qualify only).
-        // Read from followUpSettingsJson.qualificationV2.requiredFields. The
-        // helper returns '' when the strategy doesn't warrant it OR when the
-        // tenant has no saved fields — both cases preserve legacy behavior
-        // (the qualify-strategy prompt's hardcoded priority continues to drive
-        // the conversation). See src/ai/qualification-context.ts.
-        const { buildQualificationBlockForStrategy } = require('../ai/qualification-context');
+        // REFERENCE: Qualification required fields (Qualify / Booking only).
+        // Three storage locations are merged so the bot asks service-relevant
+        // questions for ANY of: per-account qualificationV2 (operator's
+        // cross-cutting choices), profile.aiInstructionsJson.serviceRules
+        // (per-service playbook authoring), profile.qualificationSchemaJson
+        // (per-service question schema). Profile-side rows lead so an
+        // upholstery lead asks "Number of seats" before "Phone Number"
+        // (Crystal Clear Care 2026-06-23). The helper still returns '' when
+        // the strategy doesn't warrant it OR when nothing is saved anywhere.
+        // See src/ai/qualification-context.ts.
+        const {
+          buildQualificationBlockForStrategy,
+          parseProfileQualificationExtras,
+        } = require('../ai/qualification-context');
         const { buildAvailabilityBlockForStrategy } = require('../ai/booking-availability');
         let qualificationRequiredFields: unknown = undefined;
         let qualificationCustomFields: unknown = undefined;
@@ -2422,10 +2429,15 @@ export class AutomationService implements OnModuleInit {
             bookingAvailabilityRaw = s?.bookingAvailability;
           } catch { /* invalid JSON */ }
         }
+        const profileQualificationExtras = parseProfileQualificationExtras(
+          profileInputs?.aiInstructionsJson ?? null,
+          profileInputs?.qualificationSchemaJson ?? null,
+        );
         const qualificationBlock: string = buildQualificationBlockForStrategy(
           effectiveStrategyKey,
           qualificationRequiredFields,
           qualificationCustomFields,
+          profileQualificationExtras,
         );
         // AVAILABILITY block — only injected when goal is 'booking'. When
         // the tenant has nothing saved, the normalizer falls back to

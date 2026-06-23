@@ -386,6 +386,57 @@ describe('ServiceProfileService — resolver (classifier-only after A3)', () => 
     expect(inputs.faqJson).toBeNull();
     expect(inputs.profileId).toBeNull();
     expect(inputs.source).toBe('none');
+    // no_match path must also null the new qualification field — callers
+    // pass it straight into the qualify-block builder.
+    expect(inputs.qualificationSchemaJson).toBeNull();
+  });
+
+  it('resolveForLead returns the matched profile qualificationSchemaJson', async () => {
+    // The Crystal Clear Care fix: callers feed this back into the qualify
+    // prompt block so upholstery leads see service-specific questions
+    // (Number of seats, Fabric type) instead of the prompt's hardcoded
+    // "square footage" example.
+    const schema = JSON.stringify({
+      questions: [{ key: 'fabric', label: 'What type of upholstery material is it?' }],
+    });
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-uphol',
+          serviceGroup: 'upholstery_carpet',
+          qualificationSchemaJson: schema,
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const result = await svc.resolveForLead(
+      { ...LEAD_BASE, category: 'Carpet and upholstery cleaning' },
+      null,
+    );
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('typeguard');
+    expect(result.effectiveQualificationSchemaJson).toBe(schema);
+  });
+
+  it('resolveEffectivePromptInputs propagates qualificationSchemaJson from the matched profile', async () => {
+    const schema = JSON.stringify({ questions: [{ label: 'Number of seats' }] });
+    const prisma = buildPrismaMock({
+      profiles: [
+        buildProfile({
+          id: 'prof-uphol',
+          serviceGroup: 'upholstery_carpet',
+          qualificationSchemaJson: schema,
+        }),
+      ],
+      users: [{ id: USER_ID, defaultServiceProfileId: null }],
+    });
+    const svc = new ServiceProfileService(prisma, ADMIN_TEMPLATES_STUB, MONITORING_STUB);
+    const inputs = await svc.resolveEffectivePromptInputs(
+      { ...LEAD_BASE, category: 'Upholstery cleaning' },
+      null,
+    );
+    expect(inputs.qualificationSchemaJson).toBe(schema);
   });
 });
 
