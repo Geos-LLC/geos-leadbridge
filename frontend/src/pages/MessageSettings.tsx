@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText, Sparkles } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, X, Info, ChevronDown, ChevronUp, FileText, Sparkles, MessageSquare } from 'lucide-react';
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
@@ -222,7 +222,7 @@ export function MessageSettings() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-10 max-w-5xl mx-auto space-y-6 sm:space-y-10">
+    <div className="p-4 sm:p-6 lg:p-10 max-w-5xl mx-auto space-y-6 sm:space-y-8">
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
           <X size={16} className="shrink-0" />
@@ -233,57 +233,113 @@ export function MessageSettings() {
         </div>
       )}
 
-      {/* Welcome Section — hero shrinks aggressively on phones so the
-          Settings-page chrome above doesn't push the actual templates
-          off-screen. Marketing tagline collapses, the "what is this"
-          line stays as the only subtitle, and the CTA goes compact. */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
-        <div className="min-w-0">
-          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-[10px] sm:text-xs">Messaging System</p>
-          <h2 className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
-            Message <span className="gradient-text">Templates.</span>
-          </h2>
-          <p className="hidden sm:block text-slate-500 mt-2 text-lg">Streamline your client communication with reusable response blocks.</p>
-          <p className="text-slate-500 sm:text-slate-400 mt-2 text-sm">Used when you choose <span className="font-semibold text-slate-600">Custom Template</span> instead of AI in automation settings.</p>
-        </div>
-        <div className="flex gap-3">
+      {/* Templates library card — mirrors FinalDesign "Templates Screen
+          (standalone)": single bordered/shadowed card with a violet
+          MessageSquareText tile + "Your Library" header + Create New
+          button, a horizontally-scrollable filter strip below, and flat
+          template rows separated by bottom borders (no per-template
+          card chrome). Drops the legacy hero ("Messaging System /
+          Message Templates.") — Settings page chrome above already
+          identifies the page. */}
+      <section
+        style={{
+          background: '#fff',
+          border: '1.5px solid var(--lb-line)',
+          borderRadius: 14,
+          boxShadow: 'var(--lb-shadow-sm)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex', alignItems: 'flex-start', gap: 14,
+            padding: '18px 20px',
+            borderBottom: '1px solid var(--lb-line-soft)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span
+            style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: '#ede9fe', color: '#7c3aed',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <MessageSquare className="w-5 h-5" />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Your Library
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45 }}>
+              Used when you choose <strong style={{ color: 'var(--lb-ink-2)' }}>Custom Template</strong> instead of AI in your automation settings.
+            </div>
+          </div>
           <button
             onClick={openCreate}
-            className="w-full md:w-auto px-4 sm:px-6 py-2.5 sm:py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-blue-700 shadow-md sm:shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
+            style={{
+              flexShrink: 0,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '9px 14px',
+              borderRadius: 9, border: 0,
+              background: 'var(--lb-accent)', color: '#fff',
+              fontSize: 12.5, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
           >
-            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            Create New
+            <Plus className="w-3.5 h-3.5" /> Create New
           </button>
         </div>
-      </section>
 
-      {/* Templates List */}
-      <section className="space-y-4 sm:space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 px-1 sm:px-2">
-          <h3 className="text-lg sm:text-xl font-bold text-slate-900">Your Library</h3>
-          {/* Filter tabs — horizontally scrollable on mobile so the row
-              stays single-line. -mx-1 + px-1 trick lets the scroll edge
-              bleed to the screen edge while keeping content padding. */}
-          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto -mx-1 px-1 sm:flex-wrap sm:overflow-visible">
+        {/* Filter strip — horizontally scrollable so the row stays
+            single-line on phones with negative-margin scroll bleed. */}
+        <div style={{ padding: '14px 20px 6px' }}>
+          <div
+            style={{
+              display: 'flex', gap: 8,
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              paddingBottom: 4,
+              marginLeft: -4, paddingLeft: 4,
+              marginRight: -4, paddingRight: 4,
+            }}
+          >
             {FILTER_TABS.map(tab => {
               const count = tab.key === 'all'
                 ? templates.length
                 : templates.filter(t => getTemplateFilter(t) === tab.key).length;
+              const active = activeFilter === tab.key;
               return (
                 <button
                   key={tab.key}
                   onClick={() => setActiveFilter(tab.key)}
-                  className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    activeFilter === tab.key
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                  }`}
+                  style={{
+                    flexShrink: 0,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    border: '1px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+                    background: active ? 'var(--lb-accent)' : 'var(--lb-surface)',
+                    color: active ? '#fff' : 'var(--lb-ink-3)',
+                    fontSize: 12, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                  }}
                 >
                   {tab.label}
                   {count > 0 && (
-                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${
-                      activeFilter === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
-                    }`}>{count}</span>
+                    <span
+                      style={{
+                        fontSize: 10, fontWeight: 700,
+                        padding: '1px 7px', borderRadius: 999,
+                        background: active ? 'rgba(255,255,255,0.22)' : 'var(--lb-ink-10)',
+                        color: active ? '#fff' : 'var(--lb-ink-5)',
+                      }}
+                    >
+                      {count}
+                    </span>
                   )}
                 </button>
               );
@@ -291,102 +347,162 @@ export function MessageSettings() {
           </div>
         </div>
 
-        {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).length === 0 ? (
-          <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center">
-            <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-slate-600 mb-2">
-              {activeFilter === 'all' ? 'No templates yet' : `No ${FILTER_TABS.find(t => t.key === activeFilter)?.label} templates`}
-            </h3>
-            <p className="text-slate-500 mb-6 max-w-md mx-auto">
-              {activeFilter === 'all'
-                ? 'Templates let you send personalized follow-up messages to multiple leads at once. Create your first one to get started.'
-                : 'No templates match this filter yet. Create one or check another category.'}
-            </p>
-            <button
-              onClick={openCreate}
-              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all inline-flex items-center gap-2"
+        {/* Templates list — flat rows separated by bottom borders. */}
+        <div style={{ padding: '6px 20px 8px' }}>
+          {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).length === 0 ? (
+            <div
+              style={{
+                margin: '12px 0 16px',
+                padding: 28,
+                textAlign: 'center',
+                border: '1px dashed var(--lb-line)',
+                borderRadius: 12,
+                background: 'var(--lb-bg, #f8fafc)',
+              }}
             >
-              <Plus className="w-5 h-5" />
-              Create Template
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).map(template => {
+              <FileText className="w-10 h-10" style={{ color: 'var(--lb-ink-6)', margin: '0 auto 10px' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-2)', marginBottom: 4 }}>
+                {activeFilter === 'all' ? 'No templates yet' : `No ${FILTER_TABS.find(t => t.key === activeFilter)?.label} templates`}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5, maxWidth: 320, margin: '0 auto 14px' }}>
+                {activeFilter === 'all'
+                  ? 'Templates let you send personalized follow-up messages to multiple leads at once. Create your first one to get started.'
+                  : 'No templates match this filter yet. Create one or check another category.'}
+              </div>
+              <button
+                onClick={openCreate}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px',
+                  borderRadius: 9, border: 0,
+                  background: 'var(--lb-accent)', color: '#fff',
+                  fontSize: 12.5, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <Plus className="w-3.5 h-3.5" /> Create Template
+              </button>
+            </div>
+          ) : (
+            templates.filter(t => activeFilter === 'all' || getTemplateFilter(t) === activeFilter).map((template, idx, arr) => {
               const isExpanded = expandedTemplates.has(template.id);
               const isFlashing = flashId === template.id;
               const isPrompt = template.type === 'prompt';
+              const isLast = idx === arr.length - 1;
               return (
                 <div
                   key={template.id}
                   ref={(el) => { rowRefs.current[template.id] = el; }}
-                  className={
-                    'bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ' +
-                    (isFlashing
-                      ? 'border-blue-500 ring-2 ring-blue-200'
-                      : 'border-slate-100 hover:border-blue-200')
-                  }
-                  style={isFlashing ? { boxShadow: '0 0 0 4px rgba(37,99,235,0.12), 0 1px 2px rgba(10,21,48,0.04)' } : undefined}
+                  style={{
+                    padding: '16px 0',
+                    borderBottom: isLast ? 'none' : '1px solid var(--lb-line-soft)',
+                    ...(isFlashing
+                      ? { boxShadow: '0 0 0 3px rgba(37,99,235,0.14)', borderRadius: 10, padding: '16px 12px' }
+                      : {}),
+                  }}
                 >
-                  <div className="p-4 sm:p-6">
-                    <div className="flex items-start justify-between gap-3 sm:gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 sm:gap-3 mb-2 flex-wrap">
-                          <h3 className="text-base sm:text-lg font-bold text-slate-900">{template.name}</h3>
-                          {isPrompt && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-50 text-violet-700 text-[10px] font-bold rounded uppercase tracking-wider">
-                              <Sparkles className="w-3 h-3" /> AI Prompt
-                            </span>
-                          )}
-                          {template.isDefault && (
-                            <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase tracking-wider">Default</span>
-                          )}
-                          {template.usageCount > 0 && (
-                            <span className="text-xs text-slate-400">
-                              • Used {template.usageCount} time{template.usageCount !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-slate-600 text-sm leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>
-                          {template.content}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-                        <button
-                          onClick={() => toggleTemplate(template.id)}
-                          className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
-                          title={isExpanded ? 'Collapse' : 'Expand'}
-                        >
-                          {isExpanded ? <ChevronUp className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5" />}
-                        </button>
-                        <button
-                          onClick={() => openEdit(template)}
-                          className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                          title="Edit template"
-                        >
-                          <Pencil className="w-4 h-4 sm:w-5 sm:h-5" />
-                        </button>
-                        <button
-                          onClick={() => setDeletingId(template.id)}
-                          className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                          title="Delete template"
-                        >
-                          <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {isExpanded && template.lastUsedAt && (
-                      <div className="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400">
-                        Last used {new Date(template.lastUsedAt).toLocaleDateString()}
-                      </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        flex: 1, minWidth: 0,
+                        fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {template.name}
+                    </span>
+                    <button
+                      onClick={() => toggleTemplate(template.id)}
+                      aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                      style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        border: '1px solid var(--lb-line)', background: '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', flexShrink: 0, color: 'var(--lb-ink-4)',
+                      }}
+                    >
+                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      onClick={() => openEdit(template)}
+                      aria-label="Edit"
+                      style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        border: '1px solid var(--lb-line)', background: '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', flexShrink: 0, color: 'var(--lb-accent)',
+                      }}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingId(template.id)}
+                      aria-label="Delete"
+                      style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        border: '1px solid var(--lb-line)', background: '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', flexShrink: 0, color: 'var(--lb-danger)',
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, marginTop: 9 }}>
+                    {isPrompt && (
+                      <span
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          padding: '2px 8px', borderRadius: 4,
+                          background: '#f5f3ff', color: '#7c3aed',
+                          fontSize: 10, fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '0.04em',
+                        }}
+                      >
+                        <Sparkles className="w-2.5 h-2.5" /> AI Prompt
+                      </span>
+                    )}
+                    {template.isDefault && (
+                      <span
+                        style={{
+                          padding: '2px 8px', borderRadius: 4,
+                          background: '#eff6ff', color: '#2563eb',
+                          fontSize: 10, fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '0.04em',
+                        }}
+                      >
+                        Default
+                      </span>
+                    )}
+                    {template.usageCount > 0 && (
+                      <span style={{ fontSize: 11.5, color: 'var(--lb-ink-6)', fontFamily: 'var(--lb-font-mono)' }}>
+                        Used {template.usageCount} time{template.usageCount !== 1 ? 's' : ''}
+                      </span>
                     )}
                   </div>
+                  <p
+                    style={{
+                      margin: '11px 0 0',
+                      fontSize: 13, color: 'var(--lb-ink-4)', lineHeight: 1.55,
+                      ...(isExpanded ? {} : {
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }),
+                    } as React.CSSProperties}
+                  >
+                    {template.content}
+                  </p>
+                  {isExpanded && template.lastUsedAt && (
+                    <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--lb-ink-6)' }}>
+                      Last used {new Date(template.lastUsedAt).toLocaleDateString()}
+                    </div>
+                  )}
                 </div>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </section>
 
       {/* Variables Reference */}
