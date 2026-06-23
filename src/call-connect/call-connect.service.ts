@@ -341,8 +341,15 @@ export class CallConnectService {
     }
 
     // No sibling — first CC row for this user. Insert a disabled row with sane
-    // defaults so the Settings page renders the config form. Owner must enable
-    // explicitly (we don't pick a phone for them).
+    // defaults so the Settings page renders the config form. Pre-fill the agent
+    // phone from User.businessPhone — agentStrategy='owner' already declares
+    // "ring the owner", so leaving the field null forced Sigcore to 422 with
+    // "Agent phone not configured" when the owner later flipped CC on without
+    // re-entering their phone in the form.
+    const owner = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
     await this.prisma.callConnectSettings.create({
       data: {
         savedAccountId,
@@ -350,6 +357,7 @@ export class CallConnectService {
         enabled: false,
         mode: 'AGENT_FIRST',
         agentStrategy: 'owner',
+        agentPhoneE164: owner?.businessPhone || null,
         maxAgentAttempts: 2,
         agentAcceptDigits: '0123456789*#',
         agentWhisperMessage:
@@ -360,7 +368,7 @@ export class CallConnectService {
         sigcoreWebhookSecret: crypto.randomBytes(32).toString('hex'),
       },
     });
-    this.logger.log(`[seedOrInheritCC] Seeded first-account CC defaults (disabled) for ${savedAccountId}`);
+    this.logger.log(`[seedOrInheritCC] Seeded first-account CC defaults (disabled, agentPhone=${owner?.businessPhone ?? 'null'}) for ${savedAccountId}`);
   }
 
   // ─── Sigcore API ─────────────────────────────────────────────────────────────
@@ -919,6 +927,19 @@ export class CallConnectService {
     // Resolve workspace/business ID from NotificationSettings
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || ns?.sigcoreTenantId || params.businessId || params.savedAccountId;
 
+    // Resolve agent phone: prefer the row's explicit value; for agentStrategy='owner'
+    // (the seed default), fall back to User.businessPhone. Without this fallback,
+    // any tenant whose CC row was created by the first-account-defaults seed
+    // before this field was pre-filled gets 422 from Sigcore on every lead.
+    let resolvedAgentPhone = settings.agentPhoneE164 || null;
+    if (!resolvedAgentPhone && settings.agentStrategy === 'owner') {
+      const owner = await this.prisma.user.findUnique({
+        where: { id: params.userId },
+        select: { businessPhone: true },
+      });
+      resolvedAgentPhone = owner?.businessPhone || null;
+    }
+
     const summary =
       params.leadSummary ||
       [params.customerName, params.category].filter(Boolean).join(' – ');
@@ -973,7 +994,7 @@ export class CallConnectService {
             leadSummary: summary,
             agentWhisperMessage,
             leadVoicemailMessage,
-            agentHint: settings.agentPhoneE164 || undefined,
+            agentHint: resolvedAgentPhone || undefined,
             // fromNumberHint tells Sigcore which per-account settings row to use
             fromNumberHint: settings.botNumberE164 || undefined,
             source: 'leadbridge',
