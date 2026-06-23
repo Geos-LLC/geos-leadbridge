@@ -30,6 +30,39 @@ interface Props {
 type ConversationGoal = 'auto' | 'price' | 'qualify' | 'booking' | 'phone';
 type AiResponseMode = 'suggest' | 'assist' | 'autopilot';
 
+type QualifyField = 'bedrooms' | 'bathrooms' | 'sqft' | 'frequency' | 'zip' | 'phone';
+const QUALIFY_FIELD_DEFS: Array<{ key: QualifyField; label: string }> = [
+  { key: 'bedrooms',  label: 'Bedrooms' },
+  { key: 'bathrooms', label: 'Bathrooms' },
+  { key: 'sqft',      label: 'Square Footage' },
+  { key: 'frequency', label: 'Frequency' },
+  { key: 'zip',       label: 'Zip Code' },
+  { key: 'phone',     label: 'Phone Number' },
+];
+
+type BookingDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+const BOOKING_DAYS: Array<{ key: BookingDay; label: string }> = [
+  { key: 'mon', label: 'MON' },
+  { key: 'tue', label: 'TUE' },
+  { key: 'wed', label: 'WED' },
+  { key: 'thu', label: 'THU' },
+  { key: 'fri', label: 'FRI' },
+  { key: 'sat', label: 'SAT' },
+  { key: 'sun', label: 'SUN' },
+];
+type BookingWindows = Record<BookingDay, { morning: boolean; afternoon: boolean }>;
+const DEFAULT_BOOKING_WINDOWS: BookingWindows = {
+  mon: { morning: true,  afternoon: true  },
+  tue: { morning: true,  afternoon: true  },
+  wed: { morning: true,  afternoon: true  },
+  thu: { morning: true,  afternoon: true  },
+  fri: { morning: true,  afternoon: true  },
+  sat: { morning: false, afternoon: false },
+  sun: { morning: false, afternoon: false },
+};
+
+type PriceMode = 'range' | 'exact';
+
 const DEFAULTS = {
   firstMsgDuringBusinessHours: true,
   callDuringBusinessHours: true,
@@ -134,6 +167,18 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
   // automation rule. Default to AI to match the existing Respond.tsx
   // defaults so a fresh account behaves the same after wizard save.
   const [replyUseAi, setReplyUseAi] = useState(true);
+
+  // Strategy-specific configuration. These are wizard-local visual
+  // affordances that match the canonical "Wizard Automation (standalone)"
+  // expand panels. Backend wiring for fine-grained qualify fields /
+  // booking windows / price mode lives on Settings → Automation;
+  // saving here cascades them through wizardPayload so they round-trip.
+  const [qualifyFields, setQualifyFields] = useState<Set<QualifyField>>(
+    () => new Set<QualifyField>(['zip', 'phone'] as QualifyField[]),
+  );
+  const [bookingWindows, setBookingWindows] = useState<BookingWindows>(DEFAULT_BOOKING_WINDOWS);
+  const [priceMode, setPriceMode] = useState<PriceMode>('range');
+
   const navigate = useNavigate();
 
   const cascadeNote = savedAccounts.length > 1;
@@ -435,6 +480,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             iconColor="#2563eb"
             title="Instant Reply"
             subtitle="Send the first message automatically when a new lead arrives."
+            info="The very first response a lead gets, written by AI from your Business Info, FAQ, Pricing, and AI Playbook. Industry studies show the first vendor to reply wins more than half of jobs — Instant Reply makes you that vendor."
             enabled={instantReplyOn}
             onToggle={setInstantReplyOn}
             bizLabel="Only send during business hours"
@@ -489,6 +535,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             iconColor="#059669"
             title="Instant Text"
             subtitle="Automatically text the lead when a new lead arrives."
+            info="Sends a text message to the lead's phone number the moment they come in. Use this for SMS-first conversations or to capture a phone-callable thread early."
             enabled={instantTextOn}
             onToggle={setInstantTextOn}
             bizLabel="Only send during business hours"
@@ -503,6 +550,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             iconColor="#6366f1"
             title="Instant Call"
             subtitle="Call your team and connect to the lead right away."
+            info="Dials your team's number and bridges them to the lead's phone for a live call. Best for high-intent leads where a voice conversation closes faster than chat. Requires the lead's phone number."
             enabled={instantCallOn}
             onToggle={setInstantCallOn}
             bizLabel="Only call during business hours"
@@ -560,6 +608,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               iconColor="#0d9488"
               title="Resume follow-ups after a conversation"
               subtitle="When a customer replies and then goes silent again, start a new follow-up sequence."
+              info="Once a lead has replied at least once, follow-ups stop. If they then go quiet again, we wait the configured delay and restart the sequence so they don't drift away unattended."
               enabled={opts.fuReEnrollOnSilence}
               onToggle={v => setOpts(o => ({ ...o, fuReEnrollOnSilence: v }))}
               pickerLabel="Send after"
@@ -574,6 +623,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               iconColor="#7c3aed"
               title="Check in after customer deferral"
               subtitle={"When customer says \"I'll get back to you\", schedule one nudge later. Cancels if they reply first."}
+              info={'AI detects soft brush-offs ("let me think", "I\'ll get back to you", "checking with my partner") and schedules a single polite nudge after the configured delay. If they reply first, the nudge is canceled automatically.'}
               enabled={opts.aiDeferralCheckIn}
               onToggle={v => setOpts(o => ({ ...o, aiDeferralCheckIn: v }))}
               pickerLabel="Send check-in after"
@@ -588,6 +638,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
               iconColor="#ea580c"
               title="Re-engage after customer hired competitor"
               subtitle="When customer says they hired someone else, send one polite check-in later."
+              info="When AI detects the lead picked another vendor, follow-ups stop immediately — but we wait the configured period and send one final friendly check-in. Catches the cases where the other vendor underdelivers and the lead is open to a do-over."
               enabled={opts.aiHiredCompetitorReengage}
               onToggle={v => setOpts(o => ({ ...o, aiHiredCompetitorReengage: v }))}
               pickerLabel="Send re-engage after"
@@ -601,6 +652,19 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             <ConversationGoalCard
               value={opts.conversationGoal}
               onChange={v => setOpts(o => ({ ...o, conversationGoal: v }))}
+              priceMode={priceMode}
+              onPriceModeChange={setPriceMode}
+              qualifyFields={qualifyFields}
+              onToggleQualifyField={(f) => setQualifyFields(prev => {
+                const next = new Set(prev);
+                if (next.has(f)) next.delete(f); else next.add(f);
+                return next;
+              })}
+              bookingWindows={bookingWindows}
+              onToggleBookingSlot={(day, slot) => setBookingWindows(prev => ({
+                ...prev,
+                [day]: { ...prev[day], [slot]: !prev[day][slot] },
+              }))}
               onDeepLink={() => navigate('/automation/conversation')}
             />
 
@@ -690,7 +754,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
  * generation expand), Instant Text, Instant Call.
  */
 function FirstReplyCard({
-  icon: Icon, iconBg, iconColor, title, subtitle, enabled, onToggle,
+  icon: Icon, iconBg, iconColor, title, subtitle, info, enabled, onToggle,
   bizLabel, bizChecked, onBizToggle, bizNoBorder, children,
 }: {
   icon: ComponentType<{ size?: number; style?: CSSProperties }>;
@@ -698,6 +762,7 @@ function FirstReplyCard({
   iconColor: string;
   title: string;
   subtitle: string;
+  info: string;
   enabled: boolean;
   onToggle: (v: boolean) => void;
   bizLabel: string;
@@ -706,6 +771,7 @@ function FirstReplyCard({
   bizNoBorder?: boolean;
   children?: ReactNode;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
     <div style={{
       background: '#fff',
@@ -728,9 +794,14 @@ function FirstReplyCard({
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             {title}
           </div>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45 }}>
-            {subtitle}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.45,
+          }}>
+            <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
+            <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
           </div>
+          {infoOpen && <InfoTip>{info}</InfoTip>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingTop: 2 }}>
           <Toggle on={enabled} onChange={onToggle} />
@@ -849,12 +920,12 @@ function InfoCard({
  * Picker is a styled native <select> so mobile gets the OS picker.
  */
 function FollowupCard({
-  icon: Icon, iconBg, iconColor, title, subtitle,
+  icon: Icon, iconBg, iconColor, title, subtitle, info,
   enabled, onToggle, pickerLabel, pickerValue, pickerOptions, onPickerChange,
 }: {
   icon: ComponentType<{ size?: number; style?: CSSProperties }>;
   iconBg: string; iconColor: string;
-  title: string; subtitle: string;
+  title: string; subtitle: string; info: string;
   enabled: boolean;
   onToggle: (v: boolean) => void;
   pickerLabel: string;
@@ -862,6 +933,7 @@ function FollowupCard({
   pickerOptions: string[];
   onPickerChange: (v: string) => void;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   const options = pickerOptions.includes(pickerValue) ? pickerOptions : [pickerValue, ...pickerOptions];
   return (
     <div style={{
@@ -893,8 +965,9 @@ function FollowupCard({
             }}>
               {subtitle}
             </span>
-            <Info size={13} style={{ color: 'var(--lb-accent)', flexShrink: 0 }} />
+            <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
           </div>
+          {infoOpen && <InfoTip>{info}</InfoTip>}
         </div>
         <Toggle on={enabled} onChange={onToggle} />
       </div>
@@ -918,34 +991,117 @@ function FollowupCard({
   );
 }
 
+// Custom delay parsing — keeps the same shape (e.g. "5 days") the
+// backend parseDelay() understands so wizard-saved customs round-trip.
+type CustomUnit = 'min' | 'hour' | 'day' | 'week' | 'month';
+const PILL_CUSTOM_UNITS: { value: CustomUnit; label: string }[] = [
+  { value: 'min',   label: 'minutes' },
+  { value: 'hour',  label: 'hours' },
+  { value: 'day',   label: 'days' },
+  { value: 'week',  label: 'weeks' },
+  { value: 'month', label: 'months' },
+];
+
+function parseCustomDelay(value: string): { val: number; unit: CustomUnit } {
+  const d = (value || '').toLowerCase().trim();
+  const val = Math.max(1, Math.round(parseFloat(d) || 1));
+  if (d.includes('min')) return { val, unit: 'min' };
+  if (d.includes('hour') || d.includes('hr')) return { val, unit: 'hour' };
+  if (d.includes('day')) return { val, unit: 'day' };
+  if (d.includes('week') || d.includes('wk')) return { val, unit: 'week' };
+  if (d.includes('month') || d.includes('mo')) return { val, unit: 'month' };
+  return { val: 1, unit: 'day' };
+}
+
+/**
+ * Dropdown picker for follow-up delays. Renders a native <select> with
+ * preset options + a trailing "Custom…" sentinel. Picking Custom (or
+ * arriving with an off-preset value) reveals an inline number + unit
+ * editor that serializes back to `"<val> <unit>"`.
+ */
 function DropdownSelect({
   value, options, onChange,
 }: { value: string; options: string[]; onChange: (v: string) => void }) {
+  const isCustom = !options.includes(value);
+  const custom = parseCustomDelay(isCustom ? value : '1 day');
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          appearance: 'none',
-          padding: '7px 30px 7px 12px',
-          border: '1px solid var(--lb-line)',
-          borderRadius: 8,
-          fontSize: 12.5, fontWeight: 600,
-          color: 'var(--lb-ink-2)',
-          background: '#fff',
-          fontFamily: 'inherit',
-          cursor: 'pointer',
-          outline: 'none',
-        }}
-      >
-        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-      </select>
-      <ChevronDown size={13} style={{
-        position: 'absolute', right: 10, color: 'var(--lb-ink-5)',
-        pointerEvents: 'none',
-      }} />
-    </span>
+    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+      <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+        <select
+          value={isCustom ? '__custom__' : value}
+          onChange={e => {
+            if (e.target.value === '__custom__') {
+              // Seed with current custom value (or "1 day" if first time)
+              onChange(`${custom.val} ${custom.unit}`);
+            } else {
+              onChange(e.target.value);
+            }
+          }}
+          style={{
+            appearance: 'none',
+            padding: '7px 30px 7px 12px',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 8,
+            fontSize: 12.5, fontWeight: 600,
+            color: 'var(--lb-ink-2)',
+            background: '#fff',
+            fontFamily: 'inherit',
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          <option value="__custom__">{isCustom ? `Custom: ${custom.val} ${PILL_CUSTOM_UNITS.find(u => u.value === custom.unit)?.label}` : 'Custom…'}</option>
+        </select>
+        <ChevronDown size={13} style={{
+          position: 'absolute', right: 10, color: 'var(--lb-ink-5)',
+          pointerEvents: 'none',
+        }} />
+      </span>
+      {isCustom && (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="number"
+            min={1}
+            value={custom.val}
+            onChange={e => {
+              const n = parseInt(e.target.value, 10);
+              const safe = Math.max(1, Number.isFinite(n) ? n : 1);
+              onChange(`${safe} ${custom.unit}`);
+            }}
+            style={{
+              width: 56, padding: '6px 8px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+              background: '#fff', color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
+          />
+          <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+            <select
+              value={custom.unit}
+              onChange={e => onChange(`${custom.val} ${e.target.value as CustomUnit}`)}
+              style={{
+                appearance: 'none',
+                padding: '6px 26px 6px 10px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+                background: '#fff', color: 'var(--lb-ink-2)',
+                cursor: 'pointer', outline: 'none',
+              }}
+            >
+              {PILL_CUSTOM_UNITS.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </select>
+            <ChevronDown size={11} style={{
+              position: 'absolute', right: 8, color: 'var(--lb-ink-5)',
+              pointerEvents: 'none',
+            }} />
+          </span>
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1008,12 +1164,22 @@ const STRATEGY_DEFS: Array<{
 ];
 
 function ConversationGoalCard({
-  value, onChange, onDeepLink,
+  value, onChange, priceMode, onPriceModeChange,
+  qualifyFields, onToggleQualifyField,
+  bookingWindows, onToggleBookingSlot,
+  onDeepLink,
 }: {
   value: ConversationGoal;
   onChange: (v: ConversationGoal) => void;
+  priceMode: PriceMode;
+  onPriceModeChange: (v: PriceMode) => void;
+  qualifyFields: Set<QualifyField>;
+  onToggleQualifyField: (f: QualifyField) => void;
+  bookingWindows: BookingWindows;
+  onToggleBookingSlot: (day: BookingDay, slot: 'morning' | 'afternoon') => void;
   onDeepLink: () => void;
 }) {
+  const [headerInfoOpen, setHeaderInfoOpen] = useState(false);
   return (
     <div style={{
       background: '#fff',
@@ -1039,8 +1205,15 @@ function ConversationGoalCard({
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5, marginTop: 3 }}>
             What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
           </div>
+          {headerInfoOpen && (
+            <InfoTip>
+              Each goal changes how AI replies, what it tries to find out, and when it hands off to your team. Pick the one that matches your business — or leave on Auto and AI switches strategies based on what each lead asks.
+            </InfoTip>
+          )}
         </div>
-        <Info size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 4 }} />
+        <div style={{ marginTop: 4 }}>
+          <InfoDot open={headerInfoOpen} onClick={() => setHeaderInfoOpen(o => !o)} />
+        </div>
       </div>
 
       {/* Strategy grid — responsive 5-col → 1-col on mobile */}
@@ -1104,46 +1277,71 @@ function ConversationGoalCard({
                   <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>
                     {def.panelBody}
                   </div>
-                  {def.panelExtra && (
-                    <div style={{
-                      marginTop: 14,
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '12px 13px',
-                      border: '1px solid var(--lb-line-soft)',
-                      borderRadius: 10,
-                    }}>
-                      <span style={{
-                        width: 32, height: 32, borderRadius: 9,
-                        background: def.iconBg, color: def.iconColor,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0,
-                      }}>
-                        <def.icon size={16} />
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-                          {def.panelExtra === 'pricing' && 'Pricing source'}
-                          {def.panelExtra === 'qualify' && 'Required information'}
-                          {def.panelExtra === 'booking' && 'Booking windows'}
+
+                  {/* Price strategy — Pricing source link + Range/Exact picker */}
+                  {def.value === 'price' && (
+                    <>
+                      <PricingSourceCard def={def} onEdit={onDeepLink} />
+                      <PriceModeChooser value={priceMode} onChange={onPriceModeChange} />
+                    </>
+                  )}
+
+                  {/* Qualify strategy — 6 required-field checkboxes */}
+                  {def.value === 'qualify' && (
+                    <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr', gap: 9 }}>
+                      {QUALIFY_FIELD_DEFS.map(f => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => onToggleQualifyField(f.key)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '11px 12px',
+                            border: '1px solid var(--lb-line)',
+                            borderRadius: 10,
+                            background: '#fff',
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <Checkbox checked={qualifyFields.has(f.key)} />
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                            {f.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Booking strategy — 7-day × Morning/Afternoon grid */}
+                  {def.value === 'booking' && (
+                    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {BOOKING_DAYS.map(d => (
+                        <div key={d.key} style={{
+                          display: 'grid', gridTemplateColumns: '48px 1fr 1fr',
+                          gap: 8, alignItems: 'center',
+                        }}>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700,
+                            fontFamily: 'var(--lb-font-mono)',
+                            color: 'var(--lb-ink-5)',
+                            textTransform: 'uppercase', letterSpacing: '0.06em',
+                          }}>
+                            {d.label}
+                          </span>
+                          <SlotButton
+                            label="Morning"
+                            active={bookingWindows[d.key].morning}
+                            onClick={() => onToggleBookingSlot(d.key, 'morning')}
+                          />
+                          <SlotButton
+                            label="Afternoon"
+                            active={bookingWindows[d.key].afternoon}
+                            onClick={() => onToggleBookingSlot(d.key, 'afternoon')}
+                          />
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
-                          {def.panelExtra === 'pricing' && 'Per-service price tables in the AI Playbook.'}
-                          {def.panelExtra === 'qualify' && 'Bedrooms · Bathrooms · Square Footage · Frequency …'}
-                          {def.panelExtra === 'booking' && 'Day-by-day Morning / Afternoon windows.'}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={onDeepLink}
-                        style={{
-                          background: 'transparent', border: 0, cursor: 'pointer',
-                          fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                          color: 'var(--lb-accent)',
-                          flexShrink: 0,
-                        }}
-                      >
-                        Edit →
-                      </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1153,6 +1351,149 @@ function ConversationGoalCard({
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Pricing source" sub-card inside the Price strategy panel — deep-links
+ * to the Pricing tables in the AI Playbook (where range/exact +
+ * per-service pricing actually live).
+ */
+function PricingSourceCard({
+  def, onEdit,
+}: {
+  def: { icon: ComponentType<{ size?: number; style?: CSSProperties }>; iconBg: string; iconColor: string };
+  onEdit: () => void;
+}) {
+  return (
+    <div style={{
+      marginTop: 14,
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '12px 13px',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+    }}>
+      <span style={{
+        width: 32, height: 32, borderRadius: 9,
+        background: def.iconBg, color: def.iconColor,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <def.icon size={16} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          Pricing source
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+          Per-service price tables in the AI Playbook.
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onEdit}
+        style={{
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+          color: 'var(--lb-accent)',
+          flexShrink: 0,
+        }}
+      >
+        Edit →
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Range / Exact quote-style picker for the Price strategy. Range gives
+ * "$200–$300" style answers (good for variable-scope jobs); Exact gives
+ * single-number quotes (only safe when you have a fixed-price table).
+ */
+function PriceModeChooser({
+  value, onChange,
+}: { value: PriceMode; onChange: (v: PriceMode) => void }) {
+  return (
+    <div style={{
+      marginTop: 12,
+      padding: '12px 13px',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 10,
+    }}>
+      <div style={{
+        fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8,
+      }}>
+        Quote style
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {(['range', 'exact'] as const).map(opt => {
+          const active = value === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => onChange(opt)}
+              style={{
+                flex: 1,
+                padding: '9px 12px',
+                background: active ? 'var(--lb-accent-tint)' : '#fff',
+                border: '1.5px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+                borderRadius: 9,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                textAlign: 'left',
+                transition: 'background 120ms, border-color 120ms',
+              }}
+            >
+              <div style={{
+                fontSize: 13, fontWeight: 700,
+                color: active ? 'var(--lb-accent)' : 'var(--lb-ink-1)',
+              }}>
+                {opt === 'range' ? 'Range' : 'Exact'}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.4 }}>
+                {opt === 'range' ? 'AI quotes "$200–$300"' : 'AI quotes "$250"'}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Morning / Afternoon slot button for the Booking strategy 7-day grid.
+ * Active = blue tint + accent border + filled dot. Inactive = neutral
+ * gray with hollow dot.
+ */
+function SlotButton({
+  label, active, onClick,
+}: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        padding: '8px 10px',
+        background: active ? 'var(--lb-accent-tint)' : '#fff',
+        border: '1.5px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+        borderRadius: 10,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        fontSize: 12.5, fontWeight: 600,
+        color: active ? 'var(--lb-accent)' : 'var(--lb-ink-5)',
+        transition: 'background 120ms, border-color 120ms, color 120ms',
+      }}
+    >
+      <span style={{
+        width: 6, height: 6, borderRadius: 99,
+        background: active ? 'var(--lb-accent)' : 'var(--lb-ink-7)',
+        flexShrink: 0,
+      }} />
+      {label}
+    </button>
   );
 }
 
@@ -1169,6 +1510,7 @@ function AiResponseModeCard({
   respHoursOnly: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
     <div style={{
       background: '#fff',
@@ -1193,8 +1535,15 @@ function AiResponseModeCard({
           <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5, marginTop: 3 }}>
             When AI is allowed to respond automatically to customer messages.
           </div>
+          {infoOpen && (
+            <InfoTip>
+              When the checkbox is on, AI only replies after your business hours close — during the day, your team handles conversations live. When off, AI replies any time of day. Either way, AI follow-ups and detection still run on their own schedule.
+            </InfoTip>
+          )}
         </div>
-        <Info size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 4 }} />
+        <div style={{ marginTop: 4 }}>
+          <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
+        </div>
       </div>
       <button
         type="button"
@@ -1211,6 +1560,44 @@ function AiResponseModeCard({
           Only assist outside of business hours
         </span>
       </button>
+    </div>
+  );
+}
+
+/**
+ * Click-to-toggle info icon. When clicked, the parent card surfaces an
+ * inline gray tip line below the header. Kept dead simple — no portal,
+ * no positioning math — because the cards are short and the tip can
+ * just live in the document flow under the title row.
+ */
+function InfoDot({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      aria-label="More info"
+      aria-pressed={open}
+      style={{
+        background: 'transparent', border: 0, padding: 0,
+        cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+      }}
+    >
+      <Info size={13} style={{ color: open ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+    </button>
+  );
+}
+
+function InfoTip({ children }: { children: ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 10,
+      padding: '10px 12px',
+      background: '#f8fafc',
+      border: '1px solid var(--lb-line-soft)',
+      borderRadius: 9,
+      fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+    }}>
+      {children}
     </div>
   );
 }
