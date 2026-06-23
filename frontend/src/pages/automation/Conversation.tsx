@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } fr
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
-  Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
+  Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
   MessageSquareText, AlertTriangle, Power,
   ChevronDown, ChevronUp, Shield, Settings2, Target,
@@ -11,11 +11,12 @@ import {
 } from 'lucide-react';
 import {
   SectionCard, ToggleRow,
-  Radio, IconTile, ActionLink, AutoBadge, StatusPill,
+  IconTile, ActionLink, AutoBadge, StatusPill,
   PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
 import { InfoDot, InfoTip } from '../../components/InfoPopover';
+import { AiResponseModeCard } from '../../components/automation/wizard-cards';
 import { followUpApi, serviceProfilesApi, usersApi, type ServiceProfile } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -273,7 +274,8 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   // Click-to-toggle info popovers for the two main section headers
   // (matches the wizard's InfoDot/InfoTip pattern).
   const [goalInfoOpen, setGoalInfoOpen] = useState(false);
-  const [modeInfoOpen, setModeInfoOpen] = useState(false);
+  // modeInfoOpen removed 2026-06-23 — AI Response Mode now uses the
+  // shared AiResponseModeCard which owns its own info-dot state.
   // User-level business hours, shown in the "Outside of business hours"
   // option body. Replaces a hardcoded "Mon–Fri, 9:00 AM – 6:00 PM" string.
   const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
@@ -623,7 +625,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     return { mixed: true, tooltip };
   }
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
-  const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
+  // mixedAvailability dropped 2026-06-23 — the multi-option picker that
+  // surfaced its tooltip is gone (now a single AiResponseModeCard
+  // checkbox). Restore if the picker comes back.
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -932,98 +936,37 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         />
       )}
 
-      {/* ───── 4. AI Response Mode ──────────────────────────────────────────
-            Merges the old Delivery Mode + Auto Reply Availability concepts
-            into one "when is AI allowed to respond" picker. This is
-            AI-Conversation specific — Follow-ups keep their own quiet
-            hours + delivery picker because business-initiated re-engagement
-            has different customer expectations than mid-conversation reply.
-            See spec section 3.
+      {/* ───── 4. AI Response Mode — wizard chrome ───────────────────────────
+            Single checkbox "Only assist outside of business hours" —
+            checked = 'assist' (deliveryMode='auto_send' + availability=
+            'hours'), unchecked = 'autopilot' (auto_send + 'always').
+            'suggest' (review-only) is opt-in via Settings → AI Playbook
+            → Delivery mode (advanced); flipping the checkbox out of a
+            saved 'suggest' state migrates the user to auto_send. */}
+      <AiResponseModeCard
+        respHoursOnly={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
+        onChange={(v) => onResponseMode(v ? 'assist' : 'autopilot')}
+      />
 
-            Internal mapping (V2 Review Mode shipped 2026-06-12):
-              "Review before sending" → aiConversationDeliveryMode='suggest'
-                AI generates a draft on customer reply but parks it on
-                ThreadContext.stateJson.pendingAiSuggestion instead of
-                dispatching. Operator approves/discards from Lead Activity.
-              "Assist when unavailable" → deliveryMode='auto_send'
-                + followUpAvailability='active_hours' (sends only outside
-                business hours).
-              "Full autopilot"        → deliveryMode='auto_send'
-                + followUpAvailability='always' (sends any time). */}
-      <SectionCard padding="22px 24px 24px">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
-          <IconTile icon={Clock} tone="violet" size="lg" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-              AI Response Mode
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                When AI is allowed to respond automatically to customer messages.
-              </span>
-              <InfoDot open={modeInfoOpen} onClick={() => setModeInfoOpen(o => !o)} />
-            </div>
-            {modeInfoOpen && (
-              <InfoTip>
-                "Assist when unavailable" lets your team handle live conversations during business hours; AI fills in only after-hours. "Full autopilot" runs AI any time. Either way, AI follow-ups and detection still run on their own schedule.
-              </InfoTip>
-            )}
+      {/* Business hours summary — kept here as a secondary note so
+          operators see the current window without digging through
+          Settings. */}
+      <div style={{
+        padding: '12px 14px',
+        background: '#f8fafc',
+        border: '1px solid var(--lb-line-soft)',
+        borderRadius: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
+            <strong style={{ color: 'var(--lb-ink-1)' }}>Business Hours:</strong> {bizHoursSummary}
           </div>
+          <ActionLink external onClick={goEditHours}>Edit</ActionLink>
         </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* "Review before sending" hidden by default 2026-06-18. New
-              users skip suggest mode entirely — they want AI to start
-              replying ASAP, not park drafts for review. The opt-in
-              toggle for suggest mode now lives on Settings → AI
-              Playbook → Delivery mode (advanced). This card still
-              renders here when the tenant's saved value IS suggest so
-              they're never locked out of switching off without
-              hunting through Playbook. */}
-          {aiConversationDeliveryMode === 'suggest' && (
-            <ResponseModeOption
-              selected={aiConversationDeliveryMode === 'suggest'}
-              onClick={() => onResponseMode('review')}
-              title="Review before sending"
-              body="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
-            />
-          )}
-          <ResponseModeOption
-            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
-            onClick={() => onResponseMode('assist')}
-            title="Assist when unavailable"
-            body="AI responds automatically outside your business hours."
-            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
-            mixedTooltip={mixedAvailability.tooltip}
-          />
-          <ResponseModeOption
-            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
-            onClick={() => onResponseMode('autopilot')}
-            title="Full autopilot"
-            body="AI responds automatically at any time."
-            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
-            mixedTooltip={mixedAvailability.tooltip}
-          />
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6, lineHeight: 1.5 }}>
+          Business hours are used when AI Response Mode is checked.
         </div>
-
-        <div style={{
-          marginTop: 16,
-          padding: '12px 14px',
-          background: '#f8fafc',
-          border: '1px solid var(--lb-line-soft)',
-          borderRadius: 10,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
-              <strong style={{ color: 'var(--lb-ink-1)' }}>Business Hours:</strong> {bizHoursSummary}
-            </div>
-            <ActionLink external onClick={goEditHours}>Edit</ActionLink>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6, lineHeight: 1.5 }}>
-            Business hours are used when AI Response Mode is set to <em>Assist when unavailable</em>.
-          </div>
-        </div>
-      </SectionCard>
+      </div>
 
       {/* ───── 5. How it works ────────────────────────────────────────────── */}
       <SectionCard padding="20px 24px">
@@ -1070,67 +1013,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
  * account disagreement), the tile draws the same amber border the other
  * mixed-state controls on this page use.
  */
-function ResponseModeOption({
-  selected, onClick, disabled, title, body, badge, mixed, mixedTooltip,
-}: {
-  selected: boolean;
-  onClick?: () => void;
-  disabled?: boolean;
-  title: string;
-  body: string;
-  badge?: string;
-  mixed?: boolean;
-  mixedTooltip?: string;
-}) {
-  const interactive = !disabled && !!onClick;
-  return (
-    <button
-      type="button"
-      onClick={interactive ? onClick : undefined}
-      disabled={disabled}
-      title={mixed ? mixedTooltip : undefined}
-      style={{
-        display: 'flex', alignItems: 'flex-start', gap: 12,
-        width: '100%',
-        padding: '12px 14px',
-        textAlign: 'left',
-        background: disabled ? '#f8fafc' : mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
-        border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
-        borderRadius: 10,
-        cursor: interactive ? 'pointer' : 'default',
-        fontFamily: 'inherit',
-        opacity: disabled ? 0.7 : 1,
-        transition: 'border-color 120ms, background 120ms',
-        boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
-      }}
-    >
-      <div style={{ paddingTop: 2 }}>
-        <Radio selected={selected} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</span>
-          {badge && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.05,
-              padding: '2px 7px', borderRadius: 999,
-              background: '#fef3c7', color: '#92400e',
-              textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
-            }}>
-              {badge}
-            </span>
-          )}
-          {mixed && !disabled && (
-            <span style={{ display: 'inline-flex', color: '#d97706' }}>
-              <AlertTriangle size={12} />
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>{body}</div>
-      </div>
-    </button>
-  );
-}
+// ResponseModeOption removed 2026-06-23 — the 3-tile picker
+// (Review / Assist / Autopilot) is replaced by the wizard's
+// single AiResponseModeCard checkbox.
 
 function StrategyCard({
   selected, onClick, icon, iconTone, title, body, recommended, mixed, mixedTooltip,

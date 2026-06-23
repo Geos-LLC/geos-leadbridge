@@ -14,7 +14,7 @@
  *   - Checkbox:       18×18 accent-colored checkbox
  */
 import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { InfoDot, InfoTip } from '../InfoPopover';
 
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
@@ -372,6 +372,74 @@ export function MessageGenerationExpander({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * AI Response Mode card — single checkbox "Only assist outside of
+ * business hours" with an (i) toggle for the longer explanation.
+ * Checked = 'assist' (auto-send only after hours), unchecked =
+ * 'autopilot' (auto-send any time). The 'suggest' (review-only)
+ * delivery mode is intentionally not surfaced here — it's opt-in
+ * via Settings → AI Playbook → Delivery mode (advanced).
+ */
+export function AiResponseModeCard({
+  respHoursOnly, onChange,
+}: {
+  respHoursOnly: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  return (
+    <div style={{
+      background: '#fff',
+      border: '1px solid var(--lb-line)',
+      borderRadius: 14,
+      boxShadow: 'var(--lb-shadow-sm)',
+      padding: 16,
+    }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 6 }}>
+        <span style={{
+          width: 40, height: 40, borderRadius: 11,
+          background: '#e0e7ff', color: '#6366f1',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Clock size={19} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            AI Response Mode
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5, marginTop: 3 }}>
+            When AI is allowed to respond automatically to customer messages.
+          </div>
+          {infoOpen && (
+            <InfoTip>
+              When the checkbox is on, AI only replies after your business hours close — during the day, your team handles conversations live. When off, AI replies any time of day. Either way, AI follow-ups and detection still run on their own schedule.
+            </InfoTip>
+          )}
+        </div>
+        <div style={{ marginTop: 4 }}>
+          <InfoDot open={infoOpen} onClick={() => setInfoOpen(o => !o)} />
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!respHoursOnly)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'transparent', border: 0, cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left',
+          padding: '8px 0 2px', width: '100%',
+        }}
+      >
+        <Checkbox checked={respHoursOnly} />
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          Only assist outside of business hours
+        </span>
+      </button>
     </div>
   );
 }
