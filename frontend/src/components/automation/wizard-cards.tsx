@@ -181,7 +181,6 @@ export function FollowupCard({
   extra?: ReactNode;
 }) {
   const [infoOpen, setInfoOpen] = useState(false);
-  const options = pickerOptions.includes(pickerValue) ? pickerOptions : [pickerValue, ...pickerOptions];
   return (
     <div style={{
       background: '#fff',
@@ -239,38 +238,140 @@ export function FollowupCard({
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-2)' }}>
               {pickerLabel}
             </span>
-            <span style={{ position: 'relative', display: 'inline-block' }}>
-              <select
-                value={pickerValue}
-                onChange={(e) => onPickerChange(e.target.value)}
-                style={{
-                  appearance: 'none',
-                  padding: '8px 36px 8px 14px',
-                  border: '1px solid var(--lb-line)',
-                  borderRadius: 9,
-                  background: '#fff',
-                  color: 'var(--lb-ink-1)',
-                  fontFamily: 'inherit',
-                  fontSize: 13, fontWeight: 600,
-                  cursor: 'pointer',
-                  outline: 'none',
-                }}
-              >
-                {options.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-              <span style={{
-                position: 'absolute', right: 12, top: '50%',
-                transform: 'translateY(-50%)',
-                pointerEvents: 'none',
-                color: 'var(--lb-ink-5)',
-                fontSize: 10,
-              }}>▾</span>
-            </span>
+            <DelayPicker
+              value={pickerValue}
+              options={pickerOptions}
+              onChange={onPickerChange}
+            />
           </div>
           {extra}
         </div>
       )}
     </div>
+  );
+}
+
+// Custom-delay parsing — keeps the same `${val} ${unit}` shape the backend's
+// parseDelay() understands so values round-trip with the wizard.
+type CustomUnit = 'min' | 'hour' | 'day' | 'week' | 'month';
+const CUSTOM_UNIT_OPTIONS: { value: CustomUnit; label: string }[] = [
+  { value: 'min',   label: 'minutes' },
+  { value: 'hour',  label: 'hours' },
+  { value: 'day',   label: 'days' },
+  { value: 'week',  label: 'weeks' },
+  { value: 'month', label: 'months' },
+];
+
+function parseCustomDelay(value: string): { val: number; unit: CustomUnit } {
+  const d = (value || '').toLowerCase().trim();
+  const val = Math.max(1, Math.round(parseFloat(d) || 1));
+  if (d.includes('min')) return { val, unit: 'min' };
+  if (d.includes('hour') || d.includes('hr')) return { val, unit: 'hour' };
+  if (d.includes('day')) return { val, unit: 'day' };
+  if (d.includes('week') || d.includes('wk')) return { val, unit: 'week' };
+  if (d.includes('month') || d.includes('mo')) return { val, unit: 'month' };
+  return { val: 1, unit: 'day' };
+}
+
+/**
+ * Dropdown picker used by FollowupCard. Renders preset options + a
+ * "Custom…" sentinel; picking Custom (or arriving with an off-preset
+ * value) reveals an inline number + unit editor that serializes back
+ * to "<val> <unit>". Matches the wizard's DropdownSelect so both
+ * surfaces share the same UX.
+ */
+function DelayPicker({
+  value, options, onChange,
+}: { value: string; options: string[]; onChange: (v: string) => void }) {
+  const isCustom = !options.includes(value);
+  const custom = parseCustomDelay(isCustom ? value : '1 day');
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+      <span style={{ position: 'relative', display: 'inline-block' }}>
+        <select
+          value={isCustom ? '__custom__' : value}
+          onChange={(e) => {
+            if (e.target.value === '__custom__') {
+              onChange(`${custom.val} ${custom.unit}`);
+            } else {
+              onChange(e.target.value);
+            }
+          }}
+          style={{
+            appearance: 'none',
+            padding: '8px 36px 8px 14px',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 9,
+            background: '#fff',
+            color: 'var(--lb-ink-1)',
+            fontFamily: 'inherit',
+            fontSize: 13, fontWeight: 600,
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+          <option value="__custom__">
+            {isCustom
+              ? `Custom: ${custom.val} ${CUSTOM_UNIT_OPTIONS.find(u => u.value === custom.unit)?.label}`
+              : 'Custom…'}
+          </option>
+        </select>
+        <span style={{
+          position: 'absolute', right: 12, top: '50%',
+          transform: 'translateY(-50%)',
+          pointerEvents: 'none',
+          color: 'var(--lb-ink-5)',
+          fontSize: 10,
+        }}>▾</span>
+      </span>
+      {isCustom && (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="number"
+            min={1}
+            value={custom.val}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              const safe = Math.max(1, Number.isFinite(n) ? n : 1);
+              onChange(`${safe} ${custom.unit}`);
+            }}
+            style={{
+              width: 64, padding: '7px 10px',
+              border: '1px solid var(--lb-line)', borderRadius: 8,
+              fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+              background: '#fff', color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
+          />
+          <span style={{ position: 'relative', display: 'inline-block' }}>
+            <select
+              value={custom.unit}
+              onChange={(e) => onChange(`${custom.val} ${e.target.value as CustomUnit}`)}
+              style={{
+                appearance: 'none',
+                padding: '7px 28px 7px 12px',
+                border: '1px solid var(--lb-line)', borderRadius: 8,
+                fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                background: '#fff', color: 'var(--lb-ink-1)',
+                cursor: 'pointer', outline: 'none',
+              }}
+            >
+              {CUSTOM_UNIT_OPTIONS.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </select>
+            <span style={{
+              position: 'absolute', right: 10, top: '50%',
+              transform: 'translateY(-50%)',
+              pointerEvents: 'none',
+              color: 'var(--lb-ink-5)',
+              fontSize: 9,
+            }}>▾</span>
+          </span>
+        </span>
+      )}
+    </span>
   );
 }
 
