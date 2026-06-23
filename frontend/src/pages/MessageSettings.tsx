@@ -208,10 +208,10 @@ export function MessageSettings() {
 
   if (loading) {
     return (
-      <div className="p-6 lg:p-10">
+      <div className="p-4 sm:p-6 lg:p-10">
         <div className="flex items-center gap-3 mb-6">
-          <FileText className="w-6 h-6 text-blue-600" />
-          <h1 className="text-2xl font-bold text-slate-900">Message Templates</h1>
+          <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Message Templates</h1>
         </div>
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 size={32} className="animate-spin text-blue-600" />
@@ -222,7 +222,7 @@ export function MessageSettings() {
   }
 
   return (
-    <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+    <div className="p-4 sm:p-6 lg:p-10 max-w-5xl mx-auto space-y-6 sm:space-y-10">
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
           <X size={16} className="shrink-0" />
@@ -233,32 +233,38 @@ export function MessageSettings() {
         </div>
       )}
 
-      {/* Welcome Section */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">Messaging System</p>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+      {/* Welcome Section — hero shrinks aggressively on phones so the
+          Settings-page chrome above doesn't push the actual templates
+          off-screen. Marketing tagline collapses, the "what is this"
+          line stays as the only subtitle, and the CTA goes compact. */}
+      <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
+        <div className="min-w-0">
+          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-[10px] sm:text-xs">Messaging System</p>
+          <h2 className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
             Message <span className="gradient-text">Templates.</span>
           </h2>
-          <p className="text-slate-500 mt-2 text-lg">Streamline your client communication with reusable response blocks.</p>
-          <p className="text-slate-400 mt-2 text-sm">Templates are used when you choose <span className="font-semibold text-slate-600">Custom Template</span> instead of AI in your automation settings.</p>
+          <p className="hidden sm:block text-slate-500 mt-2 text-lg">Streamline your client communication with reusable response blocks.</p>
+          <p className="text-slate-500 sm:text-slate-400 mt-2 text-sm">Used when you choose <span className="font-semibold text-slate-600">Custom Template</span> instead of AI in automation settings.</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={openCreate}
-            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
+            className="w-full md:w-auto px-4 sm:px-6 py-2.5 sm:py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-blue-700 shadow-md sm:shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
             Create New
           </button>
         </div>
       </section>
 
       {/* Templates List */}
-      <section className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
-          <h3 className="text-xl font-bold text-slate-900">Your Library</h3>
-          <div className="flex items-center gap-2 flex-wrap">
+      <section className="space-y-4 sm:space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 px-1 sm:px-2">
+          <h3 className="text-lg sm:text-xl font-bold text-slate-900">Your Library</h3>
+          {/* Filter tabs — horizontally scrollable on mobile so the row
+              stays single-line. -mx-1 + px-1 trick lets the scroll edge
+              bleed to the screen edge while keeping content padding. */}
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto -mx-1 px-1 sm:flex-wrap sm:overflow-visible">
             {FILTER_TABS.map(tab => {
               const count = tab.key === 'all'
                 ? templates.length
@@ -267,7 +273,7 @@ export function MessageSettings() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveFilter(tab.key)}
-                  className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     activeFilter === tab.key
                       ? 'bg-blue-600 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -322,11 +328,11 @@ export function MessageSettings() {
                   }
                   style={isFlashing ? { boxShadow: '0 0 0 4px rgba(37,99,235,0.12), 0 1px 2px rgba(10,21,48,0.04)' } : undefined}
                 >
-                  <div className="p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <h3 className="text-lg font-bold text-slate-900">{template.name}</h3>
+                  <div className="p-4 sm:p-6">
+                    <div className="flex items-start justify-between gap-3 sm:gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 sm:gap-3 mb-2 flex-wrap">
+                          <h3 className="text-base sm:text-lg font-bold text-slate-900">{template.name}</h3>
                           {isPrompt && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-50 text-violet-700 text-[10px] font-bold rounded uppercase tracking-wider">
                               <Sparkles className="w-3 h-3" /> AI Prompt
@@ -345,27 +351,27 @@ export function MessageSettings() {
                           {template.content}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                         <button
                           onClick={() => toggleTemplate(template.id)}
-                          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
+                          className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
                           title={isExpanded ? 'Collapse' : 'Expand'}
                         >
-                          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                          {isExpanded ? <ChevronUp className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5" />}
                         </button>
                         <button
                           onClick={() => openEdit(template)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                          className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                           title="Edit template"
                         >
-                          <Pencil className="w-5 h-5" />
+                          <Pencil className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
                         <button
                           onClick={() => setDeletingId(template.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
                           title="Delete template"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
                       </div>
                     </div>
@@ -384,22 +390,22 @@ export function MessageSettings() {
       </section>
 
       {/* Variables Reference */}
-      <section className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-8 md:p-10 text-white relative overflow-hidden">
+      <section className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 md:p-10 text-white relative overflow-hidden">
         <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
-              <Info className="w-6 h-6" />
+          <div className="flex items-center gap-3 mb-4 sm:mb-6">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 rounded-xl flex items-center justify-center shrink-0">
+              <Info className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h2 className="text-2xl font-bold">Available Variables</h2>
-              <p className="text-slate-400 text-sm mt-1">Use these in your templates for personalization</p>
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-bold">Available Variables</h2>
+              <p className="text-slate-400 text-xs sm:text-sm mt-0.5 sm:mt-1">Use these in your templates for personalization</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {ALL_VARIABLES.map(v => (
-              <div key={v.name} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-start gap-3 hover:bg-white/10 transition-colors">
+              <div key={v.name} className="bg-white/5 border border-white/10 rounded-xl p-3 sm:p-4 flex items-start gap-3 hover:bg-white/10 transition-colors">
                 <code className="bg-white/10 px-2 py-1 rounded text-blue-300 text-xs font-mono shrink-0">{v.name}</code>
                 <span className="text-slate-300 text-sm">{v.desc}</span>
               </div>
