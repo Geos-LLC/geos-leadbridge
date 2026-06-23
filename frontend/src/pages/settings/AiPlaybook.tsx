@@ -1346,6 +1346,7 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
             : 'Edit the table the AI uses to quote leads. Applies to every connected account.'
         }
         contentPad="16px 24px 24px"
+        collapsible
       >
         {!primary ? (
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
@@ -1390,6 +1391,7 @@ function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
           : 'Answers the AI uses verbatim. Applies to every connected account.'
       }
       contentPad="16px 24px 24px"
+      collapsible
     >
       {!primary ? (
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
@@ -1598,10 +1600,10 @@ function ServiceQualificationCard({
   value: string;
   onChange: (next: string) => void;
 }) {
-  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
-  // hide behind a one-line summary. Open by default; users can collapse
-  // with the same toggle if they want to focus on AI instructions.
-  const [expanded, setExpanded] = useState(true);
+  // Default closed (2026-06-23) so the Service tab opens as a compact
+  // section list — same rule as the other Playbook accordions
+  // (Custom Instructions, Business Information, Delivery mode).
+  const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => parseQualRows(value), [value]);
   const summary = <CountSummary count={rows.length} noun="qualification question" />;
   return (

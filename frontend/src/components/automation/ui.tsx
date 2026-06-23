@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Check,
   ExternalLink,
   ArrowLeft,
@@ -223,7 +224,7 @@ export function BigToggle({
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
-  mixed, mixedTooltip, compact, infoText,
+  mixed, mixedTooltip, compact, infoText, collapsible, defaultOpen = false,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -244,8 +245,16 @@ export function SettingCard({
       icon next to the subtitle. Matches the wizard's InfoDot/InfoTip
       pattern. */
   infoText?: ReactNode;
+  /** When true, the header row becomes a click-to-toggle accordion and a
+   *  chevron renders at the right edge. The (i) info button and the
+   *  BigToggle stop propagation so their own behaviour isn't hijacked. */
+  collapsible?: boolean;
+  /** Initial open state for collapsible cards. Defaults to FALSE so the
+   *  page reads as a compact section list. */
+  defaultOpen?: boolean;
 }) {
   const [infoOpen, setInfoOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{
       background: 'white',
@@ -254,10 +263,23 @@ export function SettingCard({
       boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
-      <div style={{
-        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
-        padding: compact ? '15px 16px' : '20px 24px',
-      }}>
+      <div
+        onClick={collapsible ? () => setOpen(o => !o) : undefined}
+        role={collapsible ? 'button' : undefined}
+        aria-expanded={collapsible ? open : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={collapsible ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        } : undefined}
+        style={{
+          display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
+          padding: compact ? '15px 16px' : '20px 24px',
+          ...(collapsible ? { cursor: 'pointer', userSelect: 'none' as const } : {}),
+        }}
+      >
         <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -324,19 +346,31 @@ export function SettingCard({
             </div>
           )}
         </div>
-        {headerRight}
+        {headerRight && (
+          <div onClick={collapsible ? (e) => e.stopPropagation() : undefined}>
+            {headerRight}
+          </div>
+        )}
         {onToggle && (
-          <div style={{
-            display: 'flex', alignItems: 'center',
-            gap: compact ? 0 : 10,
-            paddingTop: compact ? 0 : 2,
-          }}>
+          <div
+            onClick={collapsible ? (e) => e.stopPropagation() : undefined}
+            style={{
+              display: 'flex', alignItems: 'center',
+              gap: compact ? 0 : 10,
+              paddingTop: compact ? 0 : 2,
+            }}
+          >
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
             {!compact && (
               <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
                 {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
               </span>
             )}
+          </div>
+        )}
+        {collapsible && (
+          <div style={{ flexShrink: 0, paddingTop: 4, color: 'var(--lb-ink-5)' }}>
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </div>
         )}
       </div>
@@ -347,8 +381,9 @@ export function SettingCard({
               the user needs to see the inner controls to edit them
               even though the local boolean may have loaded false).
           The previous `enabled !== false` gate hid the body in Mixed
-          mode when the last-loaded account happened to be Off. */}
-      {children && (mixed || enabled !== false) && (
+          mode when the last-loaded account happened to be Off.
+          When collapsible=true, ALSO gate on `open`. */}
+      {children && (mixed || enabled !== false) && (!collapsible || open) && (
         <div style={{
           borderTop: '1px solid var(--lb-line-soft)',
           padding: contentPad ?? '16px 24px 24px',
