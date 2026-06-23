@@ -2301,12 +2301,14 @@ function GlobalPlaybookEditor() {
         {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
         <CustomInstructionsAllCard savedAccountId={sourceAccountId} />
 
-        {/* 1. Business Information (company-wide) */}
+        {/* 1. Business Information (company-wide) — collapsible, opens
+            by default so first-time visitors see what's inside. */}
         <HowSectionCard
           section="business_information"
           value={v2.business_information?.customInstructions ?? ''}
           onChange={v => onSectionChange('business_information', v)}
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
+          collapsible
         />
 
         {/* Communication Style & Brand Voice has no UI surface — not
@@ -2410,7 +2412,7 @@ function GlobalPlaybookEditor() {
 
 function HowSectionCard({
   section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
-  titleOverride, subtitleOverride,
+  titleOverride, subtitleOverride, collapsible, defaultOpen,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -2434,6 +2436,10 @@ function HowSectionCard({
    *  prompt assembly is unchanged. */
   titleOverride?: string;
   subtitleOverride?: string;
+  /** Pass-through to PlaybookSectionShell — turn the section into an
+   *  accordion. Used by the Business Information card on Global. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -2441,6 +2447,8 @@ function HowSectionCard({
       icon={Icon}
       title={titleOverride ?? PLAYBOOK_SECTION_UI_LABELS[section]}
       subtitle={subtitleOverride ?? PLAYBOOK_SECTION_SUBTITLES[section]}
+      collapsible={collapsible}
+      defaultOpen={defaultOpen}
     >
       {isSuggested && <SuggestedFromWebsiteBadge />}
       {managedByGoals && <ManagedByGoalsBadge />}
@@ -2962,7 +2970,7 @@ function SuggestToggleRow({
 // ─── Building blocks ──────────────────────────────────────────────────────
 
 function PlaybookSectionShell({
-  icon: Icon, title, subtitle, infoText, children,
+  icon: Icon, title, subtitle, infoText, collapsible, defaultOpen = true, children,
 }: {
   icon: LucideIcon;
   title: string;
@@ -2971,12 +2979,41 @@ function PlaybookSectionShell({
    *  title. Use INSTEAD OF subtitle when the helper text isn't worth
    *  permanent screen real estate. */
   infoText?: React.ReactNode;
+  /** When true, the header row becomes a click-to-toggle accordion and a
+   *  chevron renders at the right end. The (i) info button stops
+   *  propagation so opening the description doesn't toggle the body. */
+  collapsible?: boolean;
+  /** Initial open state for the collapsible body. Defaults to true so
+   *  existing call sites that don't pass collapsible see no change. */
+  defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
   const [infoOpen, setInfoOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const headerStyle: React.CSSProperties = {
+    display: 'flex',
+    gap: 14,
+    alignItems: 'flex-start',
+    marginBottom: open ? 14 : 0,
+    ...(collapsible
+      ? { cursor: 'pointer', userSelect: 'none' as const }
+      : {}),
+  };
   return (
     <SectionCard padding="22px 24px">
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
+      <div
+        style={headerStyle}
+        onClick={collapsible ? () => setOpen(o => !o) : undefined}
+        role={collapsible ? 'button' : undefined}
+        aria-expanded={collapsible ? open : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={collapsible ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        } : undefined}
+      >
         <div style={{
           width: 36, height: 36, borderRadius: 10,
           background: '#ede9fe', color: '#6d28d9',
@@ -2992,7 +3029,7 @@ function PlaybookSectionShell({
             {infoText && !subtitle && (
               <button
                 type="button"
-                onClick={() => setInfoOpen(o => !o)}
+                onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
                 aria-label="More info"
                 aria-pressed={infoOpen}
                 style={{
@@ -3012,20 +3049,28 @@ function PlaybookSectionShell({
             </div>
           )}
           {infoOpen && infoText && !subtitle && (
-            <div style={{
-              marginTop: 8,
-              padding: '10px 12px',
-              background: '#f8fafc',
-              border: '1px solid var(--lb-line-soft)',
-              borderRadius: 9,
-              fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
-            }}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                marginTop: 8,
+                padding: '10px 12px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 9,
+                fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+              }}
+            >
               {infoText}
             </div>
           )}
         </div>
+        {collapsible && (
+          <div style={{ flexShrink: 0, paddingTop: 6, color: 'var(--lb-ink-5)' }}>
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </div>
+        )}
       </div>
-      {children}
+      {(!collapsible || open) && children}
     </SectionCard>
   );
 }
@@ -3303,6 +3348,7 @@ function CustomInstructionsAllCard({ savedAccountId }: { savedAccountId: string 
       icon={MessageSquare}
       title="Custom Instructions"
       infoText="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
+      collapsible
     >
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
