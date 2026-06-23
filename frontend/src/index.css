@@ -92,6 +92,17 @@ h1, h2, h3, h4 {
   font-weight: 700;
 }
 
+/* Wizard Conversation Goal strategy grid — 5-column on desktop, full-
+   width inline expand panels for the selected strategy, collapses to
+   1-column on mobile (override in the <=760px @media block). */
+.lb-strat-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+.lb-strat-panel {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+
 /* Setup button keeps the full "✦ Setup" pill at every width. The
    topbar only carries the hamburger + LeadBridge logo on mobile (no
    page-title h1 below `lg:`), so a 380px viewport fits the pill with
@@ -596,6 +607,12 @@ h1, h2, h3, h4 {
     align-items: center !important;
     gap: 9px !important;
     padding: 11px 13px !important;
+  }
+  /* Wizard Conversation Goal grid — single-column at mobile so the
+     5 strategy buttons stack vertically and the inline expand panel
+     sits directly under its trigger. */
+  .lb-strat-grid {
+    grid-template-columns: 1fr !important;
   }
   .lb-qual { grid-template-columns: 1fr !important; }
   /* Rule cards (Resume / Deferral / Hired competitor) collapse 3-col -> 1-col */
