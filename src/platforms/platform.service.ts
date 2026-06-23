@@ -1333,6 +1333,15 @@ export class PlatformService {
 
     const { data } = await resp.json();
 
+    // Pull owner identity so the NS row is born with userId + destinationPhone
+    // populated. Without these, owner SMS alerts cannot resolve a destination
+    // and tenant-scoped queries skip the row. Same regression shape as the
+    // 2026-06-23 Call Connect agentPhone seed bug.
+    const ownerAcct = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { userId: true, user: { select: { businessPhone: true } } },
+    });
+
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
@@ -1340,9 +1349,12 @@ export class PlatformService {
         sigcoreTenantId: data.tenantId,
         sigcoreWorkspaceId: data.tenantId,
         sigcoreProvisionedAt: new Date(),
+        ...(ownerAcct?.userId && { userId: ownerAcct.userId }),
       },
       create: {
         savedAccountId,
+        userId: ownerAcct?.userId ?? null,
+        destinationPhone: ownerAcct?.user?.businessPhone ?? null,
         sigcoreApiKey: data.apiKey,
         sigcoreTenantId: data.tenantId,
         sigcoreWorkspaceId: data.tenantId,
