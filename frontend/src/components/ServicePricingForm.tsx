@@ -1,6 +1,6 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Loader2, ChevronDown, Info as InfoIcon,
+  Plus, Trash2, Loader2, Info as InfoIcon,
   Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
@@ -393,9 +393,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Service Type Header — hidden in wizardMode (slim editor) */}
+      {/* Service Pricing header — hidden in wizardMode (slim editor).
+          Service-category dropdown (cleaning/plumbing/landscaping/...) removed
+          2026-06-23: nothing read pricing.serviceType — the price table is
+          already per-profile, each profile carries its own cleaningTypes[]
+          columns renameable to any service. */}
       {!wizardMode && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{
             ...MONO,
@@ -407,30 +410,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginTop: 2 }}>
             {accountName}
           </div>
-        </div>
-        <div style={{ position: 'relative' }}>
-          <select
-            value={pricing.serviceType}
-            onChange={e => setPricing((p: any) => ({ ...p, serviceType: e.target.value }))}
-            style={{
-              padding: '8px 30px 8px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: 'var(--lb-surface)', color: 'var(--lb-ink-1)',
-              appearance: 'none', cursor: 'pointer', outline: 'none',
-            }}
-          >
-            <option value="cleaning">Cleaning Service</option>
-            <option value="plumbing">Plumbing</option>
-            <option value="landscaping">Landscaping</option>
-            <option value="handyman">Handyman</option>
-            <option value="other">Other Service</option>
-          </select>
-          <ChevronDown size={14} style={{
-            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--lb-ink-5)', pointerEvents: 'none',
-          }} />
-        </div>
         </div>
       )}
 
