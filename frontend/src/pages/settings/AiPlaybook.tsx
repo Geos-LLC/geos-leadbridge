@@ -1720,34 +1720,6 @@ function ServiceHeader({
   );
 }
 
-// ─── Global tab: service-scoped info card (PR-B.1) ───────────────────────
-// Replaces the FaqCard + PricingGuidanceCard that used to live on Global
-// and were inherently service-specific.
-
-function ServiceScopedInfoCard() {
-  return (
-    <SectionCard padding="16px 20px">
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <Info size={16} style={{ color: 'var(--lb-accent)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            Pricing, FAQ, and qualification questions are service-specific
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            Select a service tab above to edit its instructions, or open{' '}
-            <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
-              Settings → Services
-            </a>{' '}
-            to manage pricing tables, FAQs, and qualification questions.
-          </div>
-        </div>
-      </div>
-    </SectionCard>
-  );
-}
-
 // ─── Status banners ──────────────────────────────────────────────────────
 
 function ArchivedWarningBanner({
@@ -2286,8 +2258,6 @@ function GlobalPlaybookEditor() {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      <HelpBlock />
-
       {accounts.length === 0 && (
         <SectionCard padding="22px 24px">
           <div style={{ fontSize: 14, color: 'var(--lb-ink-3)' }}>
@@ -2344,11 +2314,9 @@ function GlobalPlaybookEditor() {
               runtime default in src/ai/section-default-prompts.ts
               ('personality_brand_voice') drives tone uniformly. */}
 
-        {/* Service-scoped info card — FaqCard + PricingGuidanceCard were
-              removed in PR-B.1 because their content is inherently service-
-              specific (FAQ, pricing table). Operators select a service tab
-              above or visit Settings → Services for those surfaces. */}
-        <ServiceScopedInfoCard />
+        {/* ServiceScopedInfoCard banner removed 2026-06-23 — the service
+            tab strip + Settings → Services entry point already convey the
+            same info without an always-visible block taking vertical space. */}
 
         {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
               These 5 backend section keys still emit their default prompts
@@ -2435,28 +2403,6 @@ function GlobalPlaybookEditor() {
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Help block ───────────────────────────────────────────────────────────
-
-function HelpBlock() {
-  return (
-    <SectionCard padding="18px 22px">
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <Info size={18} style={{ color: 'var(--lb-accent)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            AI Playbook controls HOW AI communicates
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation</a> controls <em>WHAT</em> AI is trying to achieve and <em>WHEN</em> conversations are handed to your team.
-          </div>
-        </div>
-      </div>
-    </SectionCard>
   );
 }
 
@@ -2754,6 +2700,7 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
   const [loading, setLoading] = useState(true);
   const [busyKind, setBusyKind] = useState<null | 'ai_conv' | 'follow_up'>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [deliveryInfoOpen, setDeliveryInfoOpen] = useState(false);
 
   // Load current state from the first connected account (Playbook is
   // global; per-account divergence is intentional but rare here).
@@ -2860,6 +2807,20 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
             }}
           >
             Delivery mode (advanced)
+            <button
+              type="button"
+              onClick={() => setDeliveryInfoOpen(o => !o)}
+              aria-label="About delivery mode"
+              aria-pressed={deliveryInfoOpen}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 0, padding: 0,
+                cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+                color: deliveryInfoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+              }}
+            >
+              <Info size={14} />
+            </button>
             {savedAt && (
               <span
                 style={{
@@ -2875,19 +2836,25 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
               </span>
             )}
           </div>
-          <div
-            style={{
-              fontSize: 12.5,
-              color: 'var(--lb-ink-5)',
-              marginTop: 4,
-              lineHeight: 1.5,
-            }}
-          >
-            Most teams keep these OFF — AI sends automatically. Turn
-            either toggle ON to park drafts for your review before they
-            send. Applies to all {accounts.length} connected
-            {accounts.length === 1 ? ' account' : ' accounts'}.
-          </div>
+          {deliveryInfoOpen && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: '10px 12px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 9,
+                fontSize: 12.5,
+                color: 'var(--lb-ink-5)',
+                lineHeight: 1.5,
+              }}
+            >
+              Most teams keep these OFF — AI sends automatically. Turn
+              either toggle ON to park drafts for your review before they
+              send. Applies to all {accounts.length} connected
+              {accounts.length === 1 ? ' account' : ' accounts'}.
+            </div>
+          )}
         </div>
       </div>
 
@@ -2995,13 +2962,18 @@ function SuggestToggleRow({
 // ─── Building blocks ──────────────────────────────────────────────────────
 
 function PlaybookSectionShell({
-  icon: Icon, title, subtitle, children,
+  icon: Icon, title, subtitle, infoText, children,
 }: {
   icon: LucideIcon;
   title: string;
   subtitle?: string;
+  /** Long-form description revealed by a small (i) toggle next to the
+   *  title. Use INSTEAD OF subtitle when the helper text isn't worth
+   *  permanent screen real estate. */
+  infoText?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
     <SectionCard padding="22px 24px">
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
@@ -3013,12 +2985,42 @@ function PlaybookSectionShell({
           <Icon size={18} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            {title}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              {title}
+            </div>
+            {infoText && !subtitle && (
+              <button
+                type="button"
+                onClick={() => setInfoOpen(o => !o)}
+                aria-label="More info"
+                aria-pressed={infoOpen}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+                  color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+                }}
+              >
+                <Info size={14} />
+              </button>
+            )}
           </div>
           {subtitle && (
             <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>
               {subtitle}
+            </div>
+          )}
+          {infoOpen && infoText && !subtitle && (
+            <div style={{
+              marginTop: 8,
+              padding: '10px 12px',
+              background: '#f8fafc',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 9,
+              fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            }}>
+              {infoText}
             </div>
           )}
         </div>
@@ -3300,7 +3302,7 @@ function CustomInstructionsAllCard({ savedAccountId }: { savedAccountId: string 
     <PlaybookSectionShell
       icon={MessageSquare}
       title="Custom Instructions"
-      subtitle="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
+      infoText="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
     >
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
