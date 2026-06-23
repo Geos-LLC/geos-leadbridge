@@ -383,18 +383,27 @@ export class MonitoringService implements OnModuleInit {
   }
 
   /**
-   * Dev SMS alert — pages the on-call dev's phone via Sigcore for cross-tenant
-   * critical incidents (silent-failure classes that the per-tenant email path
-   * doesn't catch). Dedup window is shorter than the email path (1h vs 24h)
-   * because these are critical and we want a fresh page after a quiet hour.
+   * Dev SMS alert — pages the on-call dev's phone via the LeadBridge **platform**
+   * Sigcore workspace (NOT a tenant's). Per [SIGCORE_HIERARCHY.md], pool numbers
+   * routed via the platform `SIGCORE_API_KEY` are "alerts only" by design, which
+   * is exactly the use case here. Using a tenant's key would bill that tenant
+   * for our debug pages and confuse their outbound log — don't do that.
    *
    * Required env to actually send:
-   *   - DEV_ALERT_SMS_TO            (defaults to +12483462681 if unset)
-   *   - DEV_ALERT_SMS_FROM          (E.164 sender; must be a Sigcore-resolvable number)
-   *   - DEV_ALERT_SIGCORE_API_KEY   (tenant key Sigcore uses to authorize the send)
+   *   - SIGCORE_API_KEY      (existing platform workspace key — already used for
+   *                           tenant provisioning + pool routing)
+   *   - DEV_ALERT_SMS_TO     (defaults to +12483462681 if unset)
+   *   - DEV_ALERT_SMS_FROM   (optional — explicit pool number to send from. When
+   *                           omitted, the request goes out without `fromNumber`
+   *                           and Sigcore picks one from the platform workspace's
+   *                           pool. Set it explicitly if Sigcore rejects the
+   *                           no-from-number path or you want a stable sender.)
    *
-   * When SMS env is incomplete we fall back to notifyDevAlert (email).
-   * Dedup row stored as SystemErrorLog(category='other', code='dev_sms_<kind>').
+   * Dedup window is shorter than the email path (1h vs 24h) because these are
+   * critical and we want a fresh page after a quiet hour. When the Sigcore
+   * call fails for any reason we fall back to notifyDevAlert (email) so the
+   * alert isn't lost. Dedup row stored as
+   * SystemErrorLog(category='other', code='dev_sms_<kind>').
    */
   async notifyDevSms(opts: {
     kind: string;
@@ -404,12 +413,12 @@ export class MonitoringService implements OnModuleInit {
     try {
       const to = this.configService.get<string>('DEV_ALERT_SMS_TO') || process.env.DEV_ALERT_SMS_TO || '+12483462681';
       const fromPhone = this.configService.get<string>('DEV_ALERT_SMS_FROM') || process.env.DEV_ALERT_SMS_FROM || '';
-      const apiKey = this.configService.get<string>('DEV_ALERT_SIGCORE_API_KEY') || process.env.DEV_ALERT_SIGCORE_API_KEY || '';
+      const apiKey = this.configService.get<string>('SIGCORE_API_KEY') || process.env.SIGCORE_API_KEY || '';
 
-      // Without a sender + key we can't reach Sigcore. Fall back to email
-      // so the alert isn't lost — the dev will see it in their inbox.
-      if (!fromPhone || !apiKey) {
-        this.logger.warn(`[DevSms] env incomplete (from=${!!fromPhone} key=${!!apiKey}) — falling back to email for ${opts.kind}`);
+      // Without the platform key we can't reach Sigcore. Fall back to email so
+      // the alert isn't lost — the dev will see it in their inbox.
+      if (!apiKey) {
+        this.logger.warn(`[DevSms] SIGCORE_API_KEY unset — falling back to email for ${opts.kind}`);
         await this.notifyDevAlert({
           kind: opts.kind,
           subject: `LeadBridge: ${opts.kind}`,
@@ -434,16 +443,21 @@ export class MonitoringService implements OnModuleInit {
       const body = `LB: ${opts.message}`.slice(0, 320);
 
       const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+      const requestBody: Record<string, unknown> = {
+        toNumber: to,
+        body,
+        channel: 'sms',
+        metadata: { purpose: 'dev_alert', kind: opts.kind },
+      };
+      // Only pin a sender when explicitly configured. Otherwise Sigcore picks
+      // from the platform workspace's pool — which is the "alerts only" path
+      // per SIGCORE_HIERARCHY.md.
+      if (fromPhone) requestBody.fromNumber = fromPhone;
+
       const response = await fetch(`${sigcoreUrl}/v1/messages`, {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toNumber: to,
-          fromNumber: fromPhone,
-          body,
-          channel: 'sms',
-          metadata: { purpose: 'dev_alert', kind: opts.kind },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
