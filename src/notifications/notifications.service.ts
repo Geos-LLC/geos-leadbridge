@@ -2638,9 +2638,12 @@ export class NotificationsService {
 
   /**
    * Ensure inbound SMS webhook subscription exists for this account.
-   * Called during provisioning and settings saves.
+   * Called during provisioning and settings saves. Public so PlatformsService
+   * can invoke it immediately after autoProvisionSigcore — previously this only
+   * ran lazily from getSettings() on the first UI visit, leaving tenants who
+   * never opened Settings with inboundSmsWebhookId=null (Natasha 2026-06-18).
    */
-  private async ensureInboundSmsWebhook(savedAccountId: string, apiKeyOverride?: string): Promise<void> {
+  async ensureInboundSmsWebhook(savedAccountId: string, apiKeyOverride?: string): Promise<void> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { id: true, sigcoreApiKey: true, inboundSmsWebhookId: true },
