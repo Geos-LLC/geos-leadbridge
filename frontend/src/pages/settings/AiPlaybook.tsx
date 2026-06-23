@@ -572,13 +572,6 @@ function MobileScopeAccordion({
           badge={badge}
           isOpen={isOpen}
           onClick={() => handleTap({ kind: 'service', profileId: p.id })}
-          subtitle={
-            p.status === 'archived'
-              ? 'Not used for AI replies.'
-              : p.status === 'draft'
-                ? 'AI paused until activated.'
-                : `Applies only to ${getServiceDisplayName(p)}.`
-          }
         />
         {isActive && (
           <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
@@ -614,7 +607,6 @@ function MobileScopeAccordion({
           badge="global"
           isOpen={globalOpen}
           onClick={() => handleTap({ kind: 'global' })}
-          subtitle="Applies to all services. Tenant-wide tone and instructions."
         />
         {globalOpen && (
           <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
