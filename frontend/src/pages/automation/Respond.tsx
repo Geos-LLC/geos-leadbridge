@@ -655,7 +655,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         onToggle={onInstantReplyOn}
         mixed={mixedInstantReply}
         mixedTooltip={tipInstantReply}
-        contentPad="8px 24px 24px"
+        contentPad="8px 16px 16px"
+        compact
       >
         {/* Unified Message generation block (spec 2e). The bordered Advanced
             disclosure carries the AI vs Custom template choice, bound to
@@ -687,7 +688,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         onToggle={onInstantTextOn}
         mixed={mixedInstantText}
         mixedTooltip={tipInstantText}
-        contentPad="8px 24px 24px"
+        contentPad="8px 16px 16px"
+        compact
       >
         {/* Single-line Timing row per spec 2d — checkbox left, Edit Hours
             link with ExternalLink icon right. The schedule string used to
@@ -726,7 +728,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         onToggle={onInstantCallOn}
         mixed={mixedInstantCall}
         mixedTooltip={tipInstantCall}
-        contentPad="8px 24px 24px"
+        contentPad="8px 16px 16px"
+        compact
       >
         {/* Single-line Timing row per spec 2d, matching Instant Text. */}
         <TimingRow
