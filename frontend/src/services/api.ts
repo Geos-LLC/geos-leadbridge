@@ -145,9 +145,18 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Skip global toast for endpoints that handle their own error display
+    // Skip global toast for endpoints that handle their own error display.
+    // Monitoring endpoints are silenced because the Layout system-health
+    // banner + Admin Dashboard render their own error states; a global
+    // toast on every 5xx of `/v1/monitoring/system-health/run` (which
+    // intermittently fails when a downstream dependency is sick) would
+    // spam every page load with "Server Error" while the in-app banner
+    // already covers it.
     const url = error.config?.url || '';
-    const silentPatterns = [/\/negotiations\/[^/]+\/import$/];
+    const silentPatterns = [
+      /\/negotiations\/[^/]+\/import$/,
+      /\/v1\/monitoring\//,
+    ];
     const isSilent = silentPatterns.some(p => p.test(url));
 
     // SupportGrant-guarded admin endpoints render a SupportAccessRequired

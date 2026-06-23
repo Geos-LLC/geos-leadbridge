@@ -178,7 +178,7 @@ function App() {
               <Route path="/automation/engage"  element={<AutomationPage />} />
               <Route path="/automation/convert" element={<AutomationPage />} />
               <Route path="/automation-classic" element={<Services />} />
-              <Route path="/templates" element={<MessageSettings />} />
+              <Route path="/templates" element={<div className="p-4 sm:p-6 lg:p-10"><MessageSettings /></div>} />
               <Route path="/insights" element={<Analytics />} />
 
               {/* Phase 1.5 operator-only runtime diagnostic — not linked

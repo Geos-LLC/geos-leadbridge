@@ -208,7 +208,7 @@ export function MessageSettings() {
 
   if (loading) {
     return (
-      <div className="p-4 sm:p-6 lg:p-10">
+      <div>
         <div className="flex items-center gap-3 mb-6">
           <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Message Templates</h1>
@@ -222,7 +222,7 @@ export function MessageSettings() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-10 max-w-5xl mx-auto space-y-6 sm:space-y-8">
+    <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8">
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
           <X size={16} className="shrink-0" />
