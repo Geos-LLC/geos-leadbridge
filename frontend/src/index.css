@@ -665,6 +665,19 @@ h1, h2, h3, h4 {
     width: 100% !important;
     justify-content: space-between !important;
   }
+
+  /* Billing → plan card: actions wrap below the content on phones and
+     the two CTAs sit side-by-side (instead of squeezing the title into
+     a 2-character column). The outer .lb-billing-plan-row already has
+     flexWrap=wrap; this just stretches the wrapped actions row across
+     the full card width. */
+  .lb-billing-plan-actions {
+    width: 100% !important;
+    flex-direction: row !important;
+  }
+  .lb-billing-plan-actions > a {
+    flex: 1 1 0 !important;
+  }
 }
 
 /* Tiny phones (<=430px) shrink icon tiles further so card rows stay
