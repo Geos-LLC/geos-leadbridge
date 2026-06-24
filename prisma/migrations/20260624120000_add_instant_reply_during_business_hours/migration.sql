@@ -5,13 +5,11 @@
 -- Instant Reply (platform new_lead automation) checkbox was a UI alias with
 -- no backend effect.
 --
--- New column tracks the Instant Reply gate independently. Existing rows
--- copy their current `first_msg_during_business_hours` value so behavior is
--- preserved for tenants whose Instant Text setting also matches what they
--- want for Instant Reply.
+-- New column tracks the Instant Reply gate independently. Default is FALSE
+-- — Instant Reply sends 24/7 unless the tenant explicitly opts in to the
+-- biz-hours restriction. This also preserves prior runtime behavior: before
+-- this column existed, Instant Reply (the platform new_lead automation) had
+-- no biz-hours gating at all, regardless of what the UI checkbox showed.
 
-ALTER TABLE "SavedAccount"
-  ADD COLUMN "instant_reply_during_business_hours" BOOLEAN NOT NULL DEFAULT true;
-
-UPDATE "SavedAccount"
-  SET "instant_reply_during_business_hours" = "first_msg_during_business_hours";
+ALTER TABLE "saved_accounts"
+  ADD COLUMN "instant_reply_during_business_hours" BOOLEAN NOT NULL DEFAULT false;

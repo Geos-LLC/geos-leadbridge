@@ -66,7 +66,7 @@ const DEFAULT_BOOKING_WINDOWS: BookingWindows = {
 type PriceMode = 'range' | 'exact';
 
 const DEFAULTS = {
-  instantReplyDuringBusinessHours: true,
+  instantReplyDuringBusinessHours: false,
   firstMsgDuringBusinessHours: true,
   callDuringBusinessHours: true,
   followUpsApplyQuietHours: true,

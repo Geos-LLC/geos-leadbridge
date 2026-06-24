@@ -89,7 +89,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // V2 Instant Text AI default — new tenants land on AI. Existing tenants'
   // value is hydrated from followUpSettingsJson.instantTextMode below.
   const [instantTextMode, setInstantTextMode] = useState<'template' | 'ai'>('ai');
-  const [replyBizHours, setReplyBizHours] = useState(true);
+  const [replyBizHours, setReplyBizHours] = useState(false);
   const [textBizHours, setTextBizHours] = useState(true);
   const [callBizHours, setCallBizHours] = useState(true);
   const [connMode, setConnMode] = useState<'agent-first' | 'parallel'>('agent-first');
@@ -241,7 +241,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               // their saved value back here.
               instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
-              replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? true,
+              replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? false,
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,
               followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
@@ -302,7 +302,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
           instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
-          replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? true,
+          replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? false,
           textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
           callBizHours: hoursRes?.callDuringBusinessHours ?? true,
           followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
