@@ -5,21 +5,47 @@ import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
 import { TemplateEditorModal, TEMPLATE_VARIABLES } from '../components/TemplateEditorModal';
 
-type TemplateFilter = 'all' | 'auto-reply' | 'alerts' | 'call-connect' | 'prompts';
+type TemplateFilter = 'all' | 'sections' | 'alerts' | 'call-connect' | 'prompts';
+
+// Canonical message-template names per Automation section — the 7 seeded
+// in `src/templates/templates.service.ts` DEFAULT_TEMPLATES. Used by both
+// the tab filter and the deep-link resolver so the categorisation never
+// drifts from the seed list.
+const SECTION_TEMPLATE_NAMES: ReadonlySet<string> = new Set([
+  'Instant Reply',
+  'Instant Text',
+  'Instant Call',
+  'Follow Up',
+  'Resume After Conversation',
+  'Customer Deferral',
+  'Re-engage',
+]);
+
+// Owner-facing SMS alert templates (kept verbatim per 2026-06-23 spec).
+const ALERT_TEMPLATE_NAMES: ReadonlySet<string> = new Set([
+  'Lead Alert - Thumbtack',
+  'Lead Alert - Yelp',
+  'Lead Alert - SMS',
+  'Reply Alert',
+  'Handoff Alert',
+]);
 
 function getTemplateFilter(t: MessageTemplate): TemplateFilter {
   // Prompts (type=prompt) live in their own tab regardless of name pattern.
   if (t.type === 'prompt') return 'prompts';
+  if (SECTION_TEMPLATE_NAMES.has(t.name)) return 'sections';
+  if (ALERT_TEMPLATE_NAMES.has(t.name)) return 'alerts';
   const n = t.name.toLowerCase();
-  if (/auto[\s-]?reply|follow[\s-]?up|welcome/.test(n)) return 'auto-reply';
-  if (/alert|notification/.test(n)) return 'alerts';
   if (/^cc[\s-]|call[\s-]?connect|whisper|greeting|voicemail/.test(n)) return 'call-connect';
+  // Legacy / user-created rows that don't match a canonical category fall
+  // through to All only — keeps tab counts honest instead of conflating
+  // dropped seeds (Auto Reply - Welcome etc.) with the current sections.
   return 'all';
 }
 
 const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'auto-reply', label: 'Auto Reply' },
+  { key: 'sections', label: 'Sections' },
   { key: 'alerts', label: 'Alerts' },
   { key: 'call-connect', label: 'Call Connect' },
   { key: 'prompts', label: 'AI Prompts' },
