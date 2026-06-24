@@ -56,6 +56,13 @@ type CachedFollowups = {
   resumeOn: boolean;
   deferralOn: boolean;
   hiredOn: boolean;
+  // Per-rule message generation mode — defaults to 'ai' so each rule
+  // uses its own dedicated AI prompt seed (Resume After Conversation /
+  // Customer Deferral / Re-engage). Flipping to 'template' makes the
+  // engine fall back to that rule's named MessageTemplate body.
+  resumeMessageMode: 'template' | 'ai';
+  deferralMessageMode: 'template' | 'ai';
+  hiredMessageMode: 'template' | 'ai';
   plan: PlanStepData[];
   // Read-only on this page (edited in AutomationConversation). Cached so
   // the AI Strategy tile under Follow-up mode reflects the saved value.
@@ -147,6 +154,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [resumeOn, setResumeOn] = useState(true);
   const [deferralOn, setDeferralOn] = useState(true);
   const [hiredOn, setHiredOn] = useState(true);
+  // Per-rule message generation mode. Mirrors the global Follow-up mode
+  // expander but writes to per-rule fields so each rule can diverge.
+  // Default 'ai' matches the seed default for the deferral / hired
+  // sequence templates (see follow-up-seed.ts and commits f8a8c91b /
+  // b5fd82a4).
+  const [resumeMessageMode, setResumeMessageMode] = useState<'template' | 'ai'>('ai');
+  const [deferralMessageMode, setDeferralMessageMode] = useState<'template' | 'ai'>('ai');
+  const [hiredMessageMode, setHiredMessageMode] = useState<'template' | 'ai'>('ai');
   // 11-step plan — editable. Persisted to followUpSettingsJson.followUpSteps
   // as [{ delay: '2 min', message: null }, ...]. Backend parseDelay()
   // converts each delay string into minutes for scheduling.
@@ -183,6 +198,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
     | 'resumeDelay' | 'deferralDelay' | 'hiredDelay'
     | 'resumeOn' | 'deferralOn' | 'hiredOn'
+    | 'resumeMessageMode' | 'deferralMessageMode' | 'hiredMessageMode'
     | 'plan';
   const dirtyFieldsRef = useRef<Set<FollowupsField>>(new Set());
   // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
@@ -232,6 +248,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       resumeOn: s?.fuReEnrollOnSilence ?? true,
       deferralOn: s?.aiDeferralCheckIn ?? true,
       hiredOn: s?.aiHiredCompetitorReengage ?? true,
+      // Per-rule mode defaults to 'ai' to match the seed default (see
+      // commits f8a8c91b / b5fd82a4). Backend keys mirror the existing
+      // global `followUpReplyType` enum.
+      resumeMessageMode: s?.fuReEnrollReplyType === 'template' ? 'template' : 'ai',
+      deferralMessageMode: s?.aiDeferralReplyType === 'template' ? 'template' : 'ai',
+      hiredMessageMode: s?.aiHiredCompetitorReplyType === 'template' ? 'template' : 'ai',
       plan: hydratedPlan,
       followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
     };
@@ -257,6 +279,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeOn(first.resumeOn);
         setDeferralOn(first.deferralOn);
         setHiredOn(first.hiredOn);
+        setResumeMessageMode(first.resumeMessageMode);
+        setDeferralMessageMode(first.deferralMessageMode);
+        setHiredMessageMode(first.hiredMessageMode);
         setPlan(first.plan);
         setFollowUpStrategy(first.followUpStrategy);
         setHydrated(true);
@@ -277,6 +302,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeOn(cached.resumeOn);
         setDeferralOn(cached.deferralOn);
         setHiredOn(cached.hiredOn);
+        setResumeMessageMode(cached.resumeMessageMode);
+        setDeferralMessageMode(cached.deferralMessageMode);
+        setHiredMessageMode(cached.hiredMessageMode);
         setPlan(cached.plan);
         setFollowUpStrategy(cached.followUpStrategy);
         setHydrated(true);
@@ -345,6 +373,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           setResumeOn(parsed.resumeOn);
           setDeferralOn(parsed.deferralOn);
           setHiredOn(parsed.hiredOn);
+          setResumeMessageMode(parsed.resumeMessageMode);
+          setDeferralMessageMode(parsed.deferralMessageMode);
+          setHiredMessageMode(parsed.hiredMessageMode);
           setPlan(parsed.plan);
           setFollowUpStrategy(parsed.followUpStrategy);
         }
@@ -386,6 +417,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     if (fields.has('resumeOn'))         wizardPayload.fuReEnrollOnSilence       = resumeOn;
     if (fields.has('deferralOn'))       wizardPayload.aiDeferralCheckIn         = deferralOn;
     if (fields.has('hiredOn'))          wizardPayload.aiHiredCompetitorReengage = hiredOn;
+    if (fields.has('resumeMessageMode'))   wizardPayload.fuReEnrollReplyType         = resumeMessageMode;
+    if (fields.has('deferralMessageMode')) wizardPayload.aiDeferralReplyType         = deferralMessageMode;
+    if (fields.has('hiredMessageMode'))    wizardPayload.aiHiredCompetitorReplyType  = hiredMessageMode;
     if (fields.has('plan')) {
       // Persisted as the canonical `steps` array. Backend writes it to
       // followUpSettingsJson.followUpSteps; the scheduler prefers these
@@ -408,7 +442,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       if (!prev) {
         followupsCache.set(a.id, {
           followUpsOn, quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-          resumeDelay, deferralDelay, hiredDelay, resumeOn, deferralOn, hiredOn, plan, followUpStrategy,
+          resumeDelay, deferralDelay, hiredDelay, resumeOn, deferralOn, hiredOn,
+          resumeMessageMode, deferralMessageMode, hiredMessageMode,
+          plan, followUpStrategy,
         });
         return;
       }
@@ -436,6 +472,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         resumeOn:         fields.has('resumeOn')         ? resumeOn         : prev.resumeOn,
         deferralOn:       fields.has('deferralOn')       ? deferralOn       : prev.deferralOn,
         hiredOn:          fields.has('hiredOn')          ? hiredOn          : prev.hiredOn,
+        resumeMessageMode:   fields.has('resumeMessageMode')   ? resumeMessageMode   : prev.resumeMessageMode,
+        deferralMessageMode: fields.has('deferralMessageMode') ? deferralMessageMode : prev.deferralMessageMode,
+        hiredMessageMode:    fields.has('hiredMessageMode')    ? hiredMessageMode    : prev.hiredMessageMode,
         plan:             fields.has('plan')             ? plan             : prev.plan,
         // followUpStrategy is read-only on this page — preserve prev or
         // fall back to the displayed value (loaded from getSettings).
@@ -537,7 +576,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followUpsOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay, plan]);
+  }, [followUpsOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone, quietOn, resumeDelay, deferralDelay, hiredDelay, resumeMessageMode, deferralMessageMode, hiredMessageMode, plan]);
 
   // markDirty-wrapped setters used by JSX. Each setter adds its specific
   // field name so the save only writes the keys the user changed.
@@ -561,6 +600,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeOn      = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeOn');      setResumeOn(v); };
   const onDeferralOn    = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralOn');    setDeferralOn(v); };
   const onHiredOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredOn');       setHiredOn(v); };
+  const onResumeMessageMode   = (v: 'template' | 'ai') => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeMessageMode');   setResumeMessageMode(v); };
+  const onDeferralMessageMode = (v: 'template' | 'ai') => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralMessageMode'); setDeferralMessageMode(v); };
+  const onHiredMessageMode    = (v: 'template' | 'ai') => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredMessageMode');    setHiredMessageMode(v); };
   // Single plan setter used by the cadence-edit modal. Replaces the whole
   // array because the modal commits a working draft on Save. Per-step
   // diffing isn't needed since the wizard payload serializes the entire
@@ -674,11 +716,21 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           pickerValue={resumeDelay}
           pickerOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
           onPickerChange={onResumeDelay}
-          extra={mixedResume.mixed ? (
-            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
-              {mixedResume.tooltip}
-            </div>
-          ) : undefined}
+          extra={
+            <>
+              <MessageGenerationExpander
+                useAi={resumeMessageMode === 'ai'}
+                onChangeUseAi={next => onResumeMessageMode(next ? 'ai' : 'template')}
+                aiBody='AI writes the resume nudge using your "Resume After Conversation" prompt.'
+                templateBody='Send the saved "Resume After Conversation" template from Templates.'
+              />
+              {mixedResume.mixed && (
+                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+                  {mixedResume.tooltip}
+                </div>
+              )}
+            </>
+          }
         />
         <FollowupCard
           icon={MessageSquare}
@@ -692,11 +744,21 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           pickerValue={deferralDelay}
           pickerOptions={['1 day', '2 days', '3 days', '1 week']}
           onPickerChange={onDeferralDelay}
-          extra={mixedDeferral.mixed ? (
-            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
-              {mixedDeferral.tooltip}
-            </div>
-          ) : undefined}
+          extra={
+            <>
+              <MessageGenerationExpander
+                useAi={deferralMessageMode === 'ai'}
+                onChangeUseAi={next => onDeferralMessageMode(next ? 'ai' : 'template')}
+                aiBody='AI writes the check-in using your "Customer Deferral" prompt.'
+                templateBody='Send the saved "Customer Deferral" template from Templates.'
+              />
+              {mixedDeferral.mixed && (
+                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+                  {mixedDeferral.tooltip}
+                </div>
+              )}
+            </>
+          }
         />
         <FollowupCard
           icon={PhoneCall}
@@ -710,11 +772,21 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           pickerValue={hiredDelay}
           pickerOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
           onPickerChange={onHiredDelay}
-          extra={mixedHired.mixed ? (
-            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
-              {mixedHired.tooltip}
-            </div>
-          ) : undefined}
+          extra={
+            <>
+              <MessageGenerationExpander
+                useAi={hiredMessageMode === 'ai'}
+                onChangeUseAi={next => onHiredMessageMode(next ? 'ai' : 'template')}
+                aiBody='AI writes the re-engage nudge using your "Re-engage" prompt.'
+                templateBody='Send the saved "Re-engage" template from Templates.'
+              />
+              {mixedHired.mixed && (
+                <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+                  {mixedHired.tooltip}
+                </div>
+              )}
+            </>
+          }
         />
       </div>
 

@@ -661,6 +661,13 @@ export class FollowUpEngineController {
     if (body.aiHiredCompetitorReengage !== undefined) extendedSettings.aiHiredCompetitorReengage = body.aiHiredCompetitorReengage;
     if (body.aiHiredCompetitorDelay !== undefined) extendedSettings.aiHiredCompetitorDelay = body.aiHiredCompetitorDelay;
     if (body.aiHiredCompetitorMessage !== undefined) extendedSettings.aiHiredCompetitorMessage = body.aiHiredCompetitorMessage;
+    // Per-rule message generation mode (2026-06-24). When unset, the rule
+    // inherits the global `followUpReplyType`. When set, this rule's
+    // FollowUpSequenceTemplate.generationMode + promptTemplateId get
+    // rewritten on save (see propagate() below).
+    if (body.fuReEnrollReplyType !== undefined) extendedSettings.fuReEnrollReplyType = body.fuReEnrollReplyType;
+    if (body.aiDeferralReplyType !== undefined) extendedSettings.aiDeferralReplyType = body.aiDeferralReplyType;
+    if (body.aiHiredCompetitorReplyType !== undefined) extendedSettings.aiHiredCompetitorReplyType = body.aiHiredCompetitorReplyType;
     // Customer Reply Alerts — single user-facing toggle gating BOTH:
     //   1. Re-engagement (customer replies after follow-ups, any intent)
     //   2. Handoff       (customer signals high intent during AI Conversation)
@@ -780,6 +787,7 @@ export class FollowUpEngineController {
     const triggerSettingsTouched =
       body.aiDeferralCheckIn !== undefined || body.aiDeferralDelay !== undefined || body.aiDeferralMessage !== undefined ||
       body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined ||
+      body.fuReEnrollReplyType !== undefined || body.aiDeferralReplyType !== undefined || body.aiHiredCompetitorReplyType !== undefined ||
       replyType !== undefined; // flipping AI/Template mode also rewrites the deferral/hired template steps
     if (triggerSettingsTouched) {
       const platformForTemplates = platform || account.platform;
@@ -803,24 +811,53 @@ export class FollowUpEngineController {
       // for the deferral / hired-competitor delay use case.
       const parseShortDelay = (d: string): number => parseDuration(d, 4320);
 
-      // When the user picked AI mode for the follow-up plan, the deferral
-      // and hired-competitor messages should also be AI-generated. The
-      // engine takes the AI path when step.messageTemplate is null/empty,
-      // so we clear it on AI mode. The user's edited literal message stays
-      // in followUpSettingsJson so flipping back to Template mode restores
-      // it without retyping.
-      const aiMode = (replyType ?? account.followUpReplyType) === 'ai';
+      // Global default — per-rule reply-type fields override this when set.
+      const globalAiMode = (replyType ?? account.followUpReplyType) === 'ai';
+
+      // Read any persisted per-rule reply types from the existing JSON so a
+      // save that DOESN'T include them (e.g. only flipping a delay) still
+      // respects the saved per-rule mode instead of falling back to global.
+      const perRuleResume =
+        (body.fuReEnrollReplyType ?? extendedSettings.fuReEnrollReplyType) as 'ai' | 'template' | undefined;
+      const perRuleDeferral =
+        (body.aiDeferralReplyType ?? extendedSettings.aiDeferralReplyType) as 'ai' | 'template' | undefined;
+      const perRuleHired =
+        (body.aiHiredCompetitorReplyType ?? extendedSettings.aiHiredCompetitorReplyType) as 'ai' | 'template' | undefined;
+
+      // Resolve the seeded `type='prompt'` MessageTemplate id for this user
+      // by name. Returns null on miss so callers can leave promptTemplateId
+      // alone in the template-mode branch.
+      const lookupPromptId = async (name: string): Promise<string | null> => {
+        try {
+          const tmpl = await this.prisma.messageTemplate.findFirst({
+            where: { userId: user.id, name, type: 'prompt' },
+            select: { id: true },
+          });
+          return tmpl?.id ?? null;
+        } catch { return null; }
+      };
+
+      // Trigger state → seeded prompt name. Mirrors the templates seed list
+      // in src/templates/templates.service.ts and the templateNameForTriggerState
+      // mapping in follow-up-generator.service.ts.
+      const PROMPT_NAME: Record<string, string> = {
+        customer_deferred:           'Customer Deferral',
+        customer_hired_competitor:   'Re-engage',
+        no_reply_after_conversion:   'Resume After Conversation',
+      };
 
       const propagate = async (
         triggerState: 'customer_deferred' | 'customer_hired_competitor',
         enabled: boolean | undefined,
         delay: string | undefined,
         message: string | undefined,
+        perRuleReplyType: 'ai' | 'template' | undefined,
       ) => {
         const tmpl = await this.prisma.followUpSequenceTemplate.findFirst({
           where: { savedAccountId, platform: platformForTemplates, triggerState },
         });
         if (!tmpl) return;
+        const aiMode = (perRuleReplyType ?? (globalAiMode ? 'ai' : 'template')) === 'ai';
         const stepsJson = (tmpl.stepsJson as any) || { schemaVersion: 1, steps: [] };
         const nextLiteralMessage = aiMode
           ? null
@@ -835,11 +872,18 @@ export class FollowUpEngineController {
             messageTemplate: nextLiteralMessage,
           };
         });
+        // AI mode → point at the seeded per-rule prompt so the generator
+        // applies the right tone. Template mode → clear so the generator
+        // falls through to the named MessageTemplate body lookup
+        // (templateNameForTriggerState).
+        const promptName = PROMPT_NAME[triggerState];
+        const nextPromptId = aiMode && promptName ? await lookupPromptId(promptName) : null;
         await this.prisma.followUpSequenceTemplate.update({
           where: { id: tmpl.id },
           data: {
             stepsJson: { ...stepsJson, steps: updatedSteps },
             generationMode: aiMode ? 'ai' : 'template',
+            promptTemplateId: nextPromptId,
             ...(enabled !== undefined ? { enabled } : {}),
           },
         });
@@ -848,12 +892,35 @@ export class FollowUpEngineController {
       // Always propagate when triggerSettingsTouched fires — covers the
       // replyType-only flip case where delay/message/toggle are unchanged
       // but the literal message still needs to be cleared (or restored).
-      await propagate('customer_deferred', body.aiDeferralCheckIn, body.aiDeferralDelay, body.aiDeferralMessage).catch((err: any) => {
+      await propagate('customer_deferred', body.aiDeferralCheckIn, body.aiDeferralDelay, body.aiDeferralMessage, perRuleDeferral).catch((err: any) => {
         this.logger.warn(`[saveSettings] customer_deferred template propagation failed: ${err.message}`);
       });
-      await propagate('customer_hired_competitor', body.aiHiredCompetitorReengage, body.aiHiredCompetitorDelay, body.aiHiredCompetitorMessage).catch((err: any) => {
+      await propagate('customer_hired_competitor', body.aiHiredCompetitorReengage, body.aiHiredCompetitorDelay, body.aiHiredCompetitorMessage, perRuleHired).catch((err: any) => {
         this.logger.warn(`[saveSettings] customer_hired_competitor template propagation failed: ${err.message}`);
       });
+
+      // Resume rule fans out to no_reply_after_conversion templates (the
+      // exact state the re-enrollment path uses when a customer was in
+      // negotiation and went silent). Other no_reply_* states are part of
+      // the initial follow-up plan and stay governed by the global
+      // followUpReplyType so the Resume toggle doesn't accidentally re-tone
+      // first-touch nudges.
+      const resumeAiMode = (perRuleResume ?? (globalAiMode ? 'ai' : 'template')) === 'ai';
+      const resumePromptId = resumeAiMode ? await lookupPromptId(PROMPT_NAME.no_reply_after_conversion) : null;
+      try {
+        const updated = await this.prisma.followUpSequenceTemplate.updateMany({
+          where: { userId: user.id, triggerState: 'no_reply_after_conversion' },
+          data: {
+            generationMode: resumeAiMode ? 'ai' : 'template',
+            promptTemplateId: resumePromptId,
+          },
+        });
+        if (updated.count > 0) {
+          this.logger.log(`[saveSettings] resume propagation: ${updated.count} no_reply_after_conversion rows updated to ${resumeAiMode ? 'ai' : 'template'}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[saveSettings] resume (no_reply_after_conversion) propagation failed: ${err.message}`);
+      }
     }
 
     // When the global AI Strategy is saved, fan out to this user's AutomationRules
