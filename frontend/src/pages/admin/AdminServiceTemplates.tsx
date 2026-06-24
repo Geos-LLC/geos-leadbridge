@@ -36,11 +36,13 @@ type EditableTemplate = {
   notes: string;
   rawOptionsText: string;
   rawPricingText: string;
+  rawFaqText: string;
   // Generator output — stored as strings (pretty-printed JSON) so the
   // edit pane can show them verbatim. JSON.parse on save.
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
+  faqJson: string;
   keyOverride: string;
   description: string;
   sourceJson: AdminGeneratedTemplate['sourceJson'] | null;
@@ -54,9 +56,11 @@ const EMPTY: EditableTemplate = {
   notes: '',
   rawOptionsText: '',
   rawPricingText: '',
+  rawFaqText: '',
   serviceOptionsJson: '',
   pricingJson: '',
   customerAnswersJson: '',
+  faqJson: '',
   keyOverride: '',
   description: '',
   sourceJson: null,
@@ -68,6 +72,33 @@ function pretty(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * True when a generated/edited blob has no usable content — empty
+ * groups[], no items[], no basePrices[]. Used by handleSaveDraft to
+ * refuse a destructive save that would wipe a populated template
+ * down to nothing (the failure mode that nuked the carpet template).
+ */
+function looksEmpty(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === 'string') return value.trim().length === 0 || value.trim() === '""';
+  if (typeof value !== 'object') return false;
+  const o = value as any;
+  const groups = Array.isArray(o.groups) ? o.groups : null;
+  const items = Array.isArray(o.items) ? o.items : null;
+  const basePrices = Array.isArray(o.basePrices) ? o.basePrices : null;
+  const entries = Array.isArray(o.entries) ? o.entries : null;
+  // Any populated array of substance → not empty.
+  if (groups && groups.length > 0) return false;
+  if (items && items.length > 0) return false;
+  if (basePrices && basePrices.length > 0) return false;
+  if (entries && entries.length > 0) return false;
+  // Pricing models that don't use arrays (hourly, flat_rate) — treat
+  // as non-empty when they declare a model. Custom/empty defaults
+  // are caught by the array checks above returning all-falsy.
+  if (o.pricingModel === 'hourly' || o.pricingModel === 'flat_rate') return false;
+  return true;
 }
 
 /** Treat unparseable input as the raw text so admin can fix on next save attempt. */
@@ -151,6 +182,7 @@ export default function AdminServiceTemplates() {
         notes: draft.notes.trim() || null,
         rawOptionsText: draft.rawOptionsText,
         rawPricingText: draft.rawPricingText,
+        rawFaqText: draft.rawFaqText,
       });
       setDraft((d) => ({
         ...d,
@@ -159,6 +191,7 @@ export default function AdminServiceTemplates() {
         serviceOptionsJson: pretty(generated.serviceOptionsJson),
         pricingJson: pretty(generated.pricingJson),
         customerAnswersJson: pretty(generated.customerAnswersJson),
+        faqJson: pretty(generated.faqJson),
         sourceJson: generated.sourceJson,
       }));
       notify.success('Generated', 'Review the JSON below, then Save Draft or Publish.');
@@ -171,24 +204,58 @@ export default function AdminServiceTemplates() {
   };
 
   const handleSaveDraft = async () => {
-    if (!draft.sourceJson) {
+    // Creating a new template requires Generate first so there's
+    // something to save. When editing, the JSON textareas are loaded
+    // from the existing template by handleEdit.
+    if (!editingId && !draft.sourceJson) {
       notify.error('Generate first', 'Click "Generate Template" before saving.');
       return;
     }
+
+    const opts: unknown = safeParse(draft.serviceOptionsJson);
+    const pricing: unknown = safeParse(draft.pricingJson);
+    const answers: unknown = safeParse(draft.customerAnswersJson);
+    // FAQ block is optional. An empty textarea persists as `null` on
+    // create (no DB row written) and on patch (column cleared). The
+    // generator emits `{customQA: []}` when admin pastes nothing — the
+    // service layer's hasFaqContent() guard treats that as null too.
+    const faq: unknown = draft.faqJson.trim().length === 0 ? null : safeParse(draft.faqJson);
+
+    // Defensive guard: refuse to save when the JSON textareas would
+    // wipe the template down to empty groups/no prices. This protects
+    // against the destructive case where an admin pasted raw text but
+    // clicked Generate before pasting anything substantial — the
+    // generator returns `{groups: []}` + minimal pricing, the JSON
+    // textareas get overwritten, and Save would persist the empty
+    // result over real data. The Cristal carpet template was nuked
+    // exactly this way.
+    if (editingId && looksEmpty(opts) && looksEmpty(pricing)) {
+      notify.error(
+        'Save blocked',
+        'The template would be saved with no question groups and no pricing. Paste fresh Thumbtack content + click Generate Template, or click Cancel edit to start over.',
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       if (editingId) {
-        await adminServiceTemplatesApi.patch(editingId, {
+        const res = await adminServiceTemplatesApi.patch(editingId, {
           label: draft.serviceName.trim(),
           provider: draft.provider,
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
           description: draft.description.trim() || null,
-          serviceOptionsJson: safeParse(draft.serviceOptionsJson),
-          pricingJson: safeParse(draft.pricingJson),
-          customerAnswersJson: safeParse(draft.customerAnswersJson),
+          serviceOptionsJson: opts,
+          pricingJson: pricing,
+          customerAnswersJson: answers,
+          faqJson: faq,
         });
-        notify.success('Saved', `Template "${draft.serviceName}" updated.`);
+        const ts = res?.template?.updatedAt;
+        const stamp = ts
+          ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          : 'just now';
+        notify.success('Saved', `Template "${draft.serviceName}" updated at ${stamp}.`);
       } else {
         await adminServiceTemplatesApi.create({
           key: draft.keyOverride.trim() || `${draft.provider}_template`,
@@ -197,10 +264,11 @@ export default function AdminServiceTemplates() {
           providerCategoryName: draft.providerCategoryName.trim(),
           providerCategoryId: draft.providerCategoryId.trim() || null,
           description: draft.description.trim() || null,
-          serviceOptionsJson: safeParse(draft.serviceOptionsJson),
-          pricingJson: safeParse(draft.pricingJson),
-          customerAnswersJson: safeParse(draft.customerAnswersJson),
-          sourceJson: draft.sourceJson,
+          serviceOptionsJson: opts,
+          pricingJson: pricing,
+          customerAnswersJson: answers,
+          faqJson: faq,
+          sourceJson: draft.sourceJson!,
         });
         notify.success('Draft saved', `Template "${draft.serviceName}" created as draft.`);
       }
@@ -269,9 +337,14 @@ export default function AdminServiceTemplates() {
       notes: '',
       rawOptionsText: '',
       rawPricingText: '',
+      rawFaqText: '',
       serviceOptionsJson: pretty(safeParse(template.serviceOptionsJson)),
       pricingJson: pretty(safeParse(template.pricingJson)),
       customerAnswersJson: pretty(safeParse(template.customerAnswersJson)),
+      // Existing seeded rows (e.g. HOUSE_CLEANING_PRESET) carry their
+      // standardScope/deepScope/customQA here — load verbatim so the
+      // admin can hand-edit without losing prior content.
+      faqJson: template.faqJson ? pretty(safeParse(template.faqJson)) : '',
       keyOverride: template.key,
       description: template.description ?? '',
       sourceJson: (template.sourceJson
@@ -362,6 +435,10 @@ export default function AdminServiceTemplates() {
           </Field>
         </div>
 
+        {/* Paste-then-Generate workflow drives both Create AND Edit.
+            On Edit, handleEdit intentionally resets the paste textareas
+            to empty so the admin can paste fresh Thumbtack content over
+            the old template. */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
           <Field label="Service Options (paste)">
             <textarea
@@ -383,6 +460,18 @@ export default function AdminServiceTemplates() {
           </Field>
         </div>
 
+        <Field label="FAQ (paste — what's included, Q&A pairs)">
+          <textarea
+            value={draft.rawFaqText}
+            onChange={(e) => setDraft({ ...draft, rawFaqText: e.target.value })}
+            rows={10}
+            style={textareaStyle}
+            placeholder={
+              'Regular Cleaning Includes:\n- Dust all surfaces\n- Vacuum and mop floors\n- Clean kitchen counters and bathroom sinks\n\nDeep Cleaning Includes:\n- Everything in regular cleaning\n- Inside oven\n- Inside fridge\n- Baseboards and door frames\n\nQ: Do you bring supplies?\nA: Yes, standard supplies and equipment are included.\n\nQ: Do you charge extra for pets?\nA: A small pet surcharge applies.'
+            }
+          />
+        </Field>
+
         <Field label="Notes (optional, stored in sourceJson)">
           <textarea
             value={draft.notes}
@@ -393,7 +482,7 @@ export default function AdminServiceTemplates() {
           />
         </Field>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
           <button
             type="button"
             onClick={handleGenerate}
@@ -402,8 +491,11 @@ export default function AdminServiceTemplates() {
           >
             {generating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={14} />}
             {' '}
-            Generate Template
+            Generate Template (preview)
           </button>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>
+            Optional — Save will auto-translate any pasted content if you skip this.
+          </span>
         </div>
 
         {/* Generated JSON preview */}
@@ -454,6 +546,16 @@ export default function AdminServiceTemplates() {
                 onChange={(e) => setDraft({ ...draft, customerAnswersJson: e.target.value })}
                 rows={10}
                 style={{ ...textareaStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+              />
+            </Field>
+
+            <Field label="FAQ JSON (cleaning-shape — standardScope / deepScope / customQA)">
+              <textarea
+                value={draft.faqJson}
+                onChange={(e) => setDraft({ ...draft, faqJson: e.target.value })}
+                rows={10}
+                style={{ ...textareaStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+                placeholder={'{\n  "standardScope": "...",\n  "deepScope": "...",\n  "customQA": []\n}'}
               />
             </Field>
 

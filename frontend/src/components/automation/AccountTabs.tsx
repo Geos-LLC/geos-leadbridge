@@ -31,10 +31,9 @@ export function AccountTabs({
       className="lb-account-tabs lb-tabscroll"
       style={{
         display: 'flex',
-        gap: 4,
-        borderBottom: '1px solid var(--lb-line)',
+        gap: 6,
         overflowX: 'auto',
-        paddingBottom: 0,
+        padding: '2px 0 4px',
       }}
     >
       <UnderlineTab
@@ -86,17 +85,24 @@ function UnderlineTab({
         display: 'inline-flex',
         alignItems: 'center',
         gap: 7,
-        padding: '9px 14px 11px',
-        background: 'transparent',
+        padding: '8px 12px',
+        background: active ? 'var(--lb-accent)' : 'transparent',
         border: 0,
-        borderBottom: '2px solid ' + (active ? 'var(--lb-accent)' : 'transparent'),
-        marginBottom: -1,
+        borderRadius: 10,
         cursor: 'pointer',
         fontFamily: 'inherit',
         fontSize: 13,
         fontWeight: active ? 700 : 500,
-        color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
+        color: active ? '#ffffff' : 'var(--lb-ink-5)',
+        boxShadow: active ? '0 1px 2px rgba(16,24,40,0.08)' : 'none',
+        transition: 'background 120ms, color 120ms',
         flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = 'var(--lb-ink-bg-soft, #f3f4f6)';
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = 'transparent';
       }}
     >
       {leading}
@@ -104,7 +110,10 @@ function UnderlineTab({
       {warning && (
         <span
           aria-label="Token issue"
-          style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--lb-warn)' }}
+          style={{
+            width: 6, height: 6, borderRadius: 99,
+            background: active ? '#fff' : 'var(--lb-warn)',
+          }}
         />
       )}
     </button>

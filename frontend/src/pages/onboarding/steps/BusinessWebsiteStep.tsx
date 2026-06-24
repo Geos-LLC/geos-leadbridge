@@ -1,9 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarClock, ChevronRight as ChevronRightIcon,
-  CheckCircle2, ChevronDown, ChevronRight, ChevronUp, DownloadCloud, Globe,
-  Loader2, Phone, Sparkles, Users,
+  AlertTriangle,
+  CheckCircle2, ChevronDown, ChevronRight, Globe,
+  Info, Link2, Loader2, Phone, PhoneCall, Sparkles, Users,
 } from 'lucide-react';
 import { authApi, notificationsApi, usersApi } from '../../../services/api';
 import { useAppStore } from '../../../store/appStore';
@@ -11,9 +10,9 @@ import { useAuthStore } from '../../../store/authStore';
 import { notify } from '../../../store/notificationStore';
 import type { TenantPhoneNumber } from '../../../services/api';
 import type { SavedAccount } from '../../../types';
-import { WebsitePreviewCard } from '../../../components/WebsitePreviewCard';
 import { ManualBusinessInfoModal } from '../../../components/ManualBusinessInfoModal';
 import { AdditionalAssociatePhonesEditor, type AssociatePhoneEntry } from '../../../components/AdditionalAssociatePhonesEditor';
+import BusinessHoursEditor from '../../../components/BusinessHoursEditor';
 import { WizardStepActions } from '../WizardStepActions';
 
 interface Props {
@@ -59,7 +58,6 @@ interface VerifyOutcome {
  * old behavior. The Fetch buttons are an upgrade, not a replacement.
  */
 export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving }: Props) {
-  const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   // Title + description live in WizardShell header (2026-06-13 redesign).
@@ -139,14 +137,23 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
   // primary business number is usually enough; teams add additional
   // crew numbers only when needed.
   const [showAssociates, setShowAssociates] = useState(false);
+  // Per-card info-circle popovers. Canonical FinalDesign uses a small
+  // info-circle button next to each card title that toggles a short
+  // explanation inline — keeps the card header clean while preserving
+  // the helper copy. One open at a time per card.
+  const [infoPhoneOpen, setInfoPhoneOpen] = useState(false);
+  const [infoLbnumOpen, setInfoLbnumOpen] = useState(false);
+  const [infoWebsiteOpen, setInfoWebsiteOpen] = useState(false);
+  // LeadBridge phone — collapse the full area-code/city search behind
+  // a "Get a number" CTA when no number is assigned yet. Matches the
+  // canonical's empty-state pattern (dashed tile + Get a number
+  // button → reveal the picker).
+  const [showLbnumPicker, setShowLbnumPicker] = useState(false);
 
-  // ── Unified profile URL state ──────────────────────────────────────
-  // Detected platform from the LAST successful apply — drives the badge
-  // next to the section header. Null when the user hasn't yet applied
-  // anything (or when the URL was cleared).
-  const [detectedPlatform, setDetectedPlatform] = useState<'thumbtack' | 'yelp' | 'website' | null>(
-    user?.website ? 'website' : null,
-  );
+  // detectedPlatform state removed 2026-06-22 — the only reader was
+  // the platform badge in Section 3's header, which the target screen
+  // doesn't show. The save-side detection still happens server-side
+  // for routing the scrape; the wizard just doesn't surface it.
 
   const ttAccounts = useMemo(
     () => savedAccounts.filter(a => a.platform === 'thumbtack'),
@@ -163,7 +170,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
       .then(res => {
         if (cancelled) return;
         if (res.url && !value.trim()) setValue(res.url);
-        if (res.platform) setDetectedPlatform(res.platform);
       })
       .catch(() => { /* non-fatal — leave empty and let the user type */ });
     return () => { cancelled = true; };
@@ -222,6 +228,9 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
     const t = setTimeout(() => setBusinessPhoneSavedAt(null), 2200);
     return () => clearTimeout(t);
   }, [businessPhoneSavedAt]);
+
+  // Business hours editor — hydration + auto-save now live inside the
+  // shared BusinessHoursEditor component (re-used by Settings → Hours).
 
   // ── LeadBridge phone provisioning ─────────────────────────────────
   async function searchPhones() {
@@ -321,7 +330,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
         setVerifyState({ kind: 'invalid', outcome });
         return outcome;
       }
-      setDetectedPlatform(res.platform);
       // Generic website path also updates the cached User.website so the
       // preview card renders. TT / Yelp paths store on SavedAccount.
       if (res.platform === 'website' && user) {
@@ -471,17 +479,57 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
 
       {/* Title + description moved to WizardShell header (2026-06-13 redesign). */}
 
-      {/* ─── 1. Business phone (User.businessPhone) ──────────────── */}
-      <section className="mt-2 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Phone className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">Business phone</h2>
+      {/* ─── 1. Your phone number (User.businessPhone) ──────────────
+          Canonical "Business Step (standalone)" chrome:
+            - 38x38 dbeafe-bg icon tile + title + info-circle popover
+            - bordered tile + greyed Save button
+            - collapsible "Add associate numbers" row at bottom with
+              border-top divider */}
+      <section style={{
+        marginTop: 8,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <span style={{
+            width: 38, height: 38, borderRadius: 10,
+            background: '#dbeafe', color: '#2563eb',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Phone size={18} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Your phone number
+            </span>
+            <button
+              type="button"
+              onClick={() => setInfoPhoneOpen(v => !v)}
+              aria-label="More info"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 20, height: 20, border: 0, background: 'transparent',
+                cursor: 'pointer', padding: 0, flexShrink: 0,
+                color: 'var(--lb-accent)',
+              }}
+            >
+              <Info size={15} />
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-3">
-          Your primary owner/company number. Used for owner alerts and auto-registered
-          as the primary associate phone on connected Thumbtack businesses.
-        </p>
-        <div className="flex items-center gap-2 lb-wiz-inline-save">
+        {infoPhoneOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 9, lineHeight: 1.45 }}>
+            Used for lead alerts and auto-registered as the primary associate phone on
+            connected Thumbtack businesses.
+          </div>
+        )}
+        {/* Phone input + Save stay inline on one row at every width
+            — no .lb-wiz-inline-save wrap class here. The canonical
+            shows them side-by-side; wrapping would break the layout. */}
+        <div style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="tel"
             inputMode="tel"
@@ -489,7 +537,21 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
             value={businessPhone}
             onChange={e => setBusinessPhone(e.target.value)}
             placeholder="+1 (555) 010-1234"
-            className="flex-1 min-w-0 px-3 py-2.5 text-sm rounded-xl border-2 border-slate-200 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            style={{
+              flex: 1, minWidth: 0,
+              // Unified with the URL display tile in Section 3 — both
+              // sit at ~38px height (was ~44px) so the two cards read
+              // consistently on phone.
+              padding: '9px 14px',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 10,
+              fontSize: 13.5,
+              lineHeight: 1.4,
+              fontFamily: 'var(--lb-font-mono)',
+              color: 'var(--lb-ink-2)',
+              outline: 'none',
+              background: '#fff',
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -497,17 +559,30 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               }
             }}
           />
-          {businessPhoneSavedAt && !businessPhoneError && (
-            <span className="text-xs font-semibold text-emerald-700">Saved</span>
-          )}
           <button
             type="button"
             onClick={() => void handleSaveBusinessPhone()}
             disabled={savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || ''))}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed rounded-xl transition-all shrink-0"
+            style={{
+              flexShrink: 0,
+              padding: '9px 18px',
+              borderRadius: 9,
+              border: 0,
+              background: (savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || '')))
+                ? 'var(--lb-ink-10)'
+                : 'var(--lb-accent)',
+              color: (savingBusinessPhone || (businessPhone.trim() === ((user as any)?.businessPhone || '')))
+                ? 'var(--lb-ink-6)'
+                : '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: savingBusinessPhone ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
           >
             {savingBusinessPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {savingBusinessPhone ? 'Saving…' : 'Save'}
+            {savingBusinessPhone ? 'Saving…' : (businessPhoneSavedAt && !businessPhoneError) ? 'Saved' : 'Save'}
           </button>
         </div>
         {businessPhoneError && (
@@ -516,20 +591,36 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
           </div>
         )}
 
-        {/* Additional associate numbers — collapsible, TT-only. Same
-            editor Settings → Communication exposes; each entry registers
-            on the matching Thumbtack business's profile. */}
+        {/* Additional associate numbers — collapsible, TT-only. */}
         {ttAccounts.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
+          <>
             <button
               type="button"
               onClick={() => setShowAssociates(v => !v)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+              style={{
+                marginTop: 14, paddingTop: 14,
+                display: 'flex', alignItems: 'center', gap: 11,
+                width: '100%',
+                border: 0, borderTop: '1px solid var(--lb-line-soft)',
+                background: 'transparent', cursor: 'pointer',
+                fontFamily: 'inherit', textAlign: 'left',
+              }}
             >
-              {showAssociates ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              <Users className="w-3.5 h-3.5" />
-              Add associate numbers (Thumbtack)
-              <span className="text-slate-400 font-normal">— optional, per business</span>
+              {showAssociates ? (
+                <ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--lb-ink-5)' }} />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--lb-ink-5)' }} />
+              )}
+              <Users size={16} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13.5, fontWeight: 600,
+                color: 'var(--lb-ink-1)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                Add associate numbers
+              </span>
+              <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--lb-ink-6)' }}>Optional</span>
             </button>
             {showAssociates && (
               <div className="mt-3 space-y-4">
@@ -544,9 +635,6 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
                         savedAccountId={acct.id}
                         initialValue={initial}
                         onSaved={(next) => {
-                          // Mirror Communication.tsx — write the new list back
-                          // into the cached account's followUpSettingsJson so
-                          // a re-render shows the saved state without a refetch.
                           setSavedAccounts(
                             savedAccounts.map((a: SavedAccount) => {
                               if (a.id !== acct.id) return a;
@@ -565,21 +653,45 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
                 })}
               </div>
             )}
-          </div>
+          </>
         )}
       </section>
 
       {/* ─── 2. LeadBridge phone (TenantPhoneNumber) ─────────────── */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Phone className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">LeadBridge phone number</h2>
+      <section style={{
+        marginTop: 12,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <PhoneCall size={17} style={{ color: 'var(--lb-ink-3)' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            LeadBridge phone number
+          </span>
+          <button
+            type="button"
+            onClick={() => setInfoLbnumOpen(v => !v)}
+            aria-label="More info"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 20, border: 0, background: 'transparent',
+              cursor: 'pointer', padding: 0, flexShrink: 0, marginLeft: 1,
+              color: 'var(--lb-accent)',
+            }}
+          >
+            <Info size={15} />
+          </button>
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-4">
-          The phone number LeadBridge uses to text and call your customers.
-          Assigned from Twilio. You can also assign or release numbers from Settings.
-        </p>
+        {infoLbnumOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 7, lineHeight: 1.5 }}>
+            The phone number LeadBridge uses to text and call your customers. Assigned from Twilio.
+            You can also assign or release numbers from Settings.
+          </div>
+        )}
 
+        <div style={{ marginTop: 13 }} />
         {phonesLoading ? (
           <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
             <Loader2 className="w-4 h-4 animate-spin" /> Checking…
@@ -620,6 +732,49 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               Pick now
             </button>
           </div>
+        ) : !showLbnumPicker ? (
+          /* Canonical empty state — dashed-bordered tile + info icon +
+              "No number assigned yet" + Get a number CTA. Tapping
+              expands the full area-code/city picker below. */
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '11px 12px 11px 14px',
+              border: '1px dashed var(--lb-line)',
+              borderRadius: 10,
+              background: '#fff',
+            }}>
+              <Info size={16} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13, fontWeight: 600,
+                color: 'var(--lb-ink-3)',
+              }}>
+                No number assigned yet
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowLbnumPicker(true)}
+                style={{
+                  flexShrink: 0,
+                  padding: '8px 14px',
+                  borderRadius: 9,
+                  border: 0,
+                  background: 'var(--lb-accent)',
+                  color: '#fff',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Get a number
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--lb-ink-6)', marginTop: 9, lineHeight: 1.5 }}>
+              A LeadBridge number is also assigned automatically when you connect a lead source.
+            </div>
+          </>
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
@@ -722,209 +877,236 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               Playbook + FAQ.
           Replaces the two prior sections (Website URL + Thumbtack
           profile URLs). */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Globe className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-extrabold text-slate-900">Business profile or website</h2>
-          {detectedPlatform && (
-            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold uppercase tracking-widest">
-              {platformLabel(detectedPlatform)}
-            </span>
-          )}
+      <section style={{
+        marginTop: 12,
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 12,
+        padding: 18,
+      }} className="lb-wiz-card">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+          <Globe size={18} style={{ flexShrink: 0, marginTop: 2, color: 'var(--lb-ink-3)' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Business info
+          </span>
+          <button
+            type="button"
+            onClick={() => setInfoWebsiteOpen(v => !v)}
+            aria-label="More info"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 20, border: 0, background: 'transparent',
+              cursor: 'pointer', padding: 0, flexShrink: 0, margin: '0 2px 0 3px',
+              color: 'var(--lb-accent)',
+            }}
+          >
+            <Info size={15} />
+          </button>
+          <span style={{ flex: 1, minWidth: 0 }} />
+          {/* Only the Verified pill per the target screenshot. The
+              "Thumbtack profile" / "Yelp business page" platform
+              badge was dropped — the URL itself + Verified pill are
+              enough signal. */}
           {savedAndVerified && (
-            <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-widest">
-              <CheckCircle2 className="w-3 h-3" />
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              fontSize: 9.5, fontWeight: 700,
+              fontFamily: 'var(--lb-font-mono)',
+              textTransform: 'uppercase', letterSpacing: '.04em',
+              padding: '3px 8px', borderRadius: 99,
+              background: '#dcfce7', color: '#15803d',
+              flexShrink: 0,
+            }}>
+              <CheckCircle2 size={10} />
               Verified
             </span>
           )}
         </div>
-        <p className="text-xs text-slate-500 leading-relaxed mb-3">
-          Paste your <span className="font-semibold">Thumbtack profile</span>,{' '}
-          <span className="font-semibold">Yelp business page</span>, or{' '}
-          <span className="font-semibold">your website</span> — whichever has the most
-          info about your business. We auto-detect the source and pull services,
-          location, insurance, pricing, and more into your AI Playbook + FAQ.
-        </p>
-
-        <div className="flex items-center gap-2 lb-wiz-inline-save">
-          <div className="relative flex-1 min-w-0">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Globe className="w-4 h-4" />
-            </span>
-            <input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
-              value={value}
-              onChange={e => {
-                setValue(e.target.value);
-                if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
-                  setVerifyState({ kind: 'idle' });
-                }
-                if (lowYieldScrape) setLowYieldScrape(false);
-                // Clear the stale apply card the moment the user edits
-                // the URL — otherwise the card claims "pulled X fields"
-                // from the OLD URL while the input shows the new one.
-                if (lastApply && e.target.value.trim() !== lastApply.url) setLastApply(null);
-              }}
-              disabled={isChecking}
-              className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border-2 bg-white focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:opacity-60 ${
-                savedAndVerified ? 'border-emerald-300' : 'border-slate-200'
-              }`}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && canSave) {
-                  e.preventDefault();
-                  void fetchSiteData();
-                }
-              }}
-            />
+        {infoWebsiteOpen && (
+          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 9, lineHeight: 1.55 }}>
+            Paste your <strong style={{ color: 'var(--lb-ink-2)' }}>business profile</strong>,{' '}
+            <strong style={{ color: 'var(--lb-ink-2)' }}>Yelp page</strong>, or{' '}
+            <strong style={{ color: 'var(--lb-ink-2)' }}>website</strong> — whichever has the most
+            info about your business. We auto-detect the source and pull services, location,
+            insurance, pricing, and more into your AI Playbook + FAQ.
           </div>
-          <button
-            type="button"
-            onClick={() => void fetchSiteData()}
-            disabled={!canSave}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shrink-0"
-          >
-            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
-            {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Fetch'}
-          </button>
-        </div>
+        )}
 
-        {isBusy && (
-          <div className="mt-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-            <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <div className="font-bold text-slate-900">
-                {isApplying ? 'Applying to your AI Playbook…' : 'Pulling info…'}
-              </div>
-              <div className="text-slate-500 mt-0.5">
-                {isApplying
-                  ? 'Filling empty Playbook + FAQ sections so your AI starts with real context.'
-                  : 'We fetch the page, generate an AI summary, and pre-fill what we can. Takes a few seconds.'}
-              </div>
+        {/* URL display tile + Re-scan link when a URL is saved;
+            otherwise editable input + Apply button. Mirrors the
+            canonical "Business Step (standalone)" layout. */}
+        {savedAndVerified ? (
+          <>
+            <div style={{
+              marginTop: 13,
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 14px',
+              border: '1px solid var(--lb-accent-line)', borderRadius: 10,
+              background: '#fff',
+            }}>
+              <Link2 size={15} style={{ flexShrink: 0, color: 'var(--lb-ink-5)' }} />
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 13, color: 'var(--lb-ink-2)',
+                fontFamily: 'var(--lb-font-mono)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {(lastApply?.url || value.trim() || user?.website) || ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => void fetchSiteData()}
+                disabled={isBusy}
+                style={{
+                  flexShrink: 0,
+                  background: 'transparent', border: 0, padding: 0,
+                  fontSize: 11.5, fontWeight: 700,
+                  color: 'var(--lb-accent)', cursor: isBusy ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                  opacity: isBusy ? 0.5 : 1,
+                }}
+              >
+                {isBusy ? 'Scanning…' : 'Re-scan'}
+              </button>
             </div>
-          </div>
-        )}
 
-        {verifyState.kind === 'invalid' && (
-          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-start gap-2" role="alert">
-            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-            <div className="min-w-0 text-xs">
-              <div className="font-bold text-rose-900">
-                {verifyState.outcome.errorMessage || "We couldn't load that link."}
-              </div>
-              <div className="text-rose-700 mt-0.5">
-                Double-check the URL, or use <span className="font-semibold">I don't have one</span> below.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {savedAndVerified && savedMetadata && !isBusy && detectedPlatform === 'website' && (
-          <div className="mt-3">
-            <WebsitePreviewCard url={user?.website || null} metadata={savedMetadata as any} tone="wizard" />
-          </div>
-        )}
-
-        {/* TT / Yelp confirmation card. Renders for any populated
-            lastApply (fresh fetch in this session OR persisted snapshot
-            on user.websiteMetadataJson.lastBusinessApply) — Settings →
-            General does the same. The previous `verifyState=valid`
-            gate hid the card on reload, leaving the wizard looking
-            inert even when info was actually saved server-side. */}
-        {lastApply && lastApply.platform !== 'website' && !isBusy && (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="min-w-0 text-xs flex-1">
-              <div className="font-bold text-emerald-900">
-                {platformLabel(lastApply.platform)} connected
-                {lastApply.fieldsApplied > 0
-                  ? ` — pulled ${lastApply.fieldsApplied} field${lastApply.fieldsApplied === 1 ? '' : 's'} into your Playbook`
-                  : lastApply.fieldsExtracted > 0
-                    ? ` — ${lastApply.fieldsExtracted} field${lastApply.fieldsExtracted === 1 ? '' : 's'} already saved`
-                    : ''}
-              </div>
-              <div className="text-emerald-800 mt-0.5 leading-snug break-all">
-                {lastApply.url}
-                {lastApply.accountsAffected > 0 && (
-                  <>
-                    {' · '}
-                    Saved on {lastApply.accountsAffected} {lastApply.accountsAffected === 1 ? 'account' : 'accounts'}
-                  </>
-                )}
-              </div>
-              {lastApply.fieldsApplied > 0 && (
-                <div className="text-[11px] text-emerald-700 mt-1.5">
-                  Review on the next steps or in Settings → AI Playbook after setup.
+            {/* Scanned snippet — full-width text below the URL tile,
+                clamped to 4 lines with a Read more / Read less
+                toggle. Matches the canonical layout (no thumbnail). */}
+            {(lastApply?.summary || (savedMetadata as any)?.summary || lastApply?.url) && (
+              <>
+                <div style={{
+                  marginTop: 13,
+                  fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55,
+                  ...(showExtracted ? {} : {
+                    display: '-webkit-box',
+                    WebkitLineClamp: 4,
+                    WebkitBoxOrient: 'vertical' as const,
+                    overflow: 'hidden',
+                  }),
+                }}>
+                  {lastApply?.summary
+                    || (savedMetadata as any)?.summary
+                    || `We pulled ${lastApply?.fieldsApplied || lastApply?.fieldsExtracted || 0} fields into your AI Playbook from ${platformLabel(lastApply?.platform || 'website')}.`}
                 </div>
-              )}
-              {lastApply.fieldsApplied === 0 && lastApply.fieldsExtracted > 0 && (
-                <div className="text-[11px] text-emerald-700 mt-1.5">
-                  Your AI Playbook already reflects this page's facts.
-                </div>
-              )}
-
-              {/* GPT prose summary — same content WebsitePreviewCard
-                  shows for the website branch. Lets the tenant scan
-                  "what does the AI think this business is about?"
-                  without opening the structured-fields disclosure. */}
-              {lastApply.summary && (
-                <div
-                  className="mt-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] text-slate-700 italic leading-snug"
-                >
-                  {lastApply.summary}
-                </div>
-              )}
-
-              {/* Expandable "Show what we pulled" — renders the
-                  extractedFields blob the backend now returns. Tells
-                  the tenant which specific fields were saved (instead
-                  of just a count) and saves a trip to Settings → AI
-                  Playbook just to verify the scrape did the right
-                  thing. */}
-              {lastApply.extractedFields && Object.keys(lastApply.extractedFields).length > 0 && (
-                <div className="mt-2">
+                {(lastApply?.summary || (savedMetadata as any)?.summary) && (
                   <button
                     type="button"
                     onClick={() => setShowExtracted(v => !v)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900"
+                    style={{
+                      marginTop: 9,
+                      background: 'transparent', border: 0, padding: 0,
+                      fontFamily: 'inherit',
+                      fontSize: 12.5, fontWeight: 600,
+                      color: 'var(--lb-accent)', cursor: 'pointer',
+                    }}
                   >
-                    {showExtracted ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    {showExtracted ? 'Hide details' : 'Show what we pulled'}
+                    {showExtracted ? 'Read less' : 'Read more'}
                   </button>
-                  {showExtracted && (
-                    <div
-                      className="mt-1.5 px-2.5 py-2 rounded-lg border border-emerald-200 bg-white text-[12px] grid"
-                      style={{ gridTemplateColumns: 'auto 1fr', columnGap: 12, rowGap: 4 }}
-                    >
-                      {Object.entries(lastApply.extractedFields).map(([key, value]) => {
-                        const display = formatExtractedValue(value);
-                        if (!display) return null;
-                        return (
-                          <Fragment key={key}>
-                            <div className="font-semibold text-emerald-700 whitespace-nowrap">
-                              {humanizeFieldKey(key)}
-                            </div>
-                            <div className="text-slate-700 break-words">
-                              {display}
-                            </div>
-                          </Fragment>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Editable input + Apply button — empty / unsaved state. */}
+            <div className="flex items-center gap-2 lb-wiz-inline-save" style={{ marginTop: 13 }}>
+              <div className="relative flex-1 min-w-0">
+                <span style={{
+                  position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                  color: 'var(--lb-ink-5)', pointerEvents: 'none',
+                }}>
+                  <Globe size={15} />
+                </span>
+                <input
+                  type="text"
+                  inputMode="url"
+                  autoComplete="url"
+                  placeholder="thumbtack.com/… · yelp.com/biz/… · myco.com"
+                  value={value}
+                  onChange={e => {
+                    setValue(e.target.value);
+                    if (verifyState.kind !== 'idle' && verifyState.kind !== 'checking') {
+                      setVerifyState({ kind: 'idle' });
+                    }
+                    if (lowYieldScrape) setLowYieldScrape(false);
+                    if (lastApply && e.target.value.trim() !== lastApply.url) setLastApply(null);
+                  }}
+                  disabled={isChecking}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px 12px 36px',
+                    border: '1px solid var(--lb-line)',
+                    borderRadius: 10,
+                    fontSize: 13.5,
+                    fontFamily: 'var(--lb-font-mono)',
+                    color: 'var(--lb-ink-2)',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && canSave) {
+                      e.preventDefault();
+                      void fetchSiteData();
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchSiteData()}
+                disabled={!canSave}
+                style={{
+                  flexShrink: 0,
+                  padding: '12px 20px',
+                  borderRadius: 9,
+                  border: 0,
+                  background: canSave ? 'var(--lb-accent)' : 'var(--lb-ink-10)',
+                  color: canSave ? '#fff' : 'var(--lb-ink-6)',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {isApplying ? 'Applying…' : isChecking ? 'Fetching…' : 'Apply'}
+              </button>
             </div>
-          </div>
+            {isBusy && (
+              <div className="mt-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                <Loader2 className="w-4 h-4 text-slate-500 animate-spin shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <div className="font-bold text-slate-900">
+                    {isApplying ? 'Applying to your AI Playbook…' : 'Pulling info…'}
+                  </div>
+                  <div className="text-slate-500 mt-0.5">
+                    {isApplying
+                      ? 'Filling empty Playbook + FAQ sections so your AI starts with real context.'
+                      : 'We fetch the page, generate an AI summary, and pre-fill what we can. Takes a few seconds.'}
+                  </div>
+                </div>
+              </div>
+            )}
+            {verifyState.kind === 'invalid' && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 flex items-start gap-2" role="alert">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                <div className="min-w-0 text-xs">
+                  <div className="font-bold text-rose-900">
+                    {verifyState.outcome.errorMessage || "We couldn't load that link."}
+                  </div>
+                  <div className="text-rose-700 mt-0.5">
+                    Double-check the URL, or paste your business info manually below.
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Low-yield warning — fires when the URL was reachable but the
-            scrape returned no Playbook seed (BookingKoala SPA, meta-less
-            site, Cloudflare-protected page). The green VERIFIED card
-            alone is misleading; this banner tells the user what didn't
-            happen and offers a fallback (TT URL OR paste manually). */}
+            scrape returned nothing useful. Keep visible regardless of
+            empty / saved branch so the operator can recover. */}
         {lowYieldScrape && verifyState.kind === 'valid' && !isBusy && (
           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 flex items-start gap-2.5" role="alert">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -953,47 +1135,13 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
         )}
       </section>
 
-      {/* ─── 4. Business hours — deep-link card ──────────────────
-          The canonical FinalDesign puts a full schedule editor in
-          this step; we keep the existing Settings → Business Hours
-          page as the editor and just surface a deep-link card here
-          so the user knows the affordance exists during onboarding.
-          One card, no inline editor — tapping it routes to
-          /settings?tab=hours where the full editor lives. */}
-      <section className="mt-4 rounded-xl border bg-white p-5 lb-wiz-card">
-        <button
-          type="button"
-          onClick={() => navigate('/settings?tab=hours')}
-          className="w-full flex items-center gap-3 text-left"
-          style={{ background: 'transparent', border: 0, padding: 0, fontFamily: 'inherit', cursor: 'pointer' }}
-        >
-          <span style={{
-            width: 38, height: 38, borderRadius: 10,
-            background: '#dbeafe', color: '#2563eb',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <CalendarClock className="w-[18px] h-[18px]" />
-          </span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>
-              Business hours
-            </span>
-            <span style={{ display: 'block', fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.5 }}>
-              When you take jobs. AI books inside these hours and respects them for follow-ups.
-            </span>
-          </span>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 12.5, fontWeight: 600,
-            color: 'var(--lb-accent)',
-            flexShrink: 0,
-          }}>
-            Edit
-            <ChevronRightIcon className="w-3.5 h-3.5" />
-          </span>
-        </button>
-      </section>
+      {/* ─── 4. Business hours — shared editor ──────────────────────
+          Canonical FinalDesign 7-day editor, extracted to
+          components/BusinessHoursEditor so Settings → Hours can render
+          the same chrome. Hydrates + auto-saves on every change. */}
+      <div data-wiz-anchor="schedule" style={{ marginTop: 12 }}>
+        <BusinessHoursEditor />
+      </div>
 
       <ManualBusinessInfoModal
         isOpen={fallbackOpen}
@@ -1010,9 +1158,11 @@ export default function BusinessWebsiteStep({ onSaveContinue, saving, setSaving 
               setAuth(u, token);
             }
           } catch { /* non-fatal */ }
-          if (platform === 'thumbtack' || platform === 'yelp' || platform === 'website') {
-            setDetectedPlatform(platform);
-          }
+          // platform argument intentionally ignored — detectedPlatform
+          // state was removed when the platform badge in Section 3 was
+          // dropped to match the canonical layout. void it so the
+          // unused-parameter check stays quiet.
+          void platform;
           // Modal succeeded → the low-yield warning no longer applies
           // (we just landed real data through the fallback).
           setLowYieldScrape(false);
@@ -1032,38 +1182,11 @@ function platformLabel(p: 'thumbtack' | 'yelp' | 'website'): string {
   return 'Website';
 }
 
-// Friendly labels for the extracted-fields disclosure. Mirrors the
-// EXTRACTED_FIELD_LABELS map in Settings → General; kept inline here
-// because the seed schema isn't yet a shared module. If you add a new
-// key in either place, add it in both.
-const EXTRACTED_FIELD_LABELS: Record<string, string> = {
-  serviceArea: 'Service area',
-  teamSize: 'Team size',
-  yearsInBusiness: 'Years in business',
-  ownerName: 'Owner / founder',
-  suppliesPolicy: 'Supplies policy',
-  petsPolicy: 'Pets policy',
-  paymentMethods: 'Payment methods',
-  officeLocations: 'Office locations',
-  insurance: 'Insurance',
-  bonding: 'Bonding',
-  licensing: 'Licensing',
-  guarantees: 'Guarantees',
-  ecoFriendly: 'Eco-friendly',
-};
-
-function humanizeFieldKey(key: string): string {
-  if (EXTRACTED_FIELD_LABELS[key]) return EXTRACTED_FIELD_LABELS[key];
-  return key
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, c => c.toUpperCase());
-}
-
-function formatExtractedValue(v: string | string[] | undefined): string {
-  if (v === undefined || v === null) return '';
-  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
-  return String(v);
-}
+// Extracted-fields humanizer / formatter removed 2026-06-22 along
+// with the "Show what we pulled" disclosure — the canonical Business
+// step shows a single scan-snippet block instead of the per-field
+// table. If we re-introduce the disclosure, the labels map lives at
+// `frontend/src/pages/settings/General.tsx`.
 
 // Parse the additionalAssociatePhones list out of a SavedAccount's
 // followUpSettingsJson. Returns [] for any of: null, malformed JSON,

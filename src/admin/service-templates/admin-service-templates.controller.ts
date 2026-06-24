@@ -78,6 +78,7 @@ export class AdminServiceTemplatesController {
     }
     if (typeof body.rawOptionsText !== 'string') body.rawOptionsText = '';
     if (typeof body.rawPricingText !== 'string') body.rawPricingText = '';
+    if (typeof body.rawFaqText !== 'string') body.rawFaqText = '';
     const generated = this.service.generate({
       serviceName: body.serviceName!,
       provider: body.provider!,
@@ -86,6 +87,7 @@ export class AdminServiceTemplatesController {
       notes: body.notes ?? null,
       rawOptionsText: body.rawOptionsText,
       rawPricingText: body.rawPricingText,
+      rawFaqText: body.rawFaqText,
     });
     return { generated };
   }

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
+import { useSelectedAccount } from '../../hooks/useSelectedAccount';
 import { AutoPageHeader, type BadgeTone } from '../../components/automation/ui';
 import { AccountTabs, ScopeBanner, ALL_ACCOUNTS } from '../../components/automation/AccountTabs';
 import { PlanSwitcher } from '../../components/automation/PlanSwitcher';
@@ -43,17 +44,14 @@ export function AutomationPage() {
   const meta = META[tab];
 
   const storedAccounts = useAppStore(s => s.savedAccounts);
-  // Remember the last picked account so navigating between sub-pages doesn't reset.
-  const initialId = useMemo(() => {
-    const last = localStorage.getItem('lb_automation_scope');
-    if (last === ALL_ACCOUNTS) return ALL_ACCOUNTS;
-    if (last && storedAccounts.some(a => a.id === last)) return last;
-    return ALL_ACCOUNTS;
-  }, [storedAccounts]);
-  const [accountId, setAccountId] = useState<string>(initialId);
+  // Account scope is shared with the sidebar account switcher (same store
+  // slice), so picking an account in either surface updates both. Scope
+  // is not persisted and resets to "All accounts" whenever the user
+  // leaves /automation (handled in Layout via the route-change effect).
+  const { selectedAccountId, setSelectedAccountId } = useSelectedAccount();
+  const accountId: string = selectedAccountId ?? ALL_ACCOUNTS;
   const onChangeScope = (id: string) => {
-    setAccountId(id);
-    localStorage.setItem('lb_automation_scope', id);
+    setSelectedAccountId(id === ALL_ACCOUNTS ? null : id);
   };
 
   // Block Automation when the tenant has no active ServiceProfile —

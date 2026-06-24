@@ -5,15 +5,25 @@ export function SettingsBilling() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <SectionCard padding="22px 24px">
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        {/* Plan card — desktop is a 3-column row (icon | content | actions
+            stacked column). On phones the action buttons would otherwise
+            squeeze the center column into a 2-character width ("Engage /
+            plan", "Acti / ve"); we wrap the row so the actions drop
+            below the content and span side-by-side (see lb-billing-plan-*
+            mobile rules in index.css). */}
+        <div
+          className="lb-billing-plan-row"
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}
+        >
           <IconTile icon={Award} tone="violet" size="lg" />
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)' }}>Engage plan</div>
               <span style={{
                 padding: '3px 9px', borderRadius: 999,
                 background: '#dbeafe', color: '#2563eb',
                 fontSize: 11, fontWeight: 700,
+                whiteSpace: 'nowrap',
               }}>Active</span>
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)' }}>
@@ -29,7 +39,10 @@ export function SettingsBilling() {
               ))}
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div
+            className="lb-billing-plan-actions"
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}
+          >
             <a
               href="/pricing"
               style={{
@@ -38,6 +51,7 @@ export function SettingsBilling() {
                 border: 0, borderRadius: 8, cursor: 'pointer',
                 fontFamily: 'inherit', textDecoration: 'none',
                 textAlign: 'center',
+                whiteSpace: 'nowrap',
               }}
             >Upgrade to Convert</a>
             <a
@@ -48,6 +62,7 @@ export function SettingsBilling() {
                 border: '1px solid var(--lb-line)', borderRadius: 8, cursor: 'pointer',
                 fontFamily: 'inherit', textDecoration: 'none',
                 textAlign: 'center',
+                whiteSpace: 'nowrap',
               }}
             >Change plan</a>
           </div>

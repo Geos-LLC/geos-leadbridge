@@ -137,13 +137,10 @@ export class TrialNotificationService {
   }
 
   private formatReason(
-    trialType: TrialType | null,
-    leadsHandled: number,
-    leadsLimit: number,
+    _trialType: TrialType | null,
+    _leadsHandled: number,
+    _leadsLimit: number,
   ): string {
-    if (trialType === TrialType.TIME_BASED) return 'Your free trial has ended';
-    if (trialType === TrialType.LEAD_BASED) return `You've used all ${leadsLimit} trial leads`;
-    if (trialType === TrialType.HYBRID) return `Trial ended (${leadsHandled}/${leadsLimit} leads used)`;
     return 'Your free trial has ended';
   }
 

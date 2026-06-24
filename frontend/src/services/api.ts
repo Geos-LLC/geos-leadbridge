@@ -145,9 +145,18 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Skip global toast for endpoints that handle their own error display
+    // Skip global toast for endpoints that handle their own error display.
+    // Monitoring endpoints are silenced because the Layout system-health
+    // banner + Admin Dashboard render their own error states; a global
+    // toast on every 5xx of `/v1/monitoring/system-health/run` (which
+    // intermittently fails when a downstream dependency is sick) would
+    // spam every page load with "Server Error" while the in-app banner
+    // already covers it.
     const url = error.config?.url || '';
-    const silentPatterns = [/\/negotiations\/[^/]+\/import$/];
+    const silentPatterns = [
+      /\/negotiations\/[^/]+\/import$/,
+      /\/v1\/monitoring\//,
+    ];
     const isSilent = silentPatterns.some(p => p.test(url));
 
     // SupportGrant-guarded admin endpoints render a SupportAccessRequired
@@ -933,6 +942,8 @@ export type AdminServiceTemplate = {
   serviceOptionsJson: string;
   pricingJson: string;
   customerAnswersJson: string;
+  /** Cleaning-shape FAQ block. Null when no FAQ has been authored. */
+  faqJson: string | null;
   sourceJson: string | null;
   status: 'draft' | 'published' | 'archived';
   createdByUserId: string | null;
@@ -950,11 +961,13 @@ export type AdminGeneratedTemplate = {
   serviceOptionsJson: unknown;
   pricingJson: unknown;
   customerAnswersJson: unknown;
+  faqJson: unknown;
   sourceJson: {
     kind: 'admin_generated';
     provider: string;
     rawOptionsText: string;
     rawPricingText: string;
+    rawFaqText?: string;
     notes?: string;
     generatorVersion: number;
     generatedAt: string;
@@ -978,6 +991,7 @@ export const adminServiceTemplatesApi = {
     notes?: string | null;
     rawOptionsText: string;
     rawPricingText: string;
+    rawFaqText?: string;
   }): Promise<{ generated: AdminGeneratedTemplate }> => {
     const { data } = await api.post('/v1/admin/service-templates/generate', input);
     return data;
@@ -999,6 +1013,7 @@ export const adminServiceTemplatesApi = {
       serviceOptionsJson: unknown;
       pricingJson: unknown;
       customerAnswersJson: unknown;
+      faqJson: unknown;
     }>,
   ): Promise<{ template: AdminServiceTemplate }> => {
     const { data } = await api.patch(`/v1/admin/service-templates/${id}`, patch);
@@ -2234,6 +2249,10 @@ export const adminApi = {
   },
   updateTrialLeads: async (userId: string, updates: { trialLeadsHandled?: number; trialLeadsLimit?: number }): Promise<any> => {
     const { data } = await api.patch(`/v1/admin/users/${userId}/trial-leads`, updates);
+    return data.data;
+  },
+  extendTrial: async (userId: string, days: number): Promise<any> => {
+    const { data } = await api.patch(`/v1/admin/users/${userId}/trial-extend`, { days });
     return data.data;
   },
   getStats: async (): Promise<AdminStats> => {

@@ -350,6 +350,7 @@ export class FollowUpEngineController {
       conversationId,
       enrollment.sequenceTemplate.generationMode,
       enrollment.sequenceTemplate.promptTemplateId,
+      enrollment.sequenceTemplate.triggerState,
     );
 
     return {
@@ -629,6 +630,12 @@ export class FollowUpEngineController {
     // applyToExisting was a duplicate of includeHistorical — same value
     // sent under two names by the frontend. includeHistorical drives the
     // actual backfill below; this JSON-only write was vestigial.
+    // Mirror `mode` into the JSON too — `isAutomationConfigured` in the
+    // onboarding config-summary reads `s.mode` to flip the Automation
+    // step's checklist tick green. Pre-fix the value only ever landed in
+    // the `followUpMode` column, so a wizard save left the JSON without
+    // `mode` and the rail showed Automation as still pending.
+    if (mode !== undefined) extendedSettings.mode = mode;
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
     // 'range' | 'exact' — toggles range-vs-exact pricing instruction in the AI prompt.

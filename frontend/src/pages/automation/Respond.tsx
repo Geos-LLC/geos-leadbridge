@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  MessageSquareText, MessageCircle, Phone, Clock,
+  MessageSquareText, MessageCircle, Phone,
   ArrowRightLeft, Volume2, Mic, Info,
   User, ArrowRight, PhoneCall,
   ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  SettingCard, FieldRow, OptionCard, InfoTile, FooterBanner, MixedBadge, StatusPill,
-  MessageGenerationRow, TimingRow,
+  FieldRow, OptionCard, InfoTile, FooterBanner, StatusPill,
 } from '../../components/automation/ui';
+import { FirstReplyCard, MessageGenerationExpander } from '../../components/automation/wizard-cards';
 // MixedBadge is still used inline next to the Timing labels for the
 // per-account business-hours checkboxes (no dedicated mixed prop on Checkbox).
 import { automationApi, callConnectApi, followUpApi, notificationsApi, templatesApi, usersApi } from '../../services/api';
@@ -100,9 +100,14 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // single-line. State + fetch removed. Schedule is editable in Settings →
   // Hours via the Edit Hours link.
 
-  // Loaded source-of-truth records (only when a specific account is picked)
+  // Loaded source-of-truth records (only when a specific account is picked).
+  // newLeadRule / customerTextRule are still populated by the load below;
+  // they're kept around with void to satisfy noUnusedLocals because they
+  // were previously consumed by the firstReplyMessageTpl / ctTpl lookups
+  // that the wizard MessageGenerationExpander no longer needs.
   const [newLeadRule, setNewLeadRule] = useState<AutomationRule | null>(null);
   const [customerTextRule, setCustomerTextRule] = useState<NotificationRule | null>(null);
+  void newLeadRule; void customerTextRule;
   const [callSettings, setCallSettings] = useState<CallConnectSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
@@ -570,7 +575,9 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
   // goAiSettings was used by the now-removed Conversation Goal tile. AI
   // Conversation is still reachable via the sidebar.
-  const goEditHours = () => navigate('/settings?tab=hours', { state: fromState });
+  // goEditHours was used by the old TimingRow per-card; the biz-hours
+  // checkbox now lives inside FirstReplyCard chrome with no edit-link.
+  // Users edit hours in Settings → Business Hours.
   // Deep-link to Templates with a specific row highlighted + tab preselected.
   // Filter values match TemplateFilter on the Templates page; 'prompts' is
   // the new tab specifically for AI prompts (type='prompt' templates).
@@ -610,21 +617,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     });
   };
 
-  // Instant Reply — message template (used in 'template' reply type).
-  // The AI prompt template (firstReplyPromptTpl) used to surface via the
-  // legacy ?advanced=1 custom-AI-prompt tile; that tile was removed when
-  // the unified Message Generation row landed. Prompts remain editable at
-  // /templates?filter=prompts.
-  const firstReplyMessageTpl =
-    newLeadRule?.template
-    || findTplByName('Auto Reply - New Lead', 'Auto Reply', 'First Reply Template');
-
-  // Customer Text — Instant Text card.
-  const ctTpl =
-    customerTextRule?.messageTemplate
-    || findTplByContent(customerTextRule?.template || null)
-    || findTplByName('Auto Reply - New Lead', 'CT - Auto Reply')
-    || findTplLoose('auto', 'reply');
+  // firstReplyMessageTpl / ctTpl were used by the old MessageGenerationRow
+  // to deep-link into Templates. The wizard MessageGenerationExpander
+  // doesn't expose those deep-links — operators jump to Templates via the
+  // sidebar / footer banner instead. Refs preserved nearby only as
+  // commentary; the actual lookups are gone.
 
   // Call Connect — whisper and voicemail.
   const whisperTpl =
@@ -644,96 +641,88 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      {/* Instant Reply */}
-      <SettingCard
+      {/* Instant Reply — wizard FirstReplyCard chrome (extracted to
+          components/automation/wizard-cards.tsx). Biz-hours checkbox is
+          wired to textBizHours since both Instant Reply and Instant
+          Text share the same firstMsgDuringBusinessHours flag in user
+          settings (the wizard does the same). */}
+      <FirstReplyCard
         icon={MessageSquareText}
-        iconTone="blue"
+        iconBg="#dbeafe"
+        iconColor="#2563eb"
         title="Instant Reply"
         subtitle="Send the first message automatically when a new lead arrives."
+        info="The very first response a lead gets, written by AI from your Business Info, FAQ, Pricing, and AI Playbook. Industry studies show the first vendor to reply wins more than half of jobs — Instant Reply makes you that vendor."
         enabled={instantReplyOn}
         onToggle={onInstantReplyOn}
-        mixed={mixedInstantReply}
-        mixedTooltip={tipInstantReply}
-        contentPad="8px 24px 24px"
+        bizLabel="Only send during business hours"
+        bizChecked={textBizHours}
+        onBizToggle={onTextBizHours}
       >
-        {/* Unified Message generation block (spec 2e). The bordered Advanced
-            disclosure carries the AI vs Custom template choice, bound to
-            replyType. Backend wiring unchanged. The legacy ?advanced=1
-            custom-AI-prompt tile is no longer surfaced here — reach it
-            from /templates?filter=prompts. */}
-        <MessageGenerationRow
+        <MessageGenerationExpander
           useAi={replyType === 'ai'}
           onChangeUseAi={next => onReplyType(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => goTemplate(firstReplyMessageTpl, 'auto-reply')}
+          templateName="Instant Reply"
         />
         {mixedReplyType && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
             {tipReplyType}
           </div>
         )}
-      </SettingCard>
+        {mixedInstantReply && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipInstantReply}
+          </div>
+        )}
+      </FirstReplyCard>
 
       {/* Instant Text */}
       <LeadBridgeNumberLock feature="Instant Text" />
-      <SettingCard
+      <FirstReplyCard
         icon={MessageCircle}
-        iconTone="green"
+        iconBg="#d1fae5"
+        iconColor="#059669"
         title="Instant Text"
         subtitle="Automatically text the lead when a new lead arrives."
+        info="Sends a text message to the lead's phone number the moment they come in. Use this for SMS-first conversations or to capture a phone-callable thread early. Requires your dedicated LeadBridge number."
         enabled={instantTextOn}
         onToggle={onInstantTextOn}
-        mixed={mixedInstantText}
-        mixedTooltip={tipInstantText}
-        contentPad="8px 24px 24px"
+        bizLabel="Only send during business hours"
+        bizChecked={textBizHours}
+        onBizToggle={onTextBizHours}
       >
-        {/* Single-line Timing row per spec 2d — checkbox left, Edit Hours
-            link with ExternalLink icon right. The schedule string used to
-            be a sublabel; it now lives behind the Edit Hours link. */}
-        <TimingRow
-          icon={Clock}
-          checked={textBizHours}
-          onChangeChecked={onTextBizHours}
-          checkboxLabel="Only send during business hours"
-          onEditHours={goEditHours}
-          mixedLabelBadge={mixedTextBizHours ? <MixedBadge tooltip={tipTextBizHours} /> : undefined}
-        />
-
-        {/* Unified Message generation block (spec 2e), bound to
-            instantTextMode. NotificationsService.sendNotificationWithRule
-            still reads followUpSettingsJson.instantTextMode — wiring
-            unchanged. The legacy fallback-tile under ?advanced=1 is
-            reachable from /templates?filter=auto-reply. */}
-        <MessageGenerationRow
+        <MessageGenerationExpander
           useAi={instantTextMode === 'ai'}
           onChangeUseAi={next => onInstantTextMode(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => goTemplate(ctTpl, 'auto-reply')}
+          templateName="Instant Text"
         />
-      </SettingCard>
+        {mixedTextBizHours && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipTextBizHours}
+          </div>
+        )}
+        {mixedInstantText && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipInstantText}
+          </div>
+        )}
+      </FirstReplyCard>
 
       {/* Instant Call */}
       <LeadBridgeNumberLock feature="Instant Call" />
-      <SettingCard
+      <FirstReplyCard
         icon={Phone}
-        iconTone="violet"
+        iconBg="#e0e7ff"
+        iconColor="#6366f1"
         title="Instant Call"
         subtitle="Call your team and connect to the lead right away."
+        info="Dials your team's number and bridges them to the lead's phone for a live call. Best for high-intent leads where a voice conversation closes faster than chat. Requires the lead's phone number."
         enabled={instantCallOn}
         onToggle={onInstantCallOn}
-        mixed={mixedInstantCall}
-        mixedTooltip={tipInstantCall}
-        contentPad="8px 24px 24px"
+        bizLabel="Only call during business hours"
+        bizChecked={callBizHours}
+        onBizToggle={onCallBizHours}
       >
-        {/* Single-line Timing row per spec 2d, matching Instant Text. */}
-        <TimingRow
-          icon={Clock}
-          checked={callBizHours}
-          onChangeChecked={onCallBizHours}
-          checkboxLabel="Only call during business hours"
-          onEditHours={goEditHours}
-          mixedLabelBadge={mixedCallBizHours ? <MixedBadge tooltip={tipCallBizHours} /> : undefined}
-        />
 
         <AdvancedExpand
           title="Advanced call settings"
@@ -790,7 +779,17 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             />
           </FieldRow>
         </AdvancedExpand>
-      </SettingCard>
+        {mixedCallBizHours && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipCallBizHours}
+          </div>
+        )}
+        {mixedInstantCall && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipInstantCall}
+          </div>
+        )}
+      </FirstReplyCard>
 
       <FooterBanner
         icon={Info}

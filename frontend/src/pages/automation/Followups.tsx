@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles, History,
-  RefreshCw, Clock, UserX, Info, Power,
+  Clock, Info, Power,
   Plus, Trash2, X, RotateCcw,
+  MessageSquare, PhoneCall,
 } from 'lucide-react';
 import {
   SectionCard,
-  Dropdown, IconTile, FooterBanner, StatusPill, MixedBadge,
-  PlanOffEmptyState, TimingRow, MessageGenerationRow,
-  type IconTone,
+  IconTile, FooterBanner, StatusPill, MixedBadge,
+  PlanOffEmptyState, TimingRow,
 } from '../../components/automation/ui';
-import type { LucideIcon } from 'lucide-react';
+import { FollowupCard, MessageGenerationExpander } from '../../components/automation/wizard-cards';
+import { InfoDot, InfoTip } from '../../components/InfoPopover';
 import { followUpApi, usersApi } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -49,6 +50,12 @@ type CachedFollowups = {
   resumeDelay: string;
   deferralDelay: string;
   hiredDelay: string;
+  // Per-rule enable flags — wizard surfaces these as a Toggle on each
+  // FollowupCard. Default true so existing tenants keep the legacy
+  // always-on behaviour.
+  resumeOn: boolean;
+  deferralOn: boolean;
+  hiredOn: boolean;
   plan: PlanStepData[];
   // Read-only on this page (edited in AutomationConversation). Cached so
   // the AI Strategy tile under Follow-up mode reflects the saved value.
@@ -134,6 +141,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [resumeDelay, setResumeDelay] = useState('12 hours');
   const [deferralDelay, setDeferralDelay] = useState('3 days');
   const [hiredDelay, setHiredDelay] = useState('3 weeks');
+  // Per-rule master toggles — match the wizard's three FollowupCard
+  // toggles. Default true to preserve legacy always-on behaviour for
+  // tenants whose saved JSON doesn't carry these keys yet.
+  const [resumeOn, setResumeOn] = useState(true);
+  const [deferralOn, setDeferralOn] = useState(true);
+  const [hiredOn, setHiredOn] = useState(true);
   // 11-step plan — editable. Persisted to followUpSettingsJson.followUpSteps
   // as [{ delay: '2 min', message: null }, ...]. Backend parseDelay()
   // converts each delay string into minutes for scheduling.
@@ -146,6 +159,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const [followUpStrategy, setFollowUpStrategy] = useState<StrategyKey>('auto');
 
   const [loading, setLoading] = useState(false);
+  // True once we've populated state from either the cache or a fetch.
+  // Gates the master-off empty state so the page doesn't flash
+  // "Follow-ups is off" on first mount before settings load. Other
+  // Automation pages don't have this race because they don't switch
+  // their entire layout based on a single loaded boolean.
+  const [hydrated, setHydrated] = useState(false);
   // Preserved for potential busy-state UI later; underscore-prefixed to silence the unused-locals lint.
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -163,6 +182,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     | 'quietOn' | 'deliveryMode' | 'messageMode'
     | 'activeHoursStart' | 'activeHoursEnd' | 'timezone'
     | 'resumeDelay' | 'deferralDelay' | 'hiredDelay'
+    | 'resumeOn' | 'deferralOn' | 'hiredOn'
     | 'plan';
   const dirtyFieldsRef = useRef<Set<FollowupsField>>(new Set());
   // hydratedForRef removed — replaced with dirtyRef. Kept the scopeKey alias
@@ -209,6 +229,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       resumeDelay: s?.fuReEnrollDelay || '12 hours',
       deferralDelay: s?.aiDeferralDelay || '3 days',
       hiredDelay: s?.aiHiredCompetitorDelay || '3 weeks',
+      resumeOn: s?.fuReEnrollOnSilence ?? true,
+      deferralOn: s?.aiDeferralCheckIn ?? true,
+      hiredOn: s?.aiHiredCompetitorReengage ?? true,
       plan: hydratedPlan,
       followUpStrategy: isStrategyKey(s?.followUpStrategy) ? s.followUpStrategy : 'auto',
     };
@@ -231,8 +254,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(first.resumeDelay);
         setDeferralDelay(first.deferralDelay);
         setHiredDelay(first.hiredDelay);
+        setResumeOn(first.resumeOn);
+        setDeferralOn(first.deferralOn);
+        setHiredOn(first.hiredOn);
         setPlan(first.plan);
         setFollowUpStrategy(first.followUpStrategy);
+        setHydrated(true);
       }
     } else {
       const cached = followupsCache.get(accountId);
@@ -247,8 +274,12 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         setResumeDelay(cached.resumeDelay);
         setDeferralDelay(cached.deferralDelay);
         setHiredDelay(cached.hiredDelay);
+        setResumeOn(cached.resumeOn);
+        setDeferralOn(cached.deferralOn);
+        setHiredOn(cached.hiredOn);
         setPlan(cached.plan);
         setFollowUpStrategy(cached.followUpStrategy);
+        setHydrated(true);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -283,11 +314,14 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
             setResumeDelay(first.resumeDelay);
             setDeferralDelay(first.deferralDelay);
             setHiredDelay(first.hiredDelay);
+            setResumeOn(first.resumeOn);
+            setDeferralOn(first.deferralOn);
+            setHiredOn(first.hiredOn);
             setPlan(first.plan);
             setFollowUpStrategy(first.followUpStrategy);
           }
         }
-      }).finally(() => { if (alive) setLoading(false); });
+      }).finally(() => { if (alive) { setLoading(false); setHydrated(true); } });
     } else {
       setLoading(true); setError(null);
       Promise.all([
@@ -308,12 +342,15 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           setResumeDelay(parsed.resumeDelay);
           setDeferralDelay(parsed.deferralDelay);
           setHiredDelay(parsed.hiredDelay);
+          setResumeOn(parsed.resumeOn);
+          setDeferralOn(parsed.deferralOn);
+          setHiredOn(parsed.hiredOn);
           setPlan(parsed.plan);
           setFollowUpStrategy(parsed.followUpStrategy);
         }
       })
       .catch(() => { /* non-fatal */ })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive) { setLoading(false); setHydrated(true); } });
     }
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -346,6 +383,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     if (fields.has('resumeDelay'))      wizardPayload.fuReEnrollDelay        = resumeDelay;
     if (fields.has('deferralDelay'))    wizardPayload.aiDeferralDelay        = deferralDelay;
     if (fields.has('hiredDelay'))       wizardPayload.aiHiredCompetitorDelay = hiredDelay;
+    if (fields.has('resumeOn'))         wizardPayload.fuReEnrollOnSilence       = resumeOn;
+    if (fields.has('deferralOn'))       wizardPayload.aiDeferralCheckIn         = deferralOn;
+    if (fields.has('hiredOn'))          wizardPayload.aiHiredCompetitorReengage = hiredOn;
     if (fields.has('plan')) {
       // Persisted as the canonical `steps` array. Backend writes it to
       // followUpSettingsJson.followUpSteps; the scheduler prefers these
@@ -368,7 +408,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       if (!prev) {
         followupsCache.set(a.id, {
           followUpsOn, quietOn, deliveryMode, messageMode, activeHoursStart, activeHoursEnd, timezone,
-          resumeDelay, deferralDelay, hiredDelay, plan, followUpStrategy,
+          resumeDelay, deferralDelay, hiredDelay, resumeOn, deferralOn, hiredOn, plan, followUpStrategy,
         });
         return;
       }
@@ -393,6 +433,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         resumeDelay:      fields.has('resumeDelay')      ? resumeDelay      : prev.resumeDelay,
         deferralDelay:    fields.has('deferralDelay')    ? deferralDelay    : prev.deferralDelay,
         hiredDelay:       fields.has('hiredDelay')       ? hiredDelay       : prev.hiredDelay,
+        resumeOn:         fields.has('resumeOn')         ? resumeOn         : prev.resumeOn,
+        deferralOn:       fields.has('deferralOn')       ? deferralOn       : prev.deferralOn,
+        hiredOn:          fields.has('hiredOn')          ? hiredOn          : prev.hiredOn,
         plan:             fields.has('plan')             ? plan             : prev.plan,
         // followUpStrategy is read-only on this page — preserve prev or
         // fall back to the displayed value (loaded from getSettings).
@@ -515,6 +558,9 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
   const onResumeDelay   = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeDelay');   setResumeDelay(v); };
   const onDeferralDelay = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralDelay'); setDeferralDelay(v); };
   const onHiredDelay    = (v: string)               => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredDelay');    setHiredDelay(v); };
+  const onResumeOn      = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('resumeOn');      setResumeOn(v); };
+  const onDeferralOn    = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('deferralOn');    setDeferralOn(v); };
+  const onHiredOn       = (v: boolean)              => { dirtyRef.current = true; dirtyFieldsRef.current.add('hiredOn');       setHiredOn(v); };
   // Single plan setter used by the cadence-edit modal. Replaces the whole
   // array because the modal commits a working draft on Save. Per-step
   // diffing isn't needed since the wizard payload serializes the entire
@@ -540,17 +586,22 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
       {/* Master Follow-ups toggle moved to the page-shell PlanSwitcher
           (Phase 3 design refresh). When OFF, show the centered empty
           state instead of the controls. Writing OFF still goes through
-          followUpMode='off' via the legacy onFollowUpsOn handler. */}
-      {!followUpsOn ? (
+          followUpMode='off' via the legacy onFollowUpsOn handler.
+          Render priority:
+            • !hydrated → show the content optimistically with defaults
+              (toggle values overwrite once the fetch resolves). Mirrors
+              what Respond/Conversation do so the page chrome appears
+              instantly instead of waiting for the API.
+            • hydrated && !followUpsOn → swap to the empty state.
+            • hydrated && followUpsOn → keep showing the content. */}
+      {hydrated && !followUpsOn ? (
         <PlanOffEmptyState
           planLabel="Follow-ups"
           icon={Power}
           onTurnOn={() => onFollowUpsOn(true)}
           description="Turn on to start following up with leads who stop responding."
         />
-      ) : null}
-
-      {!followUpsOn ? null : <>
+      ) : <>
 
       {/* Follow-up mode — spec 2g. Quiet hours is folded into the first
           row of this card as a Timing checkbox; the separate Quiet hours
@@ -575,14 +626,15 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
           mixedLabelBadge={mixedQuiet.mixed ? <MixedBadge tooltip={mixedQuiet.tooltip} /> : undefined}
         />
 
-        {/* Unified Message generation row (spec 2e) bound to messageMode.
-            Backend wiring unchanged — saveWizardSettings still reads
-            replyType from messageMode. */}
-        <MessageGenerationRow
+        {/* Wizard Message generation expander — chevron-toggle header
+            that reveals AI-generated / Custom template radios. Same
+            chrome the wizard step uses. Backend wiring unchanged —
+            saveWizardSettings still reads replyType from messageMode. */}
+        <MessageGenerationExpander
           useAi={messageMode === 'ai'}
           onChangeUseAi={next => onMessageMode(next ? 'ai' : 'template')}
-          onOpenPlaybook={() => navigate('/settings?tab=ai-playbook', { state: fromState })}
-          onOpenTemplates={() => navigate('/templates?filter=auto-reply', { state: fromState })}
+          aiBody="AI writes each follow-up from your Business Info, FAQ, Pricing and AI Playbook."
+          templateName="Follow Up"
         />
         {mixedMessage.mixed && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 6 }}>
@@ -605,55 +657,66 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
         onResetDefault={() => onPlan(DEFAULT_FOLLOWUP_PLAN)}
       />
 
-      {/* Stacked rule cards */}
-      <SectionCard padding="0">
-        <RuleCardRow
-          icon={RefreshCw}
-          iconTone="green"
-          title="Resume follow-ups after conversation"
-          body="When a customer replies and then goes silent again, start a new follow-up sequence."
-          fieldLabel="Wait before resuming"
-          fieldValue={resumeDelay}
-          onFieldChange={onResumeDelay}
-          fieldOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
-          allowCustom
-          tipIcon={Sparkles}
-          tip="How long to wait after your last message before starting follow-ups again."
-          mixed={mixedResume.mixed}
-          mixedTooltip={mixedResume.tooltip}
+      {/* Rule cards — wizard FollowupCard chrome (extracted to
+          components/automation/wizard-cards.tsx). Per-rule toggle is
+          wired to the same fuReEnrollOnSilence / aiDeferralCheckIn /
+          aiHiredCompetitorReengage flags the wizard writes. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <FollowupCard
+          icon={RotateCcw}
+          iconBg="#ccfbf1"
+          iconColor="#0d9488"
+          title="Resume follow-ups after a conversation"
+          info="When a customer replies and then goes silent again, start a new follow-up sequence."
+          enabled={resumeOn}
+          onToggle={onResumeOn}
+          pickerLabel="Send after"
+          pickerValue={resumeDelay}
+          pickerOptions={['1 hour', '6 hours', '12 hours', '24 hours', '48 hours']}
+          onPickerChange={onResumeDelay}
+          extra={mixedResume.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedResume.tooltip}
+            </div>
+          ) : undefined}
         />
-        <RuleCardRow
-          icon={Clock}
-          iconTone="orange"
+        <FollowupCard
+          icon={MessageSquare}
+          iconBg="#ede9fe"
+          iconColor="#7c3aed"
           title="Check in after customer deferral"
-          body={"When customer says \"I'll get back to you\" / \"let me think\", silence the AI and schedule one nudge later. Cancels if they reply first."}
-          fieldLabel="Send check-in after"
-          fieldValue={deferralDelay}
-          onFieldChange={onDeferralDelay}
-          fieldOptions={['1 day', '2 days', '3 days', '1 week']}
-          allowCustom
-          tipIcon={Sparkles}
-          tip="AI generates this check-in from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
-          mixed={mixedDeferral.mixed}
-          mixedTooltip={mixedDeferral.tooltip}
+          info={'When customer says "I\'ll get back to you", schedule one nudge later. Cancels if they reply first.'}
+          enabled={deferralOn}
+          onToggle={onDeferralOn}
+          pickerLabel="Send check-in after"
+          pickerValue={deferralDelay}
+          pickerOptions={['1 day', '2 days', '3 days', '1 week']}
+          onPickerChange={onDeferralDelay}
+          extra={mixedDeferral.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedDeferral.tooltip}
+            </div>
+          ) : undefined}
         />
-        <RuleCardRow
-          icon={UserX}
-          iconTone="rose"
+        <FollowupCard
+          icon={PhoneCall}
+          iconBg="#ffedd5"
+          iconColor="#ea580c"
           title="Re-engage after customer hired competitor"
-          body="When customer says they hired someone else, send one polite check-in later. Captures the dissatisfied ones."
-          fieldLabel="Send re-engage after"
-          fieldValue={hiredDelay}
-          onFieldChange={onHiredDelay}
-          fieldOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
-          allowCustom
-          tipIcon={Sparkles}
-          tip="AI generates this re-engage from the conversation using your Business Information. Switch to Custom Template above to write a fixed message instead."
-          mixed={mixedHired.mixed}
-          mixedTooltip={mixedHired.tooltip}
-          noBorder
+          info="When customer says they hired someone else, send one polite check-in later."
+          enabled={hiredOn}
+          onToggle={onHiredOn}
+          pickerLabel="Send re-engage after"
+          pickerValue={hiredDelay}
+          pickerOptions={['1 week', '2 weeks', '3 weeks', '1 month']}
+          onPickerChange={onHiredDelay}
+          extra={mixedHired.mixed ? (
+            <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+              {mixedHired.tooltip}
+            </div>
+          ) : undefined}
         />
-      </SectionCard>
+      </div>
 
       <FooterBanner
         icon={Info}
@@ -664,6 +727,7 @@ export function AutomationFollowups({ accountId }: { accountId: string }) {
     </div>
   );
 }
+
 
 // ─── Follow-up plan card ──────────────────────────────────────────────
 //
@@ -776,43 +840,35 @@ function PlanCircle({ n, style }: { n: number; style: PlanNodeStyle }) {
 }
 
 // Match the cadence stepper's container width to its parent. The
-// breakpoint at 560px flips from a horizontal flex stepper (connectors
-// stretch to fill available width) to a vertical list view tuned for
-// mobile — short rows with a connector spine on the left.
-function useContainerNarrow(ref: RefObject<HTMLElement | null>, breakpoint = 560) {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setNarrow(entry.contentRect.width < breakpoint);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref, breakpoint]);
-  return narrow;
-}
+// useContainerNarrow removed 2026-06-23 — the stepper is now always
+// horizontal with overflow-x:auto on narrow viewports, so the vertical
+// list branch is gone and the breakpoint flip is no longer needed.
 
 function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () => void }) {
   const nodes = nodesForPlan(plan);
   const stepperRef = useRef<HTMLDivElement>(null);
-  const narrow = useContainerNarrow(stepperRef);
+  const [planInfoOpen, setPlanInfoOpen] = useState(false);
   return (
     <SectionCard padding="20px 24px 22px">
-      {/* Header — violet History tile + title + description + Edit cadence button */}
+      {/* Header — violet History tile + title + (i) info dot + Edit button.
+          Description ("LeadBridge nudges unresponsive leads…") collapses
+          behind the (i) toggle so the header reads as a single line. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
         <IconTile icon={History} tone="purple" size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-            Follow-up plan
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              Follow-up plan
+            </div>
+            <InfoDot open={planInfoOpen} onClick={() => setPlanInfoOpen(o => !o)} />
           </div>
-          <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-            LeadBridge nudges unresponsive leads on this cadence — AI
-            writes every step from the live conversation. Edit the timing
-            to match how often you want to follow up.
-          </div>
+          {planInfoOpen && (
+            <InfoTip>
+              LeadBridge nudges unresponsive leads on this cadence — AI
+              writes every step from the live conversation. Edit the timing
+              to match how often you want to follow up.
+            </InfoTip>
+          )}
         </div>
         <button
           type="button"
@@ -829,126 +885,92 @@ function FollowUpPlanCard({ plan, onEdit }: { plan: PlanStepData[]; onEdit: () =
             whiteSpace: 'nowrap',
           }}
         >
-          Edit cadence
+          Edit
         </button>
       </div>
 
-      {/* Cadence stepper — horizontal on wide containers, vertical list on narrow */}
+      {/* Cadence stepper — always horizontal; overflows to a swipeable
+          scroll row on narrow viewports. Drops the previous vertical-on-
+          narrow branch so the layout reads the same on every width. */}
       <div
         ref={stepperRef}
         style={{
           background: '#f8fafc',
           border: '1px solid var(--lb-line-soft)',
           borderRadius: 12,
-          padding: narrow ? '14px 14px 6px' : '20px 18px',
+          padding: '20px 18px',
           marginBottom: 14,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
         }}
       >
-        {narrow ? (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {nodes.map((node, i) => {
-              const isLast = i === nodes.length - 1;
-              const next = nodes[i + 1];
-              const dashedConnector = next && (next.n - node.n) > 1;
-              return (
-                <div key={`${node.n}-${i}`} style={{ display: 'flex', alignItems: 'stretch', gap: 12 }}>
-                  {/* Spine: circle + vertical connector */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                    <PlanCircle n={node.n} style={node.style} />
-                    {!isLast && (
-                      <div
-                        style={{
-                          flex: 1,
-                          width: 0,
-                          marginTop: 4,
-                          marginBottom: 4,
-                          borderLeft: dashedConnector
-                            ? '2px dashed var(--lb-ink-7)'
-                            : '2px solid var(--lb-ink-8)',
-                        }}
-                      />
-                    )}
-                  </div>
-                  {/* Label */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 0,
+          // On desktop the row stretches to fill the card. On mobile
+          // it uses its natural width and the parent scrolls.
+          minWidth: 'min-content',
+        }}>
+          {nodes.map((node, i) => {
+            const isLast = i === nodes.length - 1;
+            const next = nodes[i + 1];
+            // Dashed connector when the visualized gap skips intermediate
+            // steps (head-summary mode shows 1-5 then jumps to the last).
+            const dashedConnector = next && (next.n - node.n) > 1;
+            return (
+              <div
+                key={`${node.n}-${i}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  // First/last segment shouldn't grow — only the inner
+                  // node+connector pairs stretch on desktop. flex-shrink
+                  // 0 so the row keeps its natural width on mobile.
+                  flex: isLast ? '0 0 auto' : '1 0 auto',
+                }}
+              >
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: 6, flexShrink: 0, minWidth: 56,
+                }}>
+                  <PlanCircle n={node.n} style={node.style} />
                   <div style={{
-                    paddingTop: 4,
-                    paddingBottom: isLast ? 0 : 14,
-                    fontSize: 13.5,
-                    fontWeight: 700,
-                    color: 'var(--lb-ink-1)',
+                    fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
                     fontFamily: 'var(--lb-font-mono)',
                     letterSpacing: '-0.01em',
+                    whiteSpace: 'nowrap',
                   }}>
                     {node.time}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, width: '100%' }}>
-            {nodes.map((node, i) => {
-              const isLast = i === nodes.length - 1;
-              const next = nodes[i + 1];
-              // Dashed connector when the visualized gap skips intermediate
-              // steps (head-summary mode shows 1-5 then jumps to the last).
-              const dashedConnector = next && (next.n - node.n) > 1;
-              return (
-                <div
-                  key={`${node.n}-${i}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    // First/last segment shouldn't grow — only the inner
-                    // node+connector pairs stretch so labels stay centered
-                    // under their circles. The connector inside stretches.
-                    flex: isLast ? '0 0 auto' : '1 1 0',
-                    minWidth: 0,
-                  }}
-                >
-                  {/* Node + labels */}
-                  <div style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    gap: 6, flexShrink: 0, minWidth: 56,
-                  }}>
-                    <PlanCircle n={node.n} style={node.style} />
-                    <div style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--lb-ink-1)',
-                      fontFamily: 'var(--lb-font-mono)',
-                      letterSpacing: '-0.01em',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {node.time}
-                    </div>
-                  </div>
-                  {/* Connector line — flex-1 so the stepper fills the card */}
-                  {!isLast && (
-                    <div
-                      style={{
-                        flex: '1 1 auto',
-                        minWidth: 16,
-                        marginTop: 12,
-                        borderTop: dashedConnector
-                          ? '2px dashed var(--lb-ink-7)'
-                          : '2px solid var(--lb-ink-8)',
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                {!isLast && (
+                  <div
+                    style={{
+                      flex: '1 1 auto',
+                      minWidth: 32,
+                      marginTop: 12,
+                      borderTop: dashedConnector
+                        ? '2px dashed var(--lb-ink-7)'
+                        : '2px solid var(--lb-ink-8)',
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Stat strip — 3 cells, bordered + divided */}
+      {/* Stat strip — 3 cells, bordered + divided. Switched from a fixed
+          3-col grid to a horizontally-scrollable flex row so the third
+          cell ("AI writes each step") stops getting clipped on phones —
+          users now swipe right to see the rest. */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          display: 'flex',
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
           border: '1px solid var(--lb-line)',
           borderRadius: 10,
-          overflow: 'hidden',
           background: 'var(--lb-surface)',
         }}
       >
@@ -984,141 +1006,6 @@ function StatCell({ value, label, divided }: { value: ReactNode; label: string; 
       </div>
       <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 2 }}>
         {label}
-      </div>
-    </div>
-  );
-}
-
-const CUSTOM_SENTINEL = '__custom__';
-
-// Unit choices for the custom delay editor. Backend parseDelay() accepts
-// any of these via substring matching, so the labels here just need to
-// contain the unit keyword.
-const CUSTOM_UNIT_OPTIONS: { value: PlanUnit; label: string }[] = [
-  { value: 'min',   label: 'minutes' },
-  { value: 'hour',  label: 'hours' },
-  { value: 'day',   label: 'days' },
-  { value: 'week',  label: 'weeks' },
-  { value: 'month', label: 'months' },
-];
-
-function RuleCardRow({
-  icon, iconTone, title, body, fieldLabel, fieldValue, onFieldChange, fieldOptions, tipIcon: TipIcon, tip, noBorder,
-  mixed, mixedTooltip, allowCustom,
-}: {
-  icon: LucideIcon;
-  iconTone: IconTone;
-  title: string;
-  body: string;
-  fieldLabel: string;
-  fieldValue: string;
-  onFieldChange: (v: string) => void;
-  fieldOptions: string[];
-  tipIcon: LucideIcon;
-  tip: string;
-  noBorder?: boolean;
-  mixed?: boolean;
-  mixedTooltip?: string;
-  allowCustom?: boolean;
-}) {
-  // A value is "custom" when it doesn't match any preset. Note the
-  // sentinel is never the saved value — selecting it just switches the
-  // row into custom-edit mode (and persists the parsed current step).
-  const isCustom = allowCustom && !fieldOptions.includes(fieldValue);
-  const dropdownOptions = allowCustom
-    ? [...fieldOptions, { value: CUSTOM_SENTINEL, label: 'Custom…' }]
-    : fieldOptions;
-  const dropdownValue = isCustom ? CUSTOM_SENTINEL : fieldValue;
-  const handleDropdownChange = (v: string) => {
-    if (v === CUSTOM_SENTINEL) {
-      // Seed the custom editor with the parsed current step so users
-      // don't lose context — e.g. "12 hours" → step{12, hour} → still
-      // "12 hours" (no-op write, but the row flips to custom mode).
-      const seed = parseDelayToStep(fieldValue);
-      onFieldChange(stepToDelayString(seed));
-      return;
-    }
-    onFieldChange(v);
-  };
-  const customStep = parseDelayToStep(fieldValue);
-  const onCustomVal = (n: number) => {
-    const safe = Math.max(1, Math.floor(Number.isFinite(n) ? n : 1));
-    onFieldChange(stepToDelayString({ val: safe, unit: customStep.unit }));
-  };
-  const onCustomUnit = (u: PlanUnit) => {
-    onFieldChange(stepToDelayString({ val: customStep.val, unit: u }));
-  };
-  return (
-    <div className="lb-rule" style={{
-      display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 24,
-      padding: '20px 24px',
-      borderBottom: noBorder ? 'none' : '1px solid var(--lb-line-soft)',
-      alignItems: 'flex-start',
-      background: mixed ? '#fffbeb' : undefined,
-      borderLeft: mixed ? '4px solid #f59e0b' : undefined,
-    }}>
-      <div style={{ display: 'flex', gap: 12 }}>
-        <IconTile icon={icon} tone={iconTone} size="md" />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>{body}</div>
-        </div>
-      </div>
-      <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {fieldLabel}
-          {mixed && <MixedBadge tooltip={mixedTooltip} />}
-        </div>
-        <Dropdown
-          value={dropdownValue}
-          onChange={handleDropdownChange}
-          options={dropdownOptions}
-          width="100%"
-        />
-        {isCustom && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-            <input
-              type="number"
-              min={1}
-              value={customStep.val}
-              onChange={e => onCustomVal(parseInt(e.target.value, 10))}
-              style={{
-                width: 72, padding: '9px 10px',
-                border: '1px solid var(--lb-line)', borderRadius: 8,
-                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-                background: 'white', color: 'var(--lb-ink-1)',
-                outline: 'none',
-              }}
-            />
-            <select
-              value={customStep.unit}
-              onChange={e => onCustomUnit(e.target.value as PlanUnit)}
-              style={{
-                flex: 1, padding: '9px 32px 9px 12px',
-                border: '1px solid var(--lb-line)', borderRadius: 8,
-                fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-                background: 'white', color: 'var(--lb-ink-1)',
-                appearance: 'none', cursor: 'pointer', outline: 'none',
-              }}
-            >
-              {CUSTOM_UNIT_OPTIONS.map(u => (
-                <option key={u.value} value={u.value}>{u.label}</option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-      <div style={{
-        display: 'flex', gap: 10,
-        padding: '12px 14px',
-        background: '#f8fafc',
-        border: '1px solid var(--lb-line-soft)',
-        borderRadius: 10,
-        fontSize: 12.5, color: 'var(--lb-ink-4)',
-        lineHeight: 1.5,
-      }}>
-        <TipIcon size={14} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 1 }} />
-        <div>{tip}</div>
       </div>
     </div>
   );

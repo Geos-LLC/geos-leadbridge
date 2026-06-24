@@ -2,11 +2,12 @@ import { useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Check,
-  MoreHorizontal,
   ExternalLink,
   ArrowLeft,
   AlertTriangle,
+  Info as InfoIcon,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -117,6 +118,10 @@ export function AutoPageHeader({
   subtitle?: ReactNode;
   onSave?: () => void;
   saving?: boolean;
+  /** Inline indicator/pill that sits on the title row, right of the badge.
+   *  The legacy non-functional "More" (3-dot) button was removed
+   *  2026-06-23 — pages that need an overflow menu should pass their
+   *  own affordance via headerActions. */
   headerActions?: ReactNode;
   backLink?: { label: string; onClick: () => void };
 }) {
@@ -133,20 +138,12 @@ export function AutoPageHeader({
             color: 'var(--lb-ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2,
           }}>{title}</h1>
           {badge && <AutoBadge tone={badge.tone}>{badge.label}</AutoBadge>}
+          {headerActions}
         </div>
         {subtitle && <p style={{ margin: 0, fontSize: 13.5, color: 'var(--lb-ink-5)' }}>{subtitle}</p>}
       </div>
-      <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-        {headerActions}
-        <button title="More" style={{
-          width: 38, height: 38, borderRadius: 10,
-          background: 'white', border: '1px solid var(--lb-line)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: 'var(--lb-ink-4)',
-        }}>
-          <MoreHorizontal size={16} />
-        </button>
-        {onSave && (
+      {onSave && (
+        <div className="lb-page-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
           <button
             onClick={onSave}
             disabled={saving}
@@ -161,8 +158,8 @@ export function AutoPageHeader({
           >
             {saving ? 'Saving...' : 'Save changes'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -227,7 +224,7 @@ export function BigToggle({
 // ===================================================================
 export function SettingCard({
   icon, iconTone, title, subtitle, enabled, onToggle, headerRight, children, contentPad,
-  mixed, mixedTooltip, compact,
+  mixed, mixedTooltip, compact, infoText, collapsible, defaultOpen = false,
 }: {
   icon: LucideIcon;
   iconTone?: IconTone;
@@ -244,7 +241,20 @@ export function SettingCard({
       border, 14px title — matches the LeadBridge Wizard Bundle's
       compact card design. Settings pages keep the full-size default. */
   compact?: boolean;
+  /** Optional long-form explanation revealed via a click-to-toggle (i)
+      icon next to the subtitle. Matches the wizard's InfoDot/InfoTip
+      pattern. */
+  infoText?: ReactNode;
+  /** When true, the header row becomes a click-to-toggle accordion and a
+   *  chevron renders at the right edge. The (i) info button and the
+   *  BigToggle stop propagation so their own behaviour isn't hijacked. */
+  collapsible?: boolean;
+  /** Initial open state for collapsible cards. Defaults to FALSE so the
+   *  page reads as a compact section list. */
+  defaultOpen?: boolean;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{
       background: 'white',
@@ -253,10 +263,23 @@ export function SettingCard({
       boxShadow: compact ? 'none' : '0 1px 2px rgba(10,21,48,0.03)',
       overflow: 'hidden',
     }}>
-      <div style={{
-        display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
-        padding: compact ? '15px 16px' : '20px 24px',
-      }}>
+      <div
+        onClick={collapsible ? () => setOpen(o => !o) : undefined}
+        role={collapsible ? 'button' : undefined}
+        aria-expanded={collapsible ? open : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={collapsible ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        } : undefined}
+        style={{
+          display: 'flex', alignItems: compact ? 'center' : 'flex-start', gap: compact ? 13 : 14,
+          padding: compact ? '15px 16px' : '20px 24px',
+          ...(collapsible ? { cursor: 'pointer', userSelect: 'none' as const } : {}),
+        }}
+      >
         <IconTile icon={icon} tone={iconTone} size={compact ? 'md' : 'lg'} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -265,26 +288,89 @@ export function SettingCard({
               fontWeight: 700, color: 'var(--lb-ink-1)',
               letterSpacing: '-0.01em',
             }}>{title}</div>
+            {/* Info icon next to the title when there's no subtitle —
+                matches the wizard "Business info" card chrome where
+                the description hides behind a small (i) toggle. With
+                a subtitle present, the icon stays on the subtitle row
+                (below) so existing cards don't change. */}
+            {infoText && !subtitle && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
+                aria-label="More info"
+                aria-pressed={infoOpen}
+                style={{
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+                  display: 'inline-flex', alignItems: 'center',
+                }}
+              >
+                <InfoIcon size={14} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+              </button>
+            )}
             {mixed && <MixedBadge tooltip={mixedTooltip} />}
           </div>
-          {subtitle && <div style={{
-            fontSize: compact ? 12 : 13.5,
-            color: 'var(--lb-ink-5)', marginTop: 2,
-          }}>{subtitle}</div>}
+          {subtitle && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: compact ? 12 : 13.5,
+              color: 'var(--lb-ink-5)', marginTop: 2,
+            }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{subtitle}</span>
+              {infoText && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
+                  aria-label="More info"
+                  aria-pressed={infoOpen}
+                  style={{
+                    background: 'transparent', border: 0, padding: 0,
+                    cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+                  }}
+                >
+                  <InfoIcon size={13} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+                </button>
+              )}
+            </div>
+          )}
+          {infoOpen && infoText && (
+            <div style={{
+              marginTop: 10,
+              padding: '10px 12px',
+              background: '#f8fafc',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 9,
+              fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+            }}>
+              {infoText}
+            </div>
+          )}
         </div>
-        {headerRight}
+        {headerRight && (
+          <div onClick={collapsible ? (e) => e.stopPropagation() : undefined}>
+            {headerRight}
+          </div>
+        )}
         {onToggle && (
-          <div style={{
-            display: 'flex', alignItems: 'center',
-            gap: compact ? 0 : 10,
-            paddingTop: compact ? 0 : 2,
-          }}>
+          <div
+            onClick={collapsible ? (e) => e.stopPropagation() : undefined}
+            style={{
+              display: 'flex', alignItems: 'center',
+              gap: compact ? 0 : 10,
+              paddingTop: compact ? 0 : 2,
+            }}
+          >
             <BigToggle on={!!enabled} onChange={onToggle} mixed={mixed} mixedTooltip={mixedTooltip} />
             {!compact && (
               <span style={{ fontSize: 13, fontWeight: 600, color: mixed ? '#92400e' : enabled ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)', minWidth: 22 }}>
                 {mixed ? 'Mixed' : enabled ? 'On' : 'Off'}
               </span>
             )}
+          </div>
+        )}
+        {collapsible && (
+          <div style={{ flexShrink: 0, paddingTop: 4, color: 'var(--lb-ink-5)' }}>
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </div>
         )}
       </div>
@@ -295,8 +381,9 @@ export function SettingCard({
               the user needs to see the inner controls to edit them
               even though the local boolean may have loaded false).
           The previous `enabled !== false` gate hid the body in Mixed
-          mode when the last-loaded account happened to be Off. */}
-      {children && (mixed || enabled !== false) && (
+          mode when the last-loaded account happened to be Off.
+          When collapsible=true, ALSO gate on `open`. */}
+      {children && (mixed || enabled !== false) && (!collapsible || open) && (
         <div style={{
           borderTop: '1px solid var(--lb-line-soft)',
           padding: contentPad ?? '16px 24px 24px',

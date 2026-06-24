@@ -148,7 +148,7 @@ export default function ServicesStep({
     } catch (err: any) {
       notify.error(
         'Could not activate',
-        err.response?.data?.message || 'Add pricing or customer answers first.',
+        err.response?.data?.message || 'Add pricing or FAQ first.',
       );
     }
   }
@@ -380,7 +380,7 @@ export default function ServicesStep({
               <div>
                 <strong>{incompleteActive.length}</strong> active service
                 {incompleteActive.length === 1 ? '' : 's'} still need pricing
-                or customer answers. Active services must have both to
+                or FAQ. Active services must have both to
                 count toward setup completion.
               </div>
             </div>
@@ -457,8 +457,8 @@ export default function ServicesStep({
                         color: 'var(--lb-ink-5)', marginTop: 3,
                       }}>
                         {configured
-                          ? 'Pricing, FAQ and qualification configured.'
-                          : 'Add pricing and customer answers to activate.'}
+                          ? 'Pricing & FAQ configured.'
+                          : 'Add pricing and FAQ to activate.'}
                       </span>
                     </span>
                     {open ? (
@@ -471,7 +471,11 @@ export default function ServicesStep({
                   {open && (() => {
                     const editSection = editByProfile[profile.id] ?? null;
                     return (
-                    <div className="p-4 pt-1 bg-slate-50/40" style={{ borderTop: '1px solid var(--lb-line-soft)' }}>
+                    // Accordion body: tighter 10px side gutter (was
+                    // 16) so the inline pricing table reads with less
+                    // left margin per the user's direction. Top border
+                    // separates the body from the header row above.
+                    <div style={{ padding: '0 10px 14px', borderTop: '1px solid var(--lb-line-soft)', background: '#fff' }}>
                       {/* Canonical wizard pattern: 2 summary nav rows
                           (Pricing / Customer answers) stacked with
                           `Edit →` links. Tapping a link expands the
@@ -494,19 +498,20 @@ export default function ServicesStep({
                         onAction={() => toggleEdit(profile.id, 'price')}
                       />
                       {editSection === 'price' && (
-                        <div className="mt-2 mb-3">
+                        // Canonical "Service Setup (standalone)" places
+                        // the pricing editor flush with the accordion
+                        // body's 16px gutter (`margin: 8px 0 14px;`) —
+                        // no extra rounded card wrapping. The
+                        // ServicePricingForm wizardMode branch carries
+                        // its OWN bordered table card already.
+                        <div style={{ margin: '8px 0 14px' }} onBlur={() => void refreshOne(profile.id)}>
                           {primaryAccount ? (
-                            <div
-                              className="rounded-xl border border-slate-200 bg-white p-3"
-                              onBlur={() => void refreshOne(profile.id)}
-                            >
-                              <ServicePricingForm
-                                accountId={primaryAccount.id}
-                                accountName={profile.name}
-                                serviceProfileId={profile.id}
-                                wizardMode
-                              />
-                            </div>
+                            <ServicePricingForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                              wizardMode
+                            />
                           ) : (
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                               Connect an account first to edit pricing.
@@ -518,28 +523,26 @@ export default function ServicesStep({
                       <SummaryNavRow
                         icon={HelpCircle}
                         iconTone="purple"
-                        title="Customer answers"
+                        title="FAQ"
                         body={faqSummary(profile)}
-                        actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit answers →'}
+                        actionLabel={editSection === 'ans' ? 'Close ↑' : 'Edit FAQ →'}
                         onAction={() => toggleEdit(profile.id, 'ans')}
                         noBorder
                       />
                       {editSection === 'ans' && (
-                        <div className="mt-2 mb-3">
+                        // Flush with the accordion gutter — the FAQ
+                        // form draws its own Q&A cards; no outer
+                        // bordered wrapper needed.
+                        <div style={{ margin: '8px 0 14px' }} onBlur={() => void refreshOne(profile.id)}>
                           {primaryAccount ? (
-                            <div
-                              className="rounded-xl border border-slate-200 bg-white p-3"
-                              onBlur={() => void refreshOne(profile.id)}
-                            >
-                              <AccountFaqForm
-                                accountId={primaryAccount.id}
-                                accountName={profile.name}
-                                serviceProfileId={profile.id}
-                              />
-                            </div>
+                            <AccountFaqForm
+                              accountId={primaryAccount.id}
+                              accountName={profile.name}
+                              serviceProfileId={profile.id}
+                            />
                           ) : (
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                              Connect an account first to edit customer answers.
+                              Connect an account first to edit FAQ.
                             </div>
                           )}
                         </div>
@@ -631,13 +634,21 @@ function SummaryNavRow({
 
 // One-line description of the pricing config for the summary nav row.
 // Reads pricingJson and reports the most informative facet: priceTable
-// rows, BookingKoala items count, or "set up pricing" placeholder.
+// rows + active cleaningType columns, BookingKoala items count, hourly
+// rate, or "set up pricing" placeholder. Copy mirrors the canonical
+// FinalDesign "Service Setup (standalone)" pattern: "N size bands ·
+// M service types." for the bed/bath grid case.
 function pricingSummary(p: ServiceProfile): string {
   const parsed = safeParse(p.pricingJson);
   if (!parsed || typeof parsed !== 'object') return 'No pricing set — add base rates or a price table.';
   if (parsed.quoteRequired === true) return 'Quote on request — no published rates.';
   if (Array.isArray(parsed.priceTable) && parsed.priceTable.length > 0) {
-    return `${parsed.priceTable.length} size band${parsed.priceTable.length === 1 ? '' : 's'} · regular & deep options.`;
+    const bands = parsed.priceTable.length;
+    const types = Array.isArray(parsed.cleaningTypes) ? parsed.cleaningTypes.length : 0;
+    if (types > 0) {
+      return `${bands} size band${bands === 1 ? '' : 's'} · ${types} service type${types === 1 ? '' : 's'}.`;
+    }
+    return `${bands} size band${bands === 1 ? '' : 's'}.`;
   }
   if (Array.isArray(parsed.items) && parsed.items.length > 0) {
     return `${parsed.items.length} priced item${parsed.items.length === 1 ? '' : 's'}.`;
@@ -651,12 +662,13 @@ function pricingSummary(p: ServiceProfile): string {
   return 'No pricing set — add base rates or a price table.';
 }
 
-// One-line description of the FAQ/customer-answers config. Counts the
-// configured quick answers + custom Q&A so the user sees progress
-// without opening the editor.
+// One-line description of the FAQ config. Mirrors the canonical
+// FinalDesign "Service Setup (standalone)" wording — "Quick answers
+// + N custom Q&A." when both are populated; otherwise reports only
+// the populated side; falls back to "No FAQ set yet." when empty.
 function faqSummary(p: ServiceProfile): string {
   const parsed = safeParse(p.faqJson);
-  if (!parsed || typeof parsed !== 'object') return 'No answers set — insured, supplies, payment, custom Q&A.';
+  if (!parsed || typeof parsed !== 'object') return 'No FAQ set yet.';
   const valueKeys = ['insuredAndBonded', 'bringsSupplies', 'petPolicy', 'customerMustBeHome', 'sameCleanerForRecurring'];
   let quick = 0;
   for (const k of valueKeys) {
@@ -666,11 +678,12 @@ function faqSummary(p: ServiceProfile): string {
   const custom =
     (Array.isArray(parsed.customQA) ? parsed.customQA.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0) +
     (Array.isArray(parsed.entries) ? parsed.entries.filter((q: any) => (q?.question || q?.answer || '').toString().trim()).length : 0);
-  if (quick === 0 && custom === 0) return 'No answers set — insured, supplies, payment, custom Q&A.';
-  const parts: string[] = [];
-  if (quick > 0) parts.push(`${quick} quick answer${quick === 1 ? '' : 's'}`);
-  if (custom > 0) parts.push(`${custom} custom Q&A`);
-  return parts.join(' + ') + '.';
+  if (quick === 0 && custom === 0) return 'No FAQ set yet.';
+  if (quick > 0 && custom > 0) {
+    return `Quick answers + ${custom} custom Q&A.`;
+  }
+  if (quick > 0) return 'Quick answers configured.';
+  return `${custom} custom Q&A.`;
 }
 
 function looksConfigured(p: ServiceProfile): boolean {

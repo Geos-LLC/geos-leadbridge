@@ -333,6 +333,74 @@ export const HOUSE_CLEANING_PRESET: ServicePreset = {
     priceQuoteMode: 'range',
   },
   faqJson: {
+    standardScope:
+      'Every visit we clean:\n\n' +
+      'BATHROOM:\n' +
+      '• Tile walls, bathtubs, and showers cleaned and disinfected\n' +
+      '• Countertop, sink, faucets, and drains cleaned and disinfected\n' +
+      '• Built-up soap scum wiped down\n' +
+      '• Mildew and mold removed\n' +
+      '• Toilets cleaned and disinfected\n' +
+      '• Wastebaskets emptied, disinfected, and wiped down\n' +
+      '• Window sills, ledges, and blinds dusted\n' +
+      '• Mirrors and fixtures cleaned\n' +
+      '• Towels changed, neatly hung, and folded (if required)\n' +
+      '• Doors and door frames spot cleaned\n' +
+      '• Floors cleaned and carpets vacuumed\n\n' +
+      'LIVING ROOM / BEDROOMS:\n' +
+      '• Furniture and fixtures dusted and wiped\n' +
+      '• Light fixtures and ceiling fans dusted\n' +
+      '• Picture frames dusted\n' +
+      '• Glass surfaces and mirrors cleaned\n' +
+      '• Stairs and closet floors vacuumed\n' +
+      '• Wastebaskets emptied, disinfected, and wiped down\n' +
+      '• Window sills, blinds, and ledges dusted\n' +
+      '• Doors and door frames spot cleaned\n' +
+      '• All readily accessible floors vacuumed and mopped\n' +
+      '• Surfaces tidied (light organization)\n' +
+      '• Beds made\n' +
+      '• Linens changed (if required)\n\n' +
+      'KITCHEN:\n' +
+      '• Countertops, sink, faucets, and drains cleaned and sanitized\n' +
+      '• Outside of range hood cleaned\n' +
+      '• Drip pans or glass top surfaces wiped\n' +
+      '• Fronts of all appliances cleaned\n' +
+      '• Floors vacuumed and mopped\n' +
+      '• Window sills, ledges, and blinds dusted\n' +
+      '• Microwave wiped inside and out\n' +
+      '• Doors and door frames spot cleaned\n' +
+      '• Wastebaskets emptied, disinfected, and wiped down\n' +
+      '• Load and run dishwasher — 1 load (if required)\n' +
+      '• Empty dishwasher (if required)\n' +
+      '• Stainless steel polished',
+    deepScope:
+      'Everything in standard cleaning, plus the following tasks (all included on the initial / deep clean and rotated through on recurring visits):\n\n' +
+      'BATHROOM:\n' +
+      '• Tile grouting scrubbed\n' +
+      '• Doors and door frames wiped\n' +
+      '• Knickknacks individually cleaned\n' +
+      '• Fronts of cabinets wiped\n' +
+      '• Baseboards and window sills wiped\n' +
+      '• Floors given extra attention\n' +
+      '• Built-up soap scum removed\n\n' +
+      'LIVING ROOM / BEDROOMS:\n' +
+      '• Doorknobs and light switches wiped\n' +
+      '• Doors and door frames wiped\n' +
+      '• Window sills and ledges wiped\n' +
+      '• Knickknacks individually cleaned\n' +
+      '• Baseboards wiped\n' +
+      '• Furniture and upholstery vacuumed\n' +
+      '• Floors given extra attention\n' +
+      '• Accessible areas under furniture vacuumed\n\n' +
+      'KITCHEN:\n' +
+      '• Inside of range hood cleaned\n' +
+      '• Drip pans or glass top surfaces cleaned\n' +
+      '• Doors and door frames wiped\n' +
+      '• Knickknack areas cleaned\n' +
+      '• Fronts of cabinets wiped\n' +
+      '• Baseboards and window sills wiped\n' +
+      '• Floors given extra attention\n' +
+      '• All kitchen furniture wiped',
     customQA: [
       {
         question: 'What types of cleaning do you offer?',

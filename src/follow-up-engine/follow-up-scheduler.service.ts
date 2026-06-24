@@ -1109,6 +1109,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
         enrollment.conversationId,
         enrollment.sequenceTemplate.generationMode,
         enrollment.sequenceTemplate.promptTemplateId,
+        enrollment.sequenceTemplate.triggerState,
       );
     } catch (err: any) {
       this.logger.error(

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, CircleDollarSign, UserCheck, Phone,
-  Clock, Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
+  Hand, UserX, CalendarCheck, HeartHandshake, CheckSquare,
   PhoneCall, Smartphone, Ruler, BadgeCheck, Info, Bell, ArrowRight,
   MessageSquareText, AlertTriangle, Power,
   ChevronDown, ChevronUp, Shield, Settings2, Target,
@@ -11,10 +11,12 @@ import {
 } from 'lucide-react';
 import {
   SectionCard, ToggleRow,
-  Radio, IconTile, ActionLink, AutoBadge, StatusPill,
+  IconTile, ActionLink, AutoBadge, StatusPill,
   PlanOffEmptyState,
   type IconTone,
 } from '../../components/automation/ui';
+import { InfoDot, InfoTip } from '../../components/InfoPopover';
+import { AiResponseModeCard } from '../../components/automation/wizard-cards';
 import { followUpApi, serviceProfilesApi, usersApi, type ServiceProfile } from '../../services/api';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
@@ -269,6 +271,11 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Click-to-toggle info popovers for the two main section headers
+  // (matches the wizard's InfoDot/InfoTip pattern).
+  const [goalInfoOpen, setGoalInfoOpen] = useState(false);
+  // modeInfoOpen removed 2026-06-23 — AI Response Mode now uses the
+  // shared AiResponseModeCard which owns its own info-dot state.
   // User-level business hours, shown in the "Outside of business hours"
   // option body. Replaces a hardcoded "Mon–Fri, 9:00 AM – 6:00 PM" string.
   const [bizHoursSummary, setBizHoursSummary] = useState<string>('Loading…');
@@ -618,7 +625,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
     return { mixed: true, tooltip };
   }
   const mixedStrategy     = getMixed('strategy', v => String(v).charAt(0).toUpperCase() + String(v).slice(1));
-  const mixedAvailability = getMixed('availability', v => v === 'hours' ? 'Outside of business hours' : 'Always (24/7)');
+  // mixedAvailability dropped 2026-06-23 — the multi-option picker that
+  // surfaced its tooltip is gone (now a single AiResponseModeCard
+  // checkbox). Restore if the picker comes back.
 
   // Per-sub-key mixed detection for object settings (stopRules, takeover).
   // Each individual toggle gets its own warning, so the user sees exactly
@@ -821,57 +830,86 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
 
       {!(aiOn || !canUseAi) ? null : <>
 
-      {/* ───── 1. Conversation Goal — header on top, 4-card grid below ─── */}
-      <SectionCard padding="22px 24px 24px">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 18 }}>
-          <IconTile icon={Target} tone="violet" size="lg" />
+      {/* ───── 1. Conversation Goal — wizard chrome ────────────────────── */}
+      <div style={{
+        background: '#fff',
+        border: '1px solid var(--lb-line)',
+        borderRadius: 14,
+        boxShadow: 'var(--lb-shadow-sm)',
+        padding: 16,
+      }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <span style={{
+            width: 40, height: 40, borderRadius: 11,
+            background: '#e0e7ff', color: '#6366f1',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Target size={19} />
+          </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>Conversation Goal</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+                Conversation Goal
+              </div>
               <AutoBadge tone="green">Applies everywhere</AutoBadge>
+              <InfoDot open={goalInfoOpen} onClick={() => setGoalInfoOpen(o => !o)} />
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              What AI is trying to achieve with each reply. Used by Instant Reply (AI mode), Follow-ups (AI mode), and AI Conversation.
-              How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
-            </div>
+            {goalInfoOpen && (
+              <InfoTip>
+                Each goal changes how AI replies, what it tries to find out, and when it hands off to your team. Pick the one that matches your business — or leave on Auto and AI switches strategies based on what each lead asks.
+                {' '}How AI <em>speaks</em> is controlled in <a href="/settings?tab=ai-playbook" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Settings → AI Playbook</a>.
+              </InfoTip>
+            )}
           </div>
         </div>
+        <div style={{ marginTop: 16 }} />
+        {/* Strategy grid — wizard's lb-strat-grid: 5-col on desktop,
+            1-col on mobile (see index.css). Replaces the previous
+            inline repeat(5,1fr) which had no mobile collapse and
+            squeezed titles into a letter-per-line wrap on phones. */}
+        {/* Strategy grid with inline goal-setup expansion — when a card
+            is selected, the GoalSetupCard renders directly under it as
+            a full-width row (lb-strat-panel: grid-column 1 / -1).
+            Mirrors the wizard's inline-expand pattern instead of
+            stacking the setup card below the whole grid. */}
         <div
-          className="lb-strategy-grid lb-strat"
-          style={{
-            display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10,
-          }}
+          className="lb-strat-grid"
+          style={{ display: 'grid', gap: 10 }}
         >
           {STRATEGIES.map(s => (
-            <StrategyCard
-              key={s.k}
-              selected={strategy === s.k}
-              onClick={() => onStrategy(s.k)}
-              icon={s.icon}
-              iconTone={s.iconTone}
-              title={s.title}
-              body={s.body}
-              recommended={s.recommended}
-              mixed={mixedStrategy.mixed && strategy === s.k}
-              mixedTooltip={mixedStrategy.tooltip}
-            />
+            <Fragment key={s.k}>
+              <StrategyCard
+                selected={strategy === s.k}
+                onClick={() => onStrategy(s.k)}
+                icon={s.icon}
+                iconTone={s.iconTone}
+                title={s.title}
+                body={s.body}
+                recommended={s.recommended}
+                mixed={mixedStrategy.mixed && strategy === s.k}
+                mixedTooltip={mixedStrategy.tooltip}
+              />
+              {strategy === s.k && (
+                <div className="lb-strat-panel">
+                  <GoalSetupCard
+                    strategy={strategy}
+                    qualificationRequiredFields={qualificationRequiredFields}
+                    toggleQualificationField={toggleQualificationField}
+                    recommendedKeys={recommendedKeys}
+                    qualificationCustomFields={qualificationCustomFields}
+                    addCustomField={addCustomField}
+                    updateCustomField={updateCustomField}
+                    removeCustomField={removeCustomField}
+                    bookingAvailability={bookingAvailability}
+                    toggleBookingDayPeriod={toggleBookingDayPeriod}
+                  />
+                </div>
+              )}
+            </Fragment>
           ))}
         </div>
-      </SectionCard>
-
-      {/* ───── 2. Goal-specific setup ─────────────────────────────────────── */}
-      <GoalSetupCard
-        strategy={strategy}
-        qualificationRequiredFields={qualificationRequiredFields}
-        toggleQualificationField={toggleQualificationField}
-        recommendedKeys={recommendedKeys}
-        qualificationCustomFields={qualificationCustomFields}
-        addCustomField={addCustomField}
-        updateCustomField={updateCustomField}
-        removeCustomField={removeCustomField}
-        bookingAvailability={bookingAvailability}
-        toggleBookingDayPeriod={toggleBookingDayPeriod}
-      />
+      </div>
 
       {/* ───── 3. Advanced Rules — only when ?advanced=1 or ?debug=1 ────────
             Normal users manage AI behavior via Conversation Goals. The
@@ -898,90 +936,37 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
         />
       )}
 
-      {/* ───── 4. AI Response Mode ──────────────────────────────────────────
-            Merges the old Delivery Mode + Auto Reply Availability concepts
-            into one "when is AI allowed to respond" picker. This is
-            AI-Conversation specific — Follow-ups keep their own quiet
-            hours + delivery picker because business-initiated re-engagement
-            has different customer expectations than mid-conversation reply.
-            See spec section 3.
+      {/* ───── 4. AI Response Mode — wizard chrome ───────────────────────────
+            Single checkbox "Only assist outside of business hours" —
+            checked = 'assist' (deliveryMode='auto_send' + availability=
+            'hours'), unchecked = 'autopilot' (auto_send + 'always').
+            'suggest' (review-only) is opt-in via Settings → AI Playbook
+            → Delivery mode (advanced); flipping the checkbox out of a
+            saved 'suggest' state migrates the user to auto_send. */}
+      <AiResponseModeCard
+        respHoursOnly={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
+        onChange={(v) => onResponseMode(v ? 'assist' : 'autopilot')}
+      />
 
-            Internal mapping (V2 Review Mode shipped 2026-06-12):
-              "Review before sending" → aiConversationDeliveryMode='suggest'
-                AI generates a draft on customer reply but parks it on
-                ThreadContext.stateJson.pendingAiSuggestion instead of
-                dispatching. Operator approves/discards from Lead Activity.
-              "Assist when unavailable" → deliveryMode='auto_send'
-                + followUpAvailability='active_hours' (sends only outside
-                business hours).
-              "Full autopilot"        → deliveryMode='auto_send'
-                + followUpAvailability='always' (sends any time). */}
-      <SectionCard padding="22px 24px 24px">
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
-          <IconTile icon={Clock} tone="violet" size="lg" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', marginBottom: 4 }}>
-              AI Response Mode
-            </div>
-            <div style={{ fontSize: 13.5, color: 'var(--lb-ink-5)', lineHeight: 1.55 }}>
-              When AI is allowed to respond automatically to customer messages.
-            </div>
+      {/* Business hours summary — kept here as a secondary note so
+          operators see the current window without digging through
+          Settings. */}
+      <div style={{
+        padding: '12px 14px',
+        background: '#f8fafc',
+        border: '1px solid var(--lb-line-soft)',
+        borderRadius: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
+            <strong style={{ color: 'var(--lb-ink-1)' }}>Business Hours:</strong> {bizHoursSummary}
           </div>
+          <ActionLink external onClick={goEditHours}>Edit</ActionLink>
         </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* "Review before sending" hidden by default 2026-06-18. New
-              users skip suggest mode entirely — they want AI to start
-              replying ASAP, not park drafts for review. The opt-in
-              toggle for suggest mode now lives on Settings → AI
-              Playbook → Delivery mode (advanced). This card still
-              renders here when the tenant's saved value IS suggest so
-              they're never locked out of switching off without
-              hunting through Playbook. */}
-          {aiConversationDeliveryMode === 'suggest' && (
-            <ResponseModeOption
-              selected={aiConversationDeliveryMode === 'suggest'}
-              onClick={() => onResponseMode('review')}
-              title="Review before sending"
-              body="AI drafts replies and parks them for your approval. Nothing sends until you tap Send."
-            />
-          )}
-          <ResponseModeOption
-            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
-            onClick={() => onResponseMode('assist')}
-            title="Assist when unavailable"
-            body="AI responds automatically outside your business hours."
-            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'hours'}
-            mixedTooltip={mixedAvailability.tooltip}
-          />
-          <ResponseModeOption
-            selected={aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
-            onClick={() => onResponseMode('autopilot')}
-            title="Full autopilot"
-            body="AI responds automatically at any time."
-            mixed={mixedAvailability.mixed && aiConversationDeliveryMode === 'auto_send' && availability === 'always'}
-            mixedTooltip={mixedAvailability.tooltip}
-          />
+        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6, lineHeight: 1.5 }}>
+          Business hours are used when AI Response Mode is checked.
         </div>
-
-        <div style={{
-          marginTop: 16,
-          padding: '12px 14px',
-          background: '#f8fafc',
-          border: '1px solid var(--lb-line-soft)',
-          borderRadius: 10,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-2)' }}>
-              <strong style={{ color: 'var(--lb-ink-1)' }}>Business Hours:</strong> {bizHoursSummary}
-            </div>
-            <ActionLink external onClick={goEditHours}>Edit</ActionLink>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 6, lineHeight: 1.5 }}>
-            Business hours are used when AI Response Mode is set to <em>Assist when unavailable</em>.
-          </div>
-        </div>
-      </SectionCard>
+      </div>
 
       {/* ───── 5. How it works ────────────────────────────────────────────── */}
       <SectionCard padding="20px 24px">
@@ -992,11 +977,18 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
           AI pursues the Conversation Goal until the goal is reached. Then it stops and hands the lead off — your team is notified.
         </div>
 
-        <div style={{
-          display: 'flex', alignItems: 'stretch', gap: 12,
-          background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
-          borderRadius: 12, padding: '14px 16px',
-        }}>
+        {/* lb-flow: horizontal row on desktop, single column on mobile
+            (CSS in index.css). The previous 3-flex layout had no mobile
+            collapse — each step got ~80px wide and the title text
+            wrapped one character per line. */}
+        <div
+          className="lb-flow"
+          style={{
+            display: 'flex', alignItems: 'stretch', gap: 12,
+            background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
+            borderRadius: 12, padding: '14px 16px',
+          }}
+        >
           <FlowStep icon={MessageSquareText} iconTone="blue"   title="AI is chatting"          subtitle="pursuing the goal" />
           <FlowArrow />
           <FlowStep icon={Target}             iconTone="violet" title="Goal reached"            subtitle="(or protected event fired)" />
@@ -1021,67 +1013,9 @@ export function AutomationConversation({ accountId }: { accountId: string }) {
  * account disagreement), the tile draws the same amber border the other
  * mixed-state controls on this page use.
  */
-function ResponseModeOption({
-  selected, onClick, disabled, title, body, badge, mixed, mixedTooltip,
-}: {
-  selected: boolean;
-  onClick?: () => void;
-  disabled?: boolean;
-  title: string;
-  body: string;
-  badge?: string;
-  mixed?: boolean;
-  mixedTooltip?: string;
-}) {
-  const interactive = !disabled && !!onClick;
-  return (
-    <button
-      type="button"
-      onClick={interactive ? onClick : undefined}
-      disabled={disabled}
-      title={mixed ? mixedTooltip : undefined}
-      style={{
-        display: 'flex', alignItems: 'flex-start', gap: 12,
-        width: '100%',
-        padding: '12px 14px',
-        textAlign: 'left',
-        background: disabled ? '#f8fafc' : mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
-        border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
-        borderRadius: 10,
-        cursor: interactive ? 'pointer' : 'default',
-        fontFamily: 'inherit',
-        opacity: disabled ? 0.7 : 1,
-        transition: 'border-color 120ms, background 120ms',
-        boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
-      }}
-    >
-      <div style={{ paddingTop: 2 }}>
-        <Radio selected={selected} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)' }}>{title}</span>
-          {badge && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.05,
-              padding: '2px 7px', borderRadius: 999,
-              background: '#fef3c7', color: '#92400e',
-              textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
-            }}>
-              {badge}
-            </span>
-          )}
-          {mixed && !disabled && (
-            <span style={{ display: 'inline-flex', color: '#d97706' }}>
-              <AlertTriangle size={12} />
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5 }}>{body}</div>
-      </div>
-    </button>
-  );
-}
+// ResponseModeOption removed 2026-06-23 — the 3-tile picker
+// (Review / Assist / Autopilot) is replaced by the wizard's
+// single AiResponseModeCard checkbox.
 
 function StrategyCard({
   selected, onClick, icon, iconTone, title, body, recommended, mixed, mixedTooltip,
@@ -1092,52 +1026,66 @@ function StrategyCard({
   iconTone: IconTone;
   title: string;
   body: string;
-  /** Show a small "REC" pill in the card's top-right. Used on Auto. */
+  /** Show a small "REC" pill next to the title. Used on Auto. */
   recommended?: boolean;
   mixed?: boolean;
   mixedTooltip?: string;
 }) {
+  // Wizard-mirroring horizontal layout: icon-left, title+body-middle,
+  // info-glyph-right. The vertical column layout we used before broke
+  // titles letter-by-letter when the parent grid collapsed to narrow
+  // columns. Now the title has the full row width available.
   return (
     <button
       type="button"
       onClick={onClick}
       title={mixed ? mixedTooltip : undefined}
       style={{
-        position: 'relative',
-        textAlign: 'left', padding: '14px 16px 16px',
+        textAlign: 'left', padding: 12,
         background: mixed ? '#fffbeb' : selected ? '#eff6ff' : 'white',
         border: '1.5px solid ' + (mixed ? '#f59e0b' : selected ? 'var(--lb-accent)' : 'var(--lb-line)'),
         borderRadius: 12,
         cursor: 'pointer', fontFamily: 'inherit',
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 10,
         transition: 'border-color 120ms, background 120ms',
         boxShadow: mixed ? '0 0 0 3px rgba(245,158,11,0.14)' : undefined,
       }}
     >
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        gap: 8, width: '100%',
-      }}>
-        <IconTile icon={icon} tone={iconTone} size="md" />
-        {recommended && !mixed && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
-            padding: '3px 8px', borderRadius: 999,
-            background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
-            textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
-            border: '1px solid #a7f3d0',
-          }}>
-            REC
+      <IconTile icon={icon} tone={iconTone} size="md" />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            {title}
           </span>
-        )}
-        {mixed && (
-          <span style={{ color: '#d97706', marginTop: 4 }}>
-            <AlertTriangle size={14} />
-          </span>
-        )}
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{title}</div>
-      <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.45 }}>{body}</div>
+          {recommended && !mixed && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.06,
+              padding: '2px 7px', borderRadius: 999,
+              background: 'var(--lb-success-tint)', color: 'var(--lb-success)',
+              textTransform: 'uppercase', fontFamily: 'var(--lb-font-mono)',
+              border: '1px solid #a7f3d0',
+            }}>
+              REC
+            </span>
+          )}
+          {mixed && (
+            <span style={{ color: '#d97706', display: 'inline-flex' }}>
+              <AlertTriangle size={13} />
+            </span>
+          )}
+        </span>
+        <span style={{
+          display: '-webkit-box',
+          fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.4,
+          marginTop: 2,
+          overflow: 'hidden',
+          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        } as CSSProperties}>
+          {body}
+        </span>
+      </span>
     </button>
   );
 }
@@ -1156,7 +1104,7 @@ function FlowStep({ icon, iconTone, title, subtitle }: { icon: LucideIcon; iconT
 
 function FlowArrow() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', color: 'var(--lb-ink-6)' }}>
+    <div className="lb-flow-arrow" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--lb-ink-6)' }}>
       <ArrowRight size={16} />
     </div>
   );
@@ -1191,6 +1139,12 @@ function GoalSetupCard({
   bookingAvailability: BookingAvailability;
   toggleBookingDayPeriod: (day: BookingDayKey, period: 'morning' | 'afternoon') => void;
 }) {
+  // Local-only priceMode mirror — the canonical value is per-service on
+  // each ServicePricingForm's pricingJson.priceQuoteMode in the AI
+  // Playbook. Same wizard pattern: lets the operator preview Range vs
+  // Exact framing without competing for the per-service truth.
+  const [priceMode, setPriceMode] = useState<'range' | 'exact'>('range');
+  const navigate = useNavigate();
   // Auto + Call Handoff goals have no per-goal setup card per design —
   // Auto routes to whichever sub-goal applies, Call Handoff behavior is
   // fully driven by the global rules. Booking renders an availability
@@ -1245,11 +1199,127 @@ function GoalSetupCard({
     );
   }
 
-  // Price goal no longer has a per-goal setup card. The range/exact
-  // picker that used to live here moved to AI Playbook → Pricing
-  // Guidance → ServicePricingForm on 2026-06-18 so it lives next to
-  // the price table the operator is reviewing and applies independent
-  // of the Conversation Goal.
+  // ─── Price goal: Pricing source link + Quote style picker (wizard parity) ──
+  // The per-service priceQuoteMode lives on each ServicePricingForm in
+  // AI Playbook (since 2026-06-18). The picker here mirrors the wizard's
+  // Price panel — interactive UI, but the canonical setting is per-service
+  // via the "Edit →" deep-link.
+  if (strategy === 'price') {
+    return (
+      <SectionCard padding="22px 24px 22px">
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Price goal setup
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.55 }}>
+            AI quotes from your service Pricing Guidance and answers price
+            questions as fast as possible. Booking-critical Qualify fields
+            are still collected first.
+          </div>
+        </div>
+
+        {/* Pricing source — deep-link to AI Playbook → Pricing */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 13px',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 10,
+        }}>
+          <span style={{
+            width: 32, height: 32, borderRadius: 9,
+            background: '#d1fae5', color: '#059669',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <CircleDollarSign size={16} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+              Pricing source
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>
+              Per-service price tables in the AI Playbook.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/settings?tab=ai-playbook&section=pricing')}
+            style={{
+              background: 'transparent', border: 0, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+              color: 'var(--lb-accent)',
+              flexShrink: 0,
+            }}
+          >
+            Edit →
+          </button>
+        </div>
+
+        {/* Quote style — Range / Exact. Per-service value lives on the
+            ServicePricingForm; this picker is a deep-link cue. */}
+        <div style={{
+          marginTop: 12,
+          padding: '12px 13px',
+          border: '1px solid var(--lb-line-soft)',
+          borderRadius: 10,
+        }}>
+          <div style={{
+            fontSize: 12.5, fontWeight: 600, color: 'var(--lb-ink-2)', marginBottom: 8,
+          }}>
+            Quote style
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['range', 'exact'] as const).map(opt => {
+              const active = priceMode === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setPriceMode(opt)}
+                  style={{
+                    flex: 1,
+                    padding: '9px 12px',
+                    background: active ? 'var(--lb-accent-tint)' : '#fff',
+                    border: '1.5px solid ' + (active ? 'var(--lb-accent)' : 'var(--lb-line)'),
+                    borderRadius: 9,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                    transition: 'background 120ms, border-color 120ms',
+                  }}
+                >
+                  <div style={{
+                    fontSize: 13, fontWeight: 700,
+                    color: active ? 'var(--lb-accent)' : 'var(--lb-ink-1)',
+                  }}>
+                    {opt === 'range' ? 'Range' : 'Exact'}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', marginTop: 2, lineHeight: 1.4 }}>
+                    {opt === 'range' ? '$200–$300' : '$250'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-6)', marginTop: 8, lineHeight: 1.45 }}>
+            Per-service value is saved on each Pricing table in the AI Playbook —{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/settings?tab=ai-playbook&section=pricing')}
+              style={{
+                background: 'transparent', border: 0, padding: 0,
+                fontFamily: 'inherit', fontSize: 'inherit',
+                color: 'var(--lb-accent)', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              edit per service →
+            </button>
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
+
   if (strategy !== 'qualify') return null;
 
   // ─── Qualify goal: Required information ──────────────────────────────

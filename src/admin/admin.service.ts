@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
 import { TrialService } from '../trial/trial.service';
@@ -556,13 +556,13 @@ export class AdminService {
     if (dto.trialLeadsHandled !== undefined) data.trialLeadsHandled = dto.trialLeadsHandled;
     if (dto.trialLeadsLimit !== undefined) data.trialLeadsLimit = dto.trialLeadsLimit;
 
-    // If resetting leads to 0, also reset trial dates to give a fresh 14-day trial.
+    // If resetting leads to 0, also reset trial dates to give a fresh 7-day trial.
     // Must clear trialEndedAt/trialEndNotifiedAt too — otherwise canProcessLead() keeps
     // blocking and the trial-end notification won't re-fire if they exhaust again.
     if (dto.trialLeadsHandled === 0) {
       const now = new Date();
       const newTrialEnd = new Date(now);
-      newTrialEnd.setDate(newTrialEnd.getDate() + 14);
+      newTrialEnd.setDate(newTrialEnd.getDate() + 7);
       data.trialStartDate = now;
       data.trialEndDate = newTrialEnd;
       data.trialUsed = false;
@@ -577,6 +577,53 @@ export class AdminService {
 
     await this.logAdminAction(adminId, 'UPDATE_TRIAL_LEADS', userId, dto);
     this.logger.log(`Admin ${adminId} updated trial leads for user ${userId}: ${JSON.stringify(dto)}`);
+
+    return updatedUser;
+  }
+
+  /**
+   * Extend a trial by N days without resetting the lead counter.
+   *
+   * Bumps `trialEndDate` forward by N days from whichever is later: the
+   * current trialEndDate or now (so extending an already-expired trial
+   * still produces a window that ends N days from today, not in the past).
+   * Clears `trialEndedAt` / `trialEndNotifiedAt` so the gate re-opens and
+   * the user can be re-notified if they expire again. `trialType` is
+   * normalized to TIME_BASED since lead caps no longer gate.
+   */
+  async extendTrial(adminId: string, userId: string, days: number) {
+    if (!Number.isInteger(days) || days <= 0 || days > 365) {
+      throw new BadRequestException('days must be a positive integer up to 365');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, trialEndDate: true, trialType: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const now = new Date();
+    const base = user.trialEndDate && user.trialEndDate > now ? user.trialEndDate : now;
+    const newEnd = new Date(base);
+    newEnd.setDate(newEnd.getDate() + days);
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        trialEndDate: newEnd,
+        trialEndedAt: null,
+        trialEndNotifiedAt: null,
+        trialUsed: false,
+        trialType: user.trialType ?? 'TIME_BASED',
+      },
+    });
+
+    await this.logAdminAction(adminId, 'EXTEND_TRIAL', userId, { days, newTrialEndDate: newEnd });
+    this.logger.log(
+      `Admin ${adminId} extended trial for user ${userId} by ${days}d → ${newEnd.toISOString()}`,
+    );
 
     return updatedUser;
   }

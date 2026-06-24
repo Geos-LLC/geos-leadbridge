@@ -36,25 +36,77 @@ export interface TemplateResponse {
 export class TemplatesService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Message templates seeded for every tenant. Names match the UI section
+   * that uses them so users can find them by feature, not by guess.
+   *
+   * Two groups:
+   *   - Section templates (7) — one per Automation section. AI is the
+   *     runtime default; the literal template is the fallback when the
+   *     user flips the section to Template mode. For multi-step sections
+   *     (Follow Up), the one default is reused as the seed for every step
+   *     until the user customises individual steps.
+   *   - Alert templates (5) — owner-facing SMS bodies, unchanged.
+   *
+   * The Call Connect feature has its own settings table (whisper text,
+   * voicemail text) and is intentionally NOT seeded here.
+   */
   private static readonly DEFAULT_TEMPLATES: { name: string; content: string; type: string; isDefault: boolean }[] = [
+    // ─── Section templates (Automation) ────────────────────────────────
     {
-      name: 'Auto Reply - New Lead',
+      name: 'Instant Reply',
       content: 'Hi {firstName}, thanks for reaching out about {category}! I\'d love to help. Let me review your request and I\'ll get back to you shortly with availability and pricing. - {accountName}',
       type: 'message',
       isDefault: true,
     },
     {
-      name: 'Auto Reply - Follow Up',
+      name: 'Instant Text',
+      content: 'Hi {firstName}, thanks for your {category} inquiry — this is {accountName}. Reply here and I\'ll get back to you shortly!',
+      type: 'message',
+      isDefault: false,
+    },
+    {
+      name: 'Instant Call',
+      content: 'Hi {firstName}, this is {accountName} — I just tried to reach you about your {category} request. I\'ll try again shortly, or feel free to text back when you have a moment.',
+      type: 'message',
+      isDefault: false,
+    },
+    {
+      // Manual follow-up — one default reused for every step in the
+      // sequence until the user customises individual steps.
+      name: 'Follow Up',
       content: 'Hi {firstName}, just following up on your {category} request. Are you still looking for help? I have availability this week and would love to assist. Let me know!',
       type: 'message',
       isDefault: false,
     },
     {
-      name: 'Alert - New Lead Notification',
-      content: 'New lead from Thumbtack! {customerName} is looking for {category} in {city}. Check your dashboard for details.',
+      // First message after a conversation has gone quiet for a while —
+      // picks back up where the thread left off.
+      name: 'Resume After Conversation',
+      content: 'Hi {firstName}, picking back up on your {category} project — let me know if you\'d like to move forward and I\'ll get you on the schedule.',
       type: 'message',
       isDefault: false,
     },
+    {
+      // Lifted from follow-up-seed.ts (was inline on customer_deferred
+      // preset). Default runtime mode for this section is AI; this
+      // template is the fallback when the user flips to Template mode.
+      name: 'Customer Deferral',
+      content: 'Hi {{lead.name}}, just circling back — did you get a chance to think it over? Happy to answer any questions or help get you on the schedule if you\'re ready.',
+      type: 'message',
+      isDefault: false,
+    },
+    {
+      // Lifted from follow-up-seed.ts (was inline on
+      // customer_hired_competitor preset). Default runtime mode for this
+      // section is AI; this template is the fallback for Template mode.
+      name: 'Re-engage',
+      content: 'Hi {{lead.name}}, hope your project went well! If anything didn\'t go the way you hoped, we\'d be happy to help next time. No pressure either way.',
+      type: 'message',
+      isDefault: false,
+    },
+
+    // ─── Alert templates (owner-facing SMS) ────────────────────────────
     {
       name: 'Lead Alert - Thumbtack',
       content: 'New lead for {account.name}\n{lead.name}, Price {lead.price}\nLocation: {lead.location}, {lead.zip}\nService: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\nFrequency: {lead.frequency}\nDescription: {lead.serviceDescription}\nAdd-ons: {lead.addons}\nPets: {lead.pets}\nMessage: {lead.message}\nPhone: {lead.phone}',
@@ -93,24 +145,22 @@ export class TemplatesService {
       type: 'message',
       isDefault: false,
     },
-    {
-      name: 'Auto Reply - Welcome',
-      content: 'Welcome to {accountName}! Thanks for choosing us for your {category} needs. We\'ll be in touch soon to discuss your project. Feel free to reply with any questions!',
-      type: 'message',
-      isDefault: false,
-    },
   ];
 
   /**
-   * User-editable starter prompts. The 5 built-in strategies (Hybrid, Price,
-   * Qualify, Convert, Phone) live in `src/ai/strategy-prompts.ts` as a single
-   * source of truth — they are NOT seeded as editable templates. This array
-   * holds only the "First Reply" starter, which a user can customize to
-   * override the default strategy behavior for the first message.
+   * User-editable AI prompts — one per Automation section. Names mirror
+   * the section names so the Templates page is organised by feature.
+   *
+   * The 5 built-in strategies (Hybrid, Price, Qualify, Convert, Phone) and
+   * the SMS-first-touch primary-instruction live in code under
+   * `src/ai/strategy-prompts.ts` + `src/notifications/instant-text-ai.service.ts`
+   * as the single source of truth for runtime composition. The prompts
+   * seeded below are user-facing starter copies for tenants to edit — the
+   * UI surfaces them as the "AI Prompt" for each section.
    */
   private static readonly DEFAULT_PROMPTS: { name: string; content: string; type: string; isDefault: boolean }[] = [
     {
-      name: 'First Reply',
+      name: 'Instant Reply',
       content: `You are responding to a new customer inquiry. This is the FIRST reply.
 
 Your goal:
@@ -137,6 +187,121 @@ If the customer explicitly asks about price:
 Sign off with your business name.`,
       type: 'prompt',
       isDefault: true,
+    },
+    {
+      name: 'Instant Text',
+      content: `GOAL: First-touch SMS to a lead who just arrived from a marketplace.
+
+You MUST:
+- Write 1 or 2 short sentences. Total under 240 characters.
+- Greet the customer by their first name when known.
+- Reference their specific request (cleaning, plumbing, etc.) when possible.
+- Sound like a friendly local business owner — warm, conversational, brief.
+- Acknowledge the request, then either ask ONE clarifying question OR confirm a quick follow-up.
+
+You MUST NOT:
+- Use bullets, numbered lists, headers, or any markdown.
+- Promise availability or specific timing.
+- Volunteer a price unless the customer explicitly asked about price, cost, quote, or budget.
+- Ask more than one question.
+- Use corporate marketing-speak ("we're excited to", "look forward to serving you").
+- Identify yourself as AI or a bot.
+- Mention the marketplace name.
+
+If the customer asked about price, use the PRICING TABLE in REFERENCE to answer with a range — and then offer to confirm availability.`,
+      type: 'prompt',
+      isDefault: false,
+    },
+    {
+      name: 'Instant Call',
+      content: `GOAL: Short SMS sent right after the system places an outbound bridge call to the lead, so the customer knows who is calling and why.
+
+You MUST:
+- Write 1 short sentence, under 200 characters.
+- Identify the business by name.
+- Reference the customer's request briefly so it doesn't read like spam.
+- Invite a text reply if they missed the call.
+
+You MUST NOT:
+- Promise a callback at a specific time.
+- Quote a price.
+- Use markdown or formatting.
+- Identify yourself as AI.`,
+      type: 'prompt',
+      isDefault: false,
+    },
+    {
+      name: 'Follow Up',
+      content: `GOAL: One follow-up message to a lead who hasn't replied. Used as the default for every step in the manual follow-up sequence until the user customises individual steps.
+
+You MUST:
+- Reference the original request briefly so it feels like a continuation, not a fresh outreach.
+- Keep it to 1-2 sentences.
+- Be warm and low-pressure.
+- Ask ONE simple question OR leave the door open ("happy to help when you're ready").
+
+You MUST NOT:
+- Repeat anything you've already said in the thread verbatim.
+- Apply pressure or scarcity ("last chance", "won't ask again").
+- Volunteer pricing unless the customer asked.
+- Use markdown.`,
+      type: 'prompt',
+      isDefault: false,
+    },
+    {
+      name: 'Resume After Conversation',
+      content: `GOAL: First message after a conversation has gone quiet for a while. The customer engaged before, then stopped responding. You're picking the thread back up, not starting fresh.
+
+You MUST:
+- Acknowledge the prior conversation in a friendly way ("picking back up", "circling back").
+- Reference the last unresolved step if there was one (a question they didn't answer, a quote they didn't respond to).
+- Offer one clear next step (a question, an availability check, or an invite to text back).
+- Stay short — 1-2 sentences.
+
+You MUST NOT:
+- Pretend it's a first reply.
+- Repeat the entire prior conversation.
+- Apologise for following up.
+- Use markdown.`,
+      type: 'prompt',
+      isDefault: false,
+    },
+    {
+      name: 'Customer Deferral',
+      content: `GOAL: A single check-in sent days after the customer explicitly deferred ("I'll get back to you", "let me think it over", "talking to my husband").
+
+You MUST:
+- Sound patient, not pushy.
+- Reference that the customer was thinking it over.
+- Offer to answer questions or get them on the schedule — without assuming they're ready.
+- Keep it to 1-2 sentences.
+
+You MUST NOT:
+- Quote a price.
+- Add urgency ("limited slots", "today only").
+- Ask more than one question.
+- Use markdown.`,
+      type: 'prompt',
+      isDefault: false,
+    },
+    {
+      name: 'Re-engage',
+      content: `GOAL: A polite check-in sent weeks after the customer said they hired someone else. The goal is to leave the door open for next time, not to win back this job.
+
+You MUST:
+- Be warm and non-competitive — assume the other vendor did the job.
+- Offer to help next time if the experience didn't meet expectations.
+- Make it clear there's no pressure.
+- Keep it to 1-2 sentences.
+
+You MUST NOT:
+- Bash the competitor.
+- Re-pitch your service.
+- Ask for the job back.
+- Quote a price.
+- Use markdown.`,
+      type: 'prompt',
+      isDefault: false,
     },
   ];
 
@@ -259,6 +424,22 @@ Output:
   /**
    * Get templates by type. Seeds defaults if user has none of that type.
    */
+  /**
+   * One-time renames for tenants seeded under the old per-feature template
+   * names. Applied before the seed-missing pass so an existing
+   * "Auto Reply - New Lead" row gets renamed to "Instant Reply" in place
+   * (preserving any user edits) instead of leaving the legacy row and
+   * seeding a duplicate next to it.
+   *
+   * Skipped when a row with the new name already exists for the same
+   * user+type — the user-edited new row wins.
+   */
+  private static readonly SEED_RENAMES: { from: string; to: string; type: 'message' | 'prompt' }[] = [
+    { from: 'Auto Reply - New Lead',  to: 'Instant Reply', type: 'message' },
+    { from: 'Auto Reply - Follow Up', to: 'Follow Up',     type: 'message' },
+    { from: 'First Reply',            to: 'Instant Reply', type: 'prompt'  },
+  ];
+
   async getTemplates(userId: string, type?: 'message' | 'prompt'): Promise<TemplateResponse[]> {
     const where: any = { userId };
     if (type) where.type = type;
@@ -272,23 +453,61 @@ Output:
       ],
     });
 
+    // Rename legacy seed rows in place so they line up with the current
+    // section-named seed list (Templates page becomes browsable by feature).
+    //
+    // Collision detection is type-agnostic to match the DB uniqueness
+    // constraint. Pre-2026-06-23 the constraint was @@unique(userId, name)
+    // — even after the migration to @@unique(userId, name, type), this
+    // pass stays defensive so a stale schema (e.g. migration not yet
+    // applied on a fresh env) can never fail the whole GET /templates
+    // request mid-rename with P2002.
+    for (const r of TemplatesService.SEED_RENAMES) {
+      if (type && type !== r.type) continue;
+      const legacy = templates.find((t: any) => t.type === r.type && t.name === r.from);
+      if (!legacy) continue;
+      const collidesWithNewName = templates.some((t: any) => t.name === r.to);
+      if (collidesWithNewName) continue;
+      try {
+        await this.prisma.messageTemplate.update({
+          where: { id: legacy.id },
+          data: { name: r.to },
+        });
+        legacy.name = r.to;
+      } catch (err: any) {
+        // P2002 = unique-constraint race (another concurrent request
+        // already created the new-name row). Leave the legacy row in
+        // place — the user keeps editable access via the old name, and
+        // the seed-missing pass below will add the canonical one on
+        // the next call (skipDuplicates makes that idempotent).
+        if (err?.code !== 'P2002') throw err;
+      }
+    }
+
     // Seed missing defaults (per-name) so new platform-specific templates
     // get added even for existing users who already have some templates.
     const typesToSeed = type ? [type] : ['message', 'prompt'] as const;
+    let seededAny = false;
     for (const t of typesToSeed) {
       const defaults = t === 'prompt' ? TemplatesService.DEFAULT_PROMPTS : TemplatesService.DEFAULT_TEMPLATES;
       const existingNames = new Set(templates.filter((tmpl: any) => tmpl.type === t).map((tmpl: any) => tmpl.name));
       const missing = defaults.filter(d => !existingNames.has(d.name));
       if (missing.length > 0) {
-        await this.prisma.messageTemplate.createMany({
+        const result = await this.prisma.messageTemplate.createMany({
           data: missing.map(d => ({ userId, name: d.name, content: d.content, type: d.type, isDefault: d.isDefault })),
           skipDuplicates: true,
         });
+        if (result.count > 0) seededAny = true;
       }
     }
 
-    // Re-fetch if we seeded
-    if (templates.length === 0 || typesToSeed.some(t => !templates.some((tmpl: any) => tmpl.type === t))) {
+    // Re-fetch whenever we seeded — the prior check ("re-fetch only if a
+    // type has zero rows") missed the common case where the user already
+    // had SOME templates of every type but was missing new section seeds.
+    // That left freshly-inserted rows in the DB but absent from the API
+    // response, so the templates page rendered stale counts (spotless
+    // 2026-06-23 incident: 5 prompts shown vs 12 in DB).
+    if (templates.length === 0 || seededAny) {
       templates = await this.prisma.messageTemplate.findMany({
         where,
         orderBy: [{ isDefault: 'desc' }, { lastUsedAt: 'desc' }, { createdAt: 'desc' }],

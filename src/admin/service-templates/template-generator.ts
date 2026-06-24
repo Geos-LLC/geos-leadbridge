@@ -15,6 +15,7 @@ import {
 import { parseServiceOptions } from './parsers/service-options-parser';
 import { parsePricing } from './parsers/pricing-parser';
 import { generateCustomerAnswers } from './parsers/customer-answers-generator';
+import { parseFaq } from './parsers/faq-parser';
 
 /** Bump if the parser output shape changes — lets us re-run later
  *  against the same source text and produce updated JSON. */
@@ -36,6 +37,10 @@ export type GenerateInput = {
   rawOptionsText: string;
   /** Raw Pricing text the admin pasted. */
   rawPricingText: string;
+  /** Raw FAQ text the admin pasted. Optional — when omitted/empty the
+   *  generator emits `faqJson = {customQA: []}` and the create endpoint
+   *  leaves the DB column null. */
+  rawFaqText?: string;
 };
 
 /** Generate a stable key from the service name. Same logic as the
@@ -61,12 +66,14 @@ export function generateTemplate(input: GenerateInput): GeneratedTemplate {
   const serviceOptionsJson = parseServiceOptions(input.rawOptionsText);
   const pricingJson = parsePricing(input.rawPricingText);
   const customerAnswersJson = generateCustomerAnswers(serviceOptionsJson, pricingJson);
+  const faqJson = parseFaq(input.rawFaqText ?? '');
 
   const sourceJson: GeneratorSourceJson = {
     kind: 'admin_generated',
     provider: input.provider,
     rawOptionsText: input.rawOptionsText,
     rawPricingText: input.rawPricingText,
+    rawFaqText: input.rawFaqText ?? '',
     notes: input.notes ?? undefined,
     generatorVersion: GENERATOR_VERSION,
     generatedAt: new Date().toISOString(),
@@ -82,6 +89,7 @@ export function generateTemplate(input: GenerateInput): GeneratedTemplate {
     serviceOptionsJson,
     pricingJson,
     customerAnswersJson,
+    faqJson,
     sourceJson,
   };
 }

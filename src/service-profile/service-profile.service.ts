@@ -337,10 +337,24 @@ export class ServiceProfileService {
     }
 
     // Bridge v2 → v1 shapes.
-    const qualificationSchemaJson = bridgeServiceOptionsToQualification(
-      template.serviceOptionsJson,
-    );
-    const faqJson = bridgeCustomerAnswersToFaq(template.customerAnswersJson);
+    //
+    // Seeded code-side presets (HOUSE_CLEANING, UPHOLSTERY, GENERIC)
+    // populate the rich v1 columns — qualificationSchemaJson and
+    // faqJson — verbatim from the ServicePreset, and leave the v2
+    // serviceOptionsJson as {groups: []} and customerAnswersJson as a
+    // derived subset (customQA → entries[]). Bridging from the v2
+    // shapes therefore drops most of the seeded payload on seeded
+    // templates. Prefer the v1 columns when present; fall back to the
+    // bridge only for admin-generated templates that author only v2.
+    const qualificationSchemaJson =
+      typeof template.qualificationSchemaJson === 'string' &&
+      template.qualificationSchemaJson.trim().length > 0
+        ? template.qualificationSchemaJson
+        : bridgeServiceOptionsToQualification(template.serviceOptionsJson);
+    const faqJson =
+      typeof template.faqJson === 'string' && template.faqJson.trim().length > 0
+        ? template.faqJson
+        : bridgeCustomerAnswersToFaq(template.customerAnswersJson);
     const pricingJson = bridgeAdminPricingToV1(template.pricingJson);
 
     this.logger.log(

@@ -54,10 +54,10 @@ export class AuthService {
     // Hash password
     const hashedPassword = await EncryptionUtil.hashPassword(password);
 
-    // Set 14-day trial period
+    // Set 7-day trial period
     const now = new Date();
     const trialEndDate = new Date(now);
-    trialEndDate.setDate(trialEndDate.getDate() + 14);
+    trialEndDate.setDate(trialEndDate.getDate() + 7);
 
     // Normalize business phone to E.164 if provided
     const normalizedBusinessPhone = businessPhone
@@ -65,11 +65,9 @@ export class AuthService {
       : undefined;
 
     // Create user with trial. trialType=TIME_BASED gives the user immediate
-    // gate-passing for the 14-day window — needed for phone provisioning and
+    // gate-passing for the 7-day window — needed for phone provisioning and
     // other access-gated actions during onboarding, before they connect any
-    // platform. onPlatformConnected later upgrades the type to LEAD_BASED /
-    // HYBRID based on the actual platform mix (upgrade-only — won't shorten
-    // the window or reduce the lead allowance).
+    // platform.
     const user = await this.prisma.user.create({
       data: {
         email,

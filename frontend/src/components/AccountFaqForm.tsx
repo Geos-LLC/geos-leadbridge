@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { Loader2, MessageSquare, Info } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import {
   CollapsibleSection,
@@ -59,6 +59,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [inherited, setInherited] = useState(false);
+  // Hides the "Add anything the AI should know…" hint behind a small
+  // (i) toggle on the Custom Q&A empty state.
+  const [customQaInfoOpen, setCustomQaInfoOpen] = useState(false);
 
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
@@ -150,9 +153,24 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
 
   return (
     <div className="space-y-5">
+      {/* Quick answers eyebrow — mono uppercase per FinalDesign FAQ
+          (standalone) canonical. The account name is the smaller
+          subtitle line; the inherited badge keeps its right-aligned
+          warning when the FAQ has not yet been customized for this
+          account. */}
       <div className="flex items-center justify-between">
         <div>
-          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Account FAQ</h4>
+          <h4 style={{
+            fontSize: 11,
+            fontWeight: 700,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--lb-ink-6, #8b94ab)',
+            margin: 0,
+          }}>
+            Quick answers
+          </h4>
           <p className="text-[11px] text-slate-400 mt-0.5">{accountName}</p>
         </div>
         {inherited && (
@@ -162,9 +180,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
         )}
       </div>
 
-      <p className="text-xs text-slate-500 leading-relaxed bg-blue-50/60 border border-blue-100 rounded-xl p-3">
-        These answers are injected into the AI prompt so it can respond accurately to common customer questions. Anything left blank, the AI defers to the team ("we'll confirm shortly") rather than guess.
-      </p>
+      {/* "Answers the AI gives verbatim…" banner removed 2026-06-23 — the
+          same explanation now sits behind the FAQ SettingCard's title (i)
+          icon, so the standalone blue tile here was duplicative. */}
 
       {/* Five baseline chip groups — shared with every non-cleaning
           service so the FAQ chrome is identical across verticals. The
@@ -239,11 +257,32 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll, serv
               textAlign: 'center',
             }}
           >
-            <div style={{ fontSize: 13, color: 'var(--lb-ink-5, #64748b)', marginBottom: 10 }}>
-              Add anything the AI should know how to answer. Examples: weekend availability,
-              eco product brands, parking instructions.
+            {customQaInfoOpen && (
+              <div style={{
+                fontSize: 12.5, color: 'var(--lb-ink-5, #64748b)',
+                marginBottom: 12, lineHeight: 1.5, textAlign: 'left',
+              }}>
+                Add anything the AI should know how to answer. Examples:
+                weekend availability, eco product brands, parking instructions.
+              </div>
+            )}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
+              <button
+                type="button"
+                onClick={() => setCustomQaInfoOpen(o => !o)}
+                aria-label="About Custom Q&A"
+                aria-pressed={customQaInfoOpen}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', lineHeight: 0,
+                  color: customQaInfoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+                }}
+              >
+                <Info size={14} />
+              </button>
             </div>
-            <UnifiedAddRowButton label="Add Q&A" onClick={addCustomQA} />
           </div>
         ) : (
           <>

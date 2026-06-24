@@ -54,7 +54,7 @@ export const WIZARD_STEP_META: WizardStepMeta[] = [
     slug: 'services',
     label: 'Services',
     title: 'Set up the services you offer',
-    description: 'Add services from a template or create your own. For each one set pricing, customer answers, and any service rules.',
+    description: 'Add services from a template or create your own. For each one set pricing and FAQ.',
     countsTowardChecklist: true,
   },
   {

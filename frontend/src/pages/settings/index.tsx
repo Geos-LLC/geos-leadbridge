@@ -130,18 +130,16 @@ export default function SettingsPage() {
 
 /**
  * Renders the existing /templates page inline inside the Settings layout.
- * MessageSettings has its own outer padding (p-6 lg:p-10) and a 5xl
- * max-width — the negative-margin wrapper cancels the Settings page's
- * own outer padding so we don't end up with double-padded content.
- * The /templates standalone route stays intact for direct deep-links
- * (Edit Template buttons scattered through the Automation pages).
+ * MessageSettings now renders a compact card (2026-06-23 redesign) with
+ * its own p-4/sm:p-6 padding that already plays well inside lb-pad. The
+ * legacy marginLeft/Right: -28 trick was used by the old hero layout to
+ * run full-bleed; with the new card it produced asymmetric horizontal
+ * overflow on mobile and the card sitting against the left edge.
+ * The /templates standalone route is unaffected — it still has its own
+ * outer padding for direct deep-links from Automation buttons.
  */
 function SettingsTemplates() {
-  return (
-    <div style={{ marginLeft: -28, marginRight: -28 }}>
-      <MessageSettings />
-    </div>
-  );
+  return <MessageSettings />;
 }
 
 function SettingsTabs({ value, onChange }: { value: TabKey; onChange: (k: TabKey) => void }) {

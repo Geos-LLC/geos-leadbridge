@@ -1,17 +1,16 @@
 /**
- * TrialService.consumeLead — meter inbound leads against the trial quota.
+ * TrialService.consumeLead — meter inbound leads against the trial counter.
  *
  * Covers the contract documented in the method JSDoc:
  *  - paid users / no-trial users / ended-trial users are skipped (counted=false)
  *  - the CAS flip on Lead.trialCounted is single-shot per lead
  *  - increment happens only when the flip succeeded
- *  - hitting the LEAD_BASED / HYBRID limit transitions to ended via markEnded
  *  - second call for the same lead is a no-op (idempotent)
- *  - TIME_BASED trials never auto-end via lead count
+ *  - NO trial type auto-ends via lead count — trials are time-only (7 days)
  */
 
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { TrialService, TRIAL_ENDED_EVENT } from './trial.service';
+import { TrialService } from './trial.service';
 import { TrialType, SubscriptionStatus } from '../../generated/prisma';
 
 type UserSnapshot = {
@@ -154,7 +153,7 @@ describe('TrialService.consumeLead', () => {
     expect(h.getLead().trialCounted).toBe(false);
   });
 
-  it('marks the trial ended when the LEAD_BASED limit is hit', async () => {
+  it('does NOT auto-end a LEAD_BASED trial — lead limits are removed', async () => {
     const h = buildHarness({
       trialType: TrialType.LEAD_BASED,
       trialLeadsHandled: 9,
@@ -162,28 +161,15 @@ describe('TrialService.consumeLead', () => {
     });
     const result = await h.svc.consumeLead(USER_ID, LEAD_ID);
 
-    expect(result).toEqual({ justExhausted: true, nowEnded: true, counted: true });
-    expect(h.getUser().trialEndedAt).not.toBeNull();
-    expect(h.emitter.emit).toHaveBeenCalledWith(TRIAL_ENDED_EVENT, { userId: USER_ID });
+    expect(result).toEqual({ justExhausted: false, nowEnded: false, counted: true });
+    expect(h.getUser().trialEndedAt).toBeNull();
+    expect(h.emitter.emit).not.toHaveBeenCalled();
   });
 
-  it('marks the trial ended when the HYBRID lead limit is hit', async () => {
+  it('does NOT auto-end a HYBRID trial — lead limits are removed', async () => {
     const h = buildHarness({
       trialType: TrialType.HYBRID,
       trialLeadsHandled: 14,
-      trialLeadsLimit: 15,
-    });
-    const result = await h.svc.consumeLead(USER_ID, LEAD_ID);
-
-    expect(result.justExhausted).toBe(true);
-    expect(result.nowEnded).toBe(true);
-    expect(h.getUser().trialEndedAt).not.toBeNull();
-  });
-
-  it('does NOT end the trial when below the limit', async () => {
-    const h = buildHarness({
-      trialType: TrialType.HYBRID,
-      trialLeadsHandled: 9,
       trialLeadsLimit: 15,
     });
     const result = await h.svc.consumeLead(USER_ID, LEAD_ID);

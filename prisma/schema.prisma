@@ -632,7 +632,11 @@ model MessageTemplate {
   automationPromptRules AutomationRule[]   @relation("RulePromptTemplate")
   notificationRules     NotificationRule[]
 
-  @@unique([userId, name])
+  // Same friendly name can coexist across `type` (e.g. "Instant Reply"
+  // as both a message template and an AI prompt). Pre-2026-06-23 this was
+  // `@@unique([userId, name])` which blocked the section-named prompt
+  // seed from being inserted alongside the same-named message template.
+  @@unique([userId, name, type])
   @@index([userId])
   @@index([type])
   @@map("message_templates")

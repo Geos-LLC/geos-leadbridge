@@ -72,6 +72,10 @@ export function AdditionalAssociatePhonesEditor({ savedAccountId, initialValue, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // Hides the "Associate numbers are saved per TT business…" explanation
+  // behind a small (i) toggle. Same chrome the wizard uses on its other
+  // helper-text cards.
+  const [infoOpen, setInfoOpen] = useState(false);
 
   // Re-hydrate when the parent passes a different initialValue (e.g. after
   // a refresh of the saved-accounts cache).
@@ -159,26 +163,42 @@ export function AdditionalAssociatePhonesEditor({ savedAccountId, initialValue, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div
-        style={{
-          padding: '8px 12px',
-          borderRadius: 8,
-          background: 'var(--lb-ink-tint, #f8fafc)',
-          color: 'var(--lb-ink-4, #475569)',
-          fontSize: 12,
-          lineHeight: 1.5,
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 8,
-        }}
-      >
-        <Info size={13} style={{ marginTop: 2, flexShrink: 0 }} />
-        <div>
+      {/* Help-text toggle — collapses the "saved per TT business" caveat
+          behind a small (i) at the top-right of the editor. Click reveals
+          the same paragraph inline. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => setInfoOpen(o => !o)}
+          aria-label="About associate numbers"
+          aria-pressed={infoOpen}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: 0, padding: 0,
+            cursor: 'pointer', lineHeight: 0,
+            color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+          }}
+        >
+          <Info size={14} />
+        </button>
+      </div>
+      {infoOpen && (
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            background: 'var(--lb-ink-tint, #f8fafc)',
+            border: '1px solid var(--lb-line-soft, #eef1f7)',
+            color: 'var(--lb-ink-4, #475569)',
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}
+        >
           Associate numbers are saved per Thumbtack business. Registration on
           Thumbtack&rsquo;s side depends on your Thumbtack OAuth permissions —
           numbers you add here will sync once those permissions are in place.
         </div>
-      </div>
+      )}
 
       {drafts.length === 0 && (
         <div

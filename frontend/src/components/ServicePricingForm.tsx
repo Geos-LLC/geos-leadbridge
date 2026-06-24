@@ -1,7 +1,7 @@
 import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import {
-  Plus, Trash2, Loader2, ChevronDown, X,
-  Table2, Repeat, PlusCircle, AlertCircle, BadgePercent,
+  Plus, Trash2, Loader2, Info as InfoIcon,
+  Repeat, PlusCircle, AlertCircle, BadgePercent,
 } from 'lucide-react';
 import { usersApi, serviceProfilesApi } from '../services/api';
 import { DEFAULT_CLEANING_PRICING, hydratePricing } from '../data/defaultPricing';
@@ -73,76 +73,6 @@ const textInputStyle: CSSProperties = {
  * pricing), so the shared PriceChip's onChange signature would force
  * an awkward double-bind here.
  */
-function BedBathPriceChip({
-  tag,
-  amount,
-  onChange,
-}: {
-  tag: string;
-  amount: number;
-  onChange: (next: number) => void;
-}) {
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '4px 8px',
-        borderRadius: 999,
-        background: 'var(--lb-ink-10, #f3f5fa)',
-        color: 'var(--lb-ink-2, #1f2a44)',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: 12.5,
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-        minWidth: 96,
-        justifyContent: 'flex-end',
-      }}
-    >
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.05em',
-          color: 'var(--lb-ink-5, #64748b)',
-          textTransform: 'uppercase',
-        }}
-      >
-        {tag}
-      </span>
-      <span style={{ color: 'var(--lb-ink-3, #334155)' }}>$</span>
-      <input
-        type="number"
-        min={0}
-        step={1}
-        value={Number.isFinite(amount) ? amount : 0}
-        onChange={(e) => onChange(parseInt(e.target.value) || 0)}
-        style={{
-          width: 48,
-          padding: '2px 4px',
-          border: '1px solid transparent',
-          borderRadius: 6,
-          background: 'transparent',
-          fontFamily: 'inherit',
-          fontSize: 12.5,
-          fontWeight: 700,
-          color: 'var(--lb-ink-1, #0a1530)',
-          textAlign: 'right',
-        }}
-        onFocus={(e) => {
-          e.currentTarget.style.background = 'white';
-          e.currentTarget.style.borderColor = 'var(--lb-line, #e5e9f2)';
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.borderColor = 'transparent';
-        }}
-      />
-    </div>
-  );
-}
-
 // Inline editable inputs for the cleaning row label area. Mirror the
 // hover-only borders the line-items PriceRow uses so the row stays
 // tidy but the operator can still click to edit.
@@ -177,6 +107,9 @@ const INLINE_UNIT_LABEL: CSSProperties = {
   letterSpacing: '0.06em',
   color: 'var(--lb-ink-5, #64748b)',
   textTransform: 'uppercase',
+  // Keep "BED" / "BATH" on a single token even when the parent column
+  // is narrow (AI Playbook scoped tab is ~80px tighter than wizard).
+  whiteSpace: 'nowrap',
 };
 
 const INLINE_DOT: CSSProperties = {
@@ -208,6 +141,65 @@ function UnifiedSectionBadge({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Sqft-adjust checkbox row with an info-icon popover. The longform
+ * explanation of how AI uses the row's $/sqft to scale prices stays
+ * collapsed by default — same chrome the wizard uses on its other
+ * helper-text rows.
+ */
+function SqftAdjustRow({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <label
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16 }}
+        />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+          Adjust price by square footage
+        </span>
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); setInfoOpen(o => !o); }}
+          aria-label="About square-footage adjustment"
+          aria-pressed={infoOpen}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: 0, padding: 0,
+            cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+            color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+          }}
+        >
+          <InfoIcon size={14} />
+        </button>
+      </label>
+      {infoOpen && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 9,
+          background: '#f8fafc', border: '1px solid var(--lb-line-soft)',
+          fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+        }}>
+          When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Quote shape picker — two-button segmented control matching the
  * sqft-toggle card chrome. Lets the operator decide whether AI quotes
  * a calculated range ($L–$H) or a single number for THIS pricing JSON.
@@ -221,11 +213,12 @@ function QuoteShapePicker({
   mode: 'range' | 'exact';
   onChange: (next: 'range' | 'exact') => void;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   const optStyle = (selected: boolean): CSSProperties => ({
     flex: 1,
-    padding: '10px 14px',
+    padding: '7px 12px',
     border: selected ? '1.5px solid var(--lb-accent)' : '1.5px solid var(--lb-line)',
-    borderRadius: 12,
+    borderRadius: 10,
     background: selected ? 'var(--lb-accent-10, #eef2ff)' : 'var(--lb-surface)',
     cursor: 'pointer',
     fontFamily: 'inherit',
@@ -234,38 +227,57 @@ function QuoteShapePicker({
     color: selected ? 'var(--lb-accent)' : 'var(--lb-ink-2)',
     textAlign: 'left',
     transition: 'border-color 120ms, background 120ms',
+    lineHeight: 1.25,
   });
   return (
     <div
       style={{
-        padding: '12px 14px',
-        background: 'var(--lb-surface)',
-        border: '1.5px solid var(--lb-line)',
-        borderRadius: 14,
-        boxShadow: 'var(--lb-shadow-sm)',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
       }}
     >
       <div>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-          Quote shape
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)', flex: 1, minWidth: 0 }}>
+            Quote shape
+          </div>
+          <button
+            type="button"
+            onClick={() => setInfoOpen(o => !o)}
+            aria-label="More info"
+            aria-pressed={infoOpen}
+            style={{
+              background: 'transparent', border: 0, padding: 0,
+              cursor: 'pointer', flexShrink: 0, lineHeight: 0,
+            }}
+          >
+            <InfoIcon size={13} style={{ color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)' }} />
+          </button>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
-          How AI quotes the calculated price to the customer. Range uses the ±gap configured on this pricing JSON (default ±10%).
-        </div>
+        {infoOpen && (
+          <div style={{
+            marginTop: 8,
+            padding: '10px 12px',
+            background: '#f8fafc',
+            border: '1px solid var(--lb-line-soft)',
+            borderRadius: 9,
+            fontSize: 12, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+          }}>
+            How AI quotes the calculated price to the customer. <strong style={{ color: 'var(--lb-ink-2)' }}>Range</strong> uses the ±gap configured on this pricing JSON (default ±10%) — better when scope is variable. <strong style={{ color: 'var(--lb-ink-2)' }}>Exact</strong> sends one number — only safe when the price table reflects a fixed scope you can stand behind.
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <button type="button" style={optStyle(mode === 'range')} onClick={() => onChange('range')}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Range</div>
-          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Range</div>
+          <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 1 }}>
             e.g. $270–$330
           </div>
         </button>
         <button type="button" style={optStyle(mode === 'exact')} onClick={() => onChange('exact')}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>Exact</div>
-          <div style={{ fontSize: 11.5, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Exact</div>
+          <div style={{ fontSize: 11, color: 'var(--lb-ink-5)', fontWeight: 500, marginTop: 1 }}>
             single number from the table
           </div>
         </button>
@@ -394,25 +406,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
     });
   };
 
-  const removeCleaningType = (key: string) => {
-    const remaining = (pricing?.cleaningTypes || []).filter((t: any) => t.key !== key);
-    if (remaining.length === 0) {
-      alert('Keep at least one cleaning type — add another before removing this one.');
-      return;
-    }
-    const target = (pricing?.cleaningTypes || []).find((t: any) => t.key === key);
-    if (!window.confirm(`Remove the "${target?.label ?? key}" column? Prices in that column will be discarded.`)) return;
-    setPricing((p: any) => ({
-      ...p,
-      cleaningTypes: remaining,
-      priceTable: (p.priceTable || []).map((row: any) => {
-        const { [key]: _drop, ...rest } = row;
-        void _drop;
-        return rest;
-      }),
-    }));
-  };
-
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -454,9 +447,12 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Service Type Header — hidden in wizardMode (slim editor) */}
+      {/* Service Pricing header — hidden in wizardMode (slim editor).
+          Service-category dropdown (cleaning/plumbing/landscaping/...) removed
+          2026-06-23: nothing read pricing.serviceType — the price table is
+          already per-profile, each profile carries its own cleaningTypes[]
+          columns renameable to any service. */}
       {!wizardMode && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{
             ...MONO,
@@ -469,30 +465,6 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
             {accountName}
           </div>
         </div>
-        <div style={{ position: 'relative' }}>
-          <select
-            value={pricing.serviceType}
-            onChange={e => setPricing((p: any) => ({ ...p, serviceType: e.target.value }))}
-            style={{
-              padding: '8px 30px 8px 12px',
-              border: '1px solid var(--lb-line)', borderRadius: 8,
-              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: 'var(--lb-surface)', color: 'var(--lb-ink-1)',
-              appearance: 'none', cursor: 'pointer', outline: 'none',
-            }}
-          >
-            <option value="cleaning">Cleaning Service</option>
-            <option value="plumbing">Plumbing</option>
-            <option value="landscaping">Landscaping</option>
-            <option value="handyman">Handyman</option>
-            <option value="other">Other Service</option>
-          </select>
-          <ChevronDown size={14} style={{
-            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--lb-ink-5)', pointerEvents: 'none',
-          }} />
-        </div>
-        </div>
       )}
 
       {/* Service Types row removed (2026-06-13). Hiding columns by toggle led
@@ -501,33 +473,15 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
           to "disable" a service, the user enters 0 for every row of that
           column. See frontend/src/data/defaultPricing.ts. */}
 
-      {/* Square footage adjustment toggle — hidden in wizardMode */}
+      {/* Square footage adjustment toggle — flush within the parent
+          Pricing card (no inner card chrome). The longform explanation
+          lives behind a small (i) toggle next to the label so the row
+          stays a single line. Hidden in wizardMode. */}
       {!wizardMode && (
-        <label style={{
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-        padding: '12px 14px',
-        background: 'var(--lb-surface)',
-        border: '1.5px solid var(--lb-line)',
-        borderRadius: 14,
-        boxShadow: 'var(--lb-shadow-sm)',
-        cursor: 'pointer',
-        userSelect: 'none',
-      }}>
-        <input
-          type="checkbox"
+        <SqftAdjustRow
           checked={pricing.sqftAdjustEnabled !== false}
-          onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
-          style={{ accentColor: 'var(--lb-accent)', width: 16, height: 16, marginTop: 2 }}
+          onChange={(next) => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: next }))}
         />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
-            Adjust price by square footage
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 3, lineHeight: 1.45 }}>
-            When the lead's reported sqft exceeds the row's <span style={{ fontWeight: 600, color: 'var(--lb-ink-3)' }}>Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
-          </div>
-        </div>
-        </label>
       )}
 
       {/* Quote shape — Range (default) vs Exact. Moved here from
@@ -544,270 +498,269 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll, 
         />
       )}
 
-      {/* Price Table — unified collapsible chrome shared with item_quantity pricing. */}
-      <CollapsibleSection
-        title="Price table"
-        icon={<Table2 size={14} color="var(--lb-ink-5, #64748b)" />}
-        rightBadge={<UnifiedSectionBadge>{`${pricing.priceTable?.length || 0} rows`}</UnifiedSectionBadge>}
-        open={!!expandedSections.priceTable}
-        onToggle={() => toggleSection('priceTable')}
-      >
-        <div>
-          {/* Header row — matches the item_quantity Price table header
-              chrome: uppercase grey labels above the row list. */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '6px 14px',
-              borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
-              fontSize: 10.5,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              color: 'var(--lb-ink-5, #64748b)',
-              textTransform: 'uppercase',
-            }}
-          >
-            <span style={{ flex: 1 }}>Size band</span>
-            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-              {allTypes.map((t: any) => (
-                <span
-                  key={t.key}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    minWidth: 96,
-                    justifyContent: 'flex-end',
-                  }}
-                >
-                  {t.label}
-                  <button
-                    type="button"
-                    onClick={() => removeCleaningType(t.key)}
-                    title={`Remove ${t.label} column`}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 16,
-                      height: 16,
-                      borderRadius: 999,
-                      border: 0,
-                      background: 'transparent',
-                      color: 'var(--lb-ink-5, #64748b)',
-                      cursor: 'pointer',
-                      padding: 0,
-                    }}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </span>
-            <span style={{ width: 28 }} />
-          </div>
-          {pricing.priceTable?.map((row: any, i: number) => {
-            // Back-compat: rows saved before the min/max split carried
-            // a single `sqft` field.
-            const legacySqft = Number(row.sqft) || 0;
-            const sqftMin = Number(row.sqftMin) || legacySqft;
-            const sqftMax = Number(row.sqftMax) || legacySqft;
-            const midpoint =
-              sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : sqftMin || sqftMax;
-            return (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  // flexWrap lets the chip group + delete button drop
-                  // to a new line on narrow containers (wizard modal,
-                  // mobile). Without it the chips overlapped the
-                  // per-sqft fallback labels at <= 940px modal width.
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  rowGap: 8,
-                  padding: '10px 14px',
-                  borderBottom: '1px solid var(--lb-line-soft, #eef1f7)',
-                }}
-              >
+      {/* Price Table — flush layout from FinalDesign "Pricing Table
+          (standalone)". The surrounding card (SettingCard in AI Playbook,
+          accordion in the wizard) is the only card edge — no inner
+          CollapsibleSection. Each row carries its own bottom border for
+          row separation; the header row keeps a heavier bottom border to
+          separate it visually from the body. */}
+              <div>
+                {/* Header — column labels wrap to multiple lines if
+                    needed so "Moving / Move-out" and "Airbnb / Turnover"
+                    aren't truncated at the cramped wizard width. */}
                 <div
                   style={{
-                    // Switch from flex:1 to a min-width-controlled
-                    // flex-basis so the column can shrink AND wrap
-                    // its content rather than push siblings off-row.
-                    flex: '1 1 220px',
-                    minWidth: 0,
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
+                    alignItems: 'stretch',
+                    borderBottom: '1px solid var(--lb-line, #e5e9f2)',
                   }}
                 >
                   <div
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      color: 'var(--lb-ink-1, #0a1530)',
-                    }}
-                  >
-                    <input
-                      type="number"
-                      value={row.bed}
-                      min={1}
-                      max={10}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
-                      }
-                      style={INLINE_BED_BATH_INPUT}
-                    />
-                    <span style={INLINE_UNIT_LABEL}>bed</span>
-                    <span style={INLINE_DOT}>·</span>
-                    <input
-                      type="number"
-                      value={row.bath}
-                      min={1}
-                      max={10}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
-                      }
-                      style={INLINE_BED_BATH_INPUT}
-                    />
-                    <span style={INLINE_UNIT_LABEL}>bath</span>
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      // flexWrap so the per-sqft fallback labels drop
-                      // below the sqft inputs on narrow widths instead
-                      // of overflowing into the chip column.
-                      flexWrap: 'wrap',
-                      gap: 4,
-                      rowGap: 4,
+                      flex: 2,
+                      minWidth: 0,
+                      padding: '9px 4px 9px 0',
+                      fontSize: 10,
+                      fontWeight: 700,
                       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                      fontSize: 11.5,
-                      color: 'var(--lb-ink-5, #64748b)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: 'var(--lb-ink-6, #8b94ab)',
                     }}
                   >
-                    <input
-                      type="number"
-                      value={row.sqftMin ?? ''}
-                      min={0}
-                      step={50}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
-                      }
-                      style={INLINE_SQFT_INPUT}
-                    />
-                    <span>–</span>
-                    <input
-                      type="number"
-                      value={row.sqftMax ?? ''}
-                      min={0}
-                      step={50}
-                      onChange={(e) =>
-                        updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
-                      }
-                      style={INLINE_SQFT_INPUT}
-                    />
-                    <span style={{ marginLeft: 2 }}>sqft</span>
-                    {midpoint > 0 && (
-                      <span
+                    Size band
+                  </div>
+                  {allTypes.map((t: any) => (
+                    <div
+                      key={t.key}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        padding: '9px 6px',
+                        textAlign: 'right',
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.02em',
+                        color: 'var(--lb-ink-6, #8b94ab)',
+                        lineHeight: 1.2,
+                        wordBreak: 'break-word',
+                      }}
+                      title={t.label}
+                    >
+                      {t.label}
+                    </div>
+                  ))}
+                  {/* Empty sentinel column lining up with the per-row
+                      trash icon below — keeps the price columns aligned
+                      with the header columns. */}
+                  <div style={{ width: 24, flexShrink: 0 }} />
+                </div>
+
+                {/* Body rows */}
+                {pricing.priceTable?.map((row: any, i: number) => {
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderBottom: '1px solid var(--lb-line-soft, #f3f5fa)',
+                      }}
+                    >
+                      <div
                         style={{
-                          marginLeft: 10,
-                          opacity: 0.7,
-                          // Allow this hint to wrap to a new line as a
-                          // unit on narrow widths — keeps the
-                          // dot-separated triplet readable.
-                          flex: '1 1 100%',
+                          flex: 2,
+                          minWidth: 0,
+                          padding: '8px 4px 8px 0',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
                         }}
                       >
-                        {allTypes
-                          .map((t: any) => {
-                            const p = Number(row[t.key]) || 0;
-                            return p > 0
-                              ? `$${(p / midpoint).toFixed(2)}/sqft ${t.label.split(' ')[0].toLowerCase()}`
-                              : '';
-                          })
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    // Wrap chips at narrow widths (mobile + modal) so
-                    // they stack instead of forcing horizontal overflow.
-                    flexWrap: 'wrap',
-                    gap: 8,
-                    rowGap: 6,
-                  }}
-                >
-                  {allTypes.map((t: any) => (
-                    <BedBathPriceChip
-                      key={t.key}
-                      tag={t.label.split(' ')[0]}
-                      amount={Number(row[t.key]) || 0}
-                      onChange={(v) => updatePriceCell(i, t.key, v)}
-                    />
-                  ))}
-                </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: 'var(--lb-ink-1, #0a1530)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.bed}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bed', parseInt(e.target.value) || 1)
+                            }
+                            style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
+                          />
+                          <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bed</span>
+                          <span style={INLINE_DOT}>·</span>
+                          <input
+                            type="number"
+                            value={row.bath}
+                            min={1}
+                            max={10}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)
+                            }
+                            style={{ ...INLINE_BED_BATH_INPUT, width: 24, fontSize: 12.5 }}
+                          />
+                          <span style={{ ...INLINE_UNIT_LABEL, fontSize: 9.5 }}>bath</span>
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            fontSize: 10.5,
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <input
+                            type="number"
+                            value={row.sqftMin ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)
+                            }
+                            style={{ ...INLINE_SQFT_INPUT, width: 40 }}
+                          />
+                          <span>–</span>
+                          <input
+                            type="number"
+                            value={row.sqftMax ?? ''}
+                            min={0}
+                            step={50}
+                            onChange={(e) =>
+                              updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)
+                            }
+                            style={{ ...INLINE_SQFT_INPUT, width: 40 }}
+                          />
+                          <span style={{ marginLeft: 2 }}>sqft</span>
+                        </div>
+                      </div>
+                      {allTypes.map((t: any) => (
+                        <div key={t.key} style={{ flex: 1, minWidth: 0, padding: '6px 5px' }}>
+                          <span style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: 2,
+                            padding: '7px 7px',
+                            border: '1px solid var(--lb-line, #e5e9f2)',
+                            borderRadius: 8,
+                            background: '#fff',
+                          }}>
+                            <span style={{
+                              fontSize: 10,
+                              color: 'var(--lb-ink-7, #b4bbcc)',
+                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            }}>$</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={Number(row[t.key]) || 0}
+                              onChange={(e) => updatePriceCell(i, t.key, parseInt(e.target.value) || 0)}
+                              style={{
+                                width: '100%',
+                                minWidth: 0,
+                                padding: 0,
+                                border: 0,
+                                background: 'transparent',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                fontSize: 12.5,
+                                fontWeight: 700,
+                                color: 'var(--lb-ink-1, #0a1530)',
+                                textAlign: 'right',
+                                outline: 'none',
+                              }}
+                            />
+                          </span>
+                        </div>
+                      ))}
+                      {/* Right-end trash sentinel — small fixed-width
+                          column holds the per-row delete icon at the
+                          far right of the row, aligned with the empty
+                          sentinel cell in the header. */}
+                      <div style={{ width: 24, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => removePriceRow(i)}
+                          title="Remove row"
+                          style={{
+                            background: 'transparent',
+                            border: 0,
+                            padding: 4,
+                            cursor: 'pointer',
+                            color: 'var(--lb-ink-6, #8b94ab)',
+                            fontFamily: 'inherit',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add row / Add column dashed pills below */}
+              <div style={{ marginTop: 12, display: 'flex', gap: 9, flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  onClick={() => removePriceRow(i)}
-                  title="Remove row"
+                  onClick={addPriceRow}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: '1px solid var(--lb-line, #e5e9f2)',
-                    background: 'white',
-                    color: 'var(--lb-ink-5, #64748b)',
+                    gap: 6,
+                    padding: '8px 13px',
+                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                    borderRadius: 10,
+                    background: 'var(--lb-accent-tint, #e7efff)',
+                    color: 'var(--lb-accent, #2563eb)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
                     cursor: 'pointer',
-                    flexShrink: 0,
+                    fontFamily: 'inherit',
                   }}
                 >
-                  <Trash2 size={13} />
+                  <Plus size={13} /> Add row
+                </button>
+                <button
+                  type="button"
+                  onClick={addCleaningType}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 13px',
+                    border: '1px dashed var(--lb-accent-line, #c3d4ff)',
+                    borderRadius: 10,
+                    background: 'var(--lb-accent-tint, #e7efff)',
+                    color: 'var(--lb-accent, #2563eb)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <Plus size={13} /> Add column
                 </button>
               </div>
-            );
-          })}
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              padding: '12px 14px 4px',
-            }}
-          >
-            <button
-              type="button"
-              onClick={addPriceRow}
-              style={{ ...UNIFIED_ADD_ROW_STYLE }}
-            >
-              <Plus size={13} /> Add row
-            </button>
-            <button
-              type="button"
-              onClick={addCleaningType}
-              style={{ ...UNIFIED_ADD_ROW_STYLE }}
-            >
-              <Plus size={13} /> Add column
-            </button>
-          </div>
-        </div>
-      </CollapsibleSection>
 
       {/* Frequency Discounts — hidden in wizardMode (lives in full
           editor at Settings → AI Playbook after onboarding) */}

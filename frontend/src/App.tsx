@@ -23,7 +23,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m
 const Messages = lazy(() => import('./pages/Messages').then(m => ({ default: m.Messages })));
 const Analytics = lazy(() => import('./pages/Analytics').then(m => ({ default: m.Analytics })));
 const MessageSettings = lazy(() => import('./pages/MessageSettings').then(m => ({ default: m.MessageSettings })));
-const AutomationSettings = lazy(() => import('./pages/AutomationSettings').then(m => ({ default: m.AutomationSettings })));
 const NotificationSettings = lazy(() => import('./pages/NotificationSettings').then(m => ({ default: m.NotificationSettings })));
 const SmsHistory = lazy(() => import('./pages/SmsHistory').then(m => ({ default: m.SmsHistory })));
 const Services = lazy(() => import('./pages/Services').then(m => ({ default: m.Services })));
@@ -179,7 +178,7 @@ function App() {
               <Route path="/automation/engage"  element={<AutomationPage />} />
               <Route path="/automation/convert" element={<AutomationPage />} />
               <Route path="/automation-classic" element={<Services />} />
-              <Route path="/templates" element={<MessageSettings />} />
+              <Route path="/templates" element={<div className="p-4 sm:p-6 lg:p-10"><MessageSettings /></div>} />
               <Route path="/insights" element={<Analytics />} />
 
               {/* Phase 1.5 operator-only runtime diagnostic — not linked
@@ -193,10 +192,6 @@ function App() {
               <Route path="/services" element={<Navigate to="/automation" replace />} />
               <Route path="/message-settings" element={<Navigate to="/templates" replace />} />
               <Route path="/analytics" element={<Navigate to="/insights" replace />} />
-
-              {/* AutomationSettings page — formerly mounted at /automation but
-                  superseded by the Services page; kept reachable for legacy use. */}
-              <Route path="/automation-legacy" element={<AutomationSettings />} />
 
               <Route path="/notifications" element={<NotificationSettings />} />
               <Route path="/phone-settings" element={<Navigate to="/notifications" />} />

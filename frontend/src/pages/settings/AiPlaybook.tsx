@@ -25,7 +25,7 @@ import {
   Info, Loader2, Sparkles, Building, CircleDollarSign, ListChecks,
   Calendar, Shield, PhoneCall, Send, User as UserIcon, Globe, BookOpen,
   ChevronDown, ChevronUp, RefreshCw, Pencil, CheckCircle, CheckCircle2, MessageSquare, Trash2,
-  Archive, Plus,
+  Archive, Plus, Layers,
   type LucideIcon,
 } from 'lucide-react';
 import { SectionCard, SettingCard, StatusPill } from '../../components/automation/ui';
@@ -113,6 +113,25 @@ function readScopeFromParams(search: URLSearchParams): Scope {
   return { kind: 'service', profileId: raw };
 }
 
+// Mobile detection — switches the scope picker from the desktop tab strip
+// to a stacked accordion at narrow widths. 768px matches Tailwind's `md`
+// breakpoint and the natural cutover where the tab buttons would otherwise
+// wrap onto multiple rows.
+function useIsMobile(maxWidth = 768): boolean {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia(query);
+    const handler = () => setIsMobile(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [query]);
+  return isMobile;
+}
+
 export function SettingsAiPlaybook() {
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = readScopeFromParams(searchParams);
@@ -194,6 +213,30 @@ export function SettingsAiPlaybook() {
     setSearchParams(sp, { replace: false });
   };
 
+  const isMobile = useIsMobile();
+  const onProfileDeleted = () => {
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('scope');
+    setSearchParams(sp, { replace: true });
+    setRefreshTok((t) => t + 1);
+  };
+
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <MobileScopeAccordion
+          profiles={profiles}
+          scope={scope}
+          activeProfile={activeProfile}
+          onSelect={selectScope}
+          onProfileRefresh={() => setRefreshTok((t) => t + 1)}
+          onProfileDeleted={onProfileDeleted}
+          error={profilesError}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <ScopeTabStrip
@@ -209,12 +252,7 @@ export function SettingsAiPlaybook() {
           key={activeProfile.id}
           profile={activeProfile}
           onSaved={() => setRefreshTok((t) => t + 1)}
-          onDeleted={() => {
-            const sp = new URLSearchParams(searchParams);
-            sp.delete('scope');
-            setSearchParams(sp, { replace: true });
-            setRefreshTok((t) => t + 1);
-          }}
+          onDeleted={onProfileDeleted}
         />
       )}
       {scope.kind === 'service' && profiles && !activeProfile && (
@@ -423,6 +461,284 @@ function ScopeStatusLine({ profile }: { profile: ServiceProfile }) {
       {isDraft && <>AI paused until activated.</>}
       {!isArchived && !isDraft && <>Applies only to {displayName}.</>}
     </div>
+  );
+}
+
+// ─── Mobile accordion ─────────────────────────────────────────────────────
+//
+// On narrow viewports the tab strip wraps onto multiple rows and the
+// active editor pushes far down the page. The accordion presents one
+// card per scope (Global + each Service), only one open at a time —
+// matches the wizard's per-service accordion pattern in ServicesStep.
+// The currently-open card mirrors `?scope=` so deep links and the
+// desktop tab state stay shared. Archived services live behind a
+// "Show N archived" toggle, same as the desktop strip.
+
+function MobileScopeAccordion({
+  profiles,
+  scope,
+  activeProfile,
+  onSelect,
+  onProfileRefresh,
+  onProfileDeleted,
+  error,
+}: {
+  profiles: ServiceProfile[] | null;
+  scope: Scope;
+  activeProfile: ServiceProfile | null;
+  onSelect: (next: Scope) => void;
+  onProfileRefresh: () => void;
+  onProfileDeleted: () => void;
+  error: string | null;
+}) {
+  const loading = profiles === null && !error;
+  const archivedScopeActive =
+    scope.kind === 'service' && activeProfile?.status === 'archived';
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedExpanded = showArchived || archivedScopeActive;
+
+  // Local "collapsed all" flag — decouples accordion-visible from URL
+  // scope so tapping an open card truly closes it (instead of falling
+  // back to opening Global). Selecting a different scope via onSelect
+  // resets this so the newly-selected card opens.
+  const [collapsed, setCollapsed] = useState(false);
+  const scopeKey = scope.kind === 'service' ? scope.profileId : 'global';
+  useEffect(() => {
+    setCollapsed(false);
+  }, [scopeKey]);
+
+  const { primary, archived } = useMemo(() => {
+    if (!profiles) return { primary: [] as ServiceProfile[], archived: [] as ServiceProfile[] };
+    const rank = (p: ServiceProfile) =>
+      p.status === 'active' ? (p.isDefault ? 0 : 1) : 2; // draft = 2
+    const primarySorted = profiles
+      .filter((p) => p.status !== 'archived')
+      .slice()
+      .sort((a, b) => {
+        const d = rank(a) - rank(b);
+        if (d !== 0) return d;
+        return getServiceDisplayName(a).localeCompare(getServiceDisplayName(b));
+      });
+    const archivedSorted = profiles
+      .filter((p) => p.status === 'archived')
+      .slice()
+      .sort((a, b) => getServiceDisplayName(a).localeCompare(getServiceDisplayName(b)));
+    return { primary: primarySorted, archived: archivedSorted };
+  }, [profiles]);
+
+  const matchesScope = (next: Scope) =>
+    (next.kind === 'global' && scope.kind === 'global') ||
+    (next.kind === 'service' && scope.kind === 'service' && next.profileId === scope.profileId);
+
+  const globalOpen = scope.kind === 'global' && !collapsed;
+
+  // Tap a closed card → open it (re-selecting if needed). Tap the open
+  // card → collapse it, leave URL scope alone so no other card auto-
+  // opens in its place.
+  const handleTap = (next: Scope) => {
+    const isCurrentlyOpen = matchesScope(next) && !collapsed;
+    if (isCurrentlyOpen) {
+      setCollapsed(true);
+      return;
+    }
+    if (matchesScope(next)) {
+      // Same scope, was collapsed → just expand
+      setCollapsed(false);
+    } else {
+      // Different scope → URL change triggers the useEffect above which
+      // resets collapsed=false, so the new card mounts open.
+      onSelect(next);
+    }
+  };
+
+  const renderProfileCard = (p: ServiceProfile, badge: ScopeBadge) => {
+    const isOpen =
+      scope.kind === 'service' && scope.profileId === p.id && !collapsed;
+    const isActive = isOpen && !!activeProfile;
+    return (
+      <div
+        key={p.id}
+        style={{
+          background: '#fff',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <AccordionHeader
+          icon={Layers}
+          iconTone="accent"
+          label={getServiceDisplayName(p)}
+          badge={badge}
+          isOpen={isOpen}
+          onClick={() => handleTap({ kind: 'service', profileId: p.id })}
+        />
+        {isActive && (
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
+            <ServicePlaybookEditor
+              key={p.id}
+              profile={activeProfile!}
+              onSaved={onProfileRefresh}
+              onDeleted={onProfileDeleted}
+              hideHeader
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Global card — always rendered first; open by default when no
+          service is selected. */}
+      <div
+        style={{
+          background: '#fff',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <AccordionHeader
+          icon={Globe}
+          iconTone="blue"
+          label="Global"
+          badge="global"
+          isOpen={globalOpen}
+          onClick={() => handleTap({ kind: 'global' })}
+        />
+        {globalOpen && (
+          <div style={{ borderTop: '1px solid var(--lb-line-soft)', padding: '12px 12px 16px' }}>
+            <GlobalPlaybookEditor />
+          </div>
+        )}
+      </div>
+
+      {primary.map((p) =>
+        renderProfileCard(p, p.status === 'active' ? 'service' : 'draft'),
+      )}
+
+      {archivedExpanded && archived.map((p) => renderProfileCard(p, 'archived'))}
+
+      {archived.length > 0 && !archivedScopeActive && (
+        <button
+          type="button"
+          onClick={() => setShowArchived((v) => !v)}
+          style={{
+            alignSelf: 'flex-start',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '8px 12px', borderRadius: 8,
+            border: '1px dashed var(--lb-line)',
+            background: 'transparent',
+            color: 'var(--lb-ink-5)',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <Archive size={12} />
+          {showArchived ? 'Hide archived' : `Show ${archived.length} archived`}
+        </button>
+      )}
+
+      {loading && (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 12, color: 'var(--lb-ink-5)',
+          padding: '8px 4px',
+        }}>
+          <Loader2 size={12} className="animate-spin" /> Loading services…
+        </span>
+      )}
+
+      {scope.kind === 'service' && profiles && !activeProfile && (
+        <div style={{
+          padding: '12px 14px',
+          borderRadius: 10,
+          background: 'var(--lb-ink-tint, #f8fafc)',
+          fontSize: 13, color: 'var(--lb-ink-3)',
+        }}>
+          Service profile not found — switching to Global.
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: 12, color: '#b91c1c', padding: '4px 4px' }}>
+          Could not load services: {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccordionHeader({
+  icon: Icon,
+  iconTone,
+  label,
+  badge,
+  subtitle,
+  isOpen,
+  onClick,
+}: {
+  icon: LucideIcon;
+  iconTone: 'accent' | 'blue';
+  label: string;
+  badge: ScopeBadge;
+  subtitle?: string;
+  isOpen: boolean;
+  onClick: () => void;
+}) {
+  const tile = iconTone === 'blue'
+    ? { bg: '#dbeafe', fg: '#2563eb' }
+    : { bg: 'var(--lb-accent-tint, #eef2ff)', fg: 'var(--lb-accent, #2563eb)' };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={isOpen}
+      style={{
+        width: '100%',
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 14px',
+        background: 'transparent', border: 0,
+        cursor: 'pointer', textAlign: 'left',
+        fontFamily: 'inherit',
+      }}
+    >
+      <span style={{
+        width: 36, height: 36, borderRadius: 9,
+        background: tile.bg, color: tile.fg,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Icon size={18} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 14, fontWeight: 700,
+            color: 'var(--lb-ink-1)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            maxWidth: '100%',
+          }}>
+            {label}
+          </span>
+          <ScopeBadgePill badge={badge} />
+        </span>
+        {subtitle && (
+          <span style={{
+            display: 'block', fontSize: 12,
+            color: 'var(--lb-ink-5)', marginTop: 3,
+          }}>
+            {subtitle}
+          </span>
+        )}
+      </span>
+      {isOpen ? (
+        <ChevronUp size={16} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+      ) : (
+        <ChevronDown size={16} style={{ color: 'var(--lb-ink-5)', flexShrink: 0 }} />
+      )}
+    </button>
   );
 }
 
@@ -1008,42 +1324,6 @@ function CustomQAForm({
   );
 }
 
-// Read-only label for the pricing model badge in the unified Pricing
-// card header. Returns null when the shape is empty / unrecognized so
-// the badge isn't rendered.
-function pricingModelLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const p = parsed as Record<string, unknown>;
-    if (p.pricingModel === 'item_quantity') return 'Item table';
-    if (p.pricingModel === 'hourly') return 'Hourly';
-    if (p.pricingModel === 'flat_rate') return 'Flat rate';
-    if (Array.isArray(p.priceTable) || Array.isArray(p.cleaningTypes)) return 'Bed-bath grid';
-    return 'Custom';
-  } catch {
-    return null;
-  }
-}
-
-function ModelBadge({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex', alignItems: 'center',
-        padding: '4px 10px', borderRadius: 999,
-        background: 'var(--lb-ink-10, #f3f5fa)',
-        color: 'var(--lb-ink-3, #475569)',
-        fontSize: 11.5, fontWeight: 600, letterSpacing: '0.02em',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
 function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   const { primary, allIds } = useConnectedAccountsForPane();
   const scoped = !!profile;
@@ -1051,7 +1331,6 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
   // Global tab: always use the cleaning form (the SavedAccount pricing
   // shape is cleaning-grid). Service tab: branch by the stored shape.
   const cleaning = profile ? isCleaningPricing(profile.pricingJson) : true;
-  const badge = profile ? pricingModelLabel(profile.pricingJson) : null;
 
   return (
     // id used by SettingsAiPlaybook's section=pricing deep link to scroll
@@ -1061,13 +1340,13 @@ function ServicePricingPane({ profile }: { profile?: ServiceProfile }) {
         icon={CircleDollarSign}
         iconTone="green"
         title="Pricing"
-        subtitle={
+        infoText={
           scoped
             ? `Pricing the AI uses to quote ${serviceName ?? 'this service'} leads. Specific to this service only.`
             : 'Edit the table the AI uses to quote leads. Applies to every connected account.'
         }
-        headerRight={badge ? <ModelBadge label={badge} /> : undefined}
         contentPad="16px 24px 24px"
+        collapsible
       >
         {!primary ? (
           <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
@@ -1106,12 +1385,13 @@ function ServiceFaqPane({ profile }: { profile?: ServiceProfile }) {
       icon={BookOpen}
       iconTone="blue"
       title="FAQ"
-      subtitle={
+      infoText={
         scoped
           ? `Answers the AI uses verbatim for ${serviceName ?? 'this service'} leads. Specific to this service only.`
           : 'Answers the AI uses verbatim. Applies to every connected account.'
       }
       contentPad="16px 24px 24px"
+      collapsible
     >
       {!primary ? (
         <div style={{ fontSize: 13, color: 'var(--lb-ink-5)' }}>
@@ -1320,10 +1600,10 @@ function ServiceQualificationCard({
   value: string;
   onChange: (next: string) => void;
 }) {
-  // PR-D.1 — service knowledge (pricing/FAQ/qualification) should not
-  // hide behind a one-line summary. Open by default; users can collapse
-  // with the same toggle if they want to focus on AI instructions.
-  const [expanded, setExpanded] = useState(true);
+  // Default closed (2026-06-23) so the Service tab opens as a compact
+  // section list — same rule as the other Playbook accordions
+  // (Custom Instructions, Business Information, Delivery mode).
+  const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => parseQualRows(value), [value]);
   const summary = <CountSummary count={rows.length} noun="qualification question" />;
   return (
@@ -1434,34 +1714,6 @@ function ServiceHeader({
   );
 }
 
-// ─── Global tab: service-scoped info card (PR-B.1) ───────────────────────
-// Replaces the FaqCard + PricingGuidanceCard that used to live on Global
-// and were inherently service-specific.
-
-function ServiceScopedInfoCard() {
-  return (
-    <SectionCard padding="16px 20px">
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <Info size={16} style={{ color: 'var(--lb-accent)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            Pricing, FAQ, and qualification questions are service-specific
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            Select a service tab above to edit its instructions, or open{' '}
-            <a href="/settings/services" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>
-              Settings → Services
-            </a>{' '}
-            to manage pricing tables, FAQs, and qualification questions.
-          </div>
-        </div>
-      </div>
-    </SectionCard>
-  );
-}
-
 // ─── Status banners ──────────────────────────────────────────────────────
 
 function ArchivedWarningBanner({
@@ -1532,10 +1784,15 @@ function ServicePlaybookEditor({
   profile,
   onSaved,
   onDeleted,
+  hideHeader,
 }: {
   profile: ServiceProfile;
   onSaved: () => void;
   onDeleted: () => void;
+  /** Skip the in-body "Service name + badges + applies-only-to…" header.
+   *  Set true from the mobile accordion, where the surrounding card
+   *  header already shows that information. */
+  hideHeader?: boolean;
 }) {
   // PR — service tab is structured-data-first. The three legacy service
   // HOW cards (Service business details / Service pricing instructions /
@@ -1651,7 +1908,7 @@ function ServicePlaybookEditor({
       {!error && saving && <StatusPill status="saving" />}
       {!error && !saving && savedAt && <StatusPill status="saved" />}
 
-      <ServiceHeader profile={profile} onRenamed={onSaved} />
+      {!hideHeader && <ServiceHeader profile={profile} onRenamed={onSaved} />}
       {isArchived && (
         <ArchivedWarningBanner
           onReactivate={handleReactivate}
@@ -1995,8 +2252,6 @@ function GlobalPlaybookEditor() {
       {!error && !saving && savedAt && <StatusPill status="saved" />}
       {!error && !savedAt && loading && <StatusPill status="loading" />}
 
-      <HelpBlock />
-
       {accounts.length === 0 && (
         <SectionCard padding="22px 24px">
           <div style={{ fontSize: 14, color: 'var(--lb-ink-3)' }}>
@@ -2040,12 +2295,14 @@ function GlobalPlaybookEditor() {
         {/* 0. Custom Instructions (consolidated, chat-added rules across all areas) */}
         <CustomInstructionsAllCard savedAccountId={sourceAccountId} />
 
-        {/* 1. Business Information (company-wide) */}
+        {/* 1. Business Information (company-wide) — collapsible, opens
+            by default so first-time visitors see what's inside. */}
         <HowSectionCard
           section="business_information"
           value={v2.business_information?.customInstructions ?? ''}
           onChange={v => onSectionChange('business_information', v)}
           isSuggested={!!v2.business_information?.suggestedFromWebsite}
+          collapsible
         />
 
         {/* Communication Style & Brand Voice has no UI surface — not
@@ -2053,11 +2310,9 @@ function GlobalPlaybookEditor() {
               runtime default in src/ai/section-default-prompts.ts
               ('personality_brand_voice') drives tone uniformly. */}
 
-        {/* Service-scoped info card — FaqCard + PricingGuidanceCard were
-              removed in PR-B.1 because their content is inherently service-
-              specific (FAQ, pricing table). Operators select a service tab
-              above or visit Settings → Services for those surfaces. */}
-        <ServiceScopedInfoCard />
+        {/* ServiceScopedInfoCard banner removed 2026-06-23 — the service
+            tab strip + Settings → Services entry point already convey the
+            same info without an always-visible block taking vertical space. */}
 
         {/* === Advanced legacy sections — only when ?advanced=1 / ?debug=1 ===
               These 5 backend section keys still emit their default prompts
@@ -2147,33 +2402,11 @@ function GlobalPlaybookEditor() {
   );
 }
 
-// ─── Help block ───────────────────────────────────────────────────────────
-
-function HelpBlock() {
-  return (
-    <SectionCard padding="18px 22px">
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flexShrink: 0, paddingTop: 2 }}>
-          <Info size={18} style={{ color: 'var(--lb-accent)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--lb-ink-1)', marginBottom: 6 }}>
-            AI Playbook controls HOW AI communicates
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--lb-ink-3)', lineHeight: 1.55 }}>
-            <a href="/automation/convert" style={{ color: 'var(--lb-accent)', fontWeight: 600 }}>Automation → AI Conversation</a> controls <em>WHAT</em> AI is trying to achieve and <em>WHEN</em> conversations are handed to your team.
-          </div>
-        </div>
-      </div>
-    </SectionCard>
-  );
-}
-
 // ─── HOW section card — generic for the HOW sections ─────────────────────
 
 function HowSectionCard({
   section, value, onChange, managedByGoals, isSuggested, legacyAdvanced,
-  titleOverride, subtitleOverride,
+  titleOverride, subtitleOverride, collapsible, defaultOpen,
 }: {
   section: PlaybookSectionKey;
   value: string;
@@ -2197,6 +2430,10 @@ function HowSectionCard({
    *  prompt assembly is unchanged. */
   titleOverride?: string;
   subtitleOverride?: string;
+  /** Pass-through to PlaybookSectionShell — turn the section into an
+   *  accordion. Used by the Business Information card on Global. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
   const Icon = SECTION_ICONS[section];
   return (
@@ -2204,6 +2441,8 @@ function HowSectionCard({
       icon={Icon}
       title={titleOverride ?? PLAYBOOK_SECTION_UI_LABELS[section]}
       subtitle={subtitleOverride ?? PLAYBOOK_SECTION_SUBTITLES[section]}
+      collapsible={collapsible}
+      defaultOpen={defaultOpen}
     >
       {isSuggested && <SuggestedFromWebsiteBadge />}
       {managedByGoals && <ManagedByGoalsBadge />}
@@ -2463,6 +2702,10 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
   const [loading, setLoading] = useState(true);
   const [busyKind, setBusyKind] = useState<null | 'ai_conv' | 'follow_up'>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [deliveryInfoOpen, setDeliveryInfoOpen] = useState(false);
+  // Collapsible — closed by default, same chrome as the other Playbook
+  // sections (Custom Instructions, Business Information).
+  const [open, setOpen] = useState(false);
 
   // Load current state from the first connected account (Playbook is
   // global; per-account divergence is intentional but rare here).
@@ -2534,11 +2777,23 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
   return (
     <SectionCard padding="22px 24px">
       <div
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        aria-expanded={open}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        }}
         style={{
           display: 'flex',
           gap: 14,
           alignItems: 'flex-start',
-          marginBottom: 14,
+          marginBottom: open ? 14 : 0,
+          cursor: 'pointer',
+          userSelect: 'none',
         }}
       >
         <div
@@ -2569,6 +2824,20 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
             }}
           >
             Delivery mode (advanced)
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setDeliveryInfoOpen(o => !o); }}
+              aria-label="About delivery mode"
+              aria-pressed={deliveryInfoOpen}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 0, padding: 0,
+                cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+                color: deliveryInfoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+              }}
+            >
+              <Info size={14} />
+            </button>
             {savedAt && (
               <span
                 style={{
@@ -2584,37 +2853,51 @@ function AdvancedDeliveryModesCard({ accounts }: { accounts: Array<{ id: string 
               </span>
             )}
           </div>
-          <div
-            style={{
-              fontSize: 12.5,
-              color: 'var(--lb-ink-5)',
-              marginTop: 4,
-              lineHeight: 1.5,
-            }}
-          >
-            Most teams keep these OFF — AI sends automatically. Turn
-            either toggle ON to park drafts for your review before they
-            send. Applies to all {accounts.length} connected
-            {accounts.length === 1 ? ' account' : ' accounts'}.
-          </div>
+          {deliveryInfoOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                marginTop: 8,
+                padding: '10px 12px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 9,
+                fontSize: 12.5,
+                color: 'var(--lb-ink-5)',
+                lineHeight: 1.5,
+              }}
+            >
+              Most teams keep these OFF — AI sends automatically. Turn
+              either toggle ON to park drafts for your review before they
+              send. Applies to all {accounts.length} connected
+              {accounts.length === 1 ? ' account' : ' accounts'}.
+            </div>
+          )}
+        </div>
+        <div style={{ flexShrink: 0, paddingTop: 6, color: 'var(--lb-ink-5)' }}>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </div>
       </div>
 
-      <SuggestToggleRow
-        title="Park AI Conversation replies for review"
-        body="AI drafts replies to customer messages and parks them for your approval. Nothing sends until you tap Send on the Lead Activity page."
-        on={aiConvSuggest}
-        busy={busyKind === 'ai_conv'}
-        onChange={onAiConvToggle}
-      />
-      <div style={{ height: 1, background: 'var(--lb-line-soft)', margin: '12px 0' }} />
-      <SuggestToggleRow
-        title="Park follow-ups for review"
-        body="Follow-up sequences draft each message and park it for your approval before sending. The cadence still runs; messages just wait at the gate."
-        on={followUpSuggest}
-        busy={busyKind === 'follow_up'}
-        onChange={onFollowUpToggle}
-      />
+      {open && (
+        <>
+          <SuggestToggleRow
+            title="Park AI Conversation replies for review"
+            body="AI drafts replies to customer messages and parks them for your approval. Nothing sends until you tap Send on the Lead Activity page."
+            on={aiConvSuggest}
+            busy={busyKind === 'ai_conv'}
+            onChange={onAiConvToggle}
+          />
+          <div style={{ height: 1, background: 'var(--lb-line-soft)', margin: '12px 0' }} />
+          <SuggestToggleRow
+            title="Park follow-ups for review"
+            body="Follow-up sequences draft each message and park it for your approval before sending. The cadence still runs; messages just wait at the gate."
+            on={followUpSuggest}
+            busy={busyKind === 'follow_up'}
+            onChange={onFollowUpToggle}
+          />
+        </>
+      )}
     </SectionCard>
   );
 }
@@ -2704,16 +2987,51 @@ function SuggestToggleRow({
 // ─── Building blocks ──────────────────────────────────────────────────────
 
 function PlaybookSectionShell({
-  icon: Icon, title, subtitle, children,
+  icon: Icon, title, subtitle, infoText, collapsible, defaultOpen = false, children,
 }: {
   icon: LucideIcon;
   title: string;
   subtitle?: string;
+  /** Long-form description revealed by a small (i) toggle next to the
+   *  title. Use INSTEAD OF subtitle when the helper text isn't worth
+   *  permanent screen real estate. */
+  infoText?: React.ReactNode;
+  /** When true, the header row becomes a click-to-toggle accordion and a
+   *  chevron renders at the right end. The (i) info button stops
+   *  propagation so opening the description doesn't toggle the body. */
+  collapsible?: boolean;
+  /** Initial open state for the collapsible body. Defaults to FALSE
+   *  (closed) per the 2026-06-23 rule that every Playbook accordion
+   *  starts collapsed so the page reads as a compact section list. */
+  defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const headerStyle: React.CSSProperties = {
+    display: 'flex',
+    gap: 14,
+    alignItems: 'flex-start',
+    marginBottom: open ? 14 : 0,
+    ...(collapsible
+      ? { cursor: 'pointer', userSelect: 'none' as const }
+      : {}),
+  };
   return (
     <SectionCard padding="22px 24px">
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
+      <div
+        style={headerStyle}
+        onClick={collapsible ? () => setOpen(o => !o) : undefined}
+        role={collapsible ? 'button' : undefined}
+        aria-expanded={collapsible ? open : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={collapsible ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        } : undefined}
+      >
         <div style={{
           width: 36, height: 36, borderRadius: 10,
           background: '#ede9fe', color: '#6d28d9',
@@ -2722,17 +3040,55 @@ function PlaybookSectionShell({
           <Icon size={18} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
-            {title}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+              {title}
+            </div>
+            {infoText && !subtitle && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}
+                aria-label="More info"
+                aria-pressed={infoOpen}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'transparent', border: 0, padding: 0,
+                  cursor: 'pointer', lineHeight: 0, flexShrink: 0,
+                  color: infoOpen ? 'var(--lb-ink-1)' : 'var(--lb-accent)',
+                }}
+              >
+                <Info size={14} />
+              </button>
+            )}
           </div>
           {subtitle && (
             <div style={{ fontSize: 12.5, color: 'var(--lb-ink-5)', marginTop: 4, lineHeight: 1.5 }}>
               {subtitle}
             </div>
           )}
+          {infoOpen && infoText && !subtitle && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                marginTop: 8,
+                padding: '10px 12px',
+                background: '#f8fafc',
+                border: '1px solid var(--lb-line-soft)',
+                borderRadius: 9,
+                fontSize: 12.5, color: 'var(--lb-ink-5)', lineHeight: 1.5,
+              }}
+            >
+              {infoText}
+            </div>
+          )}
         </div>
+        {collapsible && (
+          <div style={{ flexShrink: 0, paddingTop: 6, color: 'var(--lb-ink-5)' }}>
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </div>
+        )}
       </div>
-      {children}
+      {(!collapsible || open) && children}
     </SectionCard>
   );
 }
@@ -3009,7 +3365,8 @@ function CustomInstructionsAllCard({ savedAccountId }: { savedAccountId: string 
     <PlaybookSectionShell
       icon={MessageSquare}
       title="Custom Instructions"
-      subtitle="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
+      infoText="Rules you've added through the AI Settings Assistant chat. Each one is applied at runtime alongside the section's default prompt."
+      collapsible
     >
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
