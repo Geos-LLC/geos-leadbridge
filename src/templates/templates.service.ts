@@ -487,20 +487,27 @@ Output:
     // Seed missing defaults (per-name) so new platform-specific templates
     // get added even for existing users who already have some templates.
     const typesToSeed = type ? [type] : ['message', 'prompt'] as const;
+    let seededAny = false;
     for (const t of typesToSeed) {
       const defaults = t === 'prompt' ? TemplatesService.DEFAULT_PROMPTS : TemplatesService.DEFAULT_TEMPLATES;
       const existingNames = new Set(templates.filter((tmpl: any) => tmpl.type === t).map((tmpl: any) => tmpl.name));
       const missing = defaults.filter(d => !existingNames.has(d.name));
       if (missing.length > 0) {
-        await this.prisma.messageTemplate.createMany({
+        const result = await this.prisma.messageTemplate.createMany({
           data: missing.map(d => ({ userId, name: d.name, content: d.content, type: d.type, isDefault: d.isDefault })),
           skipDuplicates: true,
         });
+        if (result.count > 0) seededAny = true;
       }
     }
 
-    // Re-fetch if we seeded
-    if (templates.length === 0 || typesToSeed.some(t => !templates.some((tmpl: any) => tmpl.type === t))) {
+    // Re-fetch whenever we seeded — the prior check ("re-fetch only if a
+    // type has zero rows") missed the common case where the user already
+    // had SOME templates of every type but was missing new section seeds.
+    // That left freshly-inserted rows in the DB but absent from the API
+    // response, so the templates page rendered stale counts (spotless
+    // 2026-06-23 incident: 5 prompts shown vs 12 in DB).
+    if (templates.length === 0 || seededAny) {
       templates = await this.prisma.messageTemplate.findMany({
         where,
         orderBy: [{ isDefault: 'desc' }, { lastUsedAt: 'desc' }, { createdAt: 'desc' }],
