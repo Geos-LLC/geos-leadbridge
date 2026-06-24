@@ -416,6 +416,33 @@ export function RadioButton({
 }
 
 /**
+ * Right-aligned current-mode pill rendered inside the Message generation
+ * expander header (and the wizard's inline copy). Surfaces the active
+ * choice without forcing the user to expand the row.
+ */
+export function ModePill({ useAi }: { useAi: boolean }) {
+  const label = useAi ? 'AI-generated' : 'Template';
+  const bg = useAi ? 'var(--lb-accent-tint, #eef2ff)' : 'var(--lb-ink-10, #f1f5f9)';
+  const color = useAi ? 'var(--lb-accent, #4f46e5)' : 'var(--lb-ink-3, #475569)';
+  return (
+    <span style={{
+      flexShrink: 0,
+      alignSelf: 'center',
+      fontSize: 11.5,
+      fontWeight: 600,
+      lineHeight: 1,
+      padding: '4px 8px',
+      borderRadius: 999,
+      background: bg,
+      color,
+      letterSpacing: 0.1,
+    }}>
+      {label}
+    </span>
+  );
+}
+
+/**
  * Wizard-style Message generation expander — chevron-toggle header
  * ("Message generation / How messages are composed.") that reveals
  * two RadioButtons (AI-generated vs Custom template). Used inside
@@ -465,6 +492,7 @@ export function MessageGenerationExpander({
             How messages are composed.
           </span>
         </span>
+        <ModePill useAi={useAi} />
       </button>
       {open && (
         <div style={{ marginTop: 13, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 13 }}>

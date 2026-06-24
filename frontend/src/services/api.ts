@@ -2148,6 +2148,7 @@ export const usersApi = {
     override: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
     callDuringBusinessHours: boolean;
     firstMsgDuringBusinessHours: boolean;
+    instantReplyDuringBusinessHours: boolean;
     followUpsApplyQuietHours: boolean;
     aiConversationMode: 'always' | 'when_dispatcher_unavailable';
   }> => {
@@ -2160,6 +2161,7 @@ export const usersApi = {
       override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
+      instantReplyDuringBusinessHours?: boolean;
       followUpsApplyQuietHours?: boolean;
       aiConversationMode?: 'always' | 'when_dispatcher_unavailable';
     },
@@ -2167,6 +2169,7 @@ export const usersApi = {
     override: any;
     callDuringBusinessHours: boolean;
     firstMsgDuringBusinessHours: boolean;
+    instantReplyDuringBusinessHours: boolean;
     followUpsApplyQuietHours: boolean;
     aiConversationMode: string;
   }> => {

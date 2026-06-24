@@ -16,7 +16,7 @@ import { WizardStepActions } from '../WizardStepActions';
 // pre-2026-06-22 Follow-ups & AI section; canonical now uses custom
 // inline FollowupCard / ConversationGoalCard / AiResponseModeCard below.
 import { InfoDot, InfoTip } from '../../../components/InfoPopover';
-import { FirstReplyCard, Toggle, Checkbox } from '../../../components/automation/wizard-cards';
+import { FirstReplyCard, ModePill, Toggle, Checkbox } from '../../../components/automation/wizard-cards';
 
 interface Props {
   onSaveContinue: () => Promise<void> | void;
@@ -66,6 +66,7 @@ const DEFAULT_BOOKING_WINDOWS: BookingWindows = {
 type PriceMode = 'range' | 'exact';
 
 const DEFAULTS = {
+  instantReplyDuringBusinessHours: true,
   firstMsgDuringBusinessHours: true,
   callDuringBusinessHours: true,
   followUpsApplyQuietHours: true,
@@ -242,6 +243,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
         if (callSettings) setInstantCallOn(callSettings.enabled !== false);
         setOpts(prev => ({
           ...prev,
+          instantReplyDuringBusinessHours: hours?.instantReplyDuringBusinessHours ?? prev.instantReplyDuringBusinessHours,
           firstMsgDuringBusinessHours: hours?.firstMsgDuringBusinessHours ?? prev.firstMsgDuringBusinessHours,
           callDuringBusinessHours: hours?.callDuringBusinessHours ?? prev.callDuringBusinessHours,
           followUpsApplyQuietHours: hours?.followUpsApplyQuietHours ?? prev.followUpsApplyQuietHours,
@@ -323,6 +325,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
     // is the overnight gate driven by the Timing card further down.
     ops.push(
       usersApi.updateAccountHours(accountId, {
+        instantReplyDuringBusinessHours: opts.instantReplyDuringBusinessHours,
         firstMsgDuringBusinessHours: opts.firstMsgDuringBusinessHours,
         callDuringBusinessHours: opts.callDuringBusinessHours,
         followUpsApplyQuietHours: opts.followUpsApplyQuietHours,
@@ -490,8 +493,8 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
             enabled={instantReplyOn}
             onToggle={setInstantReplyOn}
             bizLabel="Only send during business hours"
-            bizChecked={opts.firstMsgDuringBusinessHours}
-            onBizToggle={v => setOpts(o => ({ ...o, firstMsgDuringBusinessHours: v }))}
+            bizChecked={opts.instantReplyDuringBusinessHours}
+            onBizToggle={v => setOpts(o => ({ ...o, instantReplyDuringBusinessHours: v }))}
           >
             {/* Message generation expandable — AI vs Custom template */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '13px 0 0' }}>
@@ -515,6 +518,7 @@ export default function AutomationLevelStep({ onSaveContinue, saving, setSaving 
                     How messages are composed.
                   </span>
                 </span>
+                <ModePill useAi={replyUseAi} />
               </button>
               {respAdvOpen && (
                 <div style={{ marginTop: 13, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 13 }}>

@@ -51,6 +51,7 @@ type CachedAccount = {
    */
   instantTextMode: 'ai' | 'template';
   connMode: 'agent-first' | 'parallel';
+  replyBizHours: boolean;
   textBizHours: boolean;
   callBizHours: boolean;
   // Actual `followUpStrategy` from the account's followUpSettingsJson. Drives
@@ -88,6 +89,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   // V2 Instant Text AI default — new tenants land on AI. Existing tenants'
   // value is hydrated from followUpSettingsJson.instantTextMode below.
   const [instantTextMode, setInstantTextMode] = useState<'template' | 'ai'>('ai');
+  const [replyBizHours, setReplyBizHours] = useState(true);
   const [textBizHours, setTextBizHours] = useState(true);
   const [callBizHours, setCallBizHours] = useState(true);
   const [connMode, setConnMode] = useState<'agent-first' | 'parallel'>('agent-first');
@@ -144,7 +146,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     | 'instantReplyOn' | 'replyType'
     | 'instantTextOn' | 'instantTextMode'
     | 'instantCallOn' | 'connMode'
-    | 'textBizHours' | 'callBizHours';
+    | 'replyBizHours' | 'textBizHours' | 'callBizHours';
   const dirtyFieldsRef = useRef<Set<RespondField>>(new Set());
   // Cancel in-flight save when scope changes so a slow save can't overwrite
   // a freshly-loaded account.
@@ -182,6 +184,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setInstantCallOn(first.instantCallOn);
         setReplyType(first.replyType);
         setConnMode(first.connMode);
+        setReplyBizHours(first.replyBizHours);
         setTextBizHours(first.textBizHours);
         setCallBizHours(first.callBizHours);
         setFollowUpStrategy(first.followUpStrategy);
@@ -194,6 +197,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         setInstantCallOn(cached.instantCallOn);
         setReplyType(cached.replyType);
         setConnMode(cached.connMode);
+        setReplyBizHours(cached.replyBizHours);
         setTextBizHours(cached.textBizHours);
         setCallBizHours(cached.callBizHours);
         setFollowUpStrategy(cached.followUpStrategy);
@@ -237,6 +241,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
               // their saved value back here.
               instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
               connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+              replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? true,
               textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
               callBizHours: hoursRes?.callDuringBusinessHours ?? true,
               followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
@@ -266,6 +271,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
             setReplyType(first.replyType);
             setInstantTextMode(first.instantTextMode);
             setConnMode(first.connMode);
+            setReplyBizHours(first.replyBizHours);
             setTextBizHours(first.textBizHours);
             setCallBizHours(first.callBizHours);
             setFollowUpStrategy(first.followUpStrategy);
@@ -296,6 +302,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           replyType: (nl?.useAi ? 'ai' : 'template') as 'ai' | 'template',
           instantTextMode: (rawInstantTextMode === 'template' ? 'template' : 'ai') as 'ai' | 'template',
           connMode: (ccRes.settings?.mode === 'PARALLEL' ? 'parallel' : 'agent-first') as 'agent-first' | 'parallel',
+          replyBizHours: hoursRes?.instantReplyDuringBusinessHours ?? true,
           textBizHours: hoursRes?.firstMsgDuringBusinessHours ?? true,
           callBizHours: hoursRes?.callDuringBusinessHours ?? true,
           followUpStrategy: isStrategyKey(rawStrategy) ? rawStrategy : 'auto',
@@ -315,6 +322,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
           setReplyType(cached.replyType);
           setInstantTextMode(cached.instantTextMode);
           setConnMode(cached.connMode);
+          setReplyBizHours(cached.replyBizHours);
           setTextBizHours(cached.textBizHours);
           setCallBizHours(cached.callBizHours);
           setFollowUpStrategy(cached.followUpStrategy);
@@ -337,7 +345,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
     setSavedAt(Date.now()); // optimistic
     handleSave(fields);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, instantTextMode, connMode, textBizHours, callBizHours]);
+  }, [instantReplyOn, instantTextOn, instantCallOn, replyType, instantTextMode, connMode, replyBizHours, textBizHours, callBizHours]);
 
   // markDirty-wrapped setters — each one records both the dirty flag AND the
   // specific field name so the save only writes that field's endpoint.
@@ -347,6 +355,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const onReplyType      = (v: 'ai' | 'template')           => { dirtyRef.current = true; dirtyFieldsRef.current.add('replyType');      setReplyType(v); };
   const onInstantTextMode = (v: 'ai' | 'template')          => { dirtyRef.current = true; dirtyFieldsRef.current.add('instantTextMode'); setInstantTextMode(v); };
   const onConnMode       = (v: 'agent-first' | 'parallel')  => { dirtyRef.current = true; dirtyFieldsRef.current.add('connMode');       setConnMode(v); };
+  const onReplyBizHours  = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('replyBizHours');  setReplyBizHours(v); };
   const onTextBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('textBizHours');   setTextBizHours(v); };
   const onCallBizHours   = (v: boolean) => { dirtyRef.current = true; dirtyFieldsRef.current.add('callBizHours');   setCallBizHours(v); };
 
@@ -367,6 +376,7 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
       replyType:      fields.has('replyType')      ? replyType      : (prev?.replyType      ?? replyType),
       instantTextMode: fields.has('instantTextMode') ? instantTextMode : (prev?.instantTextMode ?? instantTextMode),
       connMode:       fields.has('connMode')       ? connMode       : (prev?.connMode       ?? connMode),
+      replyBizHours:  fields.has('replyBizHours')  ? replyBizHours  : (prev?.replyBizHours  ?? replyBizHours),
       textBizHours:   fields.has('textBizHours')   ? textBizHours   : (prev?.textBizHours   ?? textBizHours),
       callBizHours:   fields.has('callBizHours')   ? callBizHours   : (prev?.callBizHours   ?? callBizHours),
       // followUpStrategy is read-only on this page — preserve prev or fall
@@ -382,10 +392,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
     // 0. Per-account business-hours gating — only write the keys whose
     //    checkboxes were actually toggled.
-    if (fields.has('textBizHours') || fields.has('callBizHours')) {
+    if (fields.has('replyBizHours') || fields.has('textBizHours') || fields.has('callBizHours')) {
       const hours: Record<string, boolean> = {};
-      if (fields.has('textBizHours')) hours.firstMsgDuringBusinessHours = textBizHours;
-      if (fields.has('callBizHours')) hours.callDuringBusinessHours     = callBizHours;
+      if (fields.has('replyBizHours')) hours.instantReplyDuringBusinessHours = replyBizHours;
+      if (fields.has('textBizHours'))  hours.firstMsgDuringBusinessHours    = textBizHours;
+      if (fields.has('callBizHours'))  hours.callDuringBusinessHours        = callBizHours;
       ops.push(usersApi.updateAccountHours(id, hours).catch(() => undefined));
     }
 
@@ -549,13 +560,16 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
   const _instantCall  = getMixed('instantCallOn', onOff);
   const _replyTypeMix = getMixed('replyType', v => v === 'ai' ? 'Let AI write it' : 'Use template');
   const _connModeMix  = getMixed('connMode', v => v === 'parallel' ? 'Parallel' : 'Agent First');
+  const _replyBizMix  = getMixed('replyBizHours', v => v ? 'Only during business hours' : 'Anytime');
   const _textBizMix   = getMixed('textBizHours', v => v ? 'Only during business hours' : 'Anytime');
   const _callBizMix   = getMixed('callBizHours', v => v ? 'Only during business hours' : 'Anytime');
   // followUpStrategy mixed detection removed with the Conversation Goal
   // tile. Per-account strategy still persists in followUpSettingsJson; it's
   // just no longer surfaced on this AI-first page.
+  const mixedReplyBizHours = _replyBizMix.mixed;
   const mixedTextBizHours = _textBizMix.mixed;
   const mixedCallBizHours = _callBizMix.mixed;
+  const tipReplyBizHours  = _replyBizMix.tooltip;
   const tipTextBizHours   = _textBizMix.tooltip;
   const tipCallBizHours   = _callBizMix.tooltip;
   const mixedInstantReply = _instantReply.mixed;
@@ -643,9 +657,10 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
 
       {/* Instant Reply — wizard FirstReplyCard chrome (extracted to
           components/automation/wizard-cards.tsx). Biz-hours checkbox is
-          wired to textBizHours since both Instant Reply and Instant
-          Text share the same firstMsgDuringBusinessHours flag in user
-          settings (the wizard does the same). */}
+          wired to replyBizHours (per-account `instantReplyDuringBusinessHours`)
+          — independent from the Instant Text gate (`firstMsgDuringBusinessHours`)
+          since the platform new_lead automation and the customer-SMS
+          notification rule are separate dispatch paths. */}
       <FirstReplyCard
         icon={MessageSquareText}
         iconBg="#dbeafe"
@@ -656,8 +671,8 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         enabled={instantReplyOn}
         onToggle={onInstantReplyOn}
         bizLabel="Only send during business hours"
-        bizChecked={textBizHours}
-        onBizToggle={onTextBizHours}
+        bizChecked={replyBizHours}
+        onBizToggle={onReplyBizHours}
       >
         <MessageGenerationExpander
           useAi={replyType === 'ai'}
@@ -667,6 +682,11 @@ export function AutomationRespond({ accountId }: { accountId: string }) {
         {mixedReplyType && (
           <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
             {tipReplyType}
+          </div>
+        )}
+        {mixedReplyBizHours && (
+          <div style={{ fontSize: 11.5, color: '#b45309', fontStyle: 'italic', marginTop: 8 }}>
+            {tipReplyBizHours}
           </div>
         )}
         {mixedInstantReply && (

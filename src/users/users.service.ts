@@ -482,6 +482,7 @@ export class UsersService {
         businessHoursOverride: true,
         callDuringBusinessHours: true,
         firstMsgDuringBusinessHours: true,
+        instantReplyDuringBusinessHours: true,
         followUpsApplyQuietHours: true,
         aiConversationMode: true,
       },
@@ -491,6 +492,7 @@ export class UsersService {
       override: (account.businessHoursOverride as any) ?? null,
       callDuringBusinessHours: account.callDuringBusinessHours,
       firstMsgDuringBusinessHours: account.firstMsgDuringBusinessHours,
+      instantReplyDuringBusinessHours: account.instantReplyDuringBusinessHours,
       followUpsApplyQuietHours: account.followUpsApplyQuietHours,
       aiConversationMode: account.aiConversationMode ?? 'when_dispatcher_unavailable',
     };
@@ -503,6 +505,7 @@ export class UsersService {
       override?: { start?: string; end?: string; timezone?: string; days?: string[] } | null;
       callDuringBusinessHours?: boolean;
       firstMsgDuringBusinessHours?: boolean;
+      instantReplyDuringBusinessHours?: boolean;
       followUpsApplyQuietHours?: boolean;
       aiConversationMode?: 'always' | 'when_dispatcher_unavailable';
     },
@@ -517,6 +520,7 @@ export class UsersService {
     if (dto.override !== undefined) data.businessHoursOverride = dto.override;
     if (dto.callDuringBusinessHours !== undefined) data.callDuringBusinessHours = !!dto.callDuringBusinessHours;
     if (dto.firstMsgDuringBusinessHours !== undefined) data.firstMsgDuringBusinessHours = !!dto.firstMsgDuringBusinessHours;
+    if (dto.instantReplyDuringBusinessHours !== undefined) data.instantReplyDuringBusinessHours = !!dto.instantReplyDuringBusinessHours;
     if (dto.followUpsApplyQuietHours !== undefined) data.followUpsApplyQuietHours = !!dto.followUpsApplyQuietHours;
     if (dto.aiConversationMode !== undefined) {
       const valid = ['always', 'when_dispatcher_unavailable'];

@@ -880,6 +880,19 @@ export class AutomationService implements OnModuleInit {
 
     this.logger.log(`Found ${rules.length} new_lead rules for account ${savedAccount.businessName}`);
 
+    // Instant Reply biz-hours gate. The per-account `instantReplyDuringBusinessHours`
+    // (default true) opts the account into the User-level master window for the
+    // platform new_lead automation. Skip silently when outside hours — same
+    // semantics as `firstMsgDuringBusinessHours` for Instant Text. Independent
+    // from that flag since the underlying UI cards are independent.
+    if (rules.length > 0 && (savedAccount as any).instantReplyDuringBusinessHours !== false) {
+      const inHours = await this.businessHours.isInBusinessHours(context.userId, savedAccount.id);
+      if (!inHours) {
+        this.logger.log(`[AUTOMATION] ✗ SKIPPED ${rules.length} new_lead rule(s) — outside business hours (account=${savedAccount.id})`);
+        return;
+      }
+    }
+
     const enrichedContext = { ...context, savedAccountId: savedAccount.id, accountName: context.accountName || savedAccount.businessName };
     for (const rule of rules) {
       await this.scheduleAutomatedMessage(rule, enrichedContext);
