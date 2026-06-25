@@ -187,6 +187,13 @@ export interface Lead {
   sfLeadId?: string | null;
   sfLeadStageName?: string | null;
   sfLeadMatchedAt?: string | null;
+  // Autonomous-mode appointment metadata (2026-06-24). Populated only when
+  // the dispatcher confirmation detector parked the lead as `booked` (or the
+  // sweeper marked it completed). Derived server-side from audit metadata;
+  // the canonical Lead row is unchanged. The Messages info banner reads these
+  // to render "Cleaning scheduled for …" / "Cleaning completed …".
+  scheduledFor?: string | null;
+  completedAt?: string | null;
   // Refund / billing state. Populated by the scheduler's 404 handler and
   // the hourly chargeState sweep. `refundedAt` drives the "Refunded" badge
   // + filter on the Messages page. Yelp leaves these null (no per-lead

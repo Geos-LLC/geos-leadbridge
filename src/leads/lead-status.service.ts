@@ -108,7 +108,13 @@ export type WriteSkipReason =
   | 'automation_terminal'
   | 'pipeline_downgrade'
   | 'duplicate'
-  | 'stale_event';
+  | 'stale_event'
+  // Autonomous-booking carve-out path: a dispatcher_confirmed write arrived
+  // for a lead whose owning user has an active sf_connection. SF owns the
+  // lifecycle in that mode, so the LB autonomous detector must not flip the
+  // canonical status. Logged distinctly so dashboards can confirm the
+  // carve-out only fires in the intended mode.
+  | 'sf_connected_autonomous_blocked';
 
 export interface ConflictInfo {
   kind: ConflictKind;
@@ -245,6 +251,59 @@ export class LeadStatusService {
   ) {}
 
   /**
+   * Returns true when the given user has an active sf_connection. Powers the
+   * autonomous-mode carve-outs (dispatcher_confirmed, appointment_date_passed)
+   * which must never fire when SF owns the lifecycle.
+   *
+   * Single-shot DB read; callers gate this behind a carve-out shape check so
+   * the hot path doesn't pay for it on every write.
+   */
+  private async hasActiveSfConnection(userId: string): Promise<boolean> {
+    const conn = await this.prisma.sfConnection.findUnique({
+      where: { userId },
+      select: { isActive: true, status: true },
+    });
+    return !!(conn && conn.isActive && conn.status === 'active');
+  }
+
+  /**
+   * Reschedule check (Risk #3 fix). Returns true when the incoming
+   * appointmentAt is materially different (≥5 minutes apart) from the
+   * appointmentAt on the latest dispatcher_confirmed audit row for this lead.
+   * Used by the Guard 1 carve-out: if a new dispatcher confirmation message
+   * carries a fresh appointment time we must accept a new audit row even when
+   * Lead.status hasn't changed.
+   *
+   * Returns true when no prior dispatcher_confirmed audit row exists — that's
+   * the first confirmation for this lead and is always "fresh" for sweeper
+   * purposes, even when the canonical status is somehow already `booked` (e.g.
+   * a manual mark before the detector ran).
+   */
+  private async isAppointmentRescheduled(
+    leadId: string,
+    incomingAppointmentAtIso: string,
+  ): Promise<boolean> {
+    if (!incomingAppointmentAtIso) return false;
+    const incoming = new Date(incomingAppointmentAtIso);
+    if (Number.isNaN(incoming.getTime())) return false;
+    const latest = await this.prisma.leadStatusAuditLog.findFirst({
+      where: {
+        leadId,
+        source: 'lb_automation',
+        reason: 'dispatcher_confirmed',
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: { metadata: true },
+    });
+    if (!latest?.metadata || typeof latest.metadata !== 'object') return true;
+    const priorRaw = (latest.metadata as any).appointmentAt;
+    if (typeof priorRaw !== 'string' || !priorRaw) return true;
+    const prior = new Date(priorRaw);
+    if (Number.isNaN(prior.getTime())) return true;
+    return Math.abs(incoming.getTime() - prior.getTime()) >= 5 * 60 * 1000;
+  }
+
+  /**
    * Standard k=v skip log. Loki-friendly — every guard rejection emits the
    * same shape so dashboards/alerts can filter on `skip_reason=`.
    */
@@ -336,8 +395,36 @@ export class LeadStatusService {
     // ── Guard 1: same-status no-op ────────────────────────────────────────
     // No audit row, no SSE — keeps the activity timeline noise-free when
     // a webhook retry / extension re-sync hands us the same status.
+    //
+    // Carve-out (autonomous-booking reschedule, 2026-06-24): when a
+    // dispatcher_confirmed write arrives for a lead that's already booked,
+    // the Lead.status doesn't change but the appointment time might —
+    // dispatcher sent "tomorrow at 10" on day 1, then "moved to Friday at 2"
+    // on day 3. The sweeper relies on the LATEST audit row's
+    // metadata.appointmentAt to decide when to flip booked→completed; if we
+    // short-circuit here the new appointmentAt is lost and the sweeper acts
+    // on the stale slot. So when source=lb_automation, reason=dispatcher_confirmed,
+    // and the incoming appointmentAt differs from the last accepted one, we
+    // bypass the no-op and write a fresh audit row (status unchanged).
     if (newStatus === oldStatus) {
-      return this.skipped(lead, 'no_change');
+      const isRescheduleWrite =
+        input.source === 'lb_automation' &&
+        input.reason === 'dispatcher_confirmed' &&
+        newStatus === 'booked' &&
+        !!input.metadata?.appointmentAt;
+      if (!isRescheduleWrite) {
+        return this.skipped(lead, 'no_change');
+      }
+      const isFreshAppointment = await this.isAppointmentRescheduled(
+        lead.id,
+        String(input.metadata?.appointmentAt ?? ''),
+      );
+      if (!isFreshAppointment) {
+        return this.skipped(lead, 'no_change');
+      }
+      // Fall through: write the audit row for the new appointmentAt without
+      // touching Lead.status. The remaining guards (dedup, stale_event) still
+      // run so the reschedule write is itself replay-safe.
     }
 
     // ── Guard 2: canonical validation ─────────────────────────────────────
@@ -408,7 +495,40 @@ export class LeadStatusService {
         oldStatus !== 'booked' &&
         oldStatus !== 'in_progress' &&
         oldStatus !== 'completed';
-      if (!isOptOutLost && !isHiredElseRecoverable) {
+      // ── Autonomous-booking carve-outs (2026-06-24) ─────────────────────
+      // In autonomous mode (no active sf_connection), LB has no upstream
+      // truth about scheduling outcomes. Two narrow lb_automation carve-outs
+      // let the appointment-detector + sweeper write the lifecycle states
+      // SF would normally own:
+      //
+      //   (a) reason='dispatcher_confirmed' + newStatus='booked'
+      //       — appointment-detector saw a dispatcher confirmation message
+      //         on TT with a concrete date+time, parked the lead as booked.
+      //         Stops follow-ups (booked is in AUTOMATION_TERMINAL).
+      //         Requires metadata.appointmentAt for the sweeper to consult later.
+      //
+      //   (b) reason='appointment_date_passed' + newStatus='completed'
+      //       — appointment-sweeper saw a booked lead whose scheduled slot
+      //         ended 6h+ ago with no contradicting platform_sync override,
+      //         marked it completed.
+      //
+      // Both carve-outs require the user has NO active sf_connection. The
+      // check is async (DB hit) so it lives below in its own guard step —
+      // here we only short-circuit the forbidden-destination guard for the
+      // two recognized carve-out shapes. The sf-connection gate is enforced
+      // in Guard 2d (see below).
+      const isAutonomousDispatcherConfirmed =
+        newStatus === 'booked' &&
+        input.reason === 'dispatcher_confirmed' &&
+        !!input.metadata?.appointmentAt;
+      const isAutonomousAppointmentDatePassed =
+        newStatus === 'completed' && input.reason === 'appointment_date_passed';
+      if (
+        !isOptOutLost &&
+        !isHiredElseRecoverable &&
+        !isAutonomousDispatcherConfirmed &&
+        !isAutonomousAppointmentDatePassed
+      ) {
         this.metrics?.recordSkip('automation_forbidden_destination');
         this.logSkip(
           input,
@@ -419,6 +539,28 @@ export class LeadStatusService {
           lead.platformStatus,
         );
         return this.skipped(lead, 'automation_forbidden_destination');
+      }
+
+      // ── Guard 2d: autonomous-only enforcement for the new carve-outs ────
+      // The two autonomous carve-outs above MUST NOT fire when the user has
+      // an active SF connection. SF owns the lifecycle in connected mode —
+      // a stale LB heuristic must not flip a lead behind SF's back. The
+      // check is a single SfConnection lookup; skipped when neither carve-out
+      // shape matches to avoid an unnecessary query on the hot path.
+      if (isAutonomousDispatcherConfirmed || isAutonomousAppointmentDatePassed) {
+        const hasActiveSf = await this.hasActiveSfConnection(lead.userId);
+        if (hasActiveSf) {
+          this.metrics?.recordSkip('sf_connected_autonomous_blocked');
+          this.logSkip(
+            input,
+            lead.id,
+            oldStatus,
+            newStatus,
+            'sf_connected_autonomous_blocked',
+            lead.platformStatus,
+          );
+          return this.skipped(lead, 'sf_connected_autonomous_blocked');
+        }
       }
     }
 
@@ -571,18 +713,33 @@ export class LeadStatusService {
       ? (input.reason ?? 'sf_reactivated_archived')
       : (input.reason ?? input.lostReason ?? null);
 
+    // Reschedule-only path: when Guard 1's carve-out let us through with
+    // newStatus===oldStatus to record a new appointmentAt, we MUST NOT touch
+    // the Lead row (no status change, no statusUpdatedAt bump — that would
+    // mask the original transition timestamp). The audit row still goes in.
+    const isRescheduleOnly = newStatus === oldStatus;
+
     const { conflict, auditLogId } = await this.prisma.$transaction(async (tx) => {
-      await tx.lead.update({
-        where: { id: lead.id },
-        data: {
-          status: newStatus,
-          statusSource: input.source,
-          statusUpdatedAt: occurredAt,
-          ...(lostReasonUpdate || {}),
-          ...(reengageAtUpdate || {}),
-          ...(input.extraLeadUpdates || {}),
-        },
-      });
+      if (!isRescheduleOnly) {
+        await tx.lead.update({
+          where: { id: lead.id },
+          data: {
+            status: newStatus,
+            statusSource: input.source,
+            statusUpdatedAt: occurredAt,
+            ...(lostReasonUpdate || {}),
+            ...(reengageAtUpdate || {}),
+            ...(input.extraLeadUpdates || {}),
+          },
+        });
+      } else if (input.extraLeadUpdates && Object.keys(input.extraLeadUpdates).length > 0) {
+        // Reschedule writes never carry extraLeadUpdates today, but if a
+        // future caller passes them we shouldn't silently drop them.
+        await tx.lead.update({
+          where: { id: lead.id },
+          data: { ...input.extraLeadUpdates },
+        });
+      }
 
       // Conflict detection: manual writes only.
       let conflictInfo: ConflictInfo | null = null;

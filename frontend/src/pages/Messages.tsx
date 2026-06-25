@@ -229,6 +229,52 @@ function getDispatcherBannerCopy(
 }
 
 /**
+ * Autonomous-mode appointment info banner.
+ *
+ * Returns a green/neutral informational copy block — distinct from the yellow
+ * "AI is paused / please reply" warning banner — when the autonomous
+ * dispatcher-confirmation pipeline has parked the lead as `booked` (with an
+ * upcoming appointment) or marked it `completed` via the sweeper. Returns
+ * null for any other lead state so existing flows are untouched.
+ *
+ * Tied to the audit metadata, not to a hardcoded date column: the backend
+ * resolves `lead.scheduledFor` / `lead.completedAt` from the latest
+ * dispatcher_confirmed / appointment_date_passed audit row. When the lead's
+ * canonical status doesn't match the autonomous path (e.g. SF marked it,
+ * platform_sync marked it), the field is null and this banner stays hidden.
+ */
+function getAppointmentInfoBanner(
+  lead: Lead | null,
+): { kind: 'scheduled' | 'completed'; title: string } | null {
+  if (!lead) return null;
+  if (lead.status === 'booked' && lead.scheduledFor) {
+    const when = new Date(lead.scheduledFor);
+    if (!Number.isNaN(when.getTime())) {
+      const label = when.toLocaleString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      return { kind: 'scheduled', title: `Cleaning scheduled for ${label}` };
+    }
+  }
+  if (lead.status === 'completed' && lead.completedAt) {
+    const when = new Date(lead.completedAt);
+    if (!Number.isNaN(when.getTime())) {
+      const label = when.toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+      return { kind: 'completed', title: `Cleaning completed ${label}` };
+    }
+  }
+  return null;
+}
+
+/**
  * LeadBridge canonical pipeline statuses (mirrors LB_PIPELINE_STATUSES on the
  * backend — see src/integrations/service-flow/sf-status-map.ts). Manual writes
  * from the status dropdown must use one of these values.
@@ -572,6 +618,11 @@ export function Messages() {
   const lastInbound = lastEvent?.direction === 'inbound';
   const bannerCopy = getDispatcherBannerCopy(runtimeState, lastInbound);
   const needsDispatcher = bannerCopy !== null;
+  // Informational appointment banner — shown alongside the yellow dispatcher
+  // banner when applicable, but independent of it (lead may be scheduled
+  // without the AI being paused). Render condition is just "lead is in the
+  // autonomous booked/completed state with a known timestamp."
+  const appointmentBanner = getAppointmentInfoBanner(selectedLead);
   const [bannerMounted, setBannerMounted] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
   useEffect(() => {
@@ -2872,6 +2923,29 @@ export function Messages() {
                       {bannerCopy.reason && (
                         <div className="mt-0.5 opacity-80">{bannerCopy.reason}</div>
                       )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {appointmentBanner && (
+                <div className="flex justify-center mt-2">
+                  <div
+                    className="flex items-start gap-2 px-3 py-2 rounded-xl border max-w-md"
+                    style={{
+                      background: appointmentBanner.kind === 'scheduled'
+                        ? 'oklch(0.96 0.04 145)'
+                        : 'oklch(0.96 0.03 200)',
+                      borderColor: appointmentBanner.kind === 'scheduled'
+                        ? 'oklch(0.78 0.13 145)'
+                        : 'oklch(0.78 0.1 200)',
+                      color: appointmentBanner.kind === 'scheduled'
+                        ? 'oklch(0.32 0.13 145)'
+                        : 'oklch(0.32 0.1 200)',
+                    }}
+                  >
+                    <Calendar size={14} className="mt-0.5 shrink-0" />
+                    <div className="text-xs leading-snug">
+                      <div className="font-semibold">{appointmentBanner.title}</div>
                     </div>
                   </div>
                 </div>

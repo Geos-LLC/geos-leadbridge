@@ -271,9 +271,64 @@ export class LeadsService {
         } else {
           normalized.activityBucket = activityBucketFromThreadContext(null, lead.status);
         }
+        // Autonomous-mode appointment metadata (2026-06-24). Pull the latest
+        // dispatcher_confirmed / appointment_date_passed audit rows so the UI
+        // banner can render "Cleaning scheduled for …" / "Cleaning completed
+        // on …". Skipped for non-booked / non-completed leads to avoid an
+        // extra DB hit on the hot list-render path.
+        if (lead.status === 'booked' || lead.status === 'completed') {
+          const appointmentMeta = await this.resolveAppointmentMetadata(lead.id, lead.status);
+          normalized.scheduledFor = appointmentMeta.scheduledFor;
+          normalized.completedAt = appointmentMeta.completedAt;
+        }
         return normalized;
       },
     );
+  }
+
+  /**
+   * Pulls scheduledFor / completedAt from the latest matching audit rows.
+   * Used by `getLead` so the Messages info banner can render the autonomous-
+   * mode appointment label without storing the timestamp on the Lead row.
+   *
+   * - scheduledFor: latest source='lb_automation', reason='dispatcher_confirmed'
+   *   audit row's metadata.appointmentAt. Surfaced only when Lead.status is
+   *   `booked` (a `completed` lead's future appointment label would be wrong).
+   * - completedAt: when Lead.status === 'completed', the occurredAt of the
+   *   audit row that landed it there via reason='appointment_date_passed'.
+   *   Falls back to null otherwise; non-sweeper completions (manual / SF /
+   *   platform_sync) leave the field null and the UI omits the banner.
+   */
+  private async resolveAppointmentMetadata(
+    leadId: string,
+    status: string,
+  ): Promise<{ scheduledFor: string | null; completedAt: string | null }> {
+    const out: { scheduledFor: string | null; completedAt: string | null } = {
+      scheduledFor: null,
+      completedAt: null,
+    };
+    if (status === 'booked') {
+      const audit = await this.prisma.leadStatusAuditLog.findFirst({
+        where: { leadId, source: 'lb_automation', reason: 'dispatcher_confirmed' },
+        orderBy: { occurredAt: 'desc' },
+        select: { metadata: true },
+      });
+      const md = audit?.metadata && typeof audit.metadata === 'object' ? (audit.metadata as any) : null;
+      const raw = md && typeof md.appointmentAt === 'string' ? md.appointmentAt : null;
+      if (raw) {
+        const d = new Date(raw);
+        if (!Number.isNaN(d.getTime())) out.scheduledFor = d.toISOString();
+      }
+    }
+    if (status === 'completed') {
+      const audit = await this.prisma.leadStatusAuditLog.findFirst({
+        where: { leadId, source: 'lb_automation', reason: 'appointment_date_passed' },
+        orderBy: { occurredAt: 'desc' },
+        select: { occurredAt: true },
+      });
+      if (audit?.occurredAt) out.completedAt = audit.occurredAt.toISOString();
+    }
+    return out;
   }
 
   /**

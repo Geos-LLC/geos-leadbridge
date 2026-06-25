@@ -20,6 +20,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { parseDuration } from '../common/utils/parse-duration';
 import { LeadStatusService } from '../leads/lead-status.service';
+import { AppointmentDetectorService } from '../leads/appointment-detector.service';
 import { TrialService } from '../trial/trial.service';
 import { LeadsService } from '../leads/leads.service';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
@@ -55,6 +56,7 @@ export class WebhooksService {
     private trialService: TrialService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
+    private readonly appointmentDetector: AppointmentDetectorService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -781,6 +783,26 @@ export class WebhooksService {
         data: { senderType: 'manual' },
       });
       this.logger.log(`[manual-pro] Detected external pro message: ${messageId} (conv=${conversation.id})`);
+
+      // Autonomous-mode appointment detection. A dispatcher who typed a
+      // confirmation message directly on the TT inbox ("scheduled for
+      // tomorrow June 25 between 10-10:30 AM…") is the only outcome signal
+      // LB has when SF isn't connected. The detector decides whether THIS
+      // message is a confirmation; LeadStatusService then enforces all the
+      // safety guards (autonomous-only carve-out, sf_connection check,
+      // reschedule semantics). Failures are logged and swallowed — message
+      // ingestion must not regress when the detector errors.
+      this.detectAndApplyDispatcherConfirmation({
+        userId,
+        leadId: lead.id,
+        platform,
+        messageContent,
+        messageSentAt: messageTimestamp,
+      }).catch((err) => {
+        this.logger.warn(
+          `[appointment-detector] detection failed lead_id=${lead.id} platform=${platform} err=${err?.message ?? err}`,
+        );
+      });
     }
 
     // Update conversation's lastMessageAt and unread count
@@ -2559,6 +2581,133 @@ export class WebhooksService {
       } catch (err: any) {
         this.logger.warn(`Failed to evaluate Yelp thread for follow-up: ${err.message}`);
       }
+    }
+  }
+
+  /**
+   * Autonomous-mode dispatcher confirmation pipeline (2026-06-24).
+   *
+   * Called from the external-pro message handler when LB receives a message
+   * a human dispatcher typed directly into the platform inbox. Loads the
+   * minimal context for the detector (lead timezone via user/account),
+   * invokes the LLM-backed detector, and forwards a confirmed result into
+   * LeadStatusService for the canonical write.
+   *
+   * Three guards live HERE (before paying the LLM cost):
+   *   1. Feature flag — LB_AUTONOMOUS_BOOKING_DETECT=false turns this into
+   *      a no-op so we can ship the code without changing behavior.
+   *   2. Platform filter — only `thumbtack` for now. Yelp's dispatcher
+   *      messages have a different structure; we'll add it later.
+   *   3. SF-connection gate — when the user is in SF-connected mode the
+   *      sweeper + carve-out would block the write anyway, but skipping
+   *      here saves the LLM call.
+   *
+   * LeadStatusService applies the actual write guards (canonical validation,
+   * sf_connection re-check, reschedule semantics). When the detector returns
+   * confirmed=false this method exits without touching the DB.
+   */
+  private async detectAndApplyDispatcherConfirmation(args: {
+    userId: string;
+    leadId: string;
+    platform: string;
+    messageContent: string;
+    messageSentAt: Date;
+  }): Promise<void> {
+    const detector = this.appointmentDetector;
+    if (!detector) return;
+    if (args.platform !== 'thumbtack') return;
+
+    const featureFlag = this.configService.get<string>('LB_AUTONOMOUS_BOOKING_DETECT');
+    if (featureFlag !== 'true' && featureFlag !== 'shadow') {
+      return;
+    }
+
+    // SF-connection short-circuit. The write path will block these too, but
+    // we skip the LLM call entirely when there's no chance the write lands.
+    const sfConn = await this.prisma.sfConnection.findUnique({
+      where: { userId: args.userId },
+      select: { isActive: true, status: true },
+    });
+    if (sfConn && sfConn.isActive && sfConn.status === 'active') {
+      this.logger.log(
+        `[appointment-detector] skip_sf_connected lead_id=${args.leadId} user_id=${args.userId}`,
+      );
+      return;
+    }
+
+    // Resolve account timezone for the LLM's relative-date math.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: args.leadId },
+      select: { customerName: true, businessId: true },
+    });
+    let timezone = 'America/New_York';
+    try {
+      const [user, account] = await Promise.all([
+        this.prisma.user.findUnique({ where: { id: args.userId }, select: { timezone: true } }),
+        lead?.businessId
+          ? this.prisma.savedAccount.findFirst({
+              where: { userId: args.userId, businessId: lead.businessId },
+              select: { timezoneOverride: true },
+            })
+          : Promise.resolve(null),
+      ]);
+      timezone = account?.timezoneOverride || user?.timezone || timezone;
+    } catch (err: any) {
+      this.logger.warn(`[appointment-detector] tz resolve failed: ${err?.message ?? err}`);
+    }
+
+    const result = await detector.detect({
+      messageText: args.messageContent,
+      messageSentAt: args.messageSentAt,
+      timezone,
+      customerName: lead?.customerName,
+    });
+
+    if (!result.confirmed || !result.appointmentAt) {
+      if (!result.skippedByPrefilter) {
+        this.logger.log(
+          `[appointment-detector] no_confirm lead_id=${args.leadId} reason=${result.reason} confidence=${result.confidence}`,
+        );
+      }
+      return;
+    }
+
+    // Shadow mode: log what we would have done without performing the write.
+    if (featureFlag === 'shadow') {
+      this.logger.log(
+        `[appointment-detector] would_book lead_id=${args.leadId} appointment_at=${result.appointmentAt} slot_minutes=${result.slotMinutes ?? 'null'} confidence=${result.confidence} reason="${result.reason}"`,
+      );
+      return;
+    }
+
+    try {
+      const writeResult = await this.leadStatusService.writeStatus({
+        leadId: args.leadId,
+        newStatus: 'booked',
+        source: 'lb_automation',
+        reason: 'dispatcher_confirmed',
+        occurredAt: args.messageSentAt,
+        metadata: {
+          appointmentAt: result.appointmentAt,
+          slotMinutes: result.slotMinutes,
+          confidence: result.confidence,
+          detectorReason: result.reason,
+          timezone,
+        },
+      });
+      if (writeResult.applied) {
+        this.logger.log(
+          `[appointment-detector] booked lead_id=${args.leadId} appointment_at=${result.appointmentAt} slot_minutes=${result.slotMinutes ?? 'null'} confidence=${result.confidence}`,
+        );
+      } else {
+        this.logger.log(
+          `[appointment-detector] write_skipped lead_id=${args.leadId} skip_reason=${writeResult.skipReason ?? 'unknown'} confidence=${result.confidence}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[appointment-detector] write_failed lead_id=${args.leadId} err=${err?.message ?? err}`,
+      );
     }
   }
 

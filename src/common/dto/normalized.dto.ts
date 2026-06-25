@@ -152,6 +152,20 @@ export class NormalizedLead {
   sfLeadStageName?: string | null;
   sfLeadMatchedAt?: Date | null;
 
+  // Autonomous-mode appointment metadata (2026-06-24). Populated only when
+  // the dispatcher confirmation detector fired in autonomous mode (no
+  // sf_connection). Resolved server-side from the latest dispatcher_confirmed
+  // audit row's metadata; the canonical Lead row stays unchanged.
+  //   - scheduledFor : ISO timestamp of the next confirmed appointment slot.
+  //                    Null on leads that were never confirmed via the
+  //                    detector, or whose latest audit row predates the
+  //                    field. Used by the Messages info banner.
+  //   - completedAt  : ISO timestamp of when the appointment_date_passed
+  //                    sweeper marked the lead completed. Null when the lead
+  //                    is not in `completed` status via the sweeper path.
+  scheduledFor?: string | null;
+  completedAt?: string | null;
+
   // Refund / billing state. refundedAt drives the "Refunded" badge on
   // Messages page lead cards + the new 'refunded' filter option in the
   // status dropdown. chargeStateRaw carries the raw platform value

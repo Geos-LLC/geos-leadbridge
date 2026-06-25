@@ -1966,4 +1966,197 @@ describe('LeadStatusService', () => {
       expect(prisma._state.lead.lostReason).toBeNull();
     });
   });
+
+  // ════════════════════════════════════════════════════════════════════
+  // Autonomous-mode appointment carve-outs (2026-06-24)
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // Two narrow lb_automation carve-outs added to Guard 2c:
+  //   - dispatcher_confirmed: detector saw a TT dispatcher confirmation
+  //   - appointment_date_passed: sweeper flipped booked→completed
+  // Both require: no active sf_connection, correct metadata shape.
+  // Guard 1 also gets a reschedule fix: same-status writes go through
+  // when they carry a newer appointmentAt than the last audit.
+  describe('autonomous-mode appointment carve-outs', () => {
+    describe('dispatcher_confirmed (booked)', () => {
+      it('allows lb_automation→booked when reason=dispatcher_confirmed in autonomous mode', async () => {
+        const prisma = buildPrismaMock({ status: 'engaged' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'booked',
+          reason: 'dispatcher_confirmed',
+          metadata: { appointmentAt: '2026-06-25T14:00:00Z', slotMinutes: 30 },
+        });
+
+        expect(res.applied).toBe(true);
+        expect(res.status).toBe('booked');
+        expect(prisma._state.audits[0]).toMatchObject({
+          source: 'lb_automation',
+          reason: 'dispatcher_confirmed',
+        });
+        expect(prisma._state.audits[0].metadata).toEqual(expect.objectContaining({
+          appointmentAt: '2026-06-25T14:00:00Z',
+        }));
+      });
+
+      it('blocks lb_automation→booked when reason=dispatcher_confirmed and sf_connection is active', async () => {
+        const prisma = buildPrismaMock({ status: 'engaged' }, {
+          sfConnection: { isActive: true, status: 'active' },
+        });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'booked',
+          reason: 'dispatcher_confirmed',
+          metadata: { appointmentAt: '2026-06-25T14:00:00Z' },
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('sf_connected_autonomous_blocked');
+      });
+
+      it('rejects dispatcher_confirmed write without metadata.appointmentAt', async () => {
+        // The carve-out shape requires appointmentAt; without it the write
+        // falls through to the original forbidden-destination skip.
+        const prisma = buildPrismaMock({ status: 'engaged' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'booked',
+          reason: 'dispatcher_confirmed',
+          // no metadata
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('automation_forbidden_destination');
+      });
+    });
+
+    describe('appointment_date_passed (completed)', () => {
+      it('allows lb_automation→completed via the sweeper in autonomous mode', async () => {
+        const prisma = buildPrismaMock({ status: 'booked', statusSource: 'lb_automation' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'completed',
+          reason: 'appointment_date_passed',
+          metadata: { triggeredBy: 'AppointmentSweeper' },
+        });
+
+        expect(res.applied).toBe(true);
+        expect(res.status).toBe('completed');
+      });
+
+      it('blocks lb_automation→completed when sf_connection is active', async () => {
+        const prisma = buildPrismaMock({ status: 'booked', statusSource: 'lb_automation' }, {
+          sfConnection: { isActive: true, status: 'active' },
+        });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'completed',
+          reason: 'appointment_date_passed',
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('sf_connected_autonomous_blocked');
+      });
+
+      it('still blocks lb_automation→completed with the wrong reason', async () => {
+        // A future caller that tries to flip completed via lb_automation with
+        // an unrelated reason must still be rejected — the carve-out is a
+        // narrow allowlist, not a general escape hatch.
+        const prisma = buildPrismaMock({ status: 'booked' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'completed',
+          reason: 'something_else',
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('automation_forbidden_destination');
+      });
+    });
+
+    describe('Guard 1 reschedule fix', () => {
+      it('writes a fresh audit row when dispatcher_confirmed arrives with a newer appointmentAt', async () => {
+        // Lead already booked from an earlier confirmation; new dispatcher
+        // message moves the slot. Status stays 'booked'; a new audit row is
+        // written so the sweeper picks up the new time.
+        const prisma = buildPrismaMock({
+          status: 'booked',
+          statusSource: 'lb_automation',
+        });
+        prisma.leadStatusAuditLog.findFirst = jest.fn().mockResolvedValue({
+          metadata: { appointmentAt: '2026-06-25T14:00:00Z', slotMinutes: 30 },
+        });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'booked',
+          reason: 'dispatcher_confirmed',
+          metadata: { appointmentAt: '2026-06-27T18:00:00Z', slotMinutes: 30 },
+        });
+
+        expect(res.applied).toBe(true);
+        expect(prisma._state.audits).toHaveLength(1);
+        expect(prisma._state.audits[0].metadata).toEqual(expect.objectContaining({
+          appointmentAt: '2026-06-27T18:00:00Z',
+        }));
+        // Lead row should NOT have been updated — reschedule is audit-only.
+        expect(prisma._state.updates).toHaveLength(0);
+      });
+
+      it('short-circuits with no_change when the incoming appointmentAt matches the last audit', async () => {
+        const prisma = buildPrismaMock({ status: 'booked' });
+        prisma.leadStatusAuditLog.findFirst = jest.fn().mockResolvedValue({
+          metadata: { appointmentAt: '2026-06-25T14:00:00Z' },
+        });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'lb_automation',
+          newStatus: 'booked',
+          reason: 'dispatcher_confirmed',
+          // Same minute-resolution as the prior audit row — should no-op.
+          metadata: { appointmentAt: '2026-06-25T14:00:00Z' },
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('no_change');
+        expect(prisma._state.audits).toHaveLength(0);
+      });
+
+      it('still short-circuits same-status writes for non-dispatcher_confirmed reasons', async () => {
+        const prisma = buildPrismaMock({ status: 'booked' });
+        const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+        const res = await svc.writeStatus({
+          leadId: LEAD_ID,
+          source: 'service_flow',
+          newStatus: 'booked',
+        });
+
+        expect(res.applied).toBe(false);
+        expect(res.skipReason).toBe('no_change');
+      });
+    });
+  });
 });
