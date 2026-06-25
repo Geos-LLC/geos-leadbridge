@@ -389,15 +389,26 @@ export class MonitoringService implements OnModuleInit {
    * is exactly the use case here. Using a tenant's key would bill that tenant
    * for our debug pages and confuse their outbound log — don't do that.
    *
+   * Sigcore contract (changed in the PR4 outbound resolver work): `/v1/messages`
+   * runs the profile resolver for every request UNLESS `phoneNumberId` is
+   * provided. The resolver requires `tenantId`, which the platform workspace
+   * key does NOT carry — so a workspace-keyed call without `phoneNumberId`
+   * always 422s with `AMBIGUOUS_FROM_NUMBER: tenantId is required for
+   * profile-based outbound routing`. The legacy direct-send path (pass
+   * `phoneNumberId`, skip the resolver) is preserved for SF/Callio back-compat
+   * and is what we use here.
+   *
    * Required env to actually send:
-   *   - SIGCORE_API_KEY      (existing platform workspace key — already used for
-   *                           tenant provisioning + pool routing)
-   *   - DEV_ALERT_SMS_TO     (defaults to +12483462681 if unset)
-   *   - DEV_ALERT_SMS_FROM   (optional — explicit pool number to send from. When
-   *                           omitted, the request goes out without `fromNumber`
-   *                           and Sigcore picks one from the platform workspace's
-   *                           pool. Set it explicitly if Sigcore rejects the
-   *                           no-from-number path or you want a stable sender.)
+   *   - SIGCORE_API_KEY                 (platform workspace key)
+   *   - DEV_ALERT_SMS_TO                (defaults to +12483462681)
+   *   - DEV_ALERT_SMS_PHONE_NUMBER_ID   (Sigcore phone_number_id of a pool
+   *                                      number — required since the PR4
+   *                                      resolver change. Without it the
+   *                                      Sigcore call 422s and we fall back to
+   *                                      email. Look up the id in the platform
+   *                                      Sigcore workspace's phone_numbers
+   *                                      table for whichever pool number you
+   *                                      want as the stable dev-alert sender.)
    *
    * Dedup window is shorter than the email path (1h vs 24h) because these are
    * critical and we want a fresh page after a quiet hour. When the Sigcore
@@ -412,13 +423,33 @@ export class MonitoringService implements OnModuleInit {
   }): Promise<void> {
     try {
       const to = this.configService.get<string>('DEV_ALERT_SMS_TO') || process.env.DEV_ALERT_SMS_TO || '+12483462681';
-      const fromPhone = this.configService.get<string>('DEV_ALERT_SMS_FROM') || process.env.DEV_ALERT_SMS_FROM || '';
+      const phoneNumberId =
+        this.configService.get<string>('DEV_ALERT_SMS_PHONE_NUMBER_ID') ||
+        process.env.DEV_ALERT_SMS_PHONE_NUMBER_ID ||
+        '';
       const apiKey = this.configService.get<string>('SIGCORE_API_KEY') || process.env.SIGCORE_API_KEY || '';
 
       // Without the platform key we can't reach Sigcore. Fall back to email so
       // the alert isn't lost — the dev will see it in their inbox.
       if (!apiKey) {
         this.logger.warn(`[DevSms] SIGCORE_API_KEY unset — falling back to email for ${opts.kind}`);
+        await this.notifyDevAlert({
+          kind: opts.kind,
+          subject: `LeadBridge: ${opts.kind}`,
+          message: opts.message,
+          context: opts.context,
+        });
+        return;
+      }
+
+      // Without phoneNumberId, Sigcore's resolver will reject the call
+      // (tenantId-less workspace key). Skip the doomed network round-trip and
+      // go straight to email — the operator gets the same content and the
+      // hourly dedup row is still written via the email path.
+      if (!phoneNumberId) {
+        this.logger.warn(
+          `[DevSms] DEV_ALERT_SMS_PHONE_NUMBER_ID unset — Sigcore would 422 (tenantId required). Falling back to email for ${opts.kind}`,
+        );
         await this.notifyDevAlert({
           kind: opts.kind,
           subject: `LeadBridge: ${opts.kind}`,
@@ -443,16 +474,15 @@ export class MonitoringService implements OnModuleInit {
       const body = `LB: ${opts.message}`.slice(0, 320);
 
       const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+      // phoneNumberId is what bypasses Sigcore's profile resolver — the only
+      // path that works for workspace-keyed (no-tenant) calls today.
       const requestBody: Record<string, unknown> = {
         toNumber: to,
         body,
         channel: 'sms',
+        phoneNumberId,
         metadata: { purpose: 'dev_alert', kind: opts.kind },
       };
-      // Only pin a sender when explicitly configured. Otherwise Sigcore picks
-      // from the platform workspace's pool — which is the "alerts only" path
-      // per SIGCORE_HIERARCHY.md.
-      if (fromPhone) requestBody.fromNumber = fromPhone;
 
       const response = await fetch(`${sigcoreUrl}/v1/messages`, {
         method: 'POST',
@@ -1173,6 +1203,14 @@ export class MonitoringService implements OnModuleInit {
    *
    * Threshold of 5 across all tenants suppresses single-account hiccups —
    * a real regression in the scheduler shows up as dozens of rows.
+   *
+   * Suggest-mode parking is excluded: when an enrollment has a pending
+   * `FollowUpStepExecution(status='suggested')`, the scheduler intentionally
+   * does NOT advance it (see follow-up-scheduler.service.ts claim query) —
+   * the user is expected to action the suggestion. Those rows are not
+   * "stuck", they're awaiting input, and without this filter every
+   * un-actioned suggest-mode tenant counts as a stuck enrollment. That was
+   * driving the 2026-06-24 fu_stuck×100 false-positive page.
    */
   private async checkStuckFollowUpEnrollments(db: Db = this.prisma): Promise<number> {
     const cutoff = new Date(Date.now() - 60 * 60 * 1000);
@@ -1180,6 +1218,7 @@ export class MonitoringService implements OnModuleInit {
       where: {
         status: 'active',
         nextStepDueAt: { lt: cutoff, not: null },
+        stepExecutions: { none: { status: 'suggested' } },
       },
       select: { id: true, conversationId: true, platform: true, lastExecutedAt: true },
       take: 100,
