@@ -66,6 +66,21 @@ export interface DetectResult {
   skippedByPrefilter: boolean;
 }
 
+export type PostJobSignalType = 'review_request' | 'receipt' | 'payment' | 'post_job_thanks';
+
+export interface PostJobDetectResult {
+  /** True when the dispatcher message is a strong "job is done" signal. */
+  completed: boolean;
+  /** Which type of post-job signal triggered detection. Null when completed=false. */
+  signalType: PostJobSignalType | null;
+  /** LLM-reported confidence in [0,1]. ≥0.85 required to act. */
+  confidence: number;
+  /** Short reason string, for logs. */
+  reason: string;
+  /** True when the regex pre-filter rejected the message (LLM was skipped). */
+  skippedByPrefilter: boolean;
+}
+
 const PREFILTER_KEYWORDS = [
   'scheduled',
   'schedule',
@@ -78,6 +93,17 @@ const PREFILTER_KEYWORDS = [
   'arrival',
   'tomorrow',
   'see you',
+  // 'clean' covers messages like "looking forward to helping you clean your
+  // home on June 29 9-9:30 AM" where the dispatcher uses the verb form
+  // instead of the gerund. False-positive risk is low — the LLM is the final
+  // arbiter; the only cost is paying for a few more LLM calls per day.
+  'clean',
+  // Common confirmation phrasings that don't always include one of the other
+  // keywords ("Looking forward to seeing you on the 25th at 10 AM").
+  'looking forward',
+  'be there',
+  "we'll come",
+  'we can come',
 ];
 
 // Loose date tokens: "Jun 25", "June 25", "6/25", "06/25", "tomorrow",
@@ -107,6 +133,53 @@ const TIME_RE = new RegExp(
   ].join('|'),
   'i',
 );
+
+// ── Post-job signal detection ────────────────────────────────────────────
+// Some leads predate the LeadBridge integration: there's no record of an
+// appointment confirmation, but the only dispatcher message we have is the
+// review request that the tenant only sends AFTER a completed cleaning, or
+// the receipt that Thumbtack issued at payment. Both are strong signals
+// that the job is done — strong enough to mark the lead `completed` directly
+// (skipping `booked`).
+//
+// Same two-stage pipeline as appointment detection: cheap regex pre-filter
+// gates a small LLM call. False positives here downgrade an active lead to
+// completed, which would stop follow-ups inappropriately, so the LLM is
+// instructed to be strict.
+
+const POST_JOB_KEYWORDS = [
+  'review',
+  'rating',
+  'rate my',
+  'feedback',
+  'receipt',
+  'paid',
+  'payment',
+  'invoice',
+  'transaction',
+  'thank you for choosing',
+  'thank you for trusting',
+  'great working with you',
+  'pleasure cleaning',
+];
+
+const POST_JOB_SYSTEM_PROMPT = `You decide whether a dispatcher message is a POST-JOB signal — meaning the cleaning has already been completed.
+
+Output strict JSON: {"completed": boolean, "signalType": "review_request" | "receipt" | "payment" | "post_job_thanks" | null, "confidence": number, "reason": string}
+
+Rules:
+1. completed=true ONLY when the message is one of these post-job signals:
+   - REVIEW REQUEST: dispatcher asks the customer to leave a review / rating / feedback ("could you write a review", "I'd appreciate a review of my work", "rate my service").
+   - RECEIPT / PAYMENT: dispatcher delivers a receipt / payment confirmation tied to a completed job ("here's your receipt for your cleaning", "payment received").
+   - POST-JOB THANKS: dispatcher says "thank you for choosing us" / "great working with you" in a way that clearly references a finished job (not the initial intake "thank you for choosing us" auto-replies to a new lead).
+2. completed=false when the message is:
+   - A PRE-JOB confirmation ("looking forward to cleaning your home on June 29 9-9:30 AM") — that's a future appointment, not a completion.
+   - A quote / qualification / pricing reply.
+   - An initial "thank you for choosing us, let me check our schedule" intake auto-reply (these go out within minutes of a new lead).
+   - A follow-up checking in ("are you still interested").
+3. signalType: tag which signal triggered completion. Null when completed=false.
+4. confidence: how certain you are. Be strict — borderline messages should score below 0.85.
+5. reason: short (≤12 words) factual log line.`;
 
 const SYSTEM_PROMPT = `You decide whether a dispatcher message is confirming a specific upcoming cleaning appointment for THIS customer.
 
@@ -156,6 +229,94 @@ export class AppointmentDetectorService {
     if (!DATE_RE.test(messageText)) return false;
     if (!TIME_RE.test(messageText)) return false;
     return true;
+  }
+
+  /**
+   * Post-job pre-filter — far simpler than the confirmation pre-filter
+   * because post-job signals don't have to mention a date or time. Just one
+   * of the keyword stems is enough.
+   */
+  static postJobPreFilter(messageText: string): boolean {
+    if (!messageText) return false;
+    const lower = messageText.toLowerCase();
+    return POST_JOB_KEYWORDS.some((k) => lower.includes(k));
+  }
+
+  /**
+   * Post-job signal detection. Pairs with `detect()` (appointment confirmation)
+   * — callers typically run BOTH per message and pick the strongest signal.
+   * Returns `completed=true` when the LLM is confident the message indicates
+   * the cleaning is already done.
+   *
+   * Two-stage pipeline:
+   *   1. Cheap pre-filter (any of the POST_JOB_KEYWORDS).
+   *   2. LLM classifier with strict prompt — distinguishes review/receipt
+   *      from intake auto-replies and pre-job confirmations.
+   */
+  async detectPostJobSignal(input: DetectInput): Promise<PostJobDetectResult> {
+    const skipResult = (skippedByPrefilter: boolean, reason: string): PostJobDetectResult => ({
+      completed: false,
+      signalType: null,
+      confidence: 0,
+      reason,
+      skippedByPrefilter,
+    });
+
+    if (!input.messageText || !input.messageText.trim()) {
+      return skipResult(true, 'empty_message');
+    }
+    if (!AppointmentDetectorService.postJobPreFilter(input.messageText)) {
+      return skipResult(true, 'prefilter_no_match');
+    }
+
+    const userPrompt = this.buildUserPrompt(input);
+    try {
+      const completion = await this.withTimeout(
+        this.client.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: POST_JOB_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: 160,
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }),
+        5000,
+      );
+      const raw = completion.choices[0]?.message?.content?.trim();
+      if (!raw) return skipResult(false, 'empty_llm_response');
+
+      const parsed = JSON.parse(raw) as Partial<PostJobDetectResult>;
+      const completed = parsed.completed === true;
+      const confidence = typeof parsed.confidence === 'number'
+        ? Math.max(0, Math.min(1, parsed.confidence))
+        : 0;
+      const reason = typeof parsed.reason === 'string' ? parsed.reason : '';
+      const signalType = this.coercePostJobSignalType(parsed.signalType);
+
+      if (!completed) {
+        return { completed: false, signalType: null, confidence, reason: reason || 'llm_not_completed', skippedByPrefilter: false };
+      }
+      if (confidence < AppointmentDetectorService.MIN_CONFIDENCE) {
+        return { completed: false, signalType, confidence, reason: 'low_confidence', skippedByPrefilter: false };
+      }
+      if (!signalType) {
+        // LLM said completed but didn't pick a recognized signal type.
+        // Better to drop than to write a status flip without a labeled cause.
+        return { completed: false, signalType: null, confidence, reason: 'no_signal_type', skippedByPrefilter: false };
+      }
+      return { completed: true, signalType, confidence, reason: reason || 'post_job_signal', skippedByPrefilter: false };
+    } catch (err: any) {
+      this.logger.warn(`[appointment-detector] post-job LLM call failed: ${err?.message ?? err}`);
+      return skipResult(false, `llm_error:${err?.message ?? 'unknown'}`);
+    }
+  }
+
+  private coercePostJobSignalType(v: unknown): PostJobSignalType | null {
+    if (typeof v !== 'string') return null;
+    if (v === 'review_request' || v === 'receipt' || v === 'payment' || v === 'post_job_thanks') return v;
+    return null;
   }
 
   async detect(input: DetectInput): Promise<DetectResult> {

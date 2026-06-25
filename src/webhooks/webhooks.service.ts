@@ -2656,6 +2656,52 @@ export class WebhooksService {
       this.logger.warn(`[appointment-detector] tz resolve failed: ${err?.message ?? err}`);
     }
 
+    // Post-job signal check first — if the dispatcher message is a review
+    // request / receipt / payment, the cleaning is already done. Mark
+    // completed directly (skip booked entirely) and stop follow-ups.
+    const pj = await detector.detectPostJobSignal({
+      messageText: args.messageContent,
+      messageSentAt: args.messageSentAt,
+      timezone,
+      customerName: lead?.customerName,
+    });
+    if (pj.completed && pj.signalType) {
+      if (featureFlag === 'shadow') {
+        this.logger.log(
+          `[appointment-detector] would_complete lead_id=${args.leadId} signal_type=${pj.signalType} confidence=${pj.confidence} reason="${pj.reason}"`,
+        );
+        return;
+      }
+      try {
+        const writeResult = await this.leadStatusService.writeStatus({
+          leadId: args.leadId,
+          newStatus: 'completed',
+          source: 'lb_automation',
+          reason: 'dispatcher_post_job_signal',
+          occurredAt: args.messageSentAt,
+          metadata: {
+            signalType: pj.signalType,
+            confidence: pj.confidence,
+            detectorReason: pj.reason,
+          },
+        });
+        if (writeResult.applied) {
+          this.logger.log(
+            `[appointment-detector] completed lead_id=${args.leadId} signal_type=${pj.signalType} confidence=${pj.confidence}`,
+          );
+        } else {
+          this.logger.log(
+            `[appointment-detector] complete_skipped lead_id=${args.leadId} skip_reason=${writeResult.skipReason ?? 'unknown'} signal_type=${pj.signalType}`,
+          );
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[appointment-detector] complete_failed lead_id=${args.leadId} err=${err?.message ?? err}`,
+        );
+      }
+      return;
+    }
+
     const result = await detector.detect({
       messageText: args.messageContent,
       messageSentAt: args.messageSentAt,

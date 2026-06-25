@@ -523,11 +523,21 @@ export class LeadStatusService {
         !!input.metadata?.appointmentAt;
       const isAutonomousAppointmentDatePassed =
         newStatus === 'completed' && input.reason === 'appointment_date_passed';
+      // ── Autonomous post-job signal carve-out (2026-06-25) ────────────────
+      // Pre-LeadBridge leads exist where the only dispatcher message we have
+      // is a review request or a Thumbtack payment receipt. Both are strong
+      // signals the cleaning is done — strong enough to write `completed`
+      // directly without going through `booked`. The detector tags the
+      // signal type (review_request / receipt / payment / post_job_thanks)
+      // in metadata so the audit row is greppable.
+      const isAutonomousPostJobSignal =
+        newStatus === 'completed' && input.reason === 'dispatcher_post_job_signal';
       if (
         !isOptOutLost &&
         !isHiredElseRecoverable &&
         !isAutonomousDispatcherConfirmed &&
-        !isAutonomousAppointmentDatePassed
+        !isAutonomousAppointmentDatePassed &&
+        !isAutonomousPostJobSignal
       ) {
         this.metrics?.recordSkip('automation_forbidden_destination');
         this.logSkip(
@@ -547,7 +557,7 @@ export class LeadStatusService {
       // a stale LB heuristic must not flip a lead behind SF's back. The
       // check is a single SfConnection lookup; skipped when neither carve-out
       // shape matches to avoid an unnecessary query on the hot path.
-      if (isAutonomousDispatcherConfirmed || isAutonomousAppointmentDatePassed) {
+      if (isAutonomousDispatcherConfirmed || isAutonomousAppointmentDatePassed || isAutonomousPostJobSignal) {
         const hasActiveSf = await this.hasActiveSfConnection(lead.userId);
         if (hasActiveSf) {
           this.metrics?.recordSkip('sf_connected_autonomous_blocked');
