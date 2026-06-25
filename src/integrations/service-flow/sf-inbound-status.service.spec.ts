@@ -40,6 +40,9 @@ function buildPrismaMock() {
       findFirst: jest.fn().mockResolvedValue(null),
       findUnique: jest.fn().mockResolvedValue(null),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      // Used by the create-on-deferred stub path. Default returns null so
+      // tests that don't exercise stub creation keep the lookup-missed path.
+      upsert: jest.fn().mockResolvedValue(null),
     },
     followUpEnrollment: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -382,12 +385,65 @@ describe('SfInboundStatusService', () => {
       });
     });
 
-    it('returns 200/deferred when lead not found', async () => {
+    it('returns 200/deferred when lead not found AND payload lacks channel/external_request_id', async () => {
+      // basePayload() intentionally omits channel/external_request_id, so
+      // there's nothing to materialize a stub from — defer is the only safe
+      // path.
       prisma.lead.findFirst.mockResolvedValue(null);
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
       expect(r.httpStatus).toBe(200);
       expect(r.result).toBe('deferred');
+      expect(prisma.lead.upsert).not.toHaveBeenCalled();
       expect(prisma.sfInboundEvent.upsert).toHaveBeenCalled();
+    });
+
+    it('creates a stub lead and applies status when lookup misses but payload carries channel + external_request_id', async () => {
+      // Both lookups (sfJobId, then platform+externalRequestId) miss. Stub
+      // creation kicks in via upsert. The status flow then proceeds normally
+      // through writeStatus.
+      prisma.lead.findFirst.mockResolvedValue(null);
+      const stub = okLead({
+        platform: 'thumbtack',
+        externalRequestId: 'tt_neg_42',
+        sfJobId: JOB_ID,
+        status: 'new', // default for a freshly-created row
+      });
+      prisma.lead.upsert.mockResolvedValue(stub);
+      leadStatus.writeStatus.mockResolvedValue({
+        applied: true,
+        status: 'completed',
+        platformStatus: null,
+      });
+
+      const payload = basePayload({
+        channel: 'thumbtack',
+        external_request_id: 'tt_neg_42',
+        status: { new: 'completed' },
+      });
+
+      const r = await service.process(payload, { id: SUB_ID, userId: USER_ID });
+
+      expect(r.httpStatus).toBe(200);
+      expect(r.result).toBe('applied');
+      expect(r.leadId).toBe(LEAD_ID);
+      expect(prisma.lead.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            platform_externalRequestId: {
+              platform: 'thumbtack',
+              externalRequestId: 'tt_neg_42',
+            },
+          },
+          create: expect.objectContaining({
+            userId: USER_ID,
+            platform: 'thumbtack',
+            externalRequestId: 'tt_neg_42',
+            sfJobId: JOB_ID,
+          }),
+          update: {},
+        }),
+      );
+      expect(leadStatus.writeStatus).toHaveBeenCalled();
     });
   });
 
@@ -987,13 +1043,19 @@ describe('SfInboundStatusService', () => {
     });
 
     it('deferred (lead_not_found) carries payload-side identifiers only', async () => {
+      // Defer now fires only when the payload lacks the (channel,
+      // external_request_id) pair needed to safely materialize a stub. With
+      // both present, the create-on-deferred path takes over (covered in
+      // "process — lookup"). Here we exercise the partial-identifier case:
+      // sf_job_id and external_request_id present, channel missing → still
+      // deferred, identifiers still echoed.
       prisma.lead.findFirst.mockResolvedValue(null);
 
       const r = await service.process(
         basePayload({
           sf_job_id: '142288',
           external_request_id: 'M7SgM8SY8slQdmBB1pcD7A',
-          channel: 'yelp',
+          // channel intentionally omitted — not enough to safely stub.
         }),
         { id: SUB_ID, userId: USER_ID },
       );
@@ -1002,7 +1064,8 @@ describe('SfInboundStatusService', () => {
       expect(r.skipReason).toBe('lead_not_found');
       expect(r.sfJobId).toBe('142288');
       expect(r.externalRequestId).toBe('M7SgM8SY8slQdmBB1pcD7A');
-      expect(r.platform).toBe('yelp');
+      expect(r.platform).toBeNull();
+      expect(prisma.lead.upsert).not.toHaveBeenCalled();
       // Lead-side fields stay absent — no lead = no currentStatus.
       expect(r.currentStatus).toBeUndefined();
       expect(r.currentPlatformStatus).toBeUndefined();
