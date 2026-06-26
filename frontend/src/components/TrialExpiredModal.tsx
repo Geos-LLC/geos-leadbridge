@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { X, AlertCircle } from 'lucide-react';
-import { billingApi } from '../services/api';
+import { billingApi, platformsApi, thumbtackApi } from '../services/api';
 import '../styles/TrialExpiredModal.css';
 
 export default function TrialExpiredModal() {
@@ -44,9 +44,48 @@ export default function TrialExpiredModal() {
     checkTrialStatus();
   }, []);
 
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
+
   const handleDismiss = () => {
     setShow(false);
     sessionStorage.setItem('trialExpiredModalDismissed', 'true');
+  };
+
+  const handleDisconnect = async () => {
+    const confirmed = window.confirm(
+      'Disconnect all your linked Thumbtack and Yelp accounts? ' +
+      'New leads, AI replies, and follow-ups will stop. ' +
+      'Your LeadBridge account stays — you can reconnect anytime.',
+    );
+    if (!confirmed) return;
+
+    setDisconnecting(true);
+    setDisconnectError(null);
+    try {
+      const { accounts } = await thumbtackApi.getSavedAccounts();
+      const results = await Promise.allSettled(
+        accounts.map(acc =>
+          acc.platform === 'yelp'
+            ? platformsApi.disconnectYelp(acc.id)
+            : thumbtackApi.disconnectAccount(acc.id),
+        ),
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      if (failed > 0) {
+        setDisconnectError(
+          `Disconnected ${results.length - failed} of ${results.length} accounts. ` +
+          'Some accounts could not be disconnected — please try again or contact support.',
+        );
+        return;
+      }
+      handleDismiss();
+    } catch (err) {
+      console.error('Failed to disconnect accounts:', err);
+      setDisconnectError('Could not disconnect accounts. Please try again or contact support.');
+    } finally {
+      setDisconnecting(false);
+    }
   };
 
   if (!trialExpired || !show) {
@@ -103,9 +142,19 @@ export default function TrialExpiredModal() {
           <Link to="/pricing" className="btn-primary modal-cta" onClick={handleDismiss}>
             View Pricing Plans
           </Link>
-          <button className="btn-secondary" onClick={handleDismiss}>
+          <button className="btn-secondary" onClick={handleDismiss} disabled={disconnecting}>
             Maybe Later
           </button>
+          <button
+            className="btn-disconnect"
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+          >
+            {disconnecting ? 'Disconnecting…' : 'Disconnect Account'}
+          </button>
+          {disconnectError && (
+            <p className="disconnect-error" role="alert">{disconnectError}</p>
+          )}
         </div>
       </div>
     </>
