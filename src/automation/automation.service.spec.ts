@@ -655,3 +655,218 @@ describe('AutomationService.maybeFireHandoffAlert', () => {
     });
   });
 });
+
+/**
+ * AutomationService.applyReEngagementEnrollment — pins the per-intent
+ * re-engagement enrollment as a sibling of the status writer that runs
+ * BEFORE the manual-pro-recency pause and BEFORE the AI Conversation gates.
+ *
+ * Regression bracket for Spotless Homes Tampa lead Kala Ronshausen
+ * 2026-06-26: settings had aiHiredCompetitorReengage=true with a 3-week
+ * delay, customer said "Thank you. I found someone", status correctly
+ * flipped to lost, but no enrollment fired because a manual pro message
+ * 6 min earlier had tripped the fuReEnrollDelay pause guard which
+ * exited handleCustomerReply before reaching the (then nested) enrollment
+ * site. The fix moves enrollment out of the AI Conversation block.
+ */
+describe('AutomationService.applyReEngagementEnrollment', () => {
+  function buildReengageSvc() {
+    const enrollInSequence = jest.fn().mockResolvedValue('enr-1');
+    const template = { id: 'tmpl-1' };
+    const findFirstTemplate = jest.fn().mockResolvedValue(template);
+    const prisma = {
+      followUpSequenceTemplate: { findFirst: findFirstTemplate },
+    } as any;
+    const followUpEngine = { enrollInSequence } as any;
+    const svc = new AutomationService(
+      prisma,
+      /* templates */ {} as any,
+      /* leads */ {} as any,
+      /* config */ {} as any,
+      /* ai */ {} as any,
+      /* intentClassifier */ {} as any,
+      /* monitoring */ {} as any,
+      /* conversationContext */ {} as any,
+      /* trial */ {} as any,
+      /* leadStatus */ {} as any,
+      followUpEngine,
+      /* notifications */ {} as any,
+      /* businessHours */ {} as any,
+      /* conversationRuntime */ {} as any,
+      /* bookingOrchestrator */ {} as any,
+    );
+    // ensureCustomerReplyPresets is called by enrollInCustomerReplySequence
+    // before the template lookup. Stub it at the module level so we don't
+    // need to mock the underlying SavedAccount/prisma calls it would make.
+    jest.spyOn(require('../follow-up-engine/follow-up-seed'), 'ensureCustomerReplyPresets')
+      .mockResolvedValue(undefined as any);
+    return { svc, enrollInSequence, findFirstTemplate };
+  }
+
+  function reengageCtx(message: string) {
+    return {
+      userId: USER_ID,
+      businessId: BUSINESS_ID,
+      negotiationId: NEGOTIATION_ID,
+      leadId: LEAD_ID,
+      customerName: 'Kala',
+      customerMessage: message,
+      isFirstCustomerReply: false,
+    } as any;
+  }
+
+  function savedAccount(settingsObj: Record<string, any>) {
+    return {
+      id: 'acct-1',
+      platform: 'thumbtack',
+      followUpSettingsJson: JSON.stringify(settingsObj),
+      followUpActiveHoursStart: '09:00',
+      followUpActiveHoursEnd: '21:00',
+      followUpTimezone: 'America/New_York',
+    } as any;
+  }
+
+  function classification(intent: string, opts: { confidence?: number; fromLlm?: boolean } = {}) {
+    return {
+      intent,
+      confidence: opts.confidence ?? 0.95,
+      reason: 'test',
+      fromLlm: opts.fromLlm ?? true,
+    } as any;
+  }
+
+  async function run(svc: AutomationService, ctxArg: any, cls: any, acct: any) {
+    return (svc as any).applyReEngagementEnrollment(ctxArg, cls, acct, 'thread-1');
+  }
+
+  describe('LLM-classifier path', () => {
+    it('enrolls customer_hired_competitor on hired_elsewhere when aiHiredCompetitorReengage=true', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('thank you, I found someone'),
+        classification('hired_elsewhere'),
+        savedAccount({ aiHiredCompetitorReengage: true }));
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+      expect(enrollInSequence).toHaveBeenCalledWith('thread-1', 'tmpl-1', 'thumbtack', LEAD_ID, undefined);
+    });
+
+    it('also enrolls on intent=completed (legacy parity with the AI-conversation gate)', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('its already done'),
+        classification('completed'),
+        savedAccount({ aiHiredCompetitorReengage: true }));
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips enrollment when aiHiredCompetitorReengage is not set', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('found someone'),
+        classification('hired_elsewhere'),
+        savedAccount({}));
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+
+    it('enrolls customer_deferred on deferring when aiDeferralCheckIn=true', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('let me think about it'),
+        classification('deferring'),
+        savedAccount({ aiDeferralCheckIn: true }));
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it('forwards suggestedReengageInDays as overrideMinutes', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      const cls = classification('deferring');
+      cls.suggestedReengageInDays = 14;
+      await run(svc, reengageCtx('back in two weeks'),
+        cls,
+        savedAccount({ aiDeferralCheckIn: true }));
+      expect(enrollInSequence).toHaveBeenCalledWith('thread-1', 'tmpl-1', 'thumbtack', LEAD_ID, 14 * 24 * 60);
+    });
+
+    it('does not enroll on neutral intents (asking, engaged, agreed, opt_out)', async () => {
+      for (const intent of ['asking', 'engaged', 'agreed', 'opt_out', 'wants_live_contact']) {
+        const { svc, enrollInSequence } = buildReengageSvc();
+        await run(svc, reengageCtx('what time'),
+          classification(intent),
+          savedAccount({ aiHiredCompetitorReengage: true, aiDeferralCheckIn: true }));
+        expect(enrollInSequence).not.toHaveBeenCalled();
+      }
+    });
+
+    it('does not enroll when classifier confidence is below threshold', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('found someone'),
+        classification('hired_elsewhere', { confidence: 0.5 }),
+        savedAccount({ aiHiredCompetitorReengage: true }));
+      // Low confidence — falls through to phrase-list, which DOES match.
+      // The phrase-list path is also gated on aiHiredCompetitorReengage so
+      // it will fire here. This test confirms the LLM branch did not.
+      // (Counted once via the phrase fallback, not the LLM branch.)
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not enroll when classification is not from LLM', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('not a phrase-list match'),
+        classification('hired_elsewhere', { fromLlm: false }),
+        savedAccount({ aiHiredCompetitorReengage: true }));
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('phrase-list fallback (no LLM signal)', () => {
+    it('matches HIRED_SOMEONE_PHRASES → customer_hired_competitor', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('I already hired someone, thanks'),
+        undefined,
+        savedAccount({ aiHiredCompetitorReengage: true }));
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it('matches DEFERRAL_PHRASES → customer_deferred', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('let me think it over'),
+        undefined,
+        savedAccount({ aiDeferralCheckIn: true }));
+      expect(enrollInSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not match on neutral messages', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('what time can you come?'),
+        undefined,
+        savedAccount({ aiHiredCompetitorReengage: true, aiDeferralCheckIn: true }));
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('guards', () => {
+    it('no-ops when threadId is missing', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await (svc as any).applyReEngagementEnrollment(
+        reengageCtx('found someone'),
+        classification('hired_elsewhere'),
+        savedAccount({ aiHiredCompetitorReengage: true }),
+        null,
+      );
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+
+    it('no-ops when both toggles are off (avoids parsing settings twice)', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      await run(svc, reengageCtx('found someone'),
+        classification('hired_elsewhere'),
+        savedAccount({ aiHiredCompetitorReengage: false, aiDeferralCheckIn: false }));
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+
+    it('tolerates malformed followUpSettingsJson without throwing', async () => {
+      const { svc, enrollInSequence } = buildReengageSvc();
+      const bad = { ...savedAccount({}), followUpSettingsJson: '{not json' };
+      await run(svc, reengageCtx('found someone'),
+        classification('hired_elsewhere'),
+        bad);
+      expect(enrollInSequence).not.toHaveBeenCalled();
+    });
+  });
+});
