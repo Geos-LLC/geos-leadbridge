@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { captureException } from '@fixprompt/browser';
 import { PageSkeleton } from './PageSkeleton';
 
 const CHUNK_ERR_PATTERNS = [
@@ -47,7 +48,9 @@ export class ChunkReloadBoundary extends Component<
       } catch {
         window.location.reload();
       }
+      return;
     }
+    captureException(error, { attrs: { boundary: 'ChunkReloadBoundary' } });
   }
 
   render() {

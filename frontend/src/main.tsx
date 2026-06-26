@@ -1,10 +1,21 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { initFixPrompt } from '@fixprompt/browser'
 import './tailwind.css'
 import './index.css'
 import './styles/mobile-tokens.css'
 import App from './App.tsx'
 import { initAnalytics } from './services/analytics'
+
+const fpKey = import.meta.env.VITE_FIXPROMPT_KEY as string | undefined
+if (fpKey) {
+  initFixPrompt({
+    projectKey: fpKey,
+    source: 'leadbridge-frontend-prod',
+    service: 'leadbridge-frontend',
+    env: import.meta.env.PROD ? 'prod' : 'dev',
+  })
+}
 
 void initAnalytics()
 
