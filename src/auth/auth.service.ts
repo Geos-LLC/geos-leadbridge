@@ -86,6 +86,12 @@ export class AuthService {
       this.logger.warn(`[BusinessIdentity] Registration deferred for user ${user.id}: ${e.message}`);
     });
 
+    // Notify ops that a new tenant signed up. Non-blocking — a failed
+    // notification never breaks signup. Goes to the admin alert mailbox
+    // configured via env; defaults to info@geos-ai.com.
+    this.sendNewTenantAdminEmail(user.id, user.email, user.name, normalizedBusinessPhone || null)
+      .catch((err) => this.logger.warn(`[AdminNotify] new-tenant email failed for ${user.email}: ${err?.message || err}`));
+
     // Generate JWT token
     const token = this.generateToken(user.id, user.email);
 
@@ -355,6 +361,65 @@ export class AuthService {
 
     console.log(`[Auth] EmailJS response:`, result);
     return result;
+  }
+
+  /**
+   * Notify the ops mailbox that a new tenant just signed up. Uses SendGrid
+   * (mirrors MonitoringService.sendAlertEmail) so we can ship arbitrary
+   * subject/body without provisioning a new EmailJS template. Recipient
+   * resolves via ADMIN_ALERT_EMAIL → MONITORING_ALERT_EMAIL → the hard-
+   * coded ops mailbox so it still fires if env wasn't set on this service.
+   */
+  private async sendNewTenantAdminEmail(
+    userId: string,
+    email: string,
+    name: string | null | undefined,
+    businessPhone: string | null,
+  ): Promise<void> {
+    const apiKey = process.env.SENDGRID_API_KEY;
+    if (!apiKey) {
+      this.logger.warn('[AdminNotify] SendGrid not configured — skipping new-tenant email');
+      return;
+    }
+
+    const to = process.env.ADMIN_ALERT_EMAIL || process.env.MONITORING_ALERT_EMAIL || 'info@geos-ai.com';
+    const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
+    const adminUrl = (process.env.FRONTEND_URL || 'https://www.leadbridge360.com').replace(/\/$/, '') + `/admin/users/${userId}`;
+
+    const displayName = name?.trim() || '(no name)';
+    const displayPhone = businessPhone || '(none)';
+    const when = new Date().toISOString();
+
+    const subject = `LeadBridge — new signup: ${displayName} <${email}>`;
+    const text =
+      `New tenant just signed up.\n\n` +
+      `Name:    ${displayName}\n` +
+      `Email:   ${email}\n` +
+      `Phone:   ${displayPhone}\n` +
+      `User ID: ${userId}\n` +
+      `When:    ${when}\n\n` +
+      `Admin view: ${adminUrl}\n`;
+    const html =
+      `<p>New tenant just signed up.</p>` +
+      `<ul>` +
+      `<li><strong>Name:</strong> ${displayName}</li>` +
+      `<li><strong>Email:</strong> ${email}</li>` +
+      `<li><strong>Phone:</strong> ${displayPhone}</li>` +
+      `<li><strong>User ID:</strong> <code>${userId}</code></li>` +
+      `<li><strong>When:</strong> ${when}</li>` +
+      `</ul>` +
+      `<p><a href="${adminUrl}">Open in admin dashboard</a></p>`;
+
+    const sgMail = require('@sendgrid/mail');
+    sgMail.setApiKey(apiKey);
+    await sgMail.send({
+      to,
+      from: { email: fromEmail, name: 'LeadBridge Ops' },
+      subject,
+      text,
+      html,
+    });
+    this.logger.log(`[AdminNotify] new-tenant email sent to ${to} for ${email}`);
   }
 
   /**
