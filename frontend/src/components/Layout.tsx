@@ -1164,32 +1164,11 @@ export function Layout() {
             </header>
           )}
 
-          {/* Mobile menu button for Messages page (no top navbar) */}
-          {location.pathname === '/lead-activity' && (
-            <div
-              className="lg:hidden sticky top-0 z-30"
-              style={{
-                background: 'var(--lb-surface)',
-                borderBottom: '1px solid var(--lb-line)',
-                padding: '8px 16px',
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  style={{ color: 'var(--lb-ink-4)', background: 'transparent', border: 0, padding: 6, cursor: 'pointer' }}
-                >
-                  <Menu size={20} />
-                </button>
-                <RouterLink to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                  <BrandMark size={20} />
-                  <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>
-                    LeadBridge
-                  </span>
-                </RouterLink>
-              </div>
-            </div>
-          )}
+          {/* /lead-activity intentionally has no mobile menu strip here —
+              Messages.tsx renders its own lead-list and chat-view headers,
+              and stacking the Layout strip on top doubled the top chrome.
+              Users reach the global app sidebar via the lead-list back
+              button → /overview, which carries the standard mobile strip. */}
 
           <TrialBanner />
 
