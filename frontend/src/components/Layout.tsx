@@ -1023,7 +1023,19 @@ export function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 min-h-screen" style={{ marginLeft: 0 }}>
-        <div className="lg:ml-[232px]">
+        {/* /lead-activity needs a viewport-sized flex column on mobile so
+            the composer always sits at the visible bottom regardless of
+            how many inline banners (impersonation, mobile menu strip,
+            system health, cancelled subscription) render above it. On
+            desktop (lg+) those banners don't apply and Messages.tsx owns
+            its own 100vh layout, so we revert to a regular block flow. */}
+        <div
+          className={
+            location.pathname === '/lead-activity'
+              ? 'lg:ml-[232px] flex flex-col h-[100dvh] overflow-hidden lg:block lg:h-auto lg:overflow-visible'
+              : 'lg:ml-[232px]'
+          }
+        >
           <ImpersonationBanner />
 
           {/* Top page header — utility-first, minimal decoration.

@@ -396,6 +396,22 @@ export function Messages() {
       .catch(() => { /* silent — filter just doesn't appear if it can't load */ });
     return () => { cancelled = true; };
   }, []);
+
+  // Lock body scroll while this page is mounted. Layout's <main> carries
+  // `min-h-screen` (100vh) which on iOS Safari can exceed the dynamic
+  // viewport (100dvh) when the address bar is showing — without this lock
+  // the body becomes scrollable by ~50px and the composer drifts above
+  // the visible bottom even though our flex column sizes correctly.
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
   const setServiceFilter = (value: string) => {
     const sp = new URLSearchParams(searchParams);
     if (value === 'all') sp.delete('service'); else sp.set('service', value);
@@ -1699,7 +1715,13 @@ export function Messages() {
 
   return (
     <div
-      className="flex h-[100dvh] lg:h-screen w-full max-w-[100vw] lg:max-w-none overflow-hidden"
+      // On mobile we fill the remaining space inside Layout's flex column
+      // (which already accounts for the impersonation/mobile-menu/health/
+      // cancelled-subscription banners stacked above). `min-h-0` is the
+      // load-bearing rule — without it a flex child won't shrink below its
+      // intrinsic content size and the composer slides off-screen again.
+      // Desktop keeps its original h-screen layout.
+      className="flex flex-1 min-h-0 lg:h-screen lg:flex-initial w-full max-w-[100vw] lg:max-w-none overflow-hidden"
       style={{ background: 'var(--lb-bg)' }}
     >
       {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
