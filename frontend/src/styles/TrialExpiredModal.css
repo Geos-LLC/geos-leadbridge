@@ -163,6 +163,37 @@
   background: #f9f9f9;
 }
 
+.modal-actions .btn-secondary:disabled,
+.modal-actions .btn-disconnect:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.modal-actions .btn-disconnect {
+  background: transparent;
+  color: #b91c1c;
+  border: none;
+  padding: 10px 28px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.modal-actions .btn-disconnect:hover:not(:disabled) {
+  color: #7f1d1d;
+}
+
+.disconnect-error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #b91c1c;
+  text-align: center;
+  line-height: 1.4;
+}
+
 @media (max-width: 768px) {
   .trial-expired-modal {
     padding: 32px 24px;
