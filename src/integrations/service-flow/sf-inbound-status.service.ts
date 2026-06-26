@@ -312,6 +312,49 @@ export class SfInboundStatusService {
       });
     }
 
+    // Materialize a stub Lead from the SF payload when lookup misses but the
+    // payload carries enough identity to safely create one. Closes the gap
+    // for marketplace leads that exist in SF (from before LB's webhook
+    // subscription, or where the platform webhook never landed) — without
+    // this branch every such status event deferred forever.
+    //
+    // Reconciliation: handleNegotiationCreated (TT) and the Yelp webhook
+    // handler both upsert by (platform, externalRequestId), so a later
+    // platform webhook enriches the stub instead of erroring on the unique
+    // key. The primary-job guard at line 354 still rejects writes from a
+    // different sfJobId, so a racing stub creation with mismatched sf_job_id
+    // produces a clean noop rather than corruption.
+    if (!lead && payload.external_request_id && payload.channel) {
+      lead = await this.prisma.lead.upsert({
+        where: {
+          platform_externalRequestId: {
+            platform: payload.channel,
+            externalRequestId: payload.external_request_id,
+          },
+        },
+        create: {
+          userId: subscription.userId,
+          platform: payload.channel,
+          externalRequestId: payload.external_request_id,
+          customerName: '',
+          message: '',
+          rawJson: JSON.stringify({
+            source: 'sf-inbound-stub',
+            sf_job_id: payload.sf_job_id,
+            event_id: payload.event_id,
+          }),
+          sfJobId: payload.sf_job_id,
+        },
+        // No-op update: if a concurrent writer (TT/Yelp webhook or another
+        // SF replay) created the row first, keep their data. sfJobId
+        // mismatches surface via the primary-job guard below, not here.
+        update: {},
+      });
+      this.logger.log(
+        `[SfInbound] event_id=${payload.event_id} created stub lead_id=${lead.id} platform=${payload.channel} ext_id=${payload.external_request_id} sf_job_id=${payload.sf_job_id}`,
+      );
+    }
+
     if (!lead) {
       await this.recordEvent({
         eventId: payload.event_id,
