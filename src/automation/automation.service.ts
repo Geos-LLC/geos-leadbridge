@@ -102,6 +102,33 @@ export const HIRED_SOMEONE_PHRASES: readonly string[] = [
   'taken care of',
 ];
 
+// Deferral phrase fallback — matches the conservative subset of "I'm pausing
+// the conversation" cues that the LLM classifier reliably catches as
+// intent='deferring'. Used as a safety net when the classifier is
+// unavailable, low-confidence, or fromLlm=false. Kept exported so the
+// applyReEngagementEnrollment site and the AI Conversation skip site
+// can't drift.
+export const DEFERRAL_PHRASES: readonly string[] = [
+  'get back to you', 'get back to u',
+  'let me think', 'let me check', 'let me look',
+  "i'll think", 'ill think', 'i will think',
+  "i'll let you know", 'ill let you know', 'i will let you know',
+  "i'll be in touch", 'ill be in touch', "we'll be in touch", 'we will be in touch',
+  'need to think', 'need to discuss', 'need to talk',
+  'have to think', 'have to discuss', 'have to talk',
+  'thinking about it', 'thinking it over',
+  'talk it over', 'discuss it with',
+  'shopping around', 'comparing quotes', 'comparing prices',
+  'give me a minute', 'give me some time', 'give me a bit',
+  'check with my husband', 'check with my wife', 'check with my partner', 'check with my spouse',
+  'check with the husband', 'check with the wife', 'check with my hubby',
+  'ask my husband', 'ask my wife', 'ask my partner', 'ask my spouse',
+  'talk to my husband', 'talk to my wife', 'talk to my partner', 'talk to my spouse',
+  'run it by', 'run this by', 'run it past', 'run this past',
+  'check with the boss', 'ask the boss', 'check with my family',
+  'need to check', 'need to ask', 'will need to check', 'will need to ask',
+];
+
 export const AGREED_PHRASES: readonly string[] = [
   'sounds good',
   "let's do it",
@@ -312,6 +339,107 @@ export class AutomationService implements OnModuleInit {
       this.logger.log(`[AUTOMATION] ✓ Enrolled conversation ${threadId} in ${triggerState} (template ${template.id})${overrideBit}`);
     } catch (err: any) {
       this.logger.error(`[AUTOMATION] ${triggerState} enrollment failed for ${threadId}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Schedule the per-intent re-engagement enrollment (customer_hired_competitor
+   * / customer_deferred) as a peer of `applyCustomerReplyStatusTransition`.
+   * Runs unconditionally on every customer reply — independent of AI
+   * Conversation availability and the manual-pro-recency pause guard.
+   *
+   * The earlier placement, deep inside the AI Conversation skip block, was
+   * silently suppressed in three real configurations the user expected to
+   * still re-engage:
+   *   - `fuReEnrollDelay` pause active (a dispatcher just typed manually):
+   *     `handleCustomerReply` returned at the pause check before reaching
+   *     the enrollment. Spotless Homes Tampa lead Kala Ronshausen 2026-06-26
+   *     made this concrete — `aiHiredCompetitorReengage=true`,
+   *     `aiHiredCompetitorDelay='3 weeks'`, customer said "I found someone",
+   *     status correctly flipped to lost, but no enrollment because a manual
+   *     pro message had been sent 6 min earlier.
+   *   - `aiConversationMode='when_dispatcher_unavailable'` during business
+   *     hours: the AI defers and the entire block exits, taking the
+   *     enrollment with it.
+   *   - `aiConversationEnabled=false` at the user level: same — the AI
+   *     block never runs.
+   *
+   * The status writer (`applyCustomerReplyStatusTransition`) and the
+   * re-engagement enrollment are both intent-driven, durable side effects.
+   * They should fire as siblings, not nested under the AI reply path.
+   *
+   * The SF-link skip lives inside `enrollInSequence` itself, so SF-converted
+   * customers are still excluded here.
+   *
+   * Each branch is idempotent via `enrollInSequence`'s active-enrollment
+   * uniqueness — re-runs on the same conversation no-op.
+   */
+  private async applyReEngagementEnrollment(
+    context: CustomerReplyContext,
+    classification: IntentClassification | undefined,
+    savedAccount: {
+      id: string;
+      platform: string;
+      followUpSettingsJson: string | null;
+      followUpActiveHoursStart: string | null;
+      followUpActiveHoursEnd: string | null;
+      followUpTimezone: string | null;
+    },
+    threadId: string | null | undefined,
+  ): Promise<void> {
+    if (!threadId || !context.leadId || !context.customerMessage) return;
+
+    let aiRules: any = {};
+    if (savedAccount.followUpSettingsJson) {
+      try { aiRules = JSON.parse(savedAccount.followUpSettingsJson); } catch { /* malformed JSON — treat as no settings */ }
+    }
+    const hiredOn = aiRules.aiHiredCompetitorReengage === true;
+    const deferralOn = aiRules.aiDeferralCheckIn === true;
+    if (!hiredOn && !deferralOn) return;
+
+    const enroll = (
+      triggerState: 'customer_deferred' | 'customer_hired_competitor',
+      suggestedDays?: number,
+    ) => this.enrollInCustomerReplySequence(
+      triggerState,
+      context.leadId,
+      threadId,
+      context.userId,
+      savedAccount.platform,
+      savedAccount.id,
+      savedAccount.followUpActiveHoursStart,
+      savedAccount.followUpActiveHoursEnd,
+      savedAccount.followUpTimezone,
+      suggestedDays,
+    );
+
+    // LLM path — classifier is the primary signal when fromLlm + high confidence.
+    if (classification?.fromLlm && classification.confidence >= AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
+      const intent = classification.intent;
+      if (hiredOn && (intent === 'hired_elsewhere' || intent === 'completed')) {
+        await enroll('customer_hired_competitor', classification.suggestedReengageInDays);
+        return;
+      }
+      if (deferralOn && intent === 'deferring') {
+        await enroll('customer_deferred', classification.suggestedReengageInDays);
+        return;
+      }
+      // Other intents (asking / engaged / agreed / opt_out / wants_live_contact)
+      // are not re-engagement triggers — fall through without enrolling.
+      return;
+    }
+
+    // Phrase-list fallback — only when the LLM didn't fire (unavailable,
+    // low-confidence, or non-LLM source). Same gating as the inline checks
+    // at the bottom of the AI Conversation block.
+    const msgLower = context.customerMessage.toLowerCase();
+    if (hiredOn && HIRED_SOMEONE_PHRASES.some(p => msgLower.includes(p))) {
+      await enroll('customer_hired_competitor');
+      return;
+    }
+    if (deferralOn && DEFERRAL_PHRASES.some(p => msgLower.includes(p))) {
+      await enroll('customer_deferred');
+      return;
     }
   }
 
@@ -976,6 +1104,16 @@ export class AutomationService implements OnModuleInit {
       return;
     }
 
+    // ── Per-intent re-engagement enrollment ──────────────────────────────
+    // Sibling of applyCustomerReplyStatusTransition above. Runs BEFORE the
+    // manual-pro-recency pause and BEFORE the AI Conversation availability
+    // gates so the user-facing "Re-engage after customer hired competitor"
+    // and "Check in after customer deferral" toggles fire regardless of who
+    // typed the last pro message or which AI Conversation mode is active.
+    await this.applyReEngagementEnrollment(context, classification, savedAccount, lead?.threadId).catch((err) => {
+      this.logger.warn(`[AUTOMATION] re-engagement enrollment failed for lead ${context.leadId}: ${err.message}`);
+    });
+
     // Resolve the user-level AI Conversation master switch ONCE per
     // customer-reply handling. Used by both maybeFireHandoffAlert (gate)
     // and the main AI Conversation block below. Promoted from per-account
@@ -1278,20 +1416,9 @@ export class AutomationService implements OnModuleInit {
               conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_HIRED_ELSEWHERE,
             });
           }
-          if (aiRules.aiHiredCompetitorReengage === true && context.leadId && lead?.threadId) {
-            await this.enrollInCustomerReplySequence(
-              'customer_hired_competitor',
-              context.leadId,
-              lead.threadId,
-              context.userId,
-              savedAccount.platform,
-              savedAccount.id,
-              savedAccount.followUpActiveHoursStart,
-              savedAccount.followUpActiveHoursEnd,
-              savedAccount.followUpTimezone,
-              classification.suggestedReengageInDays,
-            );
-          }
+          // Re-engagement enrollment moved to applyReEngagementEnrollment
+          // above so the manual-pro-recency pause and AI Conversation gates
+          // can't suppress it.
           return;
         }
         // SYSTEM EVENT — customer explicitly requested live contact.
@@ -1402,20 +1529,8 @@ export class AutomationService implements OnModuleInit {
               conversationStateReason: CONVERSATION_STATE_REASONS.CLASSIFIER_DEFERRING,
             });
           }
-          if (context.leadId && lead?.threadId) {
-            await this.enrollInCustomerReplySequence(
-              'customer_deferred',
-              context.leadId,
-              lead.threadId,
-              context.userId,
-              savedAccount.platform,
-              savedAccount.id,
-              savedAccount.followUpActiveHoursStart,
-              savedAccount.followUpActiveHoursEnd,
-              savedAccount.followUpTimezone,
-              classification.suggestedReengageInDays,
-            );
-          }
+          // Re-engagement enrollment moved to applyReEngagementEnrollment
+          // above — same reason as the hired-competitor branch.
           return;
         }
         // intent='asking' or 'engaged' — fall through to AI reply generation.
@@ -1447,19 +1562,7 @@ export class AutomationService implements OnModuleInit {
         const matched = HIRED_SOMEONE_PHRASES.find(p => msgLower.includes(p));
         if (matched) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere ("${matched}")`);
-          if (aiRules.aiHiredCompetitorReengage === true && context.leadId && lead?.threadId) {
-            await this.enrollInCustomerReplySequence(
-              'customer_hired_competitor',
-              context.leadId,
-              lead.threadId,
-              context.userId,
-              savedAccount.platform,
-              savedAccount.id,
-              savedAccount.followUpActiveHoursStart,
-              savedAccount.followUpActiveHoursEnd,
-              savedAccount.followUpTimezone,
-            );
-          }
+          // Re-engagement enrollment moved to applyReEngagementEnrollment.
           return;
         }
       }
@@ -1483,46 +1586,11 @@ export class AutomationService implements OnModuleInit {
       // Gated by the same "Check in after customer deferral" toggle the UI
       // exposes (aiDeferralCheckIn). Defaults ON.
       if (aiRules.aiDeferralCheckIn === true && context.customerMessage) {
-        const deferralPhrases = [
-          'get back to you', 'get back to u',
-          'let me think', 'let me check', 'let me look',
-          'i\'ll think', 'ill think', 'i will think',
-          'i\'ll let you know', 'ill let you know', 'i will let you know',
-          'i\'ll be in touch', 'ill be in touch', 'we\'ll be in touch', 'we will be in touch',
-          'need to think', 'need to discuss', 'need to talk',
-          'have to think', 'have to discuss', 'have to talk',
-          'thinking about it', 'thinking it over',
-          'talk it over', 'discuss it with',
-          'shopping around', 'comparing quotes', 'comparing prices',
-          'give me a minute', 'give me some time', 'give me a bit',
-          // "check with my husband/wife/partner/spouse/boss" etc — Carol case
-          'check with my husband', 'check with my wife', 'check with my partner', 'check with my spouse',
-          'check with the husband', 'check with the wife', 'check with my hubby',
-          'ask my husband', 'ask my wife', 'ask my partner', 'ask my spouse',
-          'talk to my husband', 'talk to my wife', 'talk to my partner', 'talk to my spouse',
-          'run it by', 'run this by', 'run it past', 'run this past',
-          'check with the boss', 'ask the boss', 'check with my family',
-          'need to check', 'need to ask', 'will need to check', 'will need to ask',
-        ];
         const msgLower = context.customerMessage.toLowerCase();
-        const matched = deferralPhrases.find(p => msgLower.includes(p));
+        const matched = DEFERRAL_PHRASES.find(p => msgLower.includes(p));
         if (matched) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer signaled deferral ("${matched}")`);
-          // Outer gate above already confirmed aiDeferralCheckIn is on,
-          // so unconditionally schedule the check-in nudge here.
-          if (context.leadId && lead?.threadId) {
-            await this.enrollInCustomerReplySequence(
-              'customer_deferred',
-              context.leadId,
-              lead.threadId,
-              context.userId,
-              savedAccount.platform,
-              savedAccount.id,
-              savedAccount.followUpActiveHoursStart,
-              savedAccount.followUpActiveHoursEnd,
-              savedAccount.followUpTimezone,
-            );
-          }
+          // Re-engagement enrollment moved to applyReEngagementEnrollment.
           return;
         }
       }
