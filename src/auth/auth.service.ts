@@ -303,20 +303,14 @@ export class AuthService {
     // Build reset URL
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
-    console.log(`[Auth] Reset URL generated: ${resetUrl}`);
 
-    // Send email via EmailJS
-    console.log(`[Auth] About to send email via EmailJS...`);
-    console.log(`[Auth] EMAILJS_PUBLIC_KEY configured: ${!!process.env.EMAILJS_PUBLIC_KEY}`);
-    console.log(`[Auth] EMAILJS_PRIVATE_KEY configured: ${!!process.env.EMAILJS_PRIVATE_KEY}`);
+    // Send via EmailService (SendGrid). Swallow errors so the API response
+    // stays generic — surfacing "email failed" would leak account existence.
     try {
       await this.sendPasswordResetEmail(email, user.name || 'User', resetUrl);
-      console.log(`[Auth] Password reset email sent successfully to ${email}`);
     } catch (error) {
-      console.error(`[Auth] Failed to send password reset email to ${email}:`, error);
-      // Still return success to prevent email enumeration
+      this.logger.error(`[Auth] Failed to send password reset email to ${email}: ${(error as any)?.message || error}`);
     }
-    console.log(`[Auth] forgotPassword completed`);
 
     return {
       message: 'If an account with that email exists, a password reset link has been sent.',

@@ -42,7 +42,3 @@ stripe_price_starter    = ""
 stripe_price_pro        = ""
 stripe_price_enterprise = ""
 stripe_price_own_number = ""
-
-# --- Email ---
-emailjs_public_key  = ""
-emailjs_private_key = ""

@@ -1,13 +1,13 @@
 /**
  * EmailService — single SendGrid transport for the entire app.
  *
- * Before this existed, six different call sites (auth password reset via
- * EmailJS; auth new-tenant admin notification; monitoring dev alerts;
- * monitoring tenant health alerts; monitoring tenant recovery emails;
- * trial-notification expiry warnings) each rebuilt the same
+ * Before this existed, six different call sites (auth password reset,
+ * auth new-tenant admin notification, monitoring dev alerts, monitoring
+ * tenant health alerts, monitoring tenant recovery emails, trial-
+ * notification expiry warnings) each rebuilt the same
  * `require('@sendgrid/mail'); setApiKey; send` plumbing with their own
- * env-var lookups. EmailJS lived only for password reset and added a
- * second SDK + key pair to maintain.
+ * env-var lookups. Password reset additionally shipped through a
+ * separate EmailJS SDK + key pair until this consolidation removed it.
  *
  * Callers stay responsible for their own *routing* logic — recipient
  * resolution, dedup windows, fallback chains, template choice — because

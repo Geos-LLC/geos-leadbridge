@@ -229,21 +229,6 @@ variable "stripe_price_own_number" {
   default     = ""
 }
 
-# --- Email (EmailJS) ---
-
-variable "emailjs_public_key" {
-  description = "EmailJS public key"
-  type        = string
-  default     = ""
-}
-
-variable "emailjs_private_key" {
-  description = "EmailJS private key"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 # --- Loghub (Grafana log forwarding) ---
 
 variable "loghub_url" {

@@ -308,10 +308,6 @@ resource "aws_secretsmanager_secret_version" "app_secrets" {
     STRIPE_PRICE_ENTERPRISE = var.stripe_price_enterprise
     STRIPE_PRICE_OWN_NUMBER = var.stripe_price_own_number
 
-    # Email (EmailJS)
-    EMAILJS_PUBLIC_KEY  = var.emailjs_public_key
-    EMAILJS_PRIVATE_KEY = var.emailjs_private_key
-
     # Loghub (Grafana log forwarding)
     LOGHUB_URL    = var.loghub_url
     LOGHUB_SOURCE = var.loghub_source
@@ -464,8 +460,6 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "STRIPE_PRICE_PRO", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:STRIPE_PRICE_PRO::" },
       { name = "STRIPE_PRICE_ENTERPRISE", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:STRIPE_PRICE_ENTERPRISE::" },
       { name = "STRIPE_PRICE_OWN_NUMBER", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:STRIPE_PRICE_OWN_NUMBER::" },
-      { name = "EMAILJS_PUBLIC_KEY", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:EMAILJS_PUBLIC_KEY::" },
-      { name = "EMAILJS_PRIVATE_KEY", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:EMAILJS_PRIVATE_KEY::" },
       { name = "LOGHUB_URL", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:LOGHUB_URL::" },
       { name = "LOGHUB_SOURCE", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:LOGHUB_SOURCE::" },
       { name = "LOGHUB_KEY", valueFrom = "${aws_secretsmanager_secret.app_secrets.arn}:LOGHUB_KEY::" },
