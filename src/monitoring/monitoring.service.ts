@@ -11,7 +11,7 @@
 
 import { Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Cron } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { EmailService } from '../common/email/email.service';
@@ -126,9 +126,33 @@ export interface SystemHealthIssue {
 // Local alias so existing helper signatures stay readable.
 type Db = CronLockDb;
 
+/**
+ * Per-process in-memory sliding window for "burst-style" platform failures.
+ * Filled by callers via recordPlatformFailure(); read by the every-5-minute
+ * checkPlatformBursts cron which pages ops when a kind crosses its threshold.
+ *
+ * Per-instance counters are intentional: we only need to detect bursts within
+ * a 15-min window, restarts reset to zero (fine — a real outage will refill
+ * within minutes), and notifyDevAlert's 24h dedup keeps multi-instance setups
+ * from double-paging.
+ */
+const PLATFORM_BURST_WINDOW_MS = 15 * 60 * 1000;
+const PLATFORM_BURST_THRESHOLDS: Record<string, number> = {
+  // TT getLead averages <1/15min in steady state; 30 in 15min is a clear
+  // platform-side outage rather than a single tenant's token going bad.
+  thumbtack_getlead: 30,
+  // Yelp send errors are normally per-tenant (token / 403 NO_BUSINESS_ACCESS);
+  // a burst across many threads in 15 min points at Yelp itself.
+  yelp_sendmessage: 20,
+  // Webhook handler uncaught throws should be effectively zero. Any
+  // recurrence in 15 min means something regressed in handler code.
+  webhook_handler_crash: 3,
+};
+
 @Injectable()
 export class MonitoringService implements OnModuleInit {
   private readonly logger = new Logger(MonitoringService.name);
+  private readonly platformFailureWindows: Map<string, number[]> = new Map();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -529,6 +553,62 @@ export class MonitoringService implements OnModuleInit {
       this.logger.warn(`[DevSms] sent: ${opts.kind} → ${to}`);
     } catch (err: any) {
       this.logger.error(`[DevSms] internal failure (${opts.kind}): ${err.message}`);
+    }
+  }
+
+  /**
+   * Record a platform-side failure in the per-process sliding window.
+   * Cheap and synchronous — callers can fire-and-forget from any error
+   * handler. Pruning of stale timestamps happens lazily on each insert.
+   *
+   * `kind` must match a key in PLATFORM_BURST_THRESHOLDS or the value
+   * gets recorded but never alerts (acceptable for forward-compatibility).
+   * Use stable strings: e.g. 'thumbtack_getlead', 'yelp_sendmessage',
+   * 'webhook_handler_crash'.
+   */
+  recordPlatformFailure(kind: string): void {
+    const now = Date.now();
+    const cutoff = now - PLATFORM_BURST_WINDOW_MS;
+    const win = this.platformFailureWindows.get(kind) || [];
+    // Lazy prune so the window never grows unbounded under sustained load.
+    const pruned = win.length > 0 && win[0] < cutoff ? win.filter((t) => t >= cutoff) : win;
+    pruned.push(now);
+    this.platformFailureWindows.set(kind, pruned);
+  }
+
+  /**
+   * Cron: every 5 minutes, scan each platform-failure window. If any kind
+   * has crossed its threshold in the last 15 minutes, fire a dev alert.
+   * notifyDevAlert's 24h dedup row is keyed by `platform_burst_${kind}`,
+   * so a sustained outage pages once per day instead of every 5 min.
+   *
+   * Per-instance counter means each prod replica detects independently,
+   * but the shared SystemErrorLog dedup row keeps the page singular.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async checkPlatformBursts(): Promise<void> {
+    const now = Date.now();
+    const cutoff = now - PLATFORM_BURST_WINDOW_MS;
+    for (const [kind, win] of this.platformFailureWindows.entries()) {
+      const recent = win.filter((t) => t >= cutoff);
+      // Persist the pruned window — keeps memory bounded even when no
+      // alert fires (e.g. low-volume kinds that never cross threshold).
+      this.platformFailureWindows.set(kind, recent);
+
+      const threshold = PLATFORM_BURST_THRESHOLDS[kind];
+      if (threshold == null) continue; // unknown kind — record but don't alert
+      if (recent.length < threshold) continue;
+
+      await this.notifyDevAlert({
+        kind: `platform_burst_${kind}`,
+        subject: `LeadBridge: ${kind} burst — ${recent.length} failures in 15min`,
+        message:
+          `Detected ${recent.length} ${kind} failures in the last 15 minutes ` +
+          `(threshold: ${threshold}). Likely a platform-side outage rather ` +
+          `than a per-tenant issue. Check the Loki tag matching this kind ` +
+          `for the exact failure mode.`,
+        context: { kind, count: recent.length, threshold, windowMinutes: 15 },
+      });
     }
   }
 

@@ -4,10 +4,11 @@
  * Auth: API Key (webhooks/subscriptions) + OAuth (per-business lead access/reply)
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import * as crypto from 'crypto';
+import { MonitoringService } from '../../monitoring/monitoring.service';
 import {
   IPlatformAdapter,
   PlatformCredentials,
@@ -51,7 +52,12 @@ export class YelpAdapter implements IPlatformAdapter {
   private readonly inFlightCodeExchanges = new Map<string, Promise<PlatformCredentials>>();
   private static readonly CODE_DEDUP_TTL_MS = 60_000;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    // Optional — feeds the cross-tenant burst detector when sendMessage
+    // failures cluster across the prod instance (likely Yelp-side outage).
+    @Optional() private readonly monitoring: MonitoringService | null = null,
+  ) {
     this.apiKey = this.configService.get<string>('yelp.apiKey') || '';
     this.clientId = this.configService.get<string>('yelp.clientId') || '';
     this.clientSecret = this.configService.get<string>('yelp.clientSecret') || '';
@@ -391,6 +397,12 @@ export class YelpAdapter implements IPlatformAdapter {
         const reason = data?.error?.code || (status === 401 ? 'token_expired' : 'no_business_access');
         throw new Error(`Yelp ${reason} (${status}) — reconnect your Yelp account to re-authorize`);
       }
+      // Generic-failure path: feed the burst detector. 5xx from Yelp itself,
+      // network timeouts, and unknown errors all land here — exactly the
+      // failure modes that warrant an ops page when they spike. Per-tenant
+      // 401/403 (token issues) are returned with a tenant-friendly message
+      // above and intentionally NOT counted here.
+      this.monitoring?.recordPlatformFailure('yelp_sendmessage');
       throw new Error(`Failed to send message to Yelp: ${error.message}`);
     }
   }

@@ -3,9 +3,10 @@
  * Implements IPlatformAdapter for Thumbtack integration
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import { MonitoringService } from '../../monitoring/monitoring.service';
 import * as crypto from 'crypto';
 import {
   IPlatformAdapter,
@@ -53,7 +54,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   private readonly inFlightCodeExchanges = new Map<string, Promise<PlatformCredentials>>();
   private static readonly CODE_DEDUP_TTL_MS = 60_000;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    // Optional: lets the adapter notify MonitoringService when getLead
+    // failures cluster across the whole prod instance (likely a TT-side
+    // outage). Optional because direct-instantiation tests don't wire it.
+    @Optional() private readonly monitoring: MonitoringService | null = null,
+  ) {
     this.clientId = this.configService.get<string>('thumbtack.clientId') || '';
     this.clientSecret = this.configService.get<string>('thumbtack.clientSecret') || '';
     this.redirectUri = this.configService.get<string>('thumbtack.redirectUri') || '';
@@ -362,6 +369,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         `status=${status ?? 'no-response'} title=${responseData?.title ?? 'none'} ` +
         `body=${bodyPreview} message=${error.message ?? 'none'}`,
       );
+
+      // Feed the cross-tenant burst detector. Per-tenant outcomes (token
+      // expired, wrong scope, service deleted) are handled below and
+      // surface to the operator individually; this counter only fires
+      // an ops page when the absolute volume across the instance spikes
+      // beyond the 15-min threshold (configured in MonitoringService).
+      this.monitoring?.recordPlatformFailure('thumbtack_getlead');
 
       if (status === 404 && detail.includes('service deleted')) {
         throw new Error(`THUMBTACK_SERVICE_DELETED:${detail}`);

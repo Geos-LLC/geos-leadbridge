@@ -11,6 +11,7 @@ import {
   Headers,
   Query,
   UseGuards,
+  UseFilters,
   HttpCode,
   HttpStatus,
   Logger,
@@ -27,7 +28,12 @@ import {
   logSkippedWebhook,
   NOT_OWNER_SKIP_RESPONSE,
 } from '../common/webhook-processing-owner';
+import { WebhookCrashFilter } from './webhook-crash.filter';
 
+// Controller-scoped filter: every handler below routes uncaught throws
+// through the same notifyDevAlert + 500 pipeline so platform retries
+// still fire and ops gets paged on a real regression.
+@UseFilters(WebhookCrashFilter)
 @Controller('webhooks')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);

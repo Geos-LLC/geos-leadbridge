@@ -6,6 +6,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
+import { WebhookCrashFilter } from './webhook-crash.filter';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AutomationModule } from '../automation/automation.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -28,7 +29,7 @@ import { LeadsModule } from '../leads/leads.module';
     forwardRef(() => LeadsModule),
   ],
   controllers: [WebhooksController],
-  providers: [WebhooksService],
+  providers: [WebhooksService, WebhookCrashFilter],
   exports: [WebhooksService],
 })
 export class WebhooksModule {}
