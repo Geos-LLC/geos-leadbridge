@@ -147,6 +147,13 @@ const PLATFORM_BURST_THRESHOLDS: Record<string, number> = {
   // Webhook handler uncaught throws should be effectively zero. Any
   // recurrence in 15 min means something regressed in handler code.
   webhook_handler_crash: 3,
+  // OpenAI 5xx + network/timeout failures. Steady-state should be ~0 —
+  // OpenAI is highly available and individual transient errors don't
+  // cluster. 10 in 15 min = real outage, not background noise. Note:
+  // 401 (auth) and 429 quota already have their own dedicated single-
+  // shot alerts via the regex checks in captureError, so they don't
+  // double-count here.
+  openai_unavailable: 10,
 };
 
 @Injectable()
@@ -288,6 +295,14 @@ export class MonitoringService implements OnModuleInit {
       // Auto-detect platform-level OpenAI failures inside any captured error.
       // These affect every tenant and need an out-of-band dev alert (the
       // per-account email goes to the customer, not the developer).
+      //
+      // Three buckets, in priority order:
+      //   1. 401 auth → single-shot dev alert (key broken / rotated)
+      //   2. 429 quota → single-shot dev alert (billing exhausted)
+      //   3. 5xx / network / timeout → feed the burst counter, which
+      //      pages ops at >=10 failures in 15 min via checkPlatformBursts.
+      //      Single transient errors are common; an OUTAGE is what we
+      //      want to catch.
       if (this.isOpenAiAuthError(options.message)) {
         this.notifyDevAlert({
           kind: 'openai_auth_failure',
@@ -305,6 +320,8 @@ export class MonitoringService implements OnModuleInit {
             `First failure message: ${options.message}`,
           context: options.context,
         }).catch(err => this.logger.error(`[DevAlert] notify failed: ${err.message}`));
+      } else if (this.isOpenAiUnavailable(options.message)) {
+        this.recordPlatformFailure('openai_unavailable');
       }
     } catch (err: any) {
       this.logger.error(`MonitoringService.captureError internal failure: ${err.message}`);
@@ -318,6 +335,27 @@ export class MonitoringService implements OnModuleInit {
   private isOpenAiAuthError(msg: string | undefined | null): boolean {
     if (!msg) return false;
     return /401\s*incorrect api key|invalid_api_key|invalid api key/i.test(msg);
+  }
+
+  /**
+   * OpenAI server-side outage or network-level unreachability. Matches
+   * 5xx HTTP status mentions, the SDK's server_error code, common Node
+   * network errors (timeouts / resets), and the most common axios/SDK
+   * phrasings ("request timed out", "service unavailable", etc.).
+   *
+   * Deliberately conservative — auth (401) and quota (429) are filtered
+   * out before this check runs in captureError, so this regex only fires
+   * for genuine OpenAI-side trouble.
+   */
+  private isOpenAiUnavailable(msg: string | undefined | null): boolean {
+    if (!msg) return false;
+    return (
+      /\b5\d{2}\s+(?:internal\s+server\s+error|server\s+error|bad\s+gateway|service\s+unavailable|gateway\s+time-?out)\b/i.test(msg) ||
+      /\b(?:status(?:\s*code)?[:\s]+5\d{2}|http\s+5\d{2})\b/i.test(msg) ||
+      /server_error|service_unavailable|internal_server_error/i.test(msg) ||
+      /\b(?:ECONNRESET|ETIMEDOUT|ECONNABORTED|ENETUNREACH|ENOTFOUND|EAI_AGAIN)\b/.test(msg) ||
+      /timed\s+out|connection\s+reset|socket\s+hang ?up/i.test(msg)
+    );
   }
 
   private isOpenAiQuotaError(msg: string | undefined | null): boolean {

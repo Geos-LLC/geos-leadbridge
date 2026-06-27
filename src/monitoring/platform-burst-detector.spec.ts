@@ -132,5 +132,15 @@ describe('platform burst detector', () => {
       expect(notifySpy).toHaveBeenCalledTimes(1);
       expect(notifySpy.mock.calls[0][0].kind).toBe('platform_burst_yelp_sendmessage');
     });
+
+    it('fires for openai_unavailable at the 10-event threshold', async () => {
+      const { svc, notifySpy } = buildSvc();
+      for (let i = 0; i < 10; i++) svc.recordPlatformFailure('openai_unavailable');
+
+      await svc.checkPlatformBursts();
+
+      expect(notifySpy).toHaveBeenCalledTimes(1);
+      expect(notifySpy.mock.calls[0][0].kind).toBe('platform_burst_openai_unavailable');
+    });
   });
 });
