@@ -1312,11 +1312,22 @@ export class NotificationsService {
         return;
       }
 
+      const apiKey = await this.resolveApiKeyForFromPhone(
+        userId,
+        savedAccountId,
+        fromPhone,
+        settings.sigcoreApiKey,
+      );
+      if (!apiKey) {
+        this.logger.warn(`[Handoff] No Sigcore API key resolvable for fromPhone=${fromPhone} (account ${savedAccountId})`);
+        return;
+      }
+
       await this.sendViaSigcore({
         to: agentPhone,
         body: alertMessage,
         fromPhone,
-        apiKey: settings.sigcoreApiKey,
+        apiKey,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: { type: 'handoff', userId, savedAccountId },
       });
@@ -1355,11 +1366,22 @@ export class NotificationsService {
         return;
       }
 
+      const apiKey = await this.resolveApiKeyForFromPhone(
+        userId,
+        savedAccountId,
+        fromPhone,
+        settings.sigcoreApiKey,
+      );
+      if (!apiKey) {
+        this.logger.warn(`[ReEngagement] No Sigcore API key resolvable for fromPhone=${fromPhone} (account ${savedAccountId})`);
+        return;
+      }
+
       await this.sendViaSigcore({
         to: agentPhone,
         body: alertMessage,
         fromPhone,
-        apiKey: settings.sigcoreApiKey,
+        apiKey,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: { type: 're-engagement', userId, savedAccountId },
       });
