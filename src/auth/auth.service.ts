@@ -13,7 +13,7 @@ import { CacheKeys } from '../common/cache/cache-keys';
 import { TrialService } from '../trial/trial.service';
 import { TrialType } from '../../generated/prisma';
 import * as crypto from 'crypto';
-import emailjs from '@emailjs/nodejs';
+import { EmailService } from '../common/email/email.service';
 
 const ME_TTL_SECONDS = 60;
 
@@ -27,6 +27,7 @@ export class AuthService {
     private sigcoreService: SigcoreService,
     private cache: CacheService,
     private trialService: TrialService,
+    private email: EmailService,
   ) {}
 
   /**
@@ -323,52 +324,43 @@ export class AuthService {
   }
 
   /**
-   * Send password reset email via EmailJS
+   * Send password reset email via SendGrid (was EmailJS pre-consolidation;
+   * see EmailService for the why). The email is tenant-facing — different
+   * from-name and tone than the ops alerts also routed through SendGrid.
    */
-  private async sendPasswordResetEmail(toEmail: string, userName: string, resetUrl: string) {
-    console.log(`[Auth] sendPasswordResetEmail called`);
-    const publicKey = process.env.EMAILJS_PUBLIC_KEY;
-    const privateKey = process.env.EMAILJS_PRIVATE_KEY;
+  private async sendPasswordResetEmail(toEmail: string, userName: string, resetUrl: string): Promise<void> {
+    const safeName = userName?.trim() || 'there';
+    const subject = 'Reset your LeadBridge password';
+    const text =
+      `Hi ${safeName},\n\n` +
+      `We received a request to reset your LeadBridge password. Open the link below to choose a new one. This link expires in 1 hour.\n\n` +
+      `${resetUrl}\n\n` +
+      `If you didn't request a reset, you can ignore this email — your password stays the same.\n\n` +
+      `— LeadBridge`;
+    const html =
+      `<p>Hi ${safeName},</p>` +
+      `<p>We received a request to reset your LeadBridge password. Use the button below to choose a new one. This link expires in 1&nbsp;hour.</p>` +
+      `<p><a href="${resetUrl}" style="display:inline-block;padding:10px 16px;background:#2563eb;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:600">Reset password</a></p>` +
+      `<p>Or copy and paste this URL into your browser:<br><a href="${resetUrl}">${resetUrl}</a></p>` +
+      `<p>If you didn't request a reset, you can ignore this email — your password stays the same.</p>` +
+      `<p>— LeadBridge</p>`;
 
-    console.log(`[Auth] Public key length: ${publicKey?.length || 0}`);
-    console.log(`[Auth] Private key length: ${privateKey?.length || 0}`);
-
-    if (!publicKey) {
-      console.error(`[Auth] EMAILJS_PUBLIC_KEY is missing!`);
-      throw new Error('EMAILJS_PUBLIC_KEY is not configured');
-    }
-
-    console.log(`[Auth] Calling emailjs.send with:`, {
-      serviceId: 'service_hkfn8t9',
-      templateId: 'template_zk3lz5s',
-      toEmail,
-      userName,
+    await this.email.send({
+      to: toEmail,
+      subject,
+      text,
+      html,
+      fromName: 'LeadBridge',
+      tag: 'auth/password-reset',
     });
-
-    const result = await emailjs.send(
-      'service_hkfn8t9',
-      'template_zk3lz5s',
-      {
-        to_email: toEmail,
-        name: userName,
-        reset_url: resetUrl,
-      },
-      {
-        publicKey,
-        privateKey,
-      },
-    );
-
-    console.log(`[Auth] EmailJS response:`, result);
-    return result;
   }
 
   /**
-   * Notify the ops mailbox that a new tenant just signed up. Uses SendGrid
-   * (mirrors MonitoringService.sendAlertEmail) so we can ship arbitrary
-   * subject/body without provisioning a new EmailJS template. Recipient
+   * Notify the ops mailbox that a new tenant just signed up. Recipient
    * resolves via ADMIN_ALERT_EMAIL → MONITORING_ALERT_EMAIL → the hard-
    * coded ops mailbox so it still fires if env wasn't set on this service.
+   * From-name is "LeadBridge Ops" so deliverability and trust signals
+   * stay separate from tenant-facing mail (auth/billing/etc.).
    */
   private async sendNewTenantAdminEmail(
     userId: string,
@@ -376,14 +368,7 @@ export class AuthService {
     name: string | null | undefined,
     businessPhone: string | null,
   ): Promise<void> {
-    const apiKey = process.env.SENDGRID_API_KEY;
-    if (!apiKey) {
-      this.logger.warn('[AdminNotify] SendGrid not configured — skipping new-tenant email');
-      return;
-    }
-
     const to = process.env.ADMIN_ALERT_EMAIL || process.env.MONITORING_ALERT_EMAIL || 'info@geos-ai.com';
-    const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
     const adminUrl = (process.env.FRONTEND_URL || 'https://www.leadbridge360.com').replace(/\/$/, '') + `/admin/users/${userId}`;
 
     const displayName = name?.trim() || '(no name)';
@@ -410,16 +395,14 @@ export class AuthService {
       `</ul>` +
       `<p><a href="${adminUrl}">Open in admin dashboard</a></p>`;
 
-    const sgMail = require('@sendgrid/mail');
-    sgMail.setApiKey(apiKey);
-    await sgMail.send({
+    await this.email.send({
       to,
-      from: { email: fromEmail, name: 'LeadBridge Ops' },
       subject,
       text,
       html,
+      fromName: 'LeadBridge Ops',
+      tag: 'auth/new-tenant-admin',
     });
-    this.logger.log(`[AdminNotify] new-tenant email sent to ${to} for ${email}`);
   }
 
   /**

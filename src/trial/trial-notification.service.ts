@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { withCronLock } from '../common/utils/cron-lock';
+import { EmailService } from '../common/email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TrialService, TRIAL_ENDED_EVENT } from './trial.service';
 import { TrialType } from '../../generated/prisma';
@@ -16,6 +17,7 @@ export class TrialNotificationService {
     private readonly prisma: PrismaService,
     private readonly trialService: TrialService,
     private readonly configService: ConfigService,
+    private readonly email: EmailService,
     @Inject(forwardRef(() => NotificationsService))
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -150,33 +152,19 @@ export class TrialNotificationService {
     reason: string,
     pricingUrl: string,
   ): Promise<{ ok: boolean; error?: string }> {
-    const apiKey =
-      this.configService.get<string>('SENDGRID_API_KEY') || process.env.SENDGRID_API_KEY;
-    const fromEmail =
-      this.configService.get<string>('SENDGRID_FROM_EMAIL') ||
-      process.env.SENDGRID_FROM_EMAIL ||
-      'alerts@leadbridge360.com';
-
-    if (!apiKey) return { ok: false, error: 'no_sendgrid_key' };
     if (!to) return { ok: false, error: 'no_email' };
 
     const greeting = name ? `Hi ${name},` : 'Hi there,';
     const subject = `Your LeadBridge trial has ended — keep responding to leads`;
 
-    try {
-      const sgMail = require('@sendgrid/mail');
-      sgMail.setApiKey(apiKey);
-      await sgMail.send({
-        to,
-        from: { email: fromEmail, name: 'LeadBridge' },
-        subject,
-        text: `${greeting}\n\n${reason}.\n\nUpgrade now to keep instant replies, follow-ups, and AI conversations running:\n${pricingUrl}\n\n— LeadBridge`,
-        html: `<p>${greeting}</p><p><strong>${reason}.</strong></p><p>Upgrade now to keep instant replies, follow-ups, and AI conversations running.</p><p><a href="${pricingUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Pick a plan</a></p><p style="color:#64748b;font-size:14px">Or copy this link: <a href="${pricingUrl}">${pricingUrl}</a></p><p>— LeadBridge</p>`,
-      });
-      return { ok: true };
-    } catch (err: any) {
-      this.logger.error(`[sendEmail] Failed for ${to}: ${err.message}`);
-      return { ok: false, error: err.message };
-    }
+    const sent = await this.email.send({
+      to,
+      subject,
+      text: `${greeting}\n\n${reason}.\n\nUpgrade now to keep instant replies, follow-ups, and AI conversations running:\n${pricingUrl}\n\n— LeadBridge`,
+      html: `<p>${greeting}</p><p><strong>${reason}.</strong></p><p>Upgrade now to keep instant replies, follow-ups, and AI conversations running.</p><p><a href="${pricingUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Pick a plan</a></p><p style="color:#64748b;font-size:14px">Or copy this link: <a href="${pricingUrl}">${pricingUrl}</a></p><p>— LeadBridge</p>`,
+      fromName: 'LeadBridge',
+      tag: 'trial/expiry',
+    });
+    return sent ? { ok: true } : { ok: false, error: 'send_failed_or_skipped' };
   }
 }

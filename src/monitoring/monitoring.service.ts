@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
+import { EmailService } from '../common/email/email.service';
 import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
@@ -136,6 +137,10 @@ export class MonitoringService implements OnModuleInit {
     // pipeline-health.service.spec) don't have to wire it. Production DI
     // always populates it.
     @Optional() private readonly pipelineIntegrity: PipelineIntegrityService | null = null,
+    // Optional for the same reason — direct-instantiation in scripts/specs
+    // shouldn't have to wire EmailService. Production DI always populates
+    // it; when null we just log-and-skip the actual send below.
+    @Optional() private readonly email: EmailService | null = null,
   ) {}
 
   /**
@@ -321,12 +326,6 @@ export class MonitoringService implements OnModuleInit {
     context?: Record<string, any>;
   }): Promise<void> {
     try {
-      const apiKey = this.configService.get<string>('SENDGRID_API_KEY') || process.env.SENDGRID_API_KEY;
-      if (!apiKey) {
-        this.logger.warn('[DevAlert] SendGrid not configured — skipping');
-        return;
-      }
-      const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
       const toEmail = this.configService.get<string>('DEV_ALERT_EMAIL') || process.env.DEV_ALERT_EMAIL || 'alerts@leadbridge360.com';
 
       // Dedup via SystemErrorLog (category='other', code=kind, no accountId).
@@ -349,14 +348,21 @@ export class MonitoringService implements OnModuleInit {
         ctxJson ? `\nContext:\n${ctxJson}` : '',
       ].join('\n');
 
-      const sgMail = require('@sendgrid/mail');
-      sgMail.setApiKey(apiKey);
-      await sgMail.send({
+      if (!this.email) {
+        this.logger.warn(`[DevAlert] EmailService not wired — skipping ${opts.kind}`);
+        return;
+      }
+      const sent = await this.email.send({
         to: toEmail,
-        from: { email: fromEmail, name: 'LeadBridge Dev Alerts' },
         subject: opts.subject,
         text: body,
+        fromName: 'LeadBridge Dev Alerts',
+        tag: 'monitoring/dev-alert',
       });
+      // Only write the dedup row when the message actually went out. If
+      // SendGrid is unconfigured / the API call failed we want the next
+      // attempt to try again, not get suppressed.
+      if (!sent) return;
 
       // Update or create the dedup row
       if (existing) {
@@ -1580,18 +1586,15 @@ export class MonitoringService implements OnModuleInit {
   }
 
   // ==========================================
-  // SendGrid Email Notifications
+  // Tenant-facing Email Notifications (via EmailService)
   // ==========================================
 
   /**
    * Send alert email for new issues (grouped per user).
    */
   private async sendAlertEmail(userId: string, issues: SystemHealthIssue[]): Promise<void> {
-    const apiKey = this.configService.get<string>('SENDGRID_API_KEY') || process.env.SENDGRID_API_KEY;
-    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
-
-    if (!apiKey) {
-      this.logger.warn('[HealthCheck] SendGrid not configured — skipping alert email');
+    if (!this.email) {
+      this.logger.warn('[HealthCheck] EmailService not wired — skipping alert email');
       return;
     }
 
@@ -1608,28 +1611,23 @@ export class MonitoringService implements OnModuleInit {
       ? `LeadBridge Alert — ${issues[0].message.split('—')[0].trim()} for ${issues[0].accountName}`
       : `LeadBridge Alert — ${issues.length} issues detected`;
 
-    try {
-      const sgMail = require('@sendgrid/mail');
-      sgMail.setApiKey(apiKey);
-      await sgMail.send({
-        to: user.email,
-        from: { email: fromEmail, name: 'LeadBridge Alerts' },
-        subject,
-        text: `Hi ${user.name || 'there'},\n\nThe following issues were detected:\n\n${issueLines}\n\nReview and fix: ${frontendUrl}/dashboard\n\n— LeadBridge`,
-        html: `<p>Hi ${user.name || 'there'},</p><p>The following issues were detected:</p><ul>${issues.map(i => `<li><strong>${i.accountName}</strong> (${i.platform}) — ${i.message}</li>`).join('')}</ul><p><a href="${frontendUrl}/dashboard">Review and fix in Dashboard</a></p><p>— LeadBridge</p>`,
+    const sent = await this.email.send({
+      to: user.email,
+      subject,
+      text: `Hi ${user.name || 'there'},\n\nThe following issues were detected:\n\n${issueLines}\n\nReview and fix: ${frontendUrl}/dashboard\n\n— LeadBridge`,
+      html: `<p>Hi ${user.name || 'there'},</p><p>The following issues were detected:</p><ul>${issues.map(i => `<li><strong>${i.accountName}</strong> (${i.platform}) — ${i.message}</li>`).join('')}</ul><p><a href="${frontendUrl}/dashboard">Review and fix in Dashboard</a></p><p>— LeadBridge</p>`,
+      fromName: 'LeadBridge Alerts',
+      tag: 'monitoring/tenant-alert',
+    });
+
+    if (!sent) return;
+
+    // Mark issues as notified — only when the send actually succeeded.
+    for (const issue of issues) {
+      await this.prisma.accountHealthStatus.updateMany({
+        where: { accountId: issue.accountId, issueCode: issue.issueCode, isActive: true },
+        data: { lastNotifiedAt: new Date(), notificationCount: { increment: 1 } },
       });
-
-      // Mark issues as notified
-      for (const issue of issues) {
-        await this.prisma.accountHealthStatus.updateMany({
-          where: { accountId: issue.accountId, issueCode: issue.issueCode, isActive: true },
-          data: { lastNotifiedAt: new Date(), notificationCount: { increment: 1 } },
-        });
-      }
-
-      this.logger.log(`[HealthCheck] Alert email sent to ${user.email}: ${issues.length} issue(s)`);
-    } catch (err: any) {
-      this.logger.error(`[HealthCheck] Failed to send alert email: ${err.message}`);
     }
   }
 
@@ -1637,27 +1635,19 @@ export class MonitoringService implements OnModuleInit {
    * Send recovery email when an issue resolves.
    */
   private async sendRecoveryEmail(userId: string, resolved: { accountName: string; platform: string; issueCode: string }): Promise<void> {
-    const apiKey = this.configService.get<string>('SENDGRID_API_KEY') || process.env.SENDGRID_API_KEY;
-    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
-    if (!apiKey) return;
+    if (!this.email) return;
 
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
     if (!user?.email) return;
 
-    try {
-      const sgMail = require('@sendgrid/mail');
-      sgMail.setApiKey(apiKey);
-      await sgMail.send({
-        to: user.email,
-        from: { email: fromEmail, name: 'LeadBridge Alerts' },
-        subject: `LeadBridge Resolved — ${resolved.accountName} is healthy`,
-        text: `Hi ${user.name || 'there'},\n\nThe issue "${resolved.issueCode}" for ${resolved.accountName} (${resolved.platform}) has been resolved.\n\n— LeadBridge`,
-        html: `<p>Hi ${user.name || 'there'},</p><p>The issue <strong>${resolved.issueCode}</strong> for <strong>${resolved.accountName}</strong> (${resolved.platform}) has been resolved.</p><p>— LeadBridge</p>`,
-      });
-      this.logger.log(`[HealthCheck] Recovery email sent for ${resolved.accountName}`);
-    } catch (err: any) {
-      this.logger.error(`[HealthCheck] Failed to send recovery email: ${err.message}`);
-    }
+    await this.email.send({
+      to: user.email,
+      subject: `LeadBridge Resolved — ${resolved.accountName} is healthy`,
+      text: `Hi ${user.name || 'there'},\n\nThe issue "${resolved.issueCode}" for ${resolved.accountName} (${resolved.platform}) has been resolved.\n\n— LeadBridge`,
+      html: `<p>Hi ${user.name || 'there'},</p><p>The issue <strong>${resolved.issueCode}</strong> for <strong>${resolved.accountName}</strong> (${resolved.platform}) has been resolved.</p><p>— LeadBridge</p>`,
+      fromName: 'LeadBridge Alerts',
+      tag: 'monitoring/tenant-recovery',
+    });
   }
 
   /**

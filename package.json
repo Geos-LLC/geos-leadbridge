@@ -29,7 +29,6 @@
   "license": "MIT",
   "description": "Multi-platform lead integration service for Thumbtack, Yelp, and other platforms",
   "dependencies": {
-    "@emailjs/nodejs": "^5.0.2",
     "@geos/loghub-client": "github:goscha01/geos-loghub-client",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.9",
